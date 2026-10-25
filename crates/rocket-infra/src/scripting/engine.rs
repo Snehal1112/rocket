@@ -4274,6 +4274,8 @@ mod cookie_tests {
         jar: Mutex<Vec<CookieEntry>>,
         seen: Mutex<Vec<HostCookieOp>>,
         fail: Option<String>,
+        /// Answer an upsert with an extra cookie and an altered value.
+        decorate: bool,
     }
 
     impl FakeCookieHost {
@@ -4282,6 +4284,14 @@ mod cookie_tests {
                 jar: Mutex::new(vec![]),
                 seen: Mutex::new(vec![]),
                 fail: None,
+                decorate: false,
+            }
+        }
+
+        fn decorating() -> Self {
+            Self {
+                decorate: true,
+                ..Self::new()
             }
         }
 
@@ -4309,7 +4319,12 @@ mod cookie_tests {
                 HostCookieOp::Find { .. } => Ok(HostCookieResult::Cookies(jar.clone())),
                 HostCookieOp::Upsert { cookie, .. } => {
                     jar.retain(|c| c.key != cookie.key);
-                    jar.push(entry(&cookie.key, &cookie.value));
+                    if self.decorate {
+                        jar.push(entry("extra", "e"));
+                        jar.push(entry(&cookie.key, &format!("{}!", cookie.value)));
+                    } else {
+                        jar.push(entry(&cookie.key, &cookie.value));
+                    }
                     Ok(HostCookieResult::Cookies(jar.clone()))
                 }
                 HostCookieOp::Remove { name, .. } => {
@@ -4379,10 +4394,10 @@ mod cookie_tests {
 
     #[tokio::test]
     async fn cookies_write_updates_the_snapshot_from_the_reply() {
-        let host = FakeCookieHost::new();
-        let code = "await rok.cookies.upsert('c','3'); console.log(rok.cookies.get('c'))";
+        let host = FakeCookieHost::decorating();
+        let code = "await rok.cookies.upsert('c','3'); console.log(rok.cookies.toString())";
         let out = run(ctx_with(code, vec![]), Some(&host)).await;
-        assert_eq!(out, vec!["3"]);
+        assert_eq!(out, vec!["extra=e; c=3!"]);
         let ops = host.ops();
         assert_eq!(ops.len(), 1);
         match &ops[0] {
@@ -4400,10 +4415,10 @@ mod cookie_tests {
         let host = FakeCookieHost::failing("boom");
         let code = r#"
             try { await rok.cookies.add('c', '3'); } catch (e) { console.log(e.message); }
-            console.log(rok.cookies.count(), rok.cookies.get('a'));
+            console.log(rok.cookies.count(), rok.cookies.toString());
         "#;
         let out = run(ctx_with(code, vec![entry("a", "1")]), Some(&host)).await;
-        assert_eq!(out, vec!["rok.cookies.add: boom", "1 1"]);
+        assert_eq!(out, vec!["rok.cookies.add: boom", "1 a=1"]);
     }
 
     #[tokio::test]
@@ -4424,6 +4439,21 @@ mod cookie_tests {
     }
 
     #[tokio::test]
+    async fn cookies_remove_sends_remove_with_the_url_and_name() {
+        let host = FakeCookieHost::new();
+        let code = "await rok.cookies.remove('a'); console.log(rok.cookies.count())";
+        let out = run(ctx_with(code, vec![entry("a", "1")]), Some(&host)).await;
+        assert_eq!(out, vec!["0"]);
+        assert_eq!(
+            host.ops(),
+            vec![HostCookieOp::Remove {
+                url: URL.into(),
+                name: "a".into()
+            }]
+        );
+    }
+
+    #[tokio::test]
     async fn jar_methods_send_the_right_ops() {
         let host = FakeCookieHost::new();
         host.jar.lock().expect("lock").push(entry("a", "1"));
@@ -4433,9 +4463,11 @@ mod cookie_tests {
             const hit = await jar.getCookie(u, 'a');
             console.log(hit.value, await jar.getCookie(u, 'zz'));
             console.log((await jar.getCookies(u)).length);
-            await new Promise((resolve) => jar.hasCookie(u, 'nope', (err, yes) => {
-              console.log(err, yes); resolve();
-            }));
+            for (const name of ['nope', 'a']) {
+              await new Promise((resolve) => jar.hasCookie(u, name, (err, yes) => {
+                console.log(err, yes); resolve();
+              }));
+            }
             console.log(await jar.hasCookie(u, 'a'));
             await jar.setCookie(u, 'n', 'v');
             await jar.setCookie(u, { name: 'o', value: 'w', httpOnly: true });
@@ -4445,7 +4477,7 @@ mod cookie_tests {
             await jar.clear();
         "#;
         let out = run(ctx_with(code, vec![]), Some(&host)).await;
-        assert_eq!(out, vec!["1 null", "1", "null false", "true"]);
+        assert_eq!(out, vec!["1 null", "1", "null false", "null true", "true"]);
         let kinds: Vec<String> = host
             .ops()
             .iter()
@@ -4460,15 +4492,125 @@ mod cookie_tests {
         assert_eq!(
             kinds,
             vec![
-                "find", "find", "find", "find", "find", "upsert:n", "upsert:o", "upsert:p",
+                "find", "find", "find", "find", "find", "find", "upsert:n", "upsert:o", "upsert:p",
                 "upsert:q", "remove:n", "clearUrl", "clearAll"
             ]
         );
+        let other = "https://other.test/";
+        for op in host.ops() {
+            let url = match &op {
+                HostCookieOp::Find { url }
+                | HostCookieOp::Upsert { url, .. }
+                | HostCookieOp::Remove { url, .. }
+                | HostCookieOp::ClearUrl { url } => url.as_str(),
+                HostCookieOp::ClearAll => continue,
+            };
+            assert_eq!(url, other, "{op:?}");
+        }
         let object_form = host.ops().into_iter().any(|op| {
             matches!(op, HostCookieOp::Upsert { url, cookie }
                 if url == "https://other.test/" && cookie.http_only == Some(true))
         });
         assert!(object_form);
+    }
+
+    #[tokio::test]
+    async fn async_methods_reject_bad_arguments_without_calling_the_host() {
+        let host = FakeCookieHost::new();
+        let code = r#"
+            const jar = rok.cookies.jar();
+            const u = 'https://o.test/';
+            const calls = {
+              add: () => rok.cookies.add(123),
+              upsert: () => rok.cookies.upsert(''),
+              remove: () => rok.cookies.remove(undefined),
+              delete: () => rok.cookies.delete(),
+              setCookie: () => jar.setCookie(u, 5),
+              setCookie_url: () => jar.setCookie('', 'a', 'b'),
+              setCookies: () => jar.setCookies(u, 'x'),
+              getCookie: () => jar.getCookie(u),
+              hasCookie: () => jar.hasCookie(u),
+              deleteCookie: () => jar.deleteCookie(u),
+              deleteCookies: () => jar.deleteCookies(),
+              getCookies: () => jar.getCookies(7),
+            };
+            for (const [name, call] of Object.entries(calls)) {
+              await call().catch((e) => console.log(name + ' ' + e.message));
+            }
+        "#;
+        let out = run(ctx_with(code, vec![]), Some(&host)).await;
+        assert_eq!(
+            out,
+            vec![
+                "add rok.cookies.add: name must be a non-empty string",
+                "upsert rok.cookies.upsert: name must be a non-empty string",
+                "remove rok.cookies.remove: name must be a non-empty string",
+                "delete rok.cookies.delete: name must be a non-empty string",
+                "setCookie rok.cookies.setCookie: name must be a non-empty string",
+                "setCookie_url rok.cookies.setCookie: url must be a non-empty string",
+                "setCookies rok.cookies.setCookies: cookies must be an array",
+                "getCookie rok.cookies.getCookie: name must be a non-empty string",
+                "hasCookie rok.cookies.hasCookie: name must be a non-empty string",
+                "deleteCookie rok.cookies.deleteCookie: name must be a non-empty string",
+                "deleteCookies rok.cookies.deleteCookies: url must be a non-empty string",
+                "getCookies rok.cookies.getCookies: url must be a non-empty string",
+            ]
+        );
+        assert!(host.ops().is_empty());
+    }
+
+    #[tokio::test]
+    async fn sync_reads_throw_a_type_error_for_a_bad_name() {
+        let code = r#"
+            for (const f of [() => rok.cookies.get(), () => rok.cookies.has(undefined, 'x')]) {
+              try { f(); } catch (e) { console.log(e instanceof TypeError, e.message); }
+            }
+        "#;
+        let out = run(ctx_with(code, vec![entry("undefined", "1")]), None).await;
+        let msg = |m: &str| format!("true rok.cookies.{m}: name must be a non-empty string");
+        assert_eq!(out, vec![msg("get"), msg("has")]);
+    }
+
+    #[tokio::test]
+    async fn request_scoped_writes_need_a_request_url() {
+        let host = FakeCookieHost::new();
+        let code = r#"
+            for (const m of ['add', 'upsert', 'remove', 'delete', 'clear']) {
+              await rok.cookies[m]('a', '1').catch((e) => console.log(e.message));
+            }
+        "#;
+        let out = run(minimal_ctx(code), Some(&host)).await;
+        let want: Vec<String> = ["add", "upsert", "remove", "delete", "clear"]
+            .iter()
+            .map(|m| format!("rok.cookies.{m}: no request URL"))
+            .collect();
+        assert_eq!(out, want);
+        assert!(host.ops().is_empty());
+    }
+
+    #[tokio::test]
+    async fn reads_hand_out_copies_of_the_snapshot() {
+        let code = r#"
+            const c = rok.cookies;
+            c.idx(0).value = 'x';
+            c.one('app.test|/|a').value = 'y';
+            c.find((x) => true).value = 'z';
+            c.all()[0].value = 'w';
+            c.each((x) => { x.value = 'v'; });
+            c.filter((x, i, arr) => { arr.push({}); arr.splice(0, 1); return true; });
+            c.map((x, i, arr) => { arr.length = 0; return 1; });
+            c.reduce((n, x, i, arr) => { arr.pop(); return n; }, 0);
+            console.log(c.get('a'), c.toString(), JSON.stringify(c.toObject()), c.all().length);
+        "#;
+        let out = run(ctx_with(code, vec![entry("a", "1"), entry("b", "2")]), None).await;
+        assert_eq!(out, vec![r#"1 a=1; b=2 {"a":"1","b":"2"} 2"#]);
+    }
+
+    #[tokio::test]
+    async fn duplicate_names_resolve_to_the_first_match() {
+        let code = "console.log(rok.cookies.get('a'), rok.cookies.toObject().a)";
+        let ctx = ctx_with(code, vec![entry("a", "1"), entry("a", "2")]);
+        assert_eq!(run(ctx, None).await, vec!["1 1"]);
     }
 
     #[tokio::test]

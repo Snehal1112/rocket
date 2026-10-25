@@ -97,8 +97,13 @@ pub async fn op_rok_cookies(
     #[string] op_json: String,
 ) -> Result<String, ScriptHostError> {
     const API: &str = "rok.cookies";
-    let op: HostCookieOp = serde_json::from_str(&op_json)
-        .map_err(|e| ScriptHostError(format!("{API}: invalid call - {e}")))?;
+    let op: HostCookieOp = match serde_json::from_str(&op_json) {
+        Ok(op) => op,
+        Err(e) => {
+            let failed = HostError::Failed(format!("invalid call - {e}"));
+            return Err(host_error(&state.borrow(), API, failed));
+        }
+    };
     let (reply, answer) = oneshot::channel();
     send_host_call(&state, HostCall::Cookies { op, reply }, API)?;
     let outcome = answer.await.unwrap_or(Err(HostError::Unavailable));

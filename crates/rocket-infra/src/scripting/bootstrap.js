@@ -121,12 +121,17 @@
     const o = (a !== null && typeof a === 'object') ? { ...a } : { key: a, value: b, ...(c || {}) };
     if (o.key === undefined) o.key = o.name;
     delete o.name;
-    if (typeof o.key !== 'string' || o.key === '') {
-      throw new TypeError('rok.cookies.' + method + ': name must be a non-empty string');
-    }
+    _cookieName(method, o.key);
     o.value = o.value === undefined || o.value === null ? '' : String(o.value);
     if (o.expires instanceof Date) o.expires = o.expires.toISOString();
     return o;
+  }
+
+  function _cookieName(method, name) {
+    if (typeof name !== 'string' || name === '') {
+      throw new TypeError('rok.cookies.' + method + ': name must be a non-empty string');
+    }
+    return name;
   }
 
   function _cookieUrl(method, url) {
@@ -136,53 +141,85 @@
     return url;
   }
 
+  // Request-scoped writes need the request URL the snapshot was taken for.
+  function _cookieScope(method) {
+    if (!_ckUrl) throw new Error('rok.cookies.' + method + ': no request URL');
+    return _ckUrl;
+  }
+
+  // Scripts get copies, so they cannot change the snapshot.
+  const _cp = (c) => (c === undefined ? undefined : { ...c });
+  const _snap = () => _ck.map(_cp);
+
   function _ckIndex(item) {
     if (item !== null && typeof item === 'object') return _ck.findIndex((c) => c.id === item.id);
     return _ck.findIndex((c) => c.key === item);
   }
 
+  // All async methods are `async`, so an argument error rejects instead of throwing.
   function _cookieJar() {
     const find = async (m, url) => (await _cookieCall(m, { op: 'find', url: _cookieUrl(m, url) })).cookies;
-    const set = (m, url, input) => _cookieCall(m, { op: 'upsert', url: _cookieUrl(m, url), cookie: input }).then(() => {});
+    const set = async (m, url, input) => {
+      await _cookieCall(m, { op: 'upsert', url: _cookieUrl(m, url), cookie: input });
+    };
+    const lookup = async (m, url, name) => {
+      _cookieName(m, name);
+      return (await find(m, url)).find((c) => c.key === name);
+    };
     return {
-      getCookie: async (url, name) => (await find('getCookie', url)).find((c) => c.key === name) || null,
-      getCookies: (url) => find('getCookies', url),
+      getCookie: async (url, name) => lookup('getCookie', url, name).then((c) => c || null),
+      getCookies: async (url) => find('getCookies', url),
       hasCookie: (url, name, callback) => {
-        const checked = find('hasCookie', url).then((list) => list.some((c) => c.key === name));
+        const checked = lookup('hasCookie', url, name).then((c) => c !== undefined);
         if (typeof callback !== 'function') return checked;
         return checked.then((yes) => callback(null, yes), (err) => callback(err, null));
       },
-      setCookie: (url, a, b, c) => set('setCookie', url, _cookieInput('setCookie', a, b, c)),
+      setCookie: async (url, a, b, c) => set('setCookie', url, _cookieInput('setCookie', a, b, c)),
       setCookies: async (url, list) => {
         if (!Array.isArray(list)) throw new TypeError('rok.cookies.setCookies: cookies must be an array');
-        for (const item of list) await set('setCookies', url, _cookieInput('setCookies', item));
+        const inputs = list.map((item) => _cookieInput('setCookies', item));
+        for (const input of inputs) await set('setCookies', url, input);
       },
-      deleteCookie: (url, name) => _cookieCall('deleteCookie', { op: 'remove', url: _cookieUrl('deleteCookie', url), name: String(name) }).then(() => {}),
-      deleteCookies: (url) => _cookieCall('deleteCookies', { op: 'clearUrl', url: _cookieUrl('deleteCookies', url) }).then(() => {}),
-      clear: () => _cookieCall('clear', { op: 'clearAll' }).then(() => {}),
+      deleteCookie: async (url, name) => {
+        await _cookieCall('deleteCookie', { op: 'remove', url: _cookieUrl('deleteCookie', url), name: _cookieName('deleteCookie', name) });
+      },
+      deleteCookies: async (url) => {
+        await _cookieCall('deleteCookies', { op: 'clearUrl', url: _cookieUrl('deleteCookies', url) });
+      },
+      clear: async () => { await _cookieCall('clear', { op: 'clearAll' }); },
     };
   }
 
+  const _cookieWrite = async (method, op) => { await _cookieCall(method, op); };
+  const _cookieRemove = (method) => async (name) => _cookieWrite(method, { op: 'remove', url: _cookieScope(method), name: _cookieName(method, name) });
+  const _cookieUpsert = (method) => async (a, b, c) => _cookieWrite(method, { op: 'upsert', url: _cookieScope(method), cookie: _cookieInput(method, a, b, c) });
+
   const _cookies = {
-    get: (name) => { const c = _ck.find((x) => x.key === name); return c ? c.value : undefined; },
-    has: (name, value) => _ck.some((c) => c.key === name && (value === undefined || c.value === value)),
-    one: (id) => _ck.find((c) => c.id === id),
-    all: () => _ck.slice(),
+    get: (name) => { const c = _ck.find((x) => x.key === _cookieName('get', name)); return c ? c.value : undefined; },
+    // The value is compared with strict equality, as strings.
+    has: (name, value) => _ck.some((c) => c.key === _cookieName('has', name) && (value === undefined || c.value === value)),
+    one: (id) => _cp(_ck.find((c) => c.id === id)),
+    all: () => _snap(),
     count: () => _ck.length,
-    idx: (n) => _ck[n],
+    idx: (n) => _cp(_ck[n]),
     indexOf: (item) => _ckIndex(item),
-    toObject: () => Object.fromEntries(_ck.map((c) => [c.key, c.value])),
+    // The first cookie with a name wins, as in get().
+    toObject: () => {
+      const m = new Map();
+      for (const c of _ck) if (!m.has(c.key)) m.set(c.key, c.value);
+      return Object.fromEntries(m);
+    },
     toString: () => _ck.map((c) => c.key + '=' + c.value).join('; '),
-    each: (fn) => _ck.slice().forEach(fn),
-    find: (fn) => _ck.find(fn),
-    filter: (fn) => _ck.filter(fn),
-    map: (fn) => _ck.map(fn),
-    reduce: (fn, init) => _ck.reduce(fn, init),
-    add: (a, b, c) => _cookieCall('add', { op: 'upsert', url: _ckUrl, cookie: _cookieInput('add', a, b, c) }).then(() => {}),
-    upsert: (a, b, c) => _cookieCall('upsert', { op: 'upsert', url: _ckUrl, cookie: _cookieInput('upsert', a, b, c) }).then(() => {}),
-    remove: (name) => _cookieCall('remove', { op: 'remove', url: _ckUrl, name: String(name) }).then(() => {}),
-    delete: (name) => _cookieCall('delete', { op: 'remove', url: _ckUrl, name: String(name) }).then(() => {}),
-    clear: () => _cookieCall('clear', { op: 'clearUrl', url: _ckUrl }).then(() => {}),
+    each: (fn) => _snap().forEach(fn),
+    find: (fn) => _snap().find(fn),
+    filter: (fn) => _snap().filter(fn),
+    map: (fn) => _snap().map(fn),
+    reduce: (fn, init) => _snap().reduce(fn, init),
+    add: _cookieUpsert('add'),
+    upsert: _cookieUpsert('upsert'),
+    remove: _cookieRemove('remove'),
+    delete: _cookieRemove('delete'),
+    clear: async () => _cookieWrite('clear', { op: 'clearUrl', url: _cookieScope('clear') }),
     jar: _cookieJar,
   };
 
