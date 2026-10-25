@@ -116,7 +116,8 @@ async fn run_script_bounded(
                 return joined
                     .map_err(|e| DomainError::Internal(format!("script thread panic: {e}")))?;
             }
-            Some(call) = call_rx.recv(), if host.is_some() => {
+            // Calls past the cap wait in the channel until a slot frees.
+            Some(call) = call_rx.recv(), if host.is_some() && serving.len() < limits.max_host_calls => {
                 if let Some(host) = host {
                     serving.push(serve_host_call(host, call));
                 }
@@ -1633,6 +1634,7 @@ mod tests {
             cpu: Duration::from_millis(cpu_ms),
             ceiling: Duration::from_millis(ceiling_ms),
             sleep_cap: ScriptLimits::DEFAULT.sleep_cap,
+            max_host_calls: ScriptLimits::DEFAULT.max_host_calls,
         }
     }
 
@@ -1651,6 +1653,70 @@ mod tests {
                 response_time_ms: 400,
             })
         }
+    }
+
+    /// Host that counts how many `send_request` calls run at once.
+    struct CountingHost {
+        current: std::sync::atomic::AtomicUsize,
+        max: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait]
+    impl ScriptHost for CountingHost {
+        async fn send_request(&self, _request: HostRequest) -> Result<HostResponse, HostError> {
+            use std::sync::atomic::Ordering;
+            let now = self.current.fetch_add(1, Ordering::SeqCst) + 1;
+            self.max.fetch_max(now, Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            self.current.fetch_sub(1, Ordering::SeqCst);
+            Ok(HostResponse {
+                status: 204,
+                status_text: "No Content".into(),
+                headers: vec![],
+                body: String::new(),
+                response_time_ms: 1,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn host_calls_are_served_at_most_max_host_calls_at_a_time() {
+        let host = CountingHost {
+            current: Default::default(),
+            max: Default::default(),
+        };
+        let limits = ScriptLimits {
+            max_host_calls: 3,
+            ..short_limits(5_000, 60_000)
+        };
+        let ctx = minimal_ctx(
+            "const all = await Promise.all(Array.from({length: 12}, () => \
+             rok.sendRequest({url: 'http://x.test'}))); rok.setVar('n', all.length)",
+        );
+        let result = run_script_bounded(ctx, Some(&host), limits)
+            .await
+            .expect("execute");
+        assert_eq!(result.runtime_vars.get("n").expect("n present"), 12);
+        assert_eq!(host.max.load(std::sync::atomic::Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn queued_host_calls_do_not_hide_the_ceiling() {
+        let host = SlowHost(Duration::from_secs(3600));
+        let limits = ScriptLimits {
+            max_host_calls: 1,
+            ..short_limits(5_000, 300)
+        };
+        let started = std::time::Instant::now();
+        let ctx = minimal_ctx(
+            "await Promise.all(Array.from({length: 4}, () => \
+             rok.sendRequest({url: 'http://x.test'})));",
+        );
+        let err = run_script_bounded(ctx, Some(&host), limits)
+            .await
+            .expect_err("the ceiling must end it");
+        assert!(err.to_string().contains("at most"), "{err}");
+        assert!(started.elapsed() < Duration::from_secs(2));
     }
 
     #[tokio::test]

@@ -5,6 +5,7 @@
 //! handle and no second script engine.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -23,6 +24,18 @@ use super::{
 };
 use crate::runner_sequence::build_step_input;
 
+/// Most nested runs that may be active at once in one send.
+pub(crate) const MAX_ACTIVE_NESTED_RUNS: usize = 16;
+
+/// Holds one slot of the active nested run count and frees it on drop.
+struct ActiveRun(Arc<AtomicUsize>);
+
+impl Drop for ActiveRun {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 /// Serves the host calls of one script run.
 pub(crate) struct ExecutionScriptHost<'a> {
     pub(crate) svc: &'a RequestExecutionService,
@@ -32,6 +45,8 @@ pub(crate) struct ExecutionScriptHost<'a> {
     pub(crate) external_secrets: Arc<HashMap<String, String>>,
     /// Aliases that failed to resolve, which a nested run must not use.
     pub(crate) unresolved_aliases: Arc<Vec<UnresolvedAlias>>,
+    /// Nested runs active in this send, shared with every nested run.
+    pub(crate) active_runs: Arc<AtomicUsize>,
     /// TLS, redirect, cookie and client-certificate options of the request the
     /// script belongs to. Script requests reuse them.
     pub(crate) options: RequestOptions,
@@ -170,6 +185,14 @@ impl ScriptHost for ExecutionScriptHost<'_> {
                 )));
             }
         }
+        // Past the limit the call fails, so a burst cannot pile up threads and isolates.
+        if self.active_runs.fetch_add(1, Ordering::SeqCst) >= MAX_ACTIVE_NESTED_RUNS {
+            self.active_runs.fetch_sub(1, Ordering::SeqCst);
+            return Err(HostError::Failed(format!(
+                "rok.runRequest: too many nested requests running (limit {MAX_ACTIVE_NESTED_RUNS})"
+            )));
+        }
+        let _slot = ActiveRun(Arc::clone(&self.active_runs));
         let mut chain = self.chain.clone();
         chain.push(target);
         // The scopes as stored now, so the engine can tell what the nested run changed.
@@ -181,6 +204,7 @@ impl ScriptHost for ExecutionScriptHost<'_> {
             chain,
             &request.runtime_vars,
             &self.unresolved_aliases,
+            &self.active_runs,
         ))
         .await
         .map_err(|e| HostError::Failed(format!("rok.runRequest: {e}")))?;

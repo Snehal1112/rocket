@@ -348,6 +348,14 @@ fn saved(name: &str, file: &str, pre_request: &str) -> Request {
 
 /// A service over `collection` with the real engine and environment `dev` (`E` = `old`).
 fn run_service(collection: Collection) -> (RequestExecutionService, Arc<KeepingExecutor>) {
+    run_service_with_engine(collection, rocket_infra::scripting::DenoScriptEngine::new())
+}
+
+/// Like `run_service`, with an engine that has the given limits.
+fn run_service_with_engine(
+    collection: Collection,
+    engine: rocket_infra::scripting::DenoScriptEngine,
+) -> (RequestExecutionService, Arc<KeepingExecutor>) {
     let executor = Arc::new(KeepingExecutor::default());
     let mut env = Environment::new("dev");
     env.set_variable(Variable::new("E", "old"));
@@ -364,7 +372,7 @@ fn run_service(collection: Collection) -> (RequestExecutionService, Arc<KeepingE
         Arc::new(rocket_environment::NullSecretStore),
         Arc::new(rocket_environment::NullVaultSecretFetcher),
     )
-    .with_script_engine(Box::new(rocket_infra::scripting::DenoScriptEngine::new()));
+    .with_script_engine(Box::new(engine));
     (svc, executor)
 }
 
@@ -629,6 +637,61 @@ async fn run_request_e2e_nesting_stops_after_five_levels() {
     let sent = urls(&executor);
     assert_eq!(sent.len(), 6, "{sent:?}");
     assert!(sent.iter().all(|url| !url.ends_with("r7.yml")), "{sent:?}");
+}
+
+#[tokio::test]
+async fn run_request_rejects_past_the_active_nested_run_limit() {
+    let mut collection = Collection::new("api");
+    collection.root.add_request(saved(
+        "Main",
+        "main.yml",
+        "const r = await Promise.allSettled(Array.from({length: 30}, () => rok.runRequest('slow'))); \
+         const bad = r.filter(x => x.status === 'rejected'); \
+         console.log('rejected:' + bad.length); \
+         console.log(bad[0].reason.message);",
+    ));
+    collection
+        .root
+        .add_request(saved("Slow", "slow.yml", "await rok.sleep(200);"));
+    let input = send_input(&collection, "main.yml");
+    let limits = rocket_infra::scripting::ScriptLimits {
+        max_host_calls: 40,
+        ..rocket_infra::scripting::ScriptLimits::DEFAULT
+    };
+    let engine = rocket_infra::scripting::DenoScriptEngine::with_limits(limits);
+    let (svc, _executor) = run_service_with_engine(collection, engine);
+    let out = svc.execute(input).await.expect("execute");
+    let lines = console(&out);
+    assert!(lines.iter().any(|l| l == "rejected:14"), "{lines:?}");
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.contains("rok.runRequest: too many nested requests running (limit 16)")),
+        "{lines:?}"
+    );
+}
+
+#[tokio::test]
+async fn run_request_releases_its_slot_after_a_failed_nested_run() {
+    let mut collection = Collection::new("api");
+    collection.root.add_request(saved(
+        "Main",
+        "main.yml",
+        "let limited = 0; \
+         for (let i = 0; i < 20; i++) { \
+           try { await rok.runRequest('bad'); } \
+           catch (e) { if (e.message.includes('too many nested')) limited++; } \
+         } \
+         console.log('limited:' + limited);",
+    ));
+    collection
+        .root
+        .add_request(saved("Bad", "bad.yml", "throw new Error('boom');"));
+    let input = send_input(&collection, "main.yml");
+    let (svc, _executor) = run_service(collection);
+    let out = svc.execute(input).await.expect("execute");
+    let lines = console(&out);
+    assert!(lines.iter().any(|l| l == "limited:0"), "{lines:?}");
 }
 
 // ── the request guard ────────────────────────────────────────────────────────

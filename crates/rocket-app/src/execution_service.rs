@@ -394,6 +394,8 @@ pub(crate) struct PhaseState {
     pub external_secrets: Arc<std::collections::HashMap<String, String>>,
     /// Aliases that failed to resolve and that the outer send did not use, passed on to nested runs.
     pub unresolved_aliases: Arc<Vec<UnresolvedAlias>>,
+    /// Nested runs active in this send, shared by all of its nested runs.
+    pub active_runs: Arc<std::sync::atomic::AtomicUsize>,
     /// Request paths of this run and the runs that started it, outermost first.
     /// `rok.runRequest` uses it to stop recursion.
     pub run_chain: Vec<String>,
@@ -1735,6 +1737,7 @@ impl RequestExecutionService {
             input,
             external_secrets: Arc::clone(&state.external_secrets),
             unresolved_aliases: Arc::clone(&state.unresolved_aliases),
+            active_runs: Arc::clone(&state.active_runs),
             options: state.http_request.options.clone(),
             chain: state.run_chain.clone(),
             calling_url: state.http_request.url.clone(),
@@ -2146,6 +2149,7 @@ impl RequestExecutionService {
             response_body_override: None,
             external_secrets: Arc::new(external_secrets.clone()),
             unresolved_aliases: Arc::new(Vec::new()),
+            active_runs: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             run_chain: input
                 .request_path
                 .as_deref()
@@ -2906,12 +2910,14 @@ impl RequestExecutionService {
         chain: Vec<String>,
         runtime: &std::collections::HashMap<String, String>,
         unresolved: &Arc<Vec<UnresolvedAlias>>,
+        active_runs: &Arc<std::sync::atomic::AtomicUsize>,
     ) -> DomainResult<(
         ExecuteRequestOutput,
         std::collections::HashMap<String, String>,
     )> {
         let mut state = self.begin_phases(&input, external_secrets)?;
         state.unresolved_aliases = Arc::clone(unresolved);
+        state.active_runs = Arc::clone(active_runs);
         state.run_chain = chain;
         state.seed_runtime(runtime);
         self.run_before_request_phase(&input, ExecutionMode::Standalone, &mut state)
@@ -11929,6 +11935,7 @@ mod tests {
             vec![],
             &runtime,
             &Arc::new(Vec::new()),
+            &Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         )
         .await
         .expect("nested run");

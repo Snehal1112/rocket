@@ -19,6 +19,9 @@ pub struct ScriptLimits {
     pub ceiling: Duration,
     /// Longest single `rok.sleep`.
     pub sleep_cap: Duration,
+    /// Host calls served at the same time. Each in-flight `rok.runRequest` holds
+    /// a blocking thread and an isolate, so the rest of a burst waits its turn.
+    pub max_host_calls: usize,
 }
 
 impl ScriptLimits {
@@ -31,6 +34,7 @@ impl ScriptLimits {
         cpu: Duration::from_secs(5),
         ceiling: Duration::from_secs(300),
         sleep_cap: Duration::from_secs(60),
+        max_host_calls: 8,
     };
 }
 
@@ -165,6 +169,7 @@ mod tests {
         cpu: Duration::from_millis(100),
         ceiling: Duration::from_millis(1000),
         sleep_cap: Duration::from_millis(50),
+        max_host_calls: 8,
     };
 
     #[test]
