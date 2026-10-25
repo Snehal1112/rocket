@@ -58,7 +58,11 @@ import {
   generateCurlCommand,
 } from '@/lib/curl-generator';
 import type { ParsedCurl } from '@/lib/curl-parser';
-import { buildExampleSnapshot, defaultExampleName } from '@/lib/example-snapshot';
+import {
+  buildExampleSnapshot,
+  defaultExampleName,
+  saveExampleDisabledReason,
+} from '@/lib/example-snapshot';
 import { resolveRequestFields } from '@/lib/execute-request';
 import {
   graphqlSendMode,
@@ -294,13 +298,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
     () => (response ? buildExampleSnapshot(request, response) : null),
     [request, response],
   );
-  const saveExampleDisabledReason = tab.transient
-    ? 'Temporary tab: not saved'
-    : request.requestType !== 'http' || !tab.source
-      ? 'Save the request first'
-      : !response
-        ? 'Send the request first'
-        : null;
+  const disabledReason = saveExampleDisabledReason(tab, request, response);
 
   const openSaveExample = useCallback(() => {
     const source = tab.source;
@@ -1565,7 +1563,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       <ResponseBodyViewer
         response={response}
         onSaveAsExample={request.requestType === 'http' ? openSaveExample : undefined}
-        saveExampleDisabledReason={saveExampleDisabledReason}
+        saveExampleDisabledReason={disabledReason}
       />
       {tab.source && exampleSnapshot && (
         <SaveExampleDialog

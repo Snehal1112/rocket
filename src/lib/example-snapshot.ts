@@ -84,3 +84,16 @@ export function buildExampleSnapshot(
 export function defaultExampleName(response: ResponseState): string {
   return `${response.status} ${response.statusText}`.trim();
 }
+
+// Says why Save as example is unavailable, or null when it is ready.
+export function saveExampleDisabledReason(
+  tab: { transient?: boolean; source?: unknown },
+  request: RequestState,
+  response: ResponseState | null | undefined,
+): string | null {
+  if (tab.transient) return 'Temporary tab: not saved';
+  if (request.requestType !== 'http') return 'Examples are only for HTTP requests';
+  if (!tab.source) return 'Save the request first';
+  if (!response) return 'Send the request first';
+  return null;
+}

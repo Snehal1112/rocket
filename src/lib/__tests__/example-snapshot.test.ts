@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { KeyValueEntry, RequestState, ResponseState } from '@/types/pane-types';
-import { buildExampleSnapshot, defaultExampleName } from '../example-snapshot';
+import { buildExampleSnapshot, defaultExampleName, saveExampleDisabledReason } from '../example-snapshot';
 import { createDefaultRequest } from '../pane-utils';
 
 function row(key: string, value: string, enabled = true): KeyValueEntry {
@@ -141,5 +141,35 @@ describe('defaultExampleName', () => {
   it('default_name_uses_status_and_text', () => {
     expect(defaultExampleName(response())).toBe('200 OK');
     expect(defaultExampleName(response({ status: 404, statusText: '' }))).toBe('404');
+  });
+});
+
+describe('saveExampleDisabledReason', () => {
+  const source = {};
+
+  it('a_temporary_tab_wins', () => {
+    expect(saveExampleDisabledReason({ transient: true, source }, request(), response())).toBe(
+      'Temporary tab: not saved',
+    );
+  });
+
+  it('a_non_http_request_says_http_only', () => {
+    expect(
+      saveExampleDisabledReason({ source }, request({ requestType: 'graphql' }), response()),
+    ).toBe('Examples are only for HTTP requests');
+  });
+
+  it('a_tab_without_a_source_says_save_first', () => {
+    expect(saveExampleDisabledReason({}, request(), response())).toBe('Save the request first');
+  });
+
+  it('no_response_says_send_first', () => {
+    expect(saveExampleDisabledReason({ source }, request(), undefined)).toBe(
+      'Send the request first',
+    );
+  });
+
+  it('a_ready_tab_returns_null', () => {
+    expect(saveExampleDisabledReason({ source }, request(), response())).toBeNull();
   });
 });
