@@ -89,6 +89,8 @@ These are `pub` in `lib.rs` but are serialization-layer details — callers outs
 
 **Trust store (`fs_trust_store.rs`).** `FsCollectionTrustStore` keeps what the user allowed per collection in `~/.rocket-api/trust.yml` (snake_case persistence structs, `atomic_write`, a store mutex, read on every check so another window's grant is seen). A record matches on the canonical collection folder plus the `uid` of `opencollection.yml` (`collection_identity` on `FsCollectionRepo` and `SharedPathCollectionRepo`); a record with no uid matches on path alone. A corrupt file or unknown `version` fails closed (every collection untrusted) and the next write moves it to `trust.yml.corrupt-<secs>`. A missing file means the one-time migration has not run; a write to a missing file marks it migrated. Read the full rules in `docs/features/collection-trust.md`.
 
+**Script limits.** `ScriptLimits.max_host_calls` (default 8) bounds in-flight host calls per script.
+
 ## Testing
 
 All repository types have unit tests using `tempfile::TempDir` for ephemeral filesystem fixtures. `ReqwestExecutor` OAuth2 tests use `wiremock` to mock the token endpoint. Network tests that require live HTTP are marked `#[ignore]`.
