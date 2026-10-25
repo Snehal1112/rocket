@@ -15,7 +15,7 @@ Rules for every plan:
 |---|---|---|---|---|---|
 | P1 | `plan-01-parse-and-convert.md`: OpenAPI reader, request converter, layout and import service (pure, no network) | 1 reader and neutral model; 2 operation to request, naming, baseline hash; 3 tag and path layout, `import_openapi_text` | none | sonnet; opus reviews task 3 | done on branch openapi-import (94e54652..aaeefd2c), final review fixed, not yet merged to main |
 | P2 | `plan-02-fetch-and-source.md`: spec link parser, safe fetcher (port in `rocket-http`, reqwest impl in `rocket-infra`), source record and sidecar repo | 1 `SpecLocation` and `parse_spec_url`; 2 `SpecFetcher` and `ReqwestSpecFetcher`; 3 `.rocket/openapi-source.yml` repo and `source_record` | P1 | sonnet; opus reviews task 2 | done on branch openapi-import (8afbd278..76e39a59), final review fixed, not yet merged to main |
-| P3 | `plan-03-import-command-and-dialog.md`: import from a file or a link, Tauri commands, OpenAPI tab in the Import dialog | 1 `import_openapi_file` and `import_openapi_url` on `ImportService`; 2 Tauri commands and TS api (no query layer needed); 3 dialog tab (link or file, layout choice) | P2 | sonnet; opus reviews task 1 | written, waiting for review |
+| P3 | `plan-03-import-command-and-dialog.md`: import from a file or a link, Tauri commands, OpenAPI tab in the Import dialog | 1 `import_openapi_file` and `import_openapi_url` on `ImportService`; 2 Tauri commands and TS api (no query layer needed); 3 dialog tab (link or file, layout choice) | P2 | sonnet; opus reviews task 1 | done on branch openapi-import (0d3d659c..db9dede4), final review clean, not yet merged to main |
 
 ## Series 2: sync (outline, each plan is written after the one before it is merged)
 
