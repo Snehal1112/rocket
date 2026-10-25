@@ -473,6 +473,11 @@ pub fn run() {
             .with_lock(cookie_lock.clone());
             // App-level proxy: the service validates and stores it, the executor reads it.
             let shared_proxy = rocket_http::new_shared_proxy();
+            // Fetches OpenAPI specs for the import command, through the app proxy.
+            let spec_fetcher: Arc<dyn rocket_http::SpecFetcher> = Arc::new(
+                rocket_infra::ReqwestSpecFetcher::new().with_proxy(Arc::clone(&shared_proxy)),
+            );
+            app.manage(spec_fetcher);
             let proxy_svc = rocket_app::ProxySettingsService::new(
                 Box::new(rocket_infra::FsProxySettingsRepo::new(
                     data_dir.join("proxy.yml"),
@@ -1151,6 +1156,8 @@ pub fn run() {
             commands::import::import_postman_collection,
             commands::import::import_postman_environment,
             commands::import::import_wsdl,
+            commands::import::import_openapi_file,
+            commands::import::import_openapi_url,
             commands::contract::attach_contract,
             commands::contract::update_contract,
             commands::contract::list_contracts,

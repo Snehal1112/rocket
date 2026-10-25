@@ -1883,6 +1883,27 @@ export const importPostmanEnvironment = (
 export const importWsdl = (path: string, targetWorkspaceId: string) =>
   invoke<ImportReport>('import_wsdl', { path, targetWorkspaceId });
 
+export type OpenApiGroupBy = 'tags' | 'paths';
+
+export interface OpenApiImportResult {
+  report: ImportReport;
+  collection: string;
+  sourceUrl: string | null;
+  warnings: string[];
+}
+
+export const importOpenApiFile = (
+  path: string,
+  groupBy: OpenApiGroupBy,
+  targetWorkspaceId: string,
+) => invoke<OpenApiImportResult>('import_openapi_file', { path, groupBy, targetWorkspaceId });
+
+export const importOpenApiUrl = (
+  link: string,
+  groupBy: OpenApiGroupBy,
+  targetWorkspaceId: string,
+) => invoke<OpenApiImportResult>('import_openapi_url', { link, groupBy, targetWorkspaceId });
+
 // ============================================================
 // UI state persistence
 // ============================================================
