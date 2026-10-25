@@ -116,8 +116,8 @@ async fn run_script_bounded(
                 return joined
                     .map_err(|e| DomainError::Internal(format!("script thread panic: {e}")))?;
             }
-            // Calls past the cap wait in the channel until a slot frees.
-            Some(call) = call_rx.recv(), if host.is_some() && serving.len() < limits.max_host_calls => {
+            // Calls past the cap wait in the channel until a slot frees. A cap of 0 still serves one.
+            Some(call) = call_rx.recv(), if host.is_some() && serving.len() < limits.max_host_calls.max(1) => {
                 if let Some(host) = host {
                     serving.push(serve_host_call(host, call));
                 }

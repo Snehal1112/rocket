@@ -177,6 +177,7 @@ mod tests {
         assert_eq!(ScriptLimits::DEFAULT.cpu, Duration::from_secs(5));
         assert_eq!(ScriptLimits::DEFAULT.ceiling, Duration::from_secs(300));
         assert_eq!(ScriptLimits::DEFAULT.sleep_cap, Duration::from_secs(60));
+        assert_eq!(ScriptLimits::DEFAULT.max_host_calls, 8);
         assert_eq!(ScriptLimits::default(), ScriptLimits::DEFAULT);
     }
 

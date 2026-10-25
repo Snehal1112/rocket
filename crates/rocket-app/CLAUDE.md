@@ -223,4 +223,4 @@ Chip secret lookups fail closed: a real read or parse error of the workspace con
 
 Values that exist only at run time in the frontend are not known to the backend, so they are not masked: a script's `setVar` or `setEnvVar` results, and OAuth tokens that the tab does not send as its auth. A secret that is not held in a variable, a literal credential or the vault, and is echoed under a neutral field, cannot be recognised either.
 
-**Script host limits.** `rok.sendRequest` runs `check_request_guard`. Nested runs carry `unresolved_aliases` and refuse a send that references one. At most 16 nested runs (`MAX_ACTIVE_NESTED_RUNS`) are active per send.
+**Script host limits.** `rok.sendRequest` runs `check_request_guard` on its first URL only, so redirect hops are not checked yet (see R-68). Nested runs carry `unresolved_aliases` and refuse a send that references one. At most 16 nested runs (`MAX_ACTIVE_NESTED_RUNS`) are active per send.

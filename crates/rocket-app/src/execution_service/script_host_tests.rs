@@ -672,7 +672,7 @@ async fn run_request_rejects_past_the_active_nested_run_limit() {
 }
 
 #[tokio::test]
-async fn run_request_releases_its_slot_after_a_failed_nested_run() {
+async fn run_request_releases_its_slot_after_a_nested_script_error() {
     let mut collection = Collection::new("api");
     collection.root.add_request(saved(
         "Main",
