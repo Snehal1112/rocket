@@ -10,7 +10,7 @@ Runtime: `crates/rocket-infra/src/scripting/bootstrap.js` and `ops/{req,res,rok}
 |---|---|---|
 | A | Sync, state-only gaps | Spec and plans committed: `docs/superpowers/plans/rok-parity-a/` (index plus 2 plans). Merged to main (plans 01 and 02, final review fixed). Follow-ups: OAuth2 credential APIs, per-folder `__dirname`, collection read-all op for the overlay, getSize after setBody, spec wording (null writes, empty-string misses). |
 | B | Async host calls: `sendRequest`, `runRequest`, `sleep` (`req.onFail` stays a no-op) | Implemented and on main, from `docs/superpowers/plans/rok-parity-b/` (index plus 5 plans) with review fixes in `docs/superpowers/plans/rok-parity-b-fixes/`. Follow-ups are roadmap R-66 (re-resolve the outer request after the pre-request script) and R-67 (review minors). Still true: History badge for script requests, scanner flags for `sendRequest`/`runRequest`. |
-| C | Cookies: `rok.cookies.*`, `jar()` | Implemented on branch `rok-parity-c` (merge pending), from `docs/superpowers/plans/rok-parity-c/` (index plus 2 plans). Spec: `docs/superpowers/specs/2026-10-07-rok-js-api-parity-c-cookies-design.md`. Manual check: `docs/manual-tests/rok-cookies.md`. |
+| C | Cookies: `rok.cookies.*`, `jar()` | Implemented and on main, from `docs/superpowers/plans/rok-parity-c/` (index plus 2 plans). Spec: `docs/superpowers/specs/2026-10-07-rok-js-api-parity-c-cookies-design.md`. Manual check: `docs/manual-tests/rok-cookies.md`. |
 | D | `runner.iterationData`, `iterationIndex`, `totalIterations` | Deferred. Needs a runner CSV/JSON data-file feature first. |
 | E | `rok.grpc.*` | Deferred. The gRPC dependency is now on main; it needs a spec. |
 
@@ -38,10 +38,11 @@ Rulings are in `docs/superpowers/plans/rok-parity-c/00-plan-index.md`.
 Known limits:
 
 - A `req.setUrl` made later in the same script is not seen by `rok.cookies`.
-- A `Set-Cookie` stored by `rok.sendRequest` or a nested `rok.runRequest` does not refresh the caller's snapshot until it makes a host write or a `jar()` read.
+- A `Set-Cookie` stored by `rok.sendRequest` or a nested `rok.runRequest` does not refresh the caller's snapshot (the snapshot is replaced only when a request-scoped write or a `jar()` call uses exactly the request URL string).
 - A request with the jar option off does not send script cookies.
 - Cookies of any domain are visible to Safe-mode scripts through `jar()`, and `rok.sendRequest` can send them (accepted by the spec's Risks).
 - `maxAge` is derived on read (seconds until expiry, or null). On input, zero or negative rejects.
+- A cookie key must be an RFC 7230 token and a value cannot hold a control character (tab, CR, LF, NUL, DEL) or `;`. Key plus value is at most 4096 bytes. `RepoCookieStore` also skips a stored cookie that cannot be a header value, so one bad cookie never hides the rest.
 - A script-supplied `expires` in the past is stored as an already-expired cookie and never matched. Use `remove` to delete.
 - With no host (Flow transform and condition nodes) every async call rejects with `rok.cookies is not available here`. With no request URL they reject with `rok.cookies.<method>: no request URL`.
 
