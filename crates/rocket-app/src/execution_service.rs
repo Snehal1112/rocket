@@ -42,6 +42,9 @@ mod folder_chain_e2e_tests;
 mod folder_var_script_tests;
 pub(crate) mod run_request;
 pub(crate) mod script_chain;
+// The script host calls this service from the next plan.
+#[allow(dead_code)]
+pub(crate) mod script_cookies;
 pub(crate) mod script_host;
 #[cfg(test)]
 mod script_host_tests;
@@ -553,7 +556,6 @@ impl RequestExecutionService {
         self
     }
 
-    /// Attach the trust store that decides which requested capabilities are granted.
     /// Uses a jar lock shared with the other writers of the cookie jars.
     pub fn with_cookie_lock(mut self, lock: rocket_http::CookieJarLock) -> Self {
         self.cookie_lock = lock;
@@ -566,6 +568,7 @@ impl RequestExecutionService {
         &self.cookie_lock
     }
 
+    /// Attach the trust store that decides which requested capabilities are granted.
     pub fn with_trust_store(
         mut self,
         store: Arc<dyn rocket_collection::CollectionTrustStore>,
