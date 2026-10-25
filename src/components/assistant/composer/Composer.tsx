@@ -58,8 +58,9 @@ export function Composer() {
   const setMode = useAssistantStore((s) => s.setMode);
   const workspaceId = useWorkspaceStore((s) => s.activeWorkspaceId);
   // The preface of a continued session goes out with the first prompt, so its size is shown.
+  // A conversation that carries on in place shows its messages in the chat, so it needs no note.
   const replayChars = useAssistantStore((s) =>
-    s.replay && !s.replay.sent ? s.replay.preface.length : 0,
+    s.replay && !s.replay.sent && !s.replay.resume ? s.replay.preface.length : 0,
   );
 
   const [text, setText] = useState('');

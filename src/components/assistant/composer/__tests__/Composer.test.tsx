@@ -318,4 +318,13 @@ describe('Composer', () => {
     act(() => useAssistantStore.getState().markReplaySent('s1'));
     expect(screen.queryByText(replaySizeHint(8412))).toBeNull();
   });
+
+  it('shows no size note when the conversation carries on in the chat', () => {
+    const token = useAssistantStore
+      .getState()
+      .beginSession('agent-1', 'ask', { fromId: 'c0', preface: 'x'.repeat(8412), resume: {} });
+    useAssistantStore.getState().activateSession(token, 's1', []);
+    renderComposer();
+    expect(screen.queryByText(replaySizeHint(8412))).toBeNull();
+  });
 });
