@@ -101,6 +101,7 @@
   // reply that carries a cookie list for that URL replaces the snapshot.
   const _ckSeed = JSON.parse(__ops.op_rok_cookie_snapshot());
   const _ckUrl = _ckSeed.url;
+  const _ckHost = _ckSeed.hasHost;
   let _ck = _ckSeed.cookies;
 
   async function _cookieCall(method, op) {
@@ -139,6 +140,11 @@
       throw new TypeError('rok.cookies.' + method + ': url must be a non-empty string');
     }
     return url;
+  }
+
+  // Without a host every async call says so first, before argument checks.
+  function _cookieHost() {
+    if (!_ckHost) throw new Error('rok.cookies is not available here');
   }
 
   // Request-scoped writes need the request URL the snapshot was taken for.
@@ -191,8 +197,16 @@
   }
 
   const _cookieWrite = async (method, op) => { await _cookieCall(method, op); };
-  const _cookieRemove = (method) => async (name) => _cookieWrite(method, { op: 'remove', url: _cookieScope(method), name: _cookieName(method, name) });
-  const _cookieUpsert = (method) => async (a, b, c) => _cookieWrite(method, { op: 'upsert', url: _cookieScope(method), cookie: _cookieInput(method, a, b, c) });
+  const _cookieRemove = (method) => async (name) => {
+    _cookieHost();
+    const n = _cookieName(method, name);
+    return _cookieWrite(method, { op: 'remove', url: _cookieScope(method), name: n });
+  };
+  const _cookieUpsert = (method) => async (a, b, c) => {
+    _cookieHost();
+    const cookie = _cookieInput(method, a, b, c);
+    return _cookieWrite(method, { op: 'upsert', url: _cookieScope(method), cookie });
+  };
 
   const _cookies = {
     get: (name) => { const c = _ck.find((x) => x.key === _cookieName('get', name)); return c ? c.value : undefined; },
@@ -219,7 +233,10 @@
     upsert: _cookieUpsert('upsert'),
     remove: _cookieRemove('remove'),
     delete: _cookieRemove('delete'),
-    clear: async () => _cookieWrite('clear', { op: 'clearUrl', url: _cookieScope('clear') }),
+    clear: async () => {
+      _cookieHost();
+      return _cookieWrite('clear', { op: 'clearUrl', url: _cookieScope('clear') });
+    },
     jar: _cookieJar,
   };
 

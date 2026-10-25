@@ -1,3 +1,4 @@
+use crate::scripting::host_bridge::HostChannel;
 use crate::scripting::ops::ScriptOpError;
 use crate::scripting::state::{ScriptInputState, ScriptOutputState};
 use deno_core::{op2, OpState};
@@ -481,12 +482,16 @@ pub fn op_rok_get_collection_name(state: &OpState) -> String {
 }
 
 /// rok.cookies — the URL and the cookies matching it when the phase started,
-/// as `{"url": .., "cookies": [..]}`.
+/// plus whether a host serves async calls, as `{"url", "cookies", "hasHost"}`.
 #[op2]
 #[string]
 pub fn op_rok_cookie_snapshot(state: &OpState) -> String {
     let input = state.borrow::<ScriptInputState>();
-    serde_json::json!({ "url": input.cookie_url, "cookies": input.cookies }).to_string()
+    let has_host = state
+        .try_borrow::<HostChannel>()
+        .is_some_and(|channel| channel.0.is_some());
+    serde_json::json!({ "url": input.cookie_url, "cookies": input.cookies, "hasHost": has_host })
+        .to_string()
 }
 
 /// rok.isSafeMode() — true in Safe mode, false in Developer mode.

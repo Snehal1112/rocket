@@ -4589,6 +4589,31 @@ mod cookie_tests {
     }
 
     #[tokio::test]
+    async fn hostless_request_scoped_writes_say_not_available() {
+        let code = r#"
+            console.log(rok.cookies.count(), rok.cookies.toString() === '', rok.cookies.get('a'));
+            for (const m of ['add', 'upsert', 'remove', 'delete', 'clear']) {
+              await rok.cookies[m]('a', '1').catch((e) => console.log(e.message));
+            }
+            await rok.cookies.add(5).catch((e) => console.log(e.message));
+        "#;
+        let out = run(minimal_ctx(code), None).await;
+        let mut want = vec!["0 true undefined".to_string()];
+        want.extend((0..6).map(|_| "rok.cookies is not available here".to_string()));
+        assert_eq!(out, want);
+    }
+
+    #[tokio::test]
+    async fn hostless_jar_calls_say_not_available() {
+        let code = r#"
+            await rok.cookies.jar().setCookie('https://x.test/', 'a', '1')
+              .catch((e) => console.log(e.message));
+        "#;
+        let out = run(minimal_ctx(code), None).await;
+        assert_eq!(out, vec!["rok.cookies is not available here"]);
+    }
+
+    #[tokio::test]
     async fn reads_hand_out_copies_of_the_snapshot() {
         let code = r#"
             const c = rok.cookies;
