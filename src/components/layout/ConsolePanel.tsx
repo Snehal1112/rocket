@@ -1,10 +1,14 @@
 import {
+  Braces,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   Eye,
   EyeOff,
+  FlaskConical,
+  Globe,
   Trash2,
+  TriangleAlert,
   XCircle,
 } from 'lucide-react';
 import { useMemo, useRef, useState } from 'react';
@@ -33,6 +37,43 @@ interface ConsolePanelProps {
 
 const MIN_HEIGHT = 120;
 const MAX_HEIGHT = 600;
+
+// What the Console collects, so an empty panel says what will show up.
+const CONSOLE_SOURCES = [
+  { label: 'Requests', Icon: Globe },
+  { label: 'Script output', Icon: Braces },
+  { label: 'Test results', Icon: FlaskConical },
+  { label: 'Backend warnings', Icon: TriangleAlert },
+] as const;
+
+function ConsoleEmptyState() {
+  return (
+    <div
+      role='status'
+      data-slot='empty-state'
+      data-cause='none-yet'
+      className='flex h-full flex-col items-center justify-center gap-3 px-4 py-3 text-center font-sans'
+    >
+      <div className='space-y-0.5'>
+        <p className='text-sm font-medium text-foreground'>No console activity yet</p>
+        <p className='text-xs text-muted-foreground'>
+          Send a request or run a script to see it here.
+        </p>
+      </div>
+      <ul aria-label='What the Console shows' className='flex flex-wrap justify-center gap-1.5'>
+        {CONSOLE_SOURCES.map(({ label, Icon }) => (
+          <li
+            key={label}
+            className='inline-flex items-center gap-1 rounded-full border border-border/70 px-2 py-0.5 text-xs text-muted-foreground'
+          >
+            <Icon aria-hidden='true' className='h-3 w-3' />
+            {label}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 function formatTime(iso: string): string {
   const d = new Date(iso);
@@ -310,6 +351,7 @@ export function ConsolePanel({ isOpen, height, onHeightChange }: ConsolePanelPro
           size='sm'
           className='h-6 px-2 text-sm'
           onClick={clearEntries}
+          disabled={entries.length === 0 && logEntries.length === 0}
           aria-label='Clear console'
         >
           <Trash2 className='h-3.5 w-3.5 mr-1 text-muted-foreground' />
@@ -339,13 +381,7 @@ export function ConsolePanel({ isOpen, height, onHeightChange }: ConsolePanelPro
               action={{ label: 'Show INFO logs', onClick: () => setShowInfoLogs(true) }}
             />
           ) : (
-            <EmptyState
-              size='compact'
-              illustration={false}
-              cause='none-yet'
-              title='No console activity yet'
-              reason='Requests, script output and backend warnings appear here.'
-            />
+            <ConsoleEmptyState />
           )
         ) : (
           filtered.map((entry) => {
