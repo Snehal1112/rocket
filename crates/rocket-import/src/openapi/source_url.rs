@@ -63,12 +63,7 @@ pub fn parse_spec_url(input: &str) -> ImportResult<SpecLocation> {
                 return Err(reject("link to the file, not a folder"));
             }
             if segments.len() >= 5 && (segments[2] == "blob" || segments[2] == "raw") {
-                return Ok(github(
-                    &segments[0],
-                    &segments[1],
-                    &segments[3],
-                    &segments[4..],
-                ));
+                return github(&segments[0], &segments[1], &segments[3], &segments[4..]);
             }
             Err(reject(file_hint))
         }
@@ -77,20 +72,10 @@ pub fn parse_spec_url(input: &str) -> ImportResult<SpecLocation> {
                 && segments[2] == "refs"
                 && (segments[3] == "heads" || segments[3] == "tags")
             {
-                return Ok(github(
-                    &segments[0],
-                    &segments[1],
-                    &segments[4],
-                    &segments[5..],
-                ));
+                return github(&segments[0], &segments[1], &segments[4], &segments[5..]);
             }
             if segments.len() >= 4 {
-                return Ok(github(
-                    &segments[0],
-                    &segments[1],
-                    &segments[2],
-                    &segments[3..],
-                ));
+                return github(&segments[0], &segments[1], &segments[2], &segments[3..]);
             }
             Err(reject(file_hint))
         }
@@ -103,13 +88,18 @@ pub fn parse_spec_url(input: &str) -> ImportResult<SpecLocation> {
                     .map(percent_decode)
                     .filter(|r| !r.is_empty())
                     .unwrap_or_else(|| "HEAD".to_string());
-                return Ok(github(&segments[1], &segments[2], &git_ref, &segments[4..]));
+                return github(&segments[1], &segments[2], &git_ref, &segments[4..]);
             }
             Err(reject(file_hint))
         }
         _ => {
             let mut url = format!("https://{before_query}");
             if let Some(query) = query {
+                if query_has_secret_name(query) {
+                    return Err(reject(
+                        "the link has a secret in its query string; remove it from the link",
+                    ));
+                }
                 url.push('?');
                 url.push_str(query);
             }
@@ -118,13 +108,48 @@ pub fn parse_spec_url(input: &str) -> ImportResult<SpecLocation> {
     }
 }
 
-fn github(owner: &str, repo: &str, git_ref: &str, path: &[String]) -> SpecLocation {
-    SpecLocation::Github {
+/// Builds a `Github` location after checking every part. A `.` or `..` segment (even one that
+/// arrived percent-encoded), an empty part, or a slash inside an owner, repo or path segment
+/// could send a token-carrying request to a different API path, so it is refused. A ref may
+/// contain `/` (a branch like `feature/x`) but not as a way to climb out.
+fn github(owner: &str, repo: &str, git_ref: &str, path: &[String]) -> ImportResult<SpecLocation> {
+    let plain = |s: &str| !s.is_empty() && !is_dot_segment(s) && !s.contains(['/', '\\']);
+    let ref_ok = !git_ref.contains('\\')
+        && git_ref
+            .split('/')
+            .all(|piece| !piece.is_empty() && !is_dot_segment(piece));
+    if !(plain(owner) && plain(repo) && ref_ok && path.iter().all(|s| plain(s))) {
+        return Err(reject("that link has a part that is not allowed"));
+    }
+    Ok(SpecLocation::Github {
         owner: owner.to_string(),
         repo: repo.to_string(),
         git_ref: git_ref.to_string(),
         path: path.join("/"),
-    }
+    })
+}
+
+fn is_dot_segment(segment: &str) -> bool {
+    segment == "." || segment == ".."
+}
+
+/// Query names that usually carry a secret. A link with one is refused, because the link is
+/// saved in a file that is committed to git.
+const SECRET_QUERY_HINTS: [&str; 7] = [
+    "token",
+    "key",
+    "secret",
+    "sig",
+    "pass",
+    "auth",
+    "credential",
+];
+
+fn query_has_secret_name(query: &str) -> bool {
+    query.split('&').any(|pair| {
+        let name = percent_decode(pair.split('=').next().unwrap_or_default()).to_ascii_lowercase();
+        SECRET_QUERY_HINTS.iter().any(|hint| name.contains(hint))
+    })
 }
 
 fn strip_https(text: &str) -> Option<&str> {
@@ -305,6 +330,51 @@ mod tests {
         ] {
             let err = parse_spec_url(link).expect_err(link);
             assert!(matches!(err, ImportError::NotAnOpenApiSpec(_)), "{link}");
+        }
+    }
+
+    #[test]
+    fn dot_segments_cannot_steer_a_request_elsewhere() {
+        for link in [
+            "https://github.com/acme/orders/blob/main/%2e%2e/%2e%2e/%2e%2e/%2e%2e/user/repos",
+            "https://github.com/acme/orders/blob/main/docs/../../../user",
+            "https://github.com/../../blob/main/user",
+            "https://github.com/acme/orders/blob/main/a%2F..%2F..%2F..%2Fuser",
+            "https://github.com/acme/orders/blob/../x/spec.yaml",
+            "https://raw.githubusercontent.com/acme/orders/main/../../other/main/x.yaml",
+            "https://api.github.com/repos/acme/orders/contents/spec.yaml?ref=../..",
+            "https://api.github.com/repos/acme/orders/contents/spec.yaml?ref=feature%2F..%2Fx",
+            "https://api.github.com/repos/../orders/contents/spec.yaml",
+        ] {
+            let err = parse_spec_url(link).expect_err(link);
+            assert!(matches!(err, ImportError::NotAnOpenApiSpec(_)), "{link}");
+        }
+        // A ref with a slash and a path with dots in names stay valid.
+        assert_eq!(
+            parse_spec_url("https://api.github.com/repos/acme/orders/contents/a/.hidden/spec.v1.yaml?ref=feature%2Fx")
+                .expect("valid"),
+            github("feature/x", "a/.hidden/spec.v1.yaml")
+        );
+    }
+
+    #[test]
+    fn https_links_with_secret_looking_query_names_are_rejected() {
+        for link in [
+            "https://example.com/spec.json?token=abc",
+            "https://example.com/spec.json?format=json&access_key=x",
+            "https://example.com/spec.json?X-Amz-Signature=deadbeef",
+            "https://example.com/spec.json?api_key=1",
+            "https://example.com/spec.json?Password=hunter2",
+            "https://example.com/spec.json?auth=Zm9v",
+        ] {
+            let err = parse_spec_url(link).expect_err(link);
+            assert!(matches!(err, ImportError::NotAnOpenApiSpec(_)), "{link}");
+        }
+        for link in [
+            "https://example.com/spec.json?format=json",
+            "https://example.com/spec.json?v=2&lang=en",
+        ] {
+            assert!(parse_spec_url(link).is_ok(), "{link}");
         }
     }
 

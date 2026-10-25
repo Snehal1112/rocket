@@ -23,10 +23,18 @@ pub struct SpecFetchRequest {
     pub max_bytes: usize,
 }
 
+/// The URL without its query values, which may carry a secret.
+fn redact_query(url: &str) -> String {
+    match url.split_once('?') {
+        Some((base, _)) => format!("{base}?<redacted>"),
+        None => url.to_string(),
+    }
+}
+
 impl fmt::Debug for SpecFetchRequest {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SpecFetchRequest")
-            .field("url", &self.url)
+            .field("url", &redact_query(&self.url))
             .field("accept", &self.accept)
             .field(
                 "bearer_token",
@@ -203,6 +211,21 @@ mod tests {
         assert!(!same_origin("https://a.com/x", "https://b.com/x"));
         assert!(!same_origin("https://a.com:8443/x", "https://a.com/x"));
         assert!(!same_origin("garbage", "https://a.com/x"));
+    }
+
+    #[test]
+    fn request_debug_hides_query_values() {
+        let request = SpecFetchRequest {
+            url: "https://a.com/x?token=abc123&format=json".to_string(),
+            accept: None,
+            bearer_token: None,
+            if_none_match: None,
+            if_modified_since: None,
+            max_bytes: 10,
+        };
+        let text = format!("{request:?}");
+        assert!(!text.contains("abc123"), "{text}");
+        assert!(text.contains("https://a.com/x"), "{text}");
     }
 
     #[test]
