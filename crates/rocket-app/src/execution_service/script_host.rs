@@ -97,6 +97,14 @@ pub(crate) fn http_request_for(
 #[async_trait]
 impl ScriptHost for ExecutionScriptHost<'_> {
     async fn send_request(&self, request: HostRequest) -> Result<HostResponse, HostError> {
+        // The workspace policy applies to a script's own requests too.
+        self.svc
+            .check_request_guard(
+                &self.input.url,
+                &request.url,
+                &self.input.request_guard_policy,
+            )
+            .map_err(|e| HostError::Failed(format!("rok.sendRequest: {e}")))?;
         let http = http_request_for(&request, &self.options)?;
         // A RocketVault certificate selected for this URL is fetched first, as for a send.
         let http = self.svc.with_vault_certificates(&http).await;

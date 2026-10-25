@@ -630,3 +630,85 @@ async fn run_request_e2e_nesting_stops_after_five_levels() {
     assert_eq!(sent.len(), 6, "{sent:?}");
     assert!(sent.iter().all(|url| !url.ends_with("r7.yml")), "{sent:?}");
 }
+
+// ── the request guard ────────────────────────────────────────────────────────
+
+fn guard_on() -> rocket_workspace::RequestGuardPolicy {
+    rocket_workspace::RequestGuardPolicy {
+        block_script_redirects_to_internal_hosts: true,
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn send_request_blocks_an_internal_host_when_the_policy_is_on() {
+    let executor = Arc::new(KeepingExecutor::default());
+    let svc = service(Arc::clone(&executor));
+    let mut req = input("https://main.test/x");
+    req.method = HttpMethod::Get;
+    req.request_guard_policy = guard_on();
+    req.pre_request_script =
+        Some("await rok.sendRequest({ url: 'http://169.254.169.254/latest' });".into());
+    let out = svc.execute(req).await.expect("execute");
+    let error = out.script_error.expect("script error");
+    assert!(error.contains("rok.sendRequest"), "{error}");
+    assert!(
+        error.contains("blocked: script redirected request to internal host '169.254.169.254'"),
+        "{error}"
+    );
+    assert!(
+        !executor.seen().iter().any(|r| r.url.contains("169.254")),
+        "{:?}",
+        executor.seen()
+    );
+}
+
+#[tokio::test]
+async fn send_request_to_the_calling_requests_own_host_is_allowed_with_the_policy_on() {
+    let executor = Arc::new(KeepingExecutor::default());
+    let svc = service(Arc::clone(&executor));
+    let mut req = input("http://127.0.0.1:9/main");
+    req.method = HttpMethod::Get;
+    req.request_guard_policy = guard_on();
+    req.pre_request_script =
+        Some("await rok.sendRequest({ url: 'http://127.0.0.1:9/side' });".into());
+    let out = svc.execute(req).await.expect("execute");
+    assert!(out.script_error.is_none(), "{:?}", out.script_error);
+    assert!(urls(&executor).contains(&"http://127.0.0.1:9/side".to_string()));
+}
+
+#[tokio::test]
+async fn send_request_to_an_internal_host_is_allowed_when_the_policy_is_off() {
+    let executor = Arc::new(KeepingExecutor::default());
+    let svc = service(Arc::clone(&executor));
+    let mut req = input("https://main.test/x");
+    req.method = HttpMethod::Get;
+    req.pre_request_script =
+        Some("await rok.sendRequest({ url: 'http://169.254.169.254/latest' });".into());
+    let out = svc.execute(req).await.expect("execute");
+    assert!(out.script_error.is_none(), "{:?}", out.script_error);
+    assert!(urls(&executor).contains(&"http://169.254.169.254/latest".to_string()));
+}
+
+#[tokio::test]
+async fn run_request_nested_set_url_is_guarded_by_the_policy() {
+    let collection = main_and_login(
+        "try { await rok.runRequest('auth/login'); } catch (e) { console.log('err', e.message); }",
+        "req.setUrl('http://169.254.169.254/x');",
+        "",
+    );
+    let mut input = send_input(&collection, "main.yml");
+    input.request_guard_policy = guard_on();
+    let (svc, executor) = run_service(collection);
+    let out = svc.execute(input).await.expect("execute");
+    let lines = console(&out).join("\n");
+    assert!(
+        lines.contains("blocked: script redirected request to internal host '169.254.169.254'"),
+        "{lines}"
+    );
+    assert!(
+        !urls(&executor).iter().any(|u| u.contains("169.254")),
+        "{:?}",
+        urls(&executor)
+    );
+}
