@@ -3,6 +3,7 @@ pub mod contract;
 pub mod folder;
 pub mod folder_settings;
 pub mod graphql_request;
+pub mod openapi_source;
 pub mod grpc_request;
 pub mod repository;
 pub mod request;
