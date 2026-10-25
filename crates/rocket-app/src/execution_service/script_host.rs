@@ -33,6 +33,8 @@ pub(crate) struct ExecutionScriptHost<'a> {
     pub(crate) options: RequestOptions,
     /// Request paths of this run and the runs that started it, outermost first.
     pub(crate) chain: Vec<String>,
+    /// The calling request's resolved URL, the base of the request guard check.
+    pub(crate) calling_url: String,
 }
 
 /// Turns an executor response into what a script sees.
@@ -100,7 +102,7 @@ impl ScriptHost for ExecutionScriptHost<'_> {
         // The workspace policy applies to a script's own requests too.
         self.svc
             .check_request_guard(
-                &self.input.url,
+                &self.calling_url,
                 &request.url,
                 &self.input.request_guard_policy,
             )

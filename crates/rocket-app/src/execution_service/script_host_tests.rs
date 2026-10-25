@@ -678,6 +678,41 @@ async fn send_request_to_the_calling_requests_own_host_is_allowed_with_the_polic
 }
 
 #[tokio::test]
+async fn send_request_to_the_host_of_a_templated_request_url_is_allowed_with_the_policy_on() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&server)
+        .await;
+    let mut env = Environment::new("dev");
+    env.set_variable(Variable::new("base", &server.uri()));
+    let svc = RequestExecutionService::new(
+        Box::new(StaticEnvRepo(env)),
+        Arc::new(rocket_infra::ReqwestExecutor::new()),
+        Box::new(SharedHistoryRepo(InMemoryHistoryRepo::new())),
+        Box::new(SharedCollectionRepo(InMemoryCollectionRepo::new(
+            Collection::new("api"),
+        ))),
+        Box::new(NullCookieRepo),
+        Box::new(NullEventPublisher),
+        Box::new(EmptySecretManagerRepo),
+        Arc::new(rocket_environment::NullSecretStore),
+        Arc::new(rocket_environment::NullVaultSecretFetcher),
+    )
+    .with_script_engine(Box::new(rocket_infra::scripting::DenoScriptEngine::new()));
+    let mut req = input("{{base}}/x");
+    req.method = HttpMethod::Get;
+    req.environment_name = Some("dev".into());
+    req.request_guard_policy = guard_on();
+    req.pre_request_script = Some(format!(
+        "await rok.sendRequest({{ url: '{}/side' }});",
+        server.uri()
+    ));
+    let out = svc.execute(req).await.expect("execute");
+    assert!(out.script_error.is_none(), "{:?}", out.script_error);
+}
+
+#[tokio::test]
 async fn send_request_to_an_internal_host_is_allowed_when_the_policy_is_off() {
     let executor = Arc::new(KeepingExecutor::default());
     let svc = service(Arc::clone(&executor));

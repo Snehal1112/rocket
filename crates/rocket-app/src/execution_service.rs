@@ -1726,6 +1726,7 @@ impl RequestExecutionService {
             external_secrets: Arc::clone(&state.external_secrets),
             options: state.http_request.options.clone(),
             chain: state.run_chain.clone(),
+            calling_url: state.http_request.url.clone(),
         }
     }
 
@@ -1978,13 +1979,9 @@ impl RequestExecutionService {
         }
     }
 
-    /// Validates a BeforeRequest script's URL mutation against the workspace's
-    /// opt-in `RequestGuardPolicy`. Only ever inspects `mutated_url` — the
-    /// user's own manually-typed URL never reaches this method (see call site
-    /// in `execute()`, which only calls this when a script actually set a new
-    /// URL). Compares resolved hosts, not raw URL strings: a script that only
-    /// rewrites the path/query of the same host the user already declared is
-    /// never blocked, regardless of whether that host happens to be internal.
+    /// Checks a script-produced URL (a URL mutation or a `rok.sendRequest`
+    /// target) against the opt-in `RequestGuardPolicy`. A URL on the same host
+    /// as `original_url` is never blocked, even when that host is internal.
     fn check_request_guard(
         &self,
         original_url: &str,
