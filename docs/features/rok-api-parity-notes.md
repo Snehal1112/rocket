@@ -4,7 +4,7 @@ Goal: every API on Bruno's JavaScript API Reference works in Rocket as `rok.*` (
 
 Runtime: `crates/rocket-infra/src/scripting/bootstrap.js` and `ops/{req,res,rok}.rs`. Typings: `src/components/editor/rok-types.ts`. Keep them in sync.
 
-## Series status (2026-10-07)
+## Series status (2026-10-25)
 
 | Part | Scope | Status |
 |---|---|---|
