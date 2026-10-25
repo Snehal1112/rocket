@@ -2,6 +2,7 @@
 pub(crate) mod collection;
 pub(crate) mod environment;
 pub(crate) mod grpc;
+pub(crate) mod openapi;
 pub(crate) mod postman;
 pub(crate) mod request;
 pub(crate) mod wsdl;
