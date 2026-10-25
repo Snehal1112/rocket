@@ -28,6 +28,7 @@ import { Input } from '@/components/ui/input';
 import { TREE_ICON, TREE_ICON_STROKE, TreeItem, TreeItemContent } from '@/components/ui/tree';
 import { deleteRequestExample, renameRequestExample } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
+import { hasActiveTab, isExampleTabFor } from './tree-utils';
 
 interface ExampleNodeProps {
   collectionName: string;
@@ -42,6 +43,9 @@ function errorMessage(err: unknown): string {
 
 export function ExampleNode({ collectionName, requestPath, name }: ExampleNodeProps) {
   const openExampleTab = usePaneStore((s) => s.openExampleTab);
+  const active = usePaneStore((s) =>
+    hasActiveTab(s.root, (t) => isExampleTabFor(t, collectionName, requestPath, name)),
+  );
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(name);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -101,7 +105,11 @@ export function ExampleNode({ collectionName, requestPath, name }: ExampleNodePr
       <ContextMenu>
         <ContextMenuTrigger asChild>
           <div className='flex-1 min-w-0'>
-            <TreeItem value={`example-${collectionName}-${requestPath}-${name}`} className='w-full'>
+            <TreeItem
+              value={`example-${collectionName}-${requestPath}-${name}`}
+              active={active}
+              className='w-full'
+            >
               <TreeItemContent
                 onClick={() => {
                   if (!isRenaming) openExampleTab(collectionName, requestPath, name);

@@ -18,7 +18,7 @@ import { flowKeys } from '@/lib/queries/flow-queries';
 import { renameFlow } from '@/lib/tauri-api';
 import { useFlowAuthStore } from '@/stores/flow-auth-store';
 import { usePaneStore } from '@/stores/pane-store';
-import type { DeleteTarget } from './tree-utils';
+import { type DeleteTarget, hasActiveTab, isFlowTabFor } from './tree-utils';
 
 interface FlowListItemProps {
   name: string;
@@ -45,6 +45,9 @@ function holdsAuthTokens(collectionName: string, name: string): boolean {
 
 export function FlowListItem({ name, collectionName, onDelete }: FlowListItemProps) {
   const queryClient = useQueryClient();
+  const active = usePaneStore((s) =>
+    hasActiveTab(s.root, (t) => isFlowTabFor(t, collectionName, name)),
+  );
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(name);
   const renameInFlight = useRef(false);
@@ -125,7 +128,11 @@ export function FlowListItem({ name, collectionName, onDelete }: FlowListItemPro
 
   return (
     <div className='group relative flex items-center'>
-      <TreeItem value={JSON.stringify(['flow', collectionName, name])} className='w-full'>
+      <TreeItem
+        value={JSON.stringify(['flow', collectionName, name])}
+        active={active}
+        className='w-full'
+      >
         <TreeItemContent
           className='flex items-center gap-1 w-full px-2 py-1 text-sm rounded-sm cursor-pointer'
           onClick={() => void open()}

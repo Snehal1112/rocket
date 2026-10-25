@@ -12,7 +12,7 @@ import { Input } from '@/components/ui/input';
 import { TREE_ICON, TREE_ICON_STROKE, TreeItem, TreeItemContent } from '@/components/ui/tree';
 import { renameScriptFile } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
-import type { DeleteTarget } from './tree-utils';
+import { type DeleteTarget, hasActiveTab, isScriptTabFor } from './tree-utils';
 
 interface ScriptNodeProps {
   name: string;
@@ -27,6 +27,9 @@ function errorMessage(err: unknown): string {
 }
 
 export function ScriptNode({ name, collectionName, path, onDelete }: ScriptNodeProps) {
+  const active = usePaneStore((s) =>
+    hasActiveTab(s.root, (t) => isScriptTabFor(t, collectionName, path)),
+  );
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(name);
   const renameInFlight = useRef(false);
@@ -67,7 +70,7 @@ export function ScriptNode({ name, collectionName, path, onDelete }: ScriptNodeP
 
   return (
     <div className='group relative flex items-center'>
-      <TreeItem value={`script-${collectionName}-${path}`} className='w-full'>
+      <TreeItem value={`script-${collectionName}-${path}`} active={active} className='w-full'>
         <TreeItemContent onClick={() => void open()} aria-label={`Open script ${name}`}>
           <FileCode aria-hidden='true' strokeWidth={TREE_ICON_STROKE} className={TREE_ICON} />
           {isRenaming ? (

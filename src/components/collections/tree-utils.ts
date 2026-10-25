@@ -1,11 +1,38 @@
 import { isPathWithin } from '@/lib/pane-utils';
 import type { PaneNode, Tab } from '@/types/pane-types';
-import { isFlowTab, isFolderTab, isScriptTab } from '@/types/pane-types';
+import { isExampleTab, isFlowTab, isFolderTab, isScriptTab } from '@/types/pane-types';
 
 // Returns true if any active tab in the pane tree matches the given tabId.
 export function isActiveRequest(node: PaneNode, tabId: string): boolean {
   if (node.type === 'leaf') return node.activeTabId === tabId;
   return isActiveRequest(node.children[0], tabId) || isActiveRequest(node.children[1], tabId);
+}
+
+// Returns true if the active tab of any pane matches the predicate. Script, example and flow
+// tabs have random ids, so their nodes match on what the tab shows instead of on its id.
+export function hasActiveTab(node: PaneNode, matches: (tab: Tab) => boolean): boolean {
+  if (node.type === 'leaf') {
+    const tab = node.tabs.find((t) => t.id === node.activeTabId);
+    return tab !== undefined && matches(tab);
+  }
+  return hasActiveTab(node.children[0], matches) || hasActiveTab(node.children[1], matches);
+}
+
+export function isScriptTabFor(tab: Tab, collection: string, path: string): boolean {
+  return isScriptTab(tab) && tab.collectionName === collection && tab.scriptPath === path;
+}
+
+export function isExampleTabFor(tab: Tab, collection: string, path: string, name: string): boolean {
+  return (
+    isExampleTab(tab) &&
+    tab.source.collection === collection &&
+    tab.source.path === path &&
+    tab.exampleName === name
+  );
+}
+
+export function isFlowTabFor(tab: Tab, collection: string, name: string): boolean {
+  return isFlowTab(tab) && tab.collectionName === collection && tab.flowName === name;
 }
 
 // Describes the item targeted for deletion in the shared confirmation dialog.
