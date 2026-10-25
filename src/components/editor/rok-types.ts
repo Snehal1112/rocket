@@ -21,6 +21,29 @@ export interface ScriptSnippetGroup {
   subGroups?: ScriptSnippetSubGroup[];
 }
 
+const COOKIE_SNIPPET_ITEMS: ScriptSnippetItem[] = [
+  {
+    label: 'await rok.cookies.upsert(name, value)',
+    kind: 'template',
+    code: `await rok.cookies.upsert("session", "abc123", { path: "/", secure: true });`,
+  },
+  {
+    label: 'rok.cookies.get("name")',
+    kind: 'expression',
+    code: 'rok.cookies.get("name")',
+  },
+  {
+    label: 'await rok.cookies.remove("name")',
+    kind: 'expression',
+    code: 'await rok.cookies.remove("name")',
+  },
+  {
+    label: 'await rok.cookies.jar().getCookie(url, name)',
+    kind: 'expression',
+    code: 'await rok.cookies.jar().getCookie("https://other.example.com", "name")',
+  },
+];
+
 export const ROK_SNIPPETS: ScriptSnippetGroup[] = [
   {
     id: 'common-tests',
@@ -162,6 +185,7 @@ export const ROK_SNIPPETS: ScriptSnippetGroup[] = [
             code: 'await rok.runRequest("folder/request")',
           },
           { label: 'await rok.sleep(ms)', kind: 'expression', code: 'await rok.sleep(1000)' },
+          ...COOKIE_SNIPPET_ITEMS,
         ],
       },
       {
@@ -344,6 +368,7 @@ export const POST_RESPONSE_SNIPPETS: ScriptSnippetGroup[] = [
             code: 'await rok.runRequest("folder/request")',
           },
           { label: 'await rok.sleep(ms)', kind: 'expression', code: 'await rok.sleep(1000)' },
+          ...COOKIE_SNIPPET_ITEMS,
         ],
       },
     ],
@@ -471,6 +496,7 @@ export const PRE_REQUEST_SNIPPETS: ScriptSnippetGroup[] = [
             code: 'await rok.runRequest("folder/request")',
           },
           { label: 'await rok.sleep(ms)', kind: 'expression', code: 'await rok.sleep(1000)' },
+          ...COOKIE_SNIPPET_ITEMS,
         ],
       },
     ],
@@ -500,7 +526,95 @@ interface RokResponse {
   /** Time taken in milliseconds. */
   responseTime: number;
 }
+interface CookieEntry {
+  /** domain|path|name. */
+  id: string;
+  /** The cookie name. */
+  key: string;
+  value: string;
+  domain: string;
+  path: string;
+  secure: boolean;
+  httpOnly: boolean;
+  /** RFC 3339 expiry time, or null for a session cookie. */
+  expires: string | null;
+  /** Seconds until expiry, derived on read. Null for a session cookie. */
+  maxAge: number | null;
+  sameSite: 'Strict' | 'Lax' | 'None' | null;
+}
+interface CookieInput {
+  /** The cookie name. Must be a non-empty string. */
+  key: string;
+  value?: string;
+  /** Must match the URL host. Left out, it is the URL host. */
+  domain?: string;
+  path?: string;
+  secure?: boolean;
+  httpOnly?: boolean;
+  /** RFC 3339 time or a Date. A time in the past stores an already-expired cookie; use remove to delete. */
+  expires?: string | Date;
+  /** Seconds. Zero or negative rejects. */
+  maxAge?: number;
+  /** Strict, Lax or None, case-insensitive. */
+  sameSite?: string;
+}
+interface RokCookies {
+  /** Value of the first cookie with this name, or undefined. Read from the snapshot taken when the script phase starts. */
+  get(name: string): string | undefined;
+  /** True when a cookie has this name. With a value, it also needs strict equality with the value. */
+  has(name: string, value?: string): boolean;
+  /** A copy of the cookie with this id, or undefined. */
+  one(id: string): CookieEntry | undefined;
+  /** A copy of every cookie that matches the request URL. */
+  all(): CookieEntry[];
+  count(): number;
+  /** A copy of the cookie at this position, or undefined. */
+  idx(n: number): CookieEntry | undefined;
+  indexOf(item: string | CookieEntry): number;
+  /** Name to value. The first cookie wins for a duplicate name. */
+  toObject(): Record<string, string>;
+  /** "name=value; name2=value2". */
+  toString(): string;
+  each(fn: (cookie: CookieEntry, index: number) => void): void;
+  find(fn: (cookie: CookieEntry, index: number) => unknown): CookieEntry | undefined;
+  filter(fn: (cookie: CookieEntry, index: number) => unknown): CookieEntry[];
+  map<T>(fn: (cookie: CookieEntry, index: number) => T): T[];
+  reduce<T>(fn: (acc: T, cookie: CookieEntry, index: number) => T, initial: T): T;
+  /** Write a cookie for the request URL straight to the jar. Rejects as "rok.cookies.add: <message>". */
+  add(cookie: CookieInput): Promise<void>;
+  add(name: string, value?: string, options?: Omit<CookieInput, 'key' | 'value'>): Promise<void>;
+  /** Same as add. Replaces a cookie with the same domain, path and name. */
+  upsert(cookie: CookieInput): Promise<void>;
+  upsert(name: string, value?: string, options?: Omit<CookieInput, 'key' | 'value'>): Promise<void>;
+  /** Remove the cookies with this name that match the request URL. */
+  remove(name: string): Promise<void>;
+  /** Same as remove. */
+  delete(name: string): Promise<void>;
+  /** Remove every cookie that matches the request URL. */
+  clear(): Promise<void>;
+  /** The whole cookie jar, for any URL. Every method is async. */
+  jar(): RokCookieJar;
+}
+interface RokCookieJar {
+  /** The cookie with this name for the URL, or null. */
+  getCookie(url: string, name: string): Promise<CookieEntry | null>;
+  getCookies(url: string): Promise<CookieEntry[]>;
+  /** Resolves to true when the cookie exists. With a callback it gets (null, exists) or (error, null). */
+  hasCookie(url: string, name: string): Promise<boolean>;
+  hasCookie(url: string, name: string, callback: (err: Error | null, exists: boolean | null) => unknown): Promise<unknown>;
+  setCookie(url: string, name: string, value?: string, options?: Omit<CookieInput, 'key' | 'value'>): Promise<void>;
+  setCookie(url: string, cookie: CookieInput): Promise<void>;
+  setCookies(url: string, cookies: CookieInput[]): Promise<void>;
+  /** Remove the cookies with this name that match the URL. */
+  deleteCookie(url: string, name: string): Promise<void>;
+  /** Remove every cookie that matches the URL. */
+  deleteCookies(url: string): Promise<void>;
+  /** Empty the whole jar, for every domain. */
+  clear(): Promise<void>;
+}
 declare const rok: {
+  /** Cookies of the request URL (reads) and the cookie jar (writes). Not available in Flow transform and condition nodes: async calls reject with "rok.cookies is not available here". */
+  readonly cookies: RokCookies;
   /** Read a runtime variable set in a previous script. */
   getVar(key: string): unknown;
   /** Set a runtime variable (in-memory, cleared after request). */

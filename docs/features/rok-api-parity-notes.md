@@ -10,7 +10,7 @@ Runtime: `crates/rocket-infra/src/scripting/bootstrap.js` and `ops/{req,res,rok}
 |---|---|---|
 | A | Sync, state-only gaps | Spec and plans committed: `docs/superpowers/plans/rok-parity-a/` (index plus 2 plans). Merged to main (plans 01 and 02, final review fixed). Follow-ups: OAuth2 credential APIs, per-folder `__dirname`, collection read-all op for the overlay, getSize after setBody, spec wording (null writes, empty-string misses). |
 | B | Async host calls: `sendRequest`, `runRequest`, `sleep` (`req.onFail` stays a no-op) | Implemented and on main, from `docs/superpowers/plans/rok-parity-b/` (index plus 5 plans) with review fixes in `docs/superpowers/plans/rok-parity-b-fixes/`. Follow-ups are roadmap R-66 (re-resolve the outer request after the pre-request script) and R-67 (review minors). Still true: History badge for script requests, scanner flags for `sendRequest`/`runRequest`. |
-| C | Cookies: `rok.cookies.*`, `jar()` | Spec committed: `docs/superpowers/specs/2026-10-07-rok-js-api-parity-c-cookies-design.md`. Depends on B's `ScriptHost`; that dependency is met (B is on main). No plan yet. |
+| C | Cookies: `rok.cookies.*`, `jar()` | Implemented on branch `rok-parity-c` (merge pending), from `docs/superpowers/plans/rok-parity-c/` (index plus 2 plans). Spec: `docs/superpowers/specs/2026-10-07-rok-js-api-parity-c-cookies-design.md`. Manual check: `docs/manual-tests/rok-cookies.md`. |
 | D | `runner.iterationData`, `iterationIndex`, `totalIterations` | Deferred. Needs a runner CSV/JSON data-file feature first. |
 | E | `rok.grpc.*` | Deferred. The gRPC dependency is now on main; it needs a spec. |
 
@@ -24,6 +24,27 @@ Runtime: `crates/rocket-infra/src/scripting/bootstrap.js` and `ops/{req,res,rok}
 - Allowed in Safe mode too, like Bruno (user ruling). This widens the trust spec's boundary, follow-up note needed there.
 - Split time budget: 5 s CPU, per-request timeout default 30 s, sleep cap 60 s, 5 min ceiling.
 
+## Decisions for C
+
+Rulings are in `docs/superpowers/plans/rok-parity-c/00-plan-index.md`.
+
+- One shared `CookieJarLock` for the reqwest store, `CookieService` and scripts (ruling 1).
+- Script cookie logic is `ScriptCookies` in `rocket-app`, not in `CookieService` (ruling 2).
+- One host method, `ScriptHost::cookies`, with one `HostCall::Cookies` and one async op `op_rok_cookies` (ruling 4).
+- The request-scoped snapshot URL is read when each script phase starts (ruling 6).
+- A `domain` that does not match the URL host rejects; `__Host-` cookies need no domain, `secure: true` and path `/` (ruling 7).
+- Scripts read and write the jar whatever the request's jar option says (ruling 9).
+
+Known limits:
+
+- A `req.setUrl` made later in the same script is not seen by `rok.cookies`.
+- A `Set-Cookie` stored by `rok.sendRequest` or a nested `rok.runRequest` does not refresh the caller's snapshot until it makes a host write or a `jar()` read.
+- A request with the jar option off does not send script cookies.
+- Cookies of any domain are visible to Safe-mode scripts through `jar()`, and `rok.sendRequest` can send them (accepted by the spec's Risks).
+- `maxAge` is derived on read (seconds until expiry, or null). On input, zero or negative rejects.
+- A script-supplied `expires` in the past is stored as an already-expired cookie and never matched. Use `remove` to delete.
+- With no host (Flow transform and condition nodes) every async call rejects with `rok.cookies is not available here`. With no request URL they reject with `rok.cookies.<method>: no request URL`.
+
 ## Notes for B
 
 - Engine model: scripts run as `(async function () { ... }).call(globalThis)` on a per-script current-thread Tokio runtime inside `spawn_blocking`. Host calls go over a channel to `run_script_bounded`, which serves them with the borrowed `&dyn ScriptHost`.
@@ -33,5 +54,5 @@ Runtime: `crates/rocket-infra/src/scripting/bootstrap.js` and `ops/{req,res,rok}
 
 ## Notes for C
 
-- Needs a cookie jar bridge into `rocket-http`. The jar has no clear or disable UI yet.
+- Done (see Decisions for C). The jar has no clear or disable UI yet.
 - Request-scoped helpers use the active request URL. `jar()` takes explicit URLs. `__Host-` cookies must omit `domain`.

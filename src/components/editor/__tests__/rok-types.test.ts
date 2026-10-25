@@ -156,11 +156,59 @@ describe('rok typings stay in sync with the runtime', () => {
     const block = bootstrap.slice(start, end);
     const names = [...block.matchAll(/^ {4}(\w+):/gm)]
       .map((m) => m[1])
-      .filter((n) => n !== 'runner');
+      .filter((n) => n !== 'runner' && n !== 'cookies');
     const defs = ROK_TYPE_DEFS_FOR_PHASE('tests');
     // Only 2-space indented lines are top-level members, so runner.* cannot satisfy this.
     const missing = names.filter((n) => !new RegExp(`^ {2}${n}\\(`, 'm').test(defs));
     expect(missing).toEqual([]);
+  });
+});
+
+describe('rok.cookies typings stay in sync with the runtime', () => {
+  const bootstrap = readFileSync(
+    join(process.cwd(), 'crates/rocket-infra/src/scripting/bootstrap.js'),
+    'utf8',
+  );
+
+  function methodsOf(startMarker: string, endMarker: string, indent: number): string[] {
+    const start = bootstrap.indexOf(startMarker);
+    expect(start).toBeGreaterThan(-1);
+    const end = bootstrap.indexOf(endMarker, start);
+    expect(end).toBeGreaterThan(start);
+    const block = bootstrap.slice(start, end);
+    return [...block.matchAll(new RegExp(`^ {${indent}}(\\w+):`, 'gm'))].map((m) => m[1]);
+  }
+
+  it('rok_types_declare_every_cookie_method', () => {
+    const cookieNames = methodsOf('const _cookies = {', '\n  };', 4);
+    const jarNames = methodsOf('return {\n      getCookie', '\n    };', 6);
+    expect(cookieNames.length).toBeGreaterThan(10);
+    expect(jarNames).toContain('getCookie');
+    for (const phase of ['pre-request', 'post-response', 'tests'] as const) {
+      const defs = ROK_TYPE_DEFS_FOR_PHASE(phase);
+      const cookiesBlock = defs.slice(defs.indexOf('interface RokCookies {'));
+      const jarBlock = defs.slice(defs.indexOf('interface RokCookieJar {'));
+      expect(defs).toContain('readonly cookies: RokCookies;');
+      expect(defs).toContain('interface CookieEntry');
+      expect(defs).toContain('interface CookieInput');
+      const missingCookies = cookieNames.filter(
+        (n) => n !== 'jar' && !new RegExp(`^ {2}${n}[(<]`, 'm').test(cookiesBlock),
+      );
+      expect(missingCookies).toEqual([]);
+      expect(cookiesBlock).toContain('jar(): RokCookieJar;');
+      const missingJar = jarNames.filter((n) => !new RegExp(`^ {2}${n}[(<]`, 'm').test(jarBlock));
+      expect(missingJar).toEqual([]);
+    }
+  });
+
+  it('cookie snippets are offered in every phase', () => {
+    for (const groups of [ROK_SNIPPETS, PRE_REQUEST_SNIPPETS, POST_RESPONSE_SNIPPETS]) {
+      const labels = rokItemLabels(groups);
+      expect(labels).toContain('await rok.cookies.upsert(name, value)');
+      expect(labels).toContain('rok.cookies.get("name")');
+      expect(labels).toContain('await rok.cookies.remove("name")');
+      expect(labels).toContain('await rok.cookies.jar().getCookie(url, name)');
+    }
   });
 });
 
