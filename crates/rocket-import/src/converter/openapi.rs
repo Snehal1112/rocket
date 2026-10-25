@@ -131,7 +131,7 @@ pub(crate) fn security_variable_names(scheme: &SecurityScheme) -> Vec<String> {
 /// Hex SHA-256 over the fields a sync would overwrite: method, URL, query and path
 /// parameters, headers, body and auth. Scripts, tests, docs, examples, name and order are
 /// left out, so editing them never makes a request look changed.
-pub(crate) fn baseline_hash(request: &Request) -> String {
+pub fn baseline_hash(request: &Request) -> String {
     let canonical = serde_json::json!({
         "method": request.method,
         "url": request.url,
@@ -387,9 +387,7 @@ fn text_body(mode: BodyMode, content: String) -> Body {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::openapi::{
-        ParamLocation, Parameter, RequestBodySpec, SecurityScheme, SecuritySchemeKind,
-    };
+    use crate::openapi::model::RequestBodySpec;
     use rocket_shared::types::{Auth, BodyMode, FormDataType};
     use serde_json::json;
 

@@ -8,5 +8,9 @@ pub mod report;
 pub(crate) mod wsdl;
 
 pub use error::{ImportError, ImportResult};
-pub use importer::{EnvironmentRepositoryFactory, ImportService};
+pub use importer::{
+    EnvironmentRepositoryFactory, ImportService, ImportedOperation, OpenApiImportOutcome,
+};
+pub use converter::openapi::baseline_hash;
+pub use openapi::GroupBy;
 pub use report::{ImportReport, SkipReason, SkippedItem};

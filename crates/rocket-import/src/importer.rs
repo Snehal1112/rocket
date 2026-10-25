@@ -839,6 +839,182 @@ impl ImportService {
         Ok(report)
     }
 
+    /// Import an OpenAPI 3.0, 3.1 or Swagger 2.0 document (JSON or YAML text) as a new
+    /// collection, grouped into folders by tag or by URL path.
+    ///
+    /// Only creating the collection is fatal. A folder or request that cannot be written
+    /// becomes a skipped item and the import goes on. At most `MAX_OPENAPI_OPERATIONS`
+    /// operations are written; the rest are reported.
+    pub fn import_openapi_text(
+        &self,
+        text: &str,
+        source_label: &str,
+        group_by: crate::openapi::GroupBy,
+        _workspace_id: &str,
+    ) -> ImportResult<OpenApiImportOutcome> {
+        use crate::converter::openapi as oc;
+        use crate::openapi::{layout, parse_openapi};
+        use rocket_collection::settings::CollectionVariable;
+        use std::collections::{HashMap, HashSet};
+
+        let doc = parse_openapi(text)?;
+        let mut report = ImportReport {
+            detected_type: "collection".to_string(),
+            ..Default::default()
+        };
+        for warning in &doc.warnings {
+            report.skipped.push(SkippedItem {
+                path: source_label.to_string(),
+                reason: SkipReason::UnsupportedRequestType(warning.clone()),
+            });
+        }
+
+        let stem = Path::new(source_label)
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let wanted = [doc.title.trim(), stem.as_str(), "openapi"]
+            .into_iter()
+            .find(|s| !s.is_empty())
+            .unwrap_or("openapi");
+        let col_name = self.resolve_collection_name(&wsdl_path_segment(wanted))?;
+        self.collection_repo
+            .create(&col_name)
+            .map_err(ImportError::DomainError)?;
+        report.created_collections.push(col_name.clone());
+
+        // `baseUrl` plus one empty secret variable for every placeholder an auth block uses.
+        let mut settings = self
+            .collection_repo
+            .get_settings(&col_name)
+            .unwrap_or_default();
+        let base_url = doc.servers.first().cloned().unwrap_or_default();
+        settings.variables.push(CollectionVariable {
+            key: oc::BASE_URL_VARIABLE.to_string(),
+            value: base_url.clone(),
+            initial_value: base_url,
+            enabled: true,
+            secret: false,
+        });
+        for scheme in &doc.security_schemes {
+            for key in oc::security_variable_names(scheme) {
+                if settings.variables.iter().all(|v| v.key != key) {
+                    settings.variables.push(CollectionVariable {
+                        key,
+                        value: String::new(),
+                        initial_value: String::new(),
+                        enabled: true,
+                        secret: true,
+                    });
+                }
+            }
+        }
+        if let Err(e) = self.collection_repo.save_settings(&col_name, &settings) {
+            report.skipped.push(SkippedItem {
+                path: source_label.to_string(),
+                reason: SkipReason::ParseError(format!(
+                    "collection variables could not be saved: {e}"
+                )),
+            });
+        }
+
+        let total = doc.operations.len();
+        if total == 0 {
+            report.skipped.push(SkippedItem {
+                path: source_label.to_string(),
+                reason: SkipReason::UnsupportedRequestType(
+                    "the spec has no operations".to_string(),
+                ),
+            });
+        }
+
+        let mut folder_dirs: HashMap<Vec<String>, String> = HashMap::new();
+        let mut used_folders: HashMap<String, HashSet<String>> = HashMap::new();
+        let mut used_requests: HashMap<String, HashSet<String>> = HashMap::new();
+        let mut next_seq: HashMap<String, u32> = HashMap::new();
+        let mut operations = Vec::new();
+
+        for (index, op) in doc.operations.iter().enumerate() {
+            if index >= MAX_OPENAPI_OPERATIONS {
+                report.skipped.push(SkippedItem {
+                    path: source_label.to_string(),
+                    reason: SkipReason::UnsupportedRequestType(format!(
+                        "operation limit reached, {} operations not imported",
+                        total - index
+                    )),
+                });
+                break;
+            }
+            report.total_files += 1;
+
+            let names = layout::folder_names(op, group_by);
+            let dir = match ensure_openapi_folder(
+                self.collection_repo.as_ref(),
+                &col_name,
+                &names,
+                &mut folder_dirs,
+                &mut used_folders,
+            ) {
+                Ok(dir) => dir,
+                Err(message) => {
+                    report.skipped.push(SkippedItem {
+                        path: op.key.clone(),
+                        reason: SkipReason::ParseError(message),
+                    });
+                    continue;
+                }
+            };
+
+            let seq = next_seq.entry(dir.clone()).or_insert(0);
+            *seq += 1;
+            let mut converted = oc::convert_operation(op, &doc.security_schemes, *seq);
+            for reason in converted.skipped.drain(..) {
+                report.skipped.push(SkippedItem {
+                    path: op.key.clone(),
+                    reason,
+                });
+            }
+            let baseline_hash = oc::baseline_hash(&converted.request);
+            let (slug, k) = unique_segment(
+                used_requests.entry(dir.clone()).or_default(),
+                &converted.request.name,
+                REQUEST_RESERVED,
+            );
+            if k > 1 {
+                converted.request.name = format!("{} ({k})", converted.request.name);
+            }
+            let request_path = if dir.is_empty() {
+                slug
+            } else {
+                format!("{dir}/{slug}")
+            };
+            match self
+                .collection_repo
+                .save_request(&col_name, &request_path, &converted.request)
+            {
+                Ok(_) => {
+                    report.imported += 1;
+                    operations.push(ImportedOperation {
+                        key: op.key.clone(),
+                        request_path,
+                        uid: converted.request.uid.clone(),
+                        baseline_hash,
+                    });
+                }
+                Err(e) => report.skipped.push(SkippedItem {
+                    path: request_path,
+                    reason: SkipReason::ParseError(format!("request could not be written: {e}")),
+                }),
+            }
+        }
+
+        Ok(OpenApiImportOutcome {
+            report,
+            collection: col_name,
+            operations,
+        })
+    }
+
     /// Import a Postman environment JSON file into an existing collection.
     pub fn import_postman_environment(
         &self,
@@ -1083,6 +1259,30 @@ fn sanitize_postman_filename(name: &str) -> String {
 const MAX_SEGMENT_CHARS: usize = 100;
 /// Most requests one WSDL import writes, counted over all services and ports.
 pub(crate) const MAX_WSDL_REQUESTS: usize = 2000;
+/// Most operations one OpenAPI import writes. The rest are reported, not imported.
+pub(crate) const MAX_OPENAPI_OPERATIONS: usize = 5_000;
+
+/// One request written by an OpenAPI import, with what a later sync needs to find it again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImportedOperation {
+    /// The operation key from the spec (`operationId`, else `METHOD /path`).
+    pub key: String,
+    /// The request's path inside the collection, without the file extension.
+    pub request_path: String,
+    pub uid: String,
+    /// Hash of the imported fields at import time, see `converter::openapi::baseline_hash`.
+    pub baseline_hash: String,
+}
+
+/// The result of an OpenAPI import.
+#[derive(Debug, Clone)]
+pub struct OpenApiImportOutcome {
+    pub report: ImportReport,
+    /// The name of the collection that was created.
+    pub collection: String,
+    pub operations: Vec<ImportedOperation>,
+}
+
 /// Most envelope bytes one WSDL import generates, summed over all requests.
 pub(crate) const MAX_WSDL_BYTES: usize = 32 * 1024 * 1024;
 
@@ -1110,6 +1310,46 @@ fn wsdl_path_segment(name: &str) -> String {
     } else {
         s
     }
+}
+
+/// Create the folder chain for `names` (outermost first) under the collection and return its
+/// path, `""` for the collection root. Each level gets a safe, unique, non-reserved name, and a
+/// chain that was created before is reused.
+fn ensure_openapi_folder(
+    repo: &dyn CollectionRepository,
+    collection: &str,
+    names: &[String],
+    dirs: &mut std::collections::HashMap<Vec<String>, String>,
+    used: &mut std::collections::HashMap<String, std::collections::HashSet<String>>,
+) -> Result<String, String> {
+    let mut dir = String::new();
+    for depth in 1..=names.len() {
+        let key = names[..depth].to_vec();
+        if let Some(existing) = dirs.get(&key) {
+            dir = existing.clone();
+            continue;
+        }
+        let reserved = if depth == 1 {
+            SERVICE_RESERVED
+        } else {
+            PORT_RESERVED
+        };
+        let (segment, _) = unique_segment(
+            used.entry(dir.clone()).or_default(),
+            &names[depth - 1],
+            reserved,
+        );
+        let path = if dir.is_empty() {
+            segment
+        } else {
+            format!("{dir}/{segment}")
+        };
+        repo.create_folder(collection, &path)
+            .map_err(|e| format!("folder {path} could not be created: {e}"))?;
+        dirs.insert(key, path.clone());
+        dir = path;
+    }
+    Ok(dir)
 }
 
 /// True for names Windows treats as devices, with or without an extension.
