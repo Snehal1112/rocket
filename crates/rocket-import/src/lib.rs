@@ -12,5 +12,5 @@ pub use importer::{
     EnvironmentRepositoryFactory, ImportService, ImportedOperation, OpenApiImportOutcome,
 };
 pub use converter::openapi::baseline_hash;
-pub use openapi::{fetch_target, parse_spec_url, FetchTarget, GroupBy};
+pub use openapi::{fetch_target, parse_spec_url, source_record, FetchTarget, GroupBy};
 pub use report::{ImportReport, SkipReason, SkippedItem};

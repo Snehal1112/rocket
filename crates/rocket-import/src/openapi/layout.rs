@@ -12,6 +12,16 @@ pub enum GroupBy {
     Paths,
 }
 
+impl GroupBy {
+    /// The name stored in the source file.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            GroupBy::Tags => "tags",
+            GroupBy::Paths => "paths",
+        }
+    }
+}
+
 /// Folder name used for operations without a tag.
 pub(crate) const UNTAGGED_FOLDER: &str = "untagged";
 
