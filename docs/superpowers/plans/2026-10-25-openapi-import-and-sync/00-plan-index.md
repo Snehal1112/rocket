@@ -14,7 +14,7 @@ Rules for every plan:
 | ID | Plan | Tasks | Needs | Models | Status |
 |---|---|---|---|---|---|
 | P1 | `plan-01-parse-and-convert.md`: OpenAPI reader, request converter, layout and import service (pure, no network) | 1 reader and neutral model; 2 operation to request, naming, baseline hash; 3 tag and path layout, `import_openapi_text` | none | sonnet; opus reviews task 3 | done on branch openapi-import (94e54652..aaeefd2c), final review fixed, not yet merged to main |
-| P2 | GitHub URL normalizer, URL fetcher (trait in `rocket-app`, reqwest impl in `rocket-infra`), source and provenance sidecar | 1 `normalize_spec_url`; 2 fetcher with caps and redirect rules; 3 `openapi-source.yml` repo | P1 | sonnet | not written |
+| P2 | `plan-02-fetch-and-source.md`: spec link parser, safe fetcher (port in `rocket-http`, reqwest impl in `rocket-infra`), source record and sidecar repo | 1 `SpecLocation` and `parse_spec_url`; 2 `SpecFetcher` and `ReqwestSpecFetcher`; 3 `.rocket/openapi-source.yml` repo and `source_record` | P1 | sonnet; opus reviews task 2 | written, not started |
 | P3 | Import command and dialog | 1 `import_openapi` service method and Tauri command; 2 TS api and query; 3 dialog source (file or URL, layout choice) | P2 | sonnet | not written |
 
 ## Series 2: sync (outline, each plan is written after the one before it is merged)
@@ -31,3 +31,4 @@ Rules for every plan:
 ## Decisions log
 
 - Ruling (2026-10-25): the design is approved. Import ships before sync. Provenance lives in a sidecar file in the collection folder (`openapi-source.yml`), keyed by request `uid`, because `Request` has no extension slot.
+- Ruling (2026-10-25): the sidecar lives at `<collection>/.rocket/openapi-source.yml`, not at the collection root. A dot folder is already hidden from the collection loader and the Bruno export, so no loader change is needed (the contract feature uses `.rocket/contracts/` the same way). It never holds a token.
