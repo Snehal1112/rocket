@@ -53,6 +53,14 @@ use self::script_chain::{
 /// Request path prefix of an inline Flow request. It names no file, so it has no folder chain.
 pub(crate) const FLOW_INLINE_PATH_PREFIX: &str = "__flow_inline__/";
 
+/// A RocketVault alias that could not be fetched and that the send did not use.
+/// Nested runs of the send are refused when they use it.
+#[derive(Debug, Clone)]
+pub(crate) struct UnresolvedAlias {
+    pub alias: String,
+    pub message: String,
+}
+
 /// An external secret binding whose values could not be fetched.
 struct UnresolvedBinding {
     alias: String,
@@ -384,6 +392,8 @@ pub(crate) struct PhaseState {
     pub response_body_override: Option<String>,
     /// RocketVault values of this run, shared with the script host for nested runs.
     pub external_secrets: Arc<std::collections::HashMap<String, String>>,
+    /// Aliases that failed to resolve and that the outer send did not use, passed on to nested runs.
+    pub unresolved_aliases: Arc<Vec<UnresolvedAlias>>,
     /// Request paths of this run and the runs that started it, outermost first.
     /// `rok.runRequest` uses it to stop recursion.
     pub run_chain: Vec<String>,
@@ -1724,6 +1734,7 @@ impl RequestExecutionService {
             svc: self,
             input,
             external_secrets: Arc::clone(&state.external_secrets),
+            unresolved_aliases: Arc::clone(&state.unresolved_aliases),
             options: state.http_request.options.clone(),
             chain: state.run_chain.clone(),
             calling_url: state.http_request.url.clone(),
@@ -2134,6 +2145,7 @@ impl RequestExecutionService {
             scripts,
             response_body_override: None,
             external_secrets: Arc::new(external_secrets.clone()),
+            unresolved_aliases: Arc::new(Vec::new()),
             run_chain: input
                 .request_path
                 .as_deref()
@@ -2794,39 +2806,50 @@ impl RequestExecutionService {
                 input.environment_name.as_deref(),
             )
             .await;
+        let mut unresolved = Vec::new();
         for failure in failures {
             if self.references_alias(&input, &failure.alias, &external_secrets) {
                 return Err(failure.error);
             }
+            unresolved.push(UnresolvedAlias {
+                alias: failure.alias.clone(),
+                message: failure.error.to_string(),
+            });
             tracing::warn!(
                 alias = %failure.alias,
                 error = %failure.error,
                 "vault secrets for an unused binding could not be fetched, sending without them"
             );
         }
-        self.execute_with_external_secrets(input, &external_secrets)
+        self.execute_with_unresolved(input, &external_secrets, unresolved)
             .await
     }
 
     /// Runs every phase of one send with External Secret values the caller
-    /// already resolved. A multi-request orchestrator (the Flow runner) calls
-    /// this so it fetches secrets once per run, not once per request.
+    /// already resolved. `unresolved` holds the aliases that failed to resolve
+    /// and that this send does not use, so its nested runs can refuse them.
     #[tracing::instrument(
         name = "http_request",
-        skip(self, input, external_secrets),
+        skip(self, input, external_secrets, unresolved),
         fields(
             method = %input.method,
             url = %input.url,
         )
     )]
-    pub(crate) async fn execute_with_external_secrets(
+    pub(crate) async fn execute_with_unresolved(
         &self,
         input: ExecuteRequestInput,
         external_secrets: &std::collections::HashMap<String, String>,
+        unresolved: Vec<UnresolvedAlias>,
     ) -> DomainResult<ExecuteRequestOutput> {
         let mut sent = None;
-        self.execute_capturing(input, external_secrets, &mut sent)
-            .await
+        self.with_send_pins(self.execute_capturing_unpinned(
+            input,
+            external_secrets,
+            &mut sent,
+            unresolved,
+        ))
+        .await
     }
 
     /// Runs the single-send path and records the request as it was handed to
@@ -2839,8 +2862,13 @@ impl RequestExecutionService {
         sent: &mut Option<HttpRequest>,
     ) -> DomainResult<ExecuteRequestOutput> {
         // Flow callers enter here, so the send is pinned here as well as in `execute`.
-        self.with_send_pins(self.execute_capturing_unpinned(input, external_secrets, sent))
-            .await
+        self.with_send_pins(self.execute_capturing_unpinned(
+            input,
+            external_secrets,
+            sent,
+            Vec::new(),
+        ))
+        .await
     }
 
     async fn execute_capturing_unpinned(
@@ -2848,11 +2876,13 @@ impl RequestExecutionService {
         input: ExecuteRequestInput,
         external_secrets: &std::collections::HashMap<String, String>,
         sent: &mut Option<HttpRequest>,
+        unresolved: Vec<UnresolvedAlias>,
     ) -> DomainResult<ExecuteRequestOutput> {
         // Every phase runs unconditionally — this is the single-send path. The
         // Collection Runner calls the same methods one at a time so it can act
         // on skip_request / next_request between them.
         let mut state = self.begin_phases(&input, external_secrets)?;
+        state.unresolved_aliases = Arc::new(unresolved);
         self.run_before_request_phase(&input, ExecutionMode::Standalone, &mut state)
             .await?;
         *sent = Some(state.http_request.clone());
@@ -2875,11 +2905,13 @@ impl RequestExecutionService {
         external_secrets: &std::collections::HashMap<String, String>,
         chain: Vec<String>,
         runtime: &std::collections::HashMap<String, String>,
+        unresolved: &Arc<Vec<UnresolvedAlias>>,
     ) -> DomainResult<(
         ExecuteRequestOutput,
         std::collections::HashMap<String, String>,
     )> {
         let mut state = self.begin_phases(&input, external_secrets)?;
+        state.unresolved_aliases = Arc::clone(unresolved);
         state.run_chain = chain;
         state.seed_runtime(runtime);
         self.run_before_request_phase(&input, ExecutionMode::Standalone, &mut state)
@@ -8888,7 +8920,7 @@ mod tests {
         let secrets =
             std::collections::HashMap::from([("vault.token".to_string(), VAULT_TOKEN.to_string())]);
         let out = svc
-            .execute_with_external_secrets(input, &secrets)
+            .execute_with_unresolved(input, &secrets, Vec::new())
             .await
             .expect("execute failed");
         assert!(env_repo.last_saved().is_none());
@@ -11891,9 +11923,15 @@ mod tests {
         let input = sample_input("https://api.test/{{tok}}", None);
         let runtime =
             std::collections::HashMap::from([("tok".to_string(), "from-caller".to_string())]);
-        svc.execute_nested(input, &std::collections::HashMap::new(), vec![], &runtime)
-            .await
-            .expect("nested run");
+        svc.execute_nested(
+            input,
+            &std::collections::HashMap::new(),
+            vec![],
+            &runtime,
+            &Arc::new(Vec::new()),
+        )
+        .await
+        .expect("nested run");
         assert_eq!(
             executor_request(&executor).url,
             "https://api.test/from-caller"

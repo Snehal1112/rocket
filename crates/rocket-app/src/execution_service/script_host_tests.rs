@@ -747,3 +747,165 @@ async fn run_request_nested_set_url_is_guarded_by_the_policy() {
         urls(&executor)
     );
 }
+
+// ── nested runs and an unresolved RocketVault alias ──────────────────────────
+
+use rocket_environment::{
+    ExternalSecretBinding, ExternalSecretRef, SecretManagerConnection, VaultSecretFetcher,
+};
+use rocket_shared::error::DomainError;
+use rocket_shared::types::Header;
+
+use crate::test_doubles::{FakeSecretManagerRepo, FakeSecretStore};
+
+/// Every secret fetch fails, as when the vault rejects the credentials.
+struct RejectingFetcher;
+
+#[async_trait]
+impl VaultSecretFetcher for RejectingFetcher {
+    async fn list_secrets(
+        &self,
+        _connection: &SecretManagerConnection,
+        _client_secret: &str,
+        _vault_name: &str,
+    ) -> DomainResult<Vec<ExternalSecretRef>> {
+        Ok(Vec::new())
+    }
+
+    async fn get_secret_value(
+        &self,
+        _connection: &SecretManagerConnection,
+        _client_secret: &str,
+        _vault_name: &str,
+        _secret_id: &str,
+    ) -> DomainResult<Option<String>> {
+        Err(DomainError::Internal(
+            "vault rejected the credentials".into(),
+        ))
+    }
+
+    async fn test_connection(
+        &self,
+        _connection: &SecretManagerConnection,
+        _client_secret: &str,
+        _vault_name: &str,
+    ) -> DomainResult<()> {
+        Ok(())
+    }
+}
+
+/// A service over `collection` whose environment `dev` binds the alias `vault`, which cannot be fetched.
+fn failing_vault_service(
+    collection: Collection,
+) -> (RequestExecutionService, Arc<KeepingExecutor>) {
+    let executor = Arc::new(KeepingExecutor::default());
+    let mut env = Environment::new("dev");
+    env.external_secrets.push(ExternalSecretBinding {
+        alias: "vault".to_string(),
+        connection_id: "conn-1".to_string(),
+        vault_name: "dev-vault".to_string(),
+        secret_names: vec![ExternalSecretRef {
+            name: "key".to_string(),
+            secret_id: "sec-1".to_string(),
+        }],
+    });
+    let connection = SecretManagerConnection {
+        id: "conn-1".to_string(),
+        label: "Test".to_string(),
+        base_url: "https://vault.internal:8774".to_string(),
+        client_id: "rocketapi".to_string(),
+        verify_ssl: true,
+        allow_insecure_http: false,
+        provider: Default::default(),
+        config: None,
+    };
+    let svc = RequestExecutionService::new(
+        Box::new(StaticEnvRepo(env)),
+        Arc::new(SharedKeeping(Arc::clone(&executor))),
+        Box::new(SharedHistoryRepo(InMemoryHistoryRepo::new())),
+        Box::new(SharedCollectionRepo(InMemoryCollectionRepo::new(
+            collection,
+        ))),
+        Box::new(NullCookieRepo),
+        Box::new(NullEventPublisher),
+        Box::new(FakeSecretManagerRepo(connection)),
+        Arc::new(FakeSecretStore("client-secret".into())),
+        Arc::new(RejectingFetcher),
+    )
+    .with_script_engine(Box::new(rocket_infra::scripting::DenoScriptEngine::new()));
+    (svc, executor)
+}
+
+/// Makes `auth/login` send the header `X-Key: {{vault.key}}`.
+fn login_uses_the_alias(collection: &mut Collection) {
+    for item in collection.root.items.iter_mut() {
+        if let CollectionItem::Folder(auth) = item {
+            for inner in auth.items.iter_mut() {
+                if let CollectionItem::Request(login) = inner {
+                    login.headers.push(Header::new("X-Key", "{{vault.key}}"));
+                }
+            }
+        }
+    }
+}
+
+const CATCH_RUN: &str = "try { await rok.runRequest('auth/login'); console.log('ran'); } \
+                         catch (e) { console.log('err', e.message); }";
+
+#[tokio::test]
+async fn run_request_refuses_a_nested_request_that_uses_a_failed_alias() {
+    let mut collection = main_and_login(CATCH_RUN, "", "");
+    login_uses_the_alias(&mut collection);
+    let input = send_input(&collection, "main.yml");
+    let (svc, executor) = failing_vault_service(collection);
+    let out = svc.execute(input).await.expect("execute");
+    let lines = console(&out).join("\n");
+    assert!(lines.contains("rok.runRequest:"), "{lines}");
+    assert!(lines.contains("vault rejected the credentials"), "{lines}");
+    assert!(
+        !urls(&executor).iter().any(|u| u.contains("login.yml")),
+        "{:?}",
+        urls(&executor)
+    );
+}
+
+#[tokio::test]
+async fn run_request_runs_a_nested_request_that_does_not_use_the_failed_alias() {
+    let collection = main_and_login(CATCH_RUN, "", "");
+    let input = send_input(&collection, "main.yml");
+    let (svc, executor) = failing_vault_service(collection);
+    let out = svc.execute(input).await.expect("execute");
+    assert!(
+        console(&out).contains(&"ran".to_string()),
+        "{:?}",
+        console(&out)
+    );
+    assert!(urls(&executor).iter().any(|u| u.contains("login.yml")));
+}
+
+#[tokio::test]
+async fn run_request_inherits_failed_aliases_two_levels_deep() {
+    // Main runs mid, which does not use the alias, and mid runs login, which does.
+    let mut collection = main_and_login(
+        "await rok.runRequest('mid'); console.log('mid said', rok.getVar('mid'));",
+        "",
+        "",
+    );
+    collection.root.add_request(saved(
+        "Mid",
+        "mid.yml",
+        "try { await rok.runRequest('auth/login'); } catch (e) { rok.setVar('mid', e.message); }",
+    ));
+    login_uses_the_alias(&mut collection);
+    let input = send_input(&collection, "main.yml");
+    let (svc, executor) = failing_vault_service(collection);
+    let out = svc.execute(input).await.expect("execute");
+    let lines = console(&out).join("\n");
+    assert!(lines.contains("rok.runRequest:"), "{lines}");
+    assert!(lines.contains("vault rejected the credentials"), "{lines}");
+    assert!(
+        !urls(&executor).iter().any(|u| u.contains("login.yml")),
+        "{:?}",
+        urls(&executor)
+    );
+}

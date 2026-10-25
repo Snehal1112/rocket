@@ -18,7 +18,9 @@ use rocket_shared::types::{Body, BodyMode, Header, HttpMethod};
 use super::run_request::{
     check_run_chain, find_run_target, normalize_run_path, runtime_changes, RunTarget,
 };
-use super::{body_mode_from_content_type, ExecuteRequestInput, RequestExecutionService};
+use super::{
+    body_mode_from_content_type, ExecuteRequestInput, RequestExecutionService, UnresolvedAlias,
+};
 use crate::runner_sequence::build_step_input;
 
 /// Serves the host calls of one script run.
@@ -28,6 +30,8 @@ pub(crate) struct ExecutionScriptHost<'a> {
     pub(crate) input: &'a ExecuteRequestInput,
     /// RocketVault values of this run, passed on to nested runs.
     pub(crate) external_secrets: Arc<HashMap<String, String>>,
+    /// Aliases that failed to resolve, which a nested run must not use.
+    pub(crate) unresolved_aliases: Arc<Vec<UnresolvedAlias>>,
     /// TLS, redirect, cookie and client-certificate options of the request the
     /// script belongs to. Script requests reuse them.
     pub(crate) options: RequestOptions,
@@ -154,6 +158,18 @@ impl ScriptHost for ExecutionScriptHost<'_> {
             // agent-driven run stays tagged as one.
             self.input.run_source,
         );
+        // A nested request that uses an alias the vault could not resolve is refused.
+        for unresolved in self.unresolved_aliases.iter() {
+            if self
+                .svc
+                .references_alias(&nested, &unresolved.alias, &self.external_secrets)
+            {
+                return Err(HostError::Failed(format!(
+                    "rok.runRequest: {}",
+                    unresolved.message
+                )));
+            }
+        }
         let mut chain = self.chain.clone();
         chain.push(target);
         // The scopes as stored now, so the engine can tell what the nested run changed.
@@ -164,6 +180,7 @@ impl ScriptHost for ExecutionScriptHost<'_> {
             &self.external_secrets,
             chain,
             &request.runtime_vars,
+            &self.unresolved_aliases,
         ))
         .await
         .map_err(|e| HostError::Failed(format!("rok.runRequest: {e}")))?;
