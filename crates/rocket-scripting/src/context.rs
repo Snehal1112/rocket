@@ -1,6 +1,6 @@
 use crate::{AssertionOutcome, ScriptPhase};
 use rocket_environment::VariableContext;
-use rocket_http::{HttpRequest, HttpResponse};
+use rocket_http::{CookieEntry, HttpRequest, HttpResponse};
 use rocket_shared::types::PathParam;
 use std::path::PathBuf;
 
@@ -105,6 +105,10 @@ pub struct ScriptContext {
     pub collection_name: Option<String>,
     /// Declarative assertion outcomes for `rok.getAssertionResults()`. Filled for the tests phase only.
     pub assertion_results: Vec<AssertionOutcome>,
+    /// URL that `rok.cookies` is scoped to. `None` when the run has no request URL.
+    pub cookie_url: Option<String>,
+    /// Cookies matching `cookie_url` when the phase starts, for `rok.cookies` reads.
+    pub cookies: Vec<CookieEntry>,
 }
 
 impl ScriptContext {
@@ -135,6 +139,8 @@ impl ScriptContext {
             file_scope: None,
             collection_name: None,
             assertion_results: Vec::new(),
+            cookie_url: None,
+            cookies: Vec::new(),
         }
     }
 
@@ -166,6 +172,8 @@ impl ScriptContext {
             file_scope: None,
             collection_name: None,
             assertion_results: Vec::new(),
+            cookie_url: None,
+            cookies: Vec::new(),
         }
     }
 
@@ -197,6 +205,8 @@ impl ScriptContext {
             file_scope: None,
             collection_name: None,
             assertion_results: Vec::new(),
+            cookie_url: None,
+            cookies: Vec::new(),
         }
     }
 
@@ -224,6 +234,13 @@ impl ScriptContext {
     /// Sets the outcomes returned by `rok.getAssertionResults()`.
     pub fn with_assertion_results(mut self, results: Vec<AssertionOutcome>) -> Self {
         self.assertion_results = results;
+        self
+    }
+
+    /// Sets the URL and the matching cookies that `rok.cookies` reads from.
+    pub fn with_cookies(mut self, url: String, cookies: Vec<CookieEntry>) -> Self {
+        self.cookie_url = Some(url);
+        self.cookies = cookies;
         self
     }
 

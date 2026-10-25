@@ -1,6 +1,6 @@
 use crate::scripting::local_modules::LocalRoots;
 use rocket_environment::VariableContext;
-use rocket_http::{HttpRequest, HttpResponse};
+use rocket_http::{CookieEntry, HttpRequest, HttpResponse};
 use rocket_scripting::{
     AssertionOutcome, CollectionVarWrite, ConsoleEntry, ConsoleLevel, EnvVarWrite, NextRequest,
     RequestMutations, SandboxMode, ScriptPhase, TestResult, TestStatus,
@@ -39,6 +39,10 @@ pub struct ScriptInputState {
     pub collection_root: Option<PathBuf>,
     /// Declarative assertion outcomes, for `rok.getAssertionResults()`.
     pub assertion_results: Vec<AssertionOutcome>,
+    /// URL `rok.cookies` is scoped to, empty when the run has none.
+    pub cookie_url: String,
+    /// Cookies matching `cookie_url` at the start of the phase.
+    pub cookies: Vec<CookieEntry>,
 }
 
 /// Accumulates all side-effects produced by ops during execution.

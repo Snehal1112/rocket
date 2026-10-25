@@ -6,7 +6,10 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use deno_core::{op2, OpState};
-use rocket_scripting::{ConsoleLevel, HostError, HostRequest, HostRunOutcome, HostRunRequest};
+use rocket_scripting::{
+    ConsoleLevel, HostCookieOp, HostCookieResult, HostError, HostRequest, HostRunOutcome,
+    HostRunRequest,
+};
 use tokio::sync::oneshot;
 
 use crate::scripting::budget::ScriptLimits;
@@ -81,6 +84,33 @@ pub async fn op_rok_send_request(
                 .add_console(ConsoleLevel::Error, line);
             Err(error)
         }
+    }
+}
+
+/// rok.cookies and rok.cookies.jar() — one cookie call through the host. Takes a
+/// `HostCookieOp` as JSON and returns `{"cookies": [..]}`, `{"count": n}` or
+/// `{"done": true}`. Errors never carry cookie values.
+#[op2]
+#[string]
+pub async fn op_rok_cookies(
+    state: Rc<RefCell<OpState>>,
+    #[string] op_json: String,
+) -> Result<String, ScriptHostError> {
+    const API: &str = "rok.cookies";
+    let op: HostCookieOp = serde_json::from_str(&op_json)
+        .map_err(|e| ScriptHostError(format!("{API}: invalid call - {e}")))?;
+    let (reply, answer) = oneshot::channel();
+    send_host_call(&state, HostCall::Cookies { op, reply }, API)?;
+    let outcome = answer.await.unwrap_or(Err(HostError::Unavailable));
+    let state = state.borrow();
+    match outcome {
+        Ok(HostCookieResult::Cookies(cookies)) => {
+            serde_json::to_string(&serde_json::json!({ "cookies": cookies }))
+                .map_err(|e| ScriptHostError(format!("{API}: {e}")))
+        }
+        Ok(HostCookieResult::Count(count)) => Ok(serde_json::json!({ "count": count }).to_string()),
+        Ok(HostCookieResult::Done) => Ok(serde_json::json!({ "done": true }).to_string()),
+        Err(error) => Err(host_error(&state, API, error)),
     }
 }
 

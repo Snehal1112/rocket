@@ -9,7 +9,8 @@ pub mod result;
 pub use context::{ExecutionMode, SandboxMode, ScriptContext, ScriptFileScope};
 pub use engine::ScriptEngine;
 pub use host::{
-    HostError, HostRequest, HostResponse, HostRunOutcome, HostRunRequest, HostScopes, ScriptHost,
+    HostCookieOp, HostCookieResult, HostError, HostRequest, HostResponse, HostRunOutcome,
+    HostRunRequest, HostScopes, ScriptHost,
 };
 pub use phase::ScriptPhase;
 pub use result::{

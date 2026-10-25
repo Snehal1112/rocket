@@ -480,6 +480,15 @@ pub fn op_rok_get_collection_name(state: &OpState) -> String {
     state.borrow::<ScriptInputState>().collection_name.clone()
 }
 
+/// rok.cookies — the URL and the cookies matching it when the phase started,
+/// as `{"url": .., "cookies": [..]}`.
+#[op2]
+#[string]
+pub fn op_rok_cookie_snapshot(state: &OpState) -> String {
+    let input = state.borrow::<ScriptInputState>();
+    serde_json::json!({ "url": input.cookie_url, "cookies": input.cookies }).to_string()
+}
+
 /// rok.isSafeMode() — true in Safe mode, false in Developer mode.
 #[op2(fast)]
 pub fn op_rok_is_safe_mode(state: &OpState) -> bool {

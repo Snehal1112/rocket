@@ -96,6 +96,96 @@
     });
   }
 
+  // ── rok.cookies ─────────────────────────────────────────────────────────────
+  // Reads come from a snapshot of the cookies matching the request URL. Every
+  // reply that carries a cookie list for that URL replaces the snapshot.
+  const _ckSeed = JSON.parse(__ops.op_rok_cookie_snapshot());
+  const _ckUrl = _ckSeed.url;
+  let _ck = _ckSeed.cookies;
+
+  async function _cookieCall(method, op) {
+    let reply;
+    try {
+      reply = JSON.parse(await __ops.op_rok_cookies(JSON.stringify(op)));
+    } catch (e) {
+      const m = String(e && e.message !== undefined ? e.message : e);
+      if (m.endsWith('is not available here')) throw new Error(m);
+      throw new Error('rok.cookies.' + method + ': ' + m);
+    }
+    if (op.op === 'clearAll') _ck = [];
+    else if (reply.cookies && op.url === _ckUrl) _ck = reply.cookies;
+    return reply;
+  }
+
+  function _cookieInput(method, a, b, c) {
+    const o = (a !== null && typeof a === 'object') ? { ...a } : { key: a, value: b, ...(c || {}) };
+    if (o.key === undefined) o.key = o.name;
+    delete o.name;
+    if (typeof o.key !== 'string' || o.key === '') {
+      throw new TypeError('rok.cookies.' + method + ': name must be a non-empty string');
+    }
+    o.value = o.value === undefined || o.value === null ? '' : String(o.value);
+    if (o.expires instanceof Date) o.expires = o.expires.toISOString();
+    return o;
+  }
+
+  function _cookieUrl(method, url) {
+    if (typeof url !== 'string' || url === '') {
+      throw new TypeError('rok.cookies.' + method + ': url must be a non-empty string');
+    }
+    return url;
+  }
+
+  function _ckIndex(item) {
+    if (item !== null && typeof item === 'object') return _ck.findIndex((c) => c.id === item.id);
+    return _ck.findIndex((c) => c.key === item);
+  }
+
+  function _cookieJar() {
+    const find = async (m, url) => (await _cookieCall(m, { op: 'find', url: _cookieUrl(m, url) })).cookies;
+    const set = (m, url, input) => _cookieCall(m, { op: 'upsert', url: _cookieUrl(m, url), cookie: input }).then(() => {});
+    return {
+      getCookie: async (url, name) => (await find('getCookie', url)).find((c) => c.key === name) || null,
+      getCookies: (url) => find('getCookies', url),
+      hasCookie: (url, name, callback) => {
+        const checked = find('hasCookie', url).then((list) => list.some((c) => c.key === name));
+        if (typeof callback !== 'function') return checked;
+        return checked.then((yes) => callback(null, yes), (err) => callback(err, null));
+      },
+      setCookie: (url, a, b, c) => set('setCookie', url, _cookieInput('setCookie', a, b, c)),
+      setCookies: async (url, list) => {
+        if (!Array.isArray(list)) throw new TypeError('rok.cookies.setCookies: cookies must be an array');
+        for (const item of list) await set('setCookies', url, _cookieInput('setCookies', item));
+      },
+      deleteCookie: (url, name) => _cookieCall('deleteCookie', { op: 'remove', url: _cookieUrl('deleteCookie', url), name: String(name) }).then(() => {}),
+      deleteCookies: (url) => _cookieCall('deleteCookies', { op: 'clearUrl', url: _cookieUrl('deleteCookies', url) }).then(() => {}),
+      clear: () => _cookieCall('clear', { op: 'clearAll' }).then(() => {}),
+    };
+  }
+
+  const _cookies = {
+    get: (name) => { const c = _ck.find((x) => x.key === name); return c ? c.value : undefined; },
+    has: (name, value) => _ck.some((c) => c.key === name && (value === undefined || c.value === value)),
+    one: (id) => _ck.find((c) => c.id === id),
+    all: () => _ck.slice(),
+    count: () => _ck.length,
+    idx: (n) => _ck[n],
+    indexOf: (item) => _ckIndex(item),
+    toObject: () => Object.fromEntries(_ck.map((c) => [c.key, c.value])),
+    toString: () => _ck.map((c) => c.key + '=' + c.value).join('; '),
+    each: (fn) => _ck.slice().forEach(fn),
+    find: (fn) => _ck.find(fn),
+    filter: (fn) => _ck.filter(fn),
+    map: (fn) => _ck.map(fn),
+    reduce: (fn, init) => _ck.reduce(fn, init),
+    add: (a, b, c) => _cookieCall('add', { op: 'upsert', url: _ckUrl, cookie: _cookieInput('add', a, b, c) }).then(() => {}),
+    upsert: (a, b, c) => _cookieCall('upsert', { op: 'upsert', url: _ckUrl, cookie: _cookieInput('upsert', a, b, c) }).then(() => {}),
+    remove: (name) => _cookieCall('remove', { op: 'remove', url: _ckUrl, name: String(name) }).then(() => {}),
+    delete: (name) => _cookieCall('delete', { op: 'remove', url: _ckUrl, name: String(name) }).then(() => {}),
+    clear: () => _cookieCall('clear', { op: 'clearUrl', url: _ckUrl }).then(() => {}),
+    jar: _cookieJar,
+  };
+
   // ── rok ─────────────────────────────────────────────────────────────────────
   globalThis.rok = {
     getVar:     (key) => _ovRead('runtime', key, (k) => __ops.op_rok_get_var(k)),
@@ -186,6 +276,7 @@
       if (out.response === null) return { status: 'skipped' };
       return _hostResponse(out.response);
     },
+    cookies: _cookies,
     runner: {
       setNextRequest: (name)  => __ops.op_rok_set_next_request(name == null ? "" : String(name)),
       skipRequest:    ()      => __ops.op_rok_skip_request(),

@@ -280,6 +280,8 @@ extension!(
         host::op_rok_send_request,
         host::op_rok_sleep,
         host::op_rok_run_request,
+        host::op_rok_cookies,
+        rok::op_rok_cookie_snapshot,
         // req read ops
         req::op_req_get_url,
         req::op_req_get_host,
@@ -519,6 +521,8 @@ async fn run_script_async(
             collection_name: ctx.collection_name.unwrap_or_default(),
             collection_root,
             assertion_results: ctx.assertion_results,
+            cookie_url: ctx.cookie_url.unwrap_or_default(),
+            cookies: ctx.cookies,
         });
         state.put(ScriptOutputState::default());
         state.put(HostChannel(calls));
@@ -570,7 +574,7 @@ mod tests {
     use rocket_scripting::{AssertionOutcome, ScriptContext, ScriptPhase, TestStatus};
     use rocket_shared::types::HttpMethod;
 
-    fn minimal_ctx(code: &str) -> ScriptContext {
+    pub(super) fn minimal_ctx(code: &str) -> ScriptContext {
         ScriptContext {
             code: code.into(),
             phase: ScriptPhase::BeforeRequest,
@@ -587,6 +591,8 @@ mod tests {
             file_scope: None,
             collection_name: None,
             assertion_results: vec![],
+            cookie_url: None,
+            cookies: vec![],
         }
     }
 
@@ -4235,5 +4241,303 @@ mod tests {
             result.runtime_vars.get("file").expect("file present"),
             "undefined"
         );
+    }
+}
+
+#[cfg(test)]
+mod cookie_tests {
+    use super::tests::minimal_ctx;
+    use super::*;
+    use rocket_http::CookieEntry;
+    use rocket_scripting::{HostCookieOp, HostCookieResult, HostError};
+    use std::sync::Mutex;
+
+    const URL: &str = "https://app.test/x";
+
+    fn entry(key: &str, value: &str) -> CookieEntry {
+        CookieEntry {
+            id: format!("app.test|/|{key}"),
+            key: key.into(),
+            value: value.into(),
+            domain: "app.test".into(),
+            path: "/".into(),
+            secure: false,
+            http_only: false,
+            expires: None,
+            max_age: None,
+            same_site: None,
+        }
+    }
+
+    /// Host that keeps a list of cookies and records each call.
+    struct FakeCookieHost {
+        jar: Mutex<Vec<CookieEntry>>,
+        seen: Mutex<Vec<HostCookieOp>>,
+        fail: Option<String>,
+    }
+
+    impl FakeCookieHost {
+        fn new() -> Self {
+            Self {
+                jar: Mutex::new(vec![]),
+                seen: Mutex::new(vec![]),
+                fail: None,
+            }
+        }
+
+        fn failing(message: &str) -> Self {
+            Self {
+                fail: Some(message.into()),
+                ..Self::new()
+            }
+        }
+
+        fn ops(&self) -> Vec<HostCookieOp> {
+            self.seen.lock().expect("lock").clone()
+        }
+    }
+
+    #[async_trait]
+    impl ScriptHost for FakeCookieHost {
+        async fn cookies(&self, op: HostCookieOp) -> Result<HostCookieResult, HostError> {
+            self.seen.lock().expect("lock").push(op.clone());
+            if let Some(message) = &self.fail {
+                return Err(HostError::Failed(message.clone()));
+            }
+            let mut jar = self.jar.lock().expect("lock");
+            match op {
+                HostCookieOp::Find { .. } => Ok(HostCookieResult::Cookies(jar.clone())),
+                HostCookieOp::Upsert { cookie, .. } => {
+                    jar.retain(|c| c.key != cookie.key);
+                    jar.push(entry(&cookie.key, &cookie.value));
+                    Ok(HostCookieResult::Cookies(jar.clone()))
+                }
+                HostCookieOp::Remove { name, .. } => {
+                    jar.retain(|c| c.key != name);
+                    Ok(HostCookieResult::Cookies(jar.clone()))
+                }
+                HostCookieOp::ClearUrl { .. } => {
+                    jar.clear();
+                    Ok(HostCookieResult::Cookies(vec![]))
+                }
+                HostCookieOp::ClearAll => {
+                    jar.clear();
+                    Ok(HostCookieResult::Done)
+                }
+            }
+        }
+    }
+
+    fn ctx_with(code: &str, cookies: Vec<CookieEntry>) -> ScriptContext {
+        minimal_ctx(code).with_cookies(URL.into(), cookies)
+    }
+
+    async fn run(ctx: ScriptContext, host: Option<&dyn ScriptHost>) -> Vec<String> {
+        let result = run_script_bounded(ctx, host, ScriptLimits::DEFAULT)
+            .await
+            .expect("execute");
+        assert!(result.error.is_none(), "{:?}", result.error);
+        result
+            .console_entries
+            .iter()
+            .map(|e| e.message.clone())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn cookies_reads_come_from_the_snapshot() {
+        let code = r#"
+            const c = rok.cookies;
+            console.log(c.get('a'), c.has('a'), c.has('a', '1'), c.has('a', '9'), c.has('z'));
+            console.log(c.one('app.test|/|b').value, c.all().length, c.count(), c.idx(0).key);
+            console.log(c.indexOf('b'), c.indexOf(c.idx(0)), c.indexOf('zz'));
+            console.log(JSON.stringify(c.toObject()), c.toString());
+            const seen = []; c.each((x) => seen.push(x.key));
+            console.log(seen.join(), c.find((x) => x.value === '2').key,
+              c.filter((x) => x.key !== 'a').length, c.map((x) => x.key).join(),
+              c.reduce((n, x) => n + Number(x.value), 0));
+        "#;
+        let ctx = ctx_with(code, vec![entry("a", "1"), entry("b", "2")]);
+        let out = run(ctx, None).await;
+        assert_eq!(
+            out,
+            vec![
+                "1 true true false false",
+                "2 2 2 a",
+                "1 0 -1",
+                r#"{"a":"1","b":"2"} a=1; b=2"#,
+                "a,b b 1 a,b 3",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn cookies_get_missing_is_undefined() {
+        let ctx = ctx_with("console.log(rok.cookies.get('nope') === undefined)", vec![]);
+        assert_eq!(run(ctx, None).await, vec!["true"]);
+    }
+
+    #[tokio::test]
+    async fn cookies_write_updates_the_snapshot_from_the_reply() {
+        let host = FakeCookieHost::new();
+        let code = "await rok.cookies.upsert('c','3'); console.log(rok.cookies.get('c'))";
+        let out = run(ctx_with(code, vec![]), Some(&host)).await;
+        assert_eq!(out, vec!["3"]);
+        let ops = host.ops();
+        assert_eq!(ops.len(), 1);
+        match &ops[0] {
+            HostCookieOp::Upsert { url, cookie } => {
+                assert_eq!(url, URL);
+                assert_eq!(cookie.key, "c");
+                assert_eq!(cookie.value, "3");
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn cookies_failed_write_leaves_the_snapshot_alone() {
+        let host = FakeCookieHost::failing("boom");
+        let code = r#"
+            try { await rok.cookies.add('c', '3'); } catch (e) { console.log(e.message); }
+            console.log(rok.cookies.count(), rok.cookies.get('a'));
+        "#;
+        let out = run(ctx_with(code, vec![entry("a", "1")]), Some(&host)).await;
+        assert_eq!(out, vec!["rok.cookies.add: boom", "1 1"]);
+    }
+
+    #[tokio::test]
+    async fn cookies_delete_and_clear_use_the_url_scope() {
+        let host = FakeCookieHost::new();
+        let code = "await rok.cookies.delete('a'); await rok.cookies.clear();";
+        run(ctx_with(code, vec![entry("a", "1")]), Some(&host)).await;
+        assert_eq!(
+            host.ops(),
+            vec![
+                HostCookieOp::Remove {
+                    url: URL.into(),
+                    name: "a".into()
+                },
+                HostCookieOp::ClearUrl { url: URL.into() },
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn jar_methods_send_the_right_ops() {
+        let host = FakeCookieHost::new();
+        host.jar.lock().expect("lock").push(entry("a", "1"));
+        let code = r#"
+            const jar = rok.cookies.jar();
+            const u = 'https://other.test/';
+            const hit = await jar.getCookie(u, 'a');
+            console.log(hit.value, await jar.getCookie(u, 'zz'));
+            console.log((await jar.getCookies(u)).length);
+            await new Promise((resolve) => jar.hasCookie(u, 'nope', (err, yes) => {
+              console.log(err, yes); resolve();
+            }));
+            console.log(await jar.hasCookie(u, 'a'));
+            await jar.setCookie(u, 'n', 'v');
+            await jar.setCookie(u, { name: 'o', value: 'w', httpOnly: true });
+            await jar.setCookies(u, [{ key: 'p', value: '1' }, { key: 'q', value: '2' }]);
+            await jar.deleteCookie(u, 'n');
+            await jar.deleteCookies(u);
+            await jar.clear();
+        "#;
+        let out = run(ctx_with(code, vec![]), Some(&host)).await;
+        assert_eq!(out, vec!["1 null", "1", "null false", "true"]);
+        let kinds: Vec<String> = host
+            .ops()
+            .iter()
+            .map(|op| match op {
+                HostCookieOp::Find { .. } => "find".to_string(),
+                HostCookieOp::Upsert { cookie, .. } => format!("upsert:{}", cookie.key),
+                HostCookieOp::Remove { name, .. } => format!("remove:{name}"),
+                HostCookieOp::ClearUrl { .. } => "clearUrl".into(),
+                HostCookieOp::ClearAll => "clearAll".into(),
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![
+                "find", "find", "find", "find", "find", "upsert:n", "upsert:o", "upsert:p",
+                "upsert:q", "remove:n", "clearUrl", "clearAll"
+            ]
+        );
+        let object_form = host.ops().into_iter().any(|op| {
+            matches!(op, HostCookieOp::Upsert { url, cookie }
+                if url == "https://other.test/" && cookie.http_only == Some(true))
+        });
+        assert!(object_form);
+    }
+
+    #[tokio::test]
+    async fn cookie_values_with_special_characters_survive() {
+        let host = FakeCookieHost::new();
+        let code = r#"
+            const v = 'ev;il="x y"=é';
+            await rok.cookies.upsert('s', v);
+            console.log(rok.cookies.get('s') === v, rok.cookies.toObject().s === v);
+        "#;
+        let out = run(ctx_with(code, vec![]), Some(&host)).await;
+        assert_eq!(out, vec!["true true"]);
+    }
+
+    #[tokio::test]
+    async fn cookies_without_a_host_reject_with_not_available() {
+        let code = r#"
+            console.log(rok.cookies.count(), rok.cookies.toString() === '');
+            try { await rok.cookies.add('a', '1'); } catch (e) { console.log(e.message); }
+            try { await rok.cookies.jar().getCookies('https://x.test'); } catch (e) { console.log(e.message); }
+        "#;
+        let out = run(ctx_with(code, vec![]), None).await;
+        assert_eq!(
+            out,
+            vec![
+                "0 true",
+                "rok.cookies is not available here",
+                "rok.cookies is not available here"
+            ]
+        );
+    }
+
+    /// Host that counts how many cookie calls run at once.
+    struct CountingCookieHost {
+        current: std::sync::atomic::AtomicUsize,
+        max: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait]
+    impl ScriptHost for CountingCookieHost {
+        async fn cookies(&self, _op: HostCookieOp) -> Result<HostCookieResult, HostError> {
+            use std::sync::atomic::Ordering;
+            let now = self.current.fetch_add(1, Ordering::SeqCst) + 1;
+            self.max.fetch_max(now, Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            self.current.fetch_sub(1, Ordering::SeqCst);
+            Ok(HostCookieResult::Cookies(vec![]))
+        }
+    }
+
+    #[tokio::test]
+    async fn cookie_calls_count_against_max_host_calls() {
+        let host = CountingCookieHost {
+            current: Default::default(),
+            max: Default::default(),
+        };
+        let limits = ScriptLimits {
+            max_host_calls: 3,
+            ..ScriptLimits::DEFAULT
+        };
+        let ctx = ctx_with(
+            "const j = rok.cookies.jar(); await Promise.all(Array.from({length: 20}, (_, i) => \
+             j.setCookie('https://x.test/', 'k' + i, 'v')));",
+            vec![],
+        );
+        let result = run_script_bounded(ctx, Some(&host), limits)
+            .await
+            .expect("execute");
+        assert!(result.error.is_none(), "{:?}", result.error);
+        assert_eq!(host.max.load(std::sync::atomic::Ordering::SeqCst), 3);
     }
 }

@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
+use rocket_http::{CookieEntry, CookieInput};
 use serde::{Deserialize, Serialize};
 
 /// An HTTP request a script sends with `rok.sendRequest`.
@@ -82,6 +83,35 @@ pub struct HostRunOutcome {
     pub scopes_before: Option<HostScopes>,
 }
 
+/// One cookie call from `rok.cookies` or `rok.cookies.jar()`.
+///
+/// The script engine builds it from JSON. It is not an IPC or persistence type.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "op", rename_all = "camelCase")]
+pub enum HostCookieOp {
+    /// The cookies that match `url`.
+    Find { url: String },
+    /// Adds or replaces one cookie for `url`.
+    Upsert { url: String, cookie: CookieInput },
+    /// Removes the cookie called `name` that matches `url`.
+    Remove { url: String, name: String },
+    /// Removes every cookie that matches `url`.
+    ClearUrl { url: String },
+    /// Empties the whole jar.
+    ClearAll,
+}
+
+/// The answer to a `HostCookieOp`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum HostCookieResult {
+    /// The cookies now matching the URL.
+    Cookies(Vec<CookieEntry>),
+    /// How many cookies the call changed.
+    Count(usize),
+    /// The call has nothing to report.
+    Done,
+}
+
 /// Calls a script makes that need the application, such as network requests.
 ///
 /// Every method has a default that reports `Unavailable`, so a host implements
@@ -95,6 +125,11 @@ pub trait ScriptHost: Send + Sync {
 
     /// Runs a saved request through the full pipeline for `rok.runRequest`.
     async fn run_request(&self, _request: HostRunRequest) -> Result<HostRunOutcome, HostError> {
+        Err(HostError::Unavailable)
+    }
+
+    /// Reads or changes the cookie jar for `rok.cookies`.
+    async fn cookies(&self, _op: HostCookieOp) -> Result<HostCookieResult, HostError> {
         Err(HostError::Unavailable)
     }
 }
@@ -134,6 +169,42 @@ mod tests {
         let json = serde_json::to_string(&response).expect("serialize");
         assert!(json.contains("\"status_text\":\"OK\""), "{json}");
         assert!(json.contains("\"response_time_ms\":3"), "{json}");
+    }
+
+    #[test]
+    fn host_cookie_op_reads_the_engine_json_shape() {
+        let op: HostCookieOp =
+            serde_json::from_str(r#"{"op":"remove","url":"https://x.test","name":"a"}"#)
+                .expect("parse");
+        assert_eq!(
+            op,
+            HostCookieOp::Remove {
+                url: "https://x.test".into(),
+                name: "a".into()
+            }
+        );
+        let op: HostCookieOp = serde_json::from_str(
+            r#"{"op":"upsert","url":"u","cookie":{"key":"a","value":"1","httpOnly":true}}"#,
+        )
+        .expect("parse");
+        match op {
+            HostCookieOp::Upsert { cookie, .. } => {
+                assert_eq!(cookie.key, "a");
+                assert_eq!(cookie.http_only, Some(true));
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        let op: HostCookieOp = serde_json::from_str(r#"{"op":"clearAll"}"#).expect("parse");
+        assert_eq!(op, HostCookieOp::ClearAll);
+    }
+
+    #[tokio::test]
+    async fn script_host_cookies_defaults_to_unavailable() {
+        struct Bare;
+        #[async_trait]
+        impl ScriptHost for Bare {}
+        let out = Bare.cookies(HostCookieOp::ClearAll).await;
+        assert_eq!(out, Err(HostError::Unavailable));
     }
 
     #[test]
