@@ -4,9 +4,23 @@ A request can hold named examples of a response (`examples:` in its `.yml`). The
 
 ## Save and view
 
-- Send an HTTP request, then press Save as example in the response toolbar. The button sits in the response toolbar, so it shows only once a response exists. It is disabled with a reason when the request is not saved ("Save the request first") or is a Try tab ("Temporary tab: not saved").
+- Send an HTTP request, then press Save as example in the response toolbar. The button sits in the response toolbar, so it shows only once a response exists. It is disabled with one reason per cause (`saveExampleDisabledReason`). The first match wins, in this order:
+  1. Try tab: "Temporary tab: not saved".
+  2. Not an HTTP request: "Examples are only for HTTP requests".
+  3. Request not saved: "Save the request first".
+  4. No response yet: "Send the request first".
 - Saving an example does not mark the request dirty and does not call `save_request`. It calls `add_request_example`.
 - Open an example from the sidebar for a read-only tab (`ExampleTab`, `ExampleTabView`). Rename and delete it from the sidebar. An open tab is retitled or closed with it.
+
+## Warnings in the dialog
+
+The save dialog lists notes in this order. Each shows only when it applies.
+
+1. "The request has unsaved changes. The example uses them, and the request file is not saved." Shows when the tab is dirty.
+2. "Disabled params and headers are not saved." Shows when any query param, path param or request header is disabled.
+3. "Secrets in headers and cookies are saved as written. Git commits mask them." Shows when a saved header name looks secret (authorization, cookie, token, secret, password, api key). Only enabled request headers and response headers count.
+
+Two more notes come from the snapshot: the form-data or binary request body that is not saved, and the response body that is dropped.
 
 ## Snapshot shape
 
@@ -14,6 +28,8 @@ Built by `buildExampleSnapshot` (`src/lib/example-snapshot.ts`) from the request
 
 - Request: method, URL, enabled params and headers, `{{vars}}` kept as written. Body: `json`, `text`, `xml`, `sparql` as `{type, data}`, `formurlencoded` as `form-urlencoded` rows. Form-data, binary and no body save no body.
 - Response: status, status text, headers, body. The body type comes from `content-type` (`json`, `xml`, `html`, else `text`). A binary body, or one over the limit, saves as `{type: 'binary', data: ''}`. The dialog says so.
+- Disabled params and headers are not saved. They were not sent, and an example describes what was sent. The dialog says so.
+- A large or binary response body is dropped on purpose. Cutting it would give invalid JSON, and a higher cap would fight the 1 MiB YAML limit.
 
 ## Limits
 
@@ -49,6 +65,8 @@ Known: declarative actions with `scope: request` or `folder` still write variabl
 ## Not covered
 
 - Examples for GraphQL, gRPC and WebSocket requests.
+- Saving the editor state, not the saved file. An example is a snapshot of what produced the response, so unsaved edits are used and the dialog warns. Saving is not blocked, and the request file is not saved.
+- Creating an example without sending a request.
 - Editing an example in place, and form-data or binary request bodies in an example.
 - Try tabs are not restored after an app restart.
 
