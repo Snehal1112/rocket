@@ -13,7 +13,7 @@ Rules for every plan:
 
 | ID | Plan | Tasks | Needs | Models | Status |
 |---|---|---|---|---|---|
-| P1 | `plan-01-parse-and-convert.md`: OpenAPI reader, request converter, layout and import service (pure, no network) | 1 reader and neutral model; 2 operation to request, naming, baseline hash; 3 tag and path layout, `import_openapi_text` | none | sonnet; opus reviews task 3 | written, not started |
+| P1 | `plan-01-parse-and-convert.md`: OpenAPI reader, request converter, layout and import service (pure, no network) | 1 reader and neutral model; 2 operation to request, naming, baseline hash; 3 tag and path layout, `import_openapi_text` | none | sonnet; opus reviews task 3 | done on branch openapi-import (94e5465..8ff61ee), final review pending |
 | P2 | GitHub URL normalizer, URL fetcher (trait in `rocket-app`, reqwest impl in `rocket-infra`), source and provenance sidecar | 1 `normalize_spec_url`; 2 fetcher with caps and redirect rules; 3 `openapi-source.yml` repo | P1 | sonnet | not written |
 | P3 | Import command and dialog | 1 `import_openapi` service method and Tauri command; 2 TS api and query; 3 dialog source (file or URL, layout choice) | P2 | sonnet | not written |
 

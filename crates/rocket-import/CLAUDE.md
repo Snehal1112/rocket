@@ -38,6 +38,8 @@ cargo test -p rocket-import <test_name>
 | `converter/collection.rs` | `convert_variables(kvs) → Vec<CollectionVariable>` |
 | `wsdl/{ast,schema,sampler,parser}.rs` | WSDL 1.1 reader, owned XSD model, sample XML generation |
 | `converter/wsdl.rs` | `convert_operation`, `build_envelope`, `soap_headers` |
+| `openapi/{model,reader,layout}.rs` | OpenAPI 3.0, 3.1 and Swagger 2.0 reader into a neutral model (`OpenApiDoc`, `Operation`), and `GroupBy` folder layout |
+| `converter/openapi.rs` | `convert_operation`, `request_name`, `security_variable_names`, `sample_json`, `baseline_hash` |
 | `importer.rs` | `ImportService` — top-level orchestrator |
 
 ### Data Flow
@@ -120,6 +122,23 @@ service.import_workspace(path, create_new, target_id) -> ImportResult<ImportRepo
 - The depth limit is `sampler::MAX_DEPTH`.
 - rpc/encoded is generated as literal.
 - WSDL 2.0 is rejected.
+
+### OpenAPI import
+
+Spec: `docs/superpowers/specs/2026-10-25-openapi-import-and-sync-design.md`.
+
+```rust
+service.import_openapi_text(text, source_label, GroupBy::Tags, workspace_id) -> ImportResult<OpenApiImportOutcome>
+```
+
+- Input is text (JSON or YAML) of OpenAPI 3.0, 3.1 or Swagger 2.0. There is no network code here; the caller fetches the text. Swagger 1.x and unknown versions give `ImportError::NotAnOpenApiSpec`.
+- The reader walks the document as `serde_yaml::Value` so paths and operations keep their document order. Only local `#/...` `$ref` values are followed (depth cap 32, a looping reference becomes `{}`); a remote `$ref` becomes a report warning.
+- `Operation.key` is the `operationId`, else `METHOD /path`; duplicates get `-2`, `-3`.
+- Layout: `GroupBy::Tags` (default) uses the first tag, with `untagged` for none. `GroupBy::Paths` nests the literal path segments before the first `{param}`. Folder and file names go through `unique_segment`, so they are safe, unique and not reserved.
+- A new collection is created each time (`Orders`, then `Orders-1`). Its variables are `baseUrl` (from `servers[0]`) and one empty secret variable per auth placeholder (`<scheme>_token`, `_username`, `_password`, `_value`). No secret value from a spec is ever imported.
+- Request: name from `summary`, else `operationId`, else `METHOD /path`, cut to 100 characters. URL is `{{baseUrl}}/path/:param`. Optional query and header parameters are imported disabled. Cookie parameters, OAuth2 and unknown schemes are reported, not imported. JSON, form, multipart and XML bodies use the spec example, else a sample built from the schema (depth cap 8).
+- At most 5,000 operations per import (`MAX_OPENAPI_OPERATIONS`); the rest are reported.
+- The outcome lists `ImportedOperation { key, request_path, uid, baseline_hash }` for each written request. `baseline_hash` is a SHA-256 over method, URL, query and path params, headers, body and auth. It ignores name, order, scripts, tests, docs and examples, so a later sync can tell whether the user edited a request.
 
 ### Fixture Files
 
