@@ -18,6 +18,7 @@ pub mod request;
 pub mod resolved_certificate;
 pub mod response;
 pub mod script_cookie;
+pub mod spec_fetch;
 pub mod token_client;
 mod util;
 pub mod websocket;
@@ -49,6 +50,10 @@ pub use resolved_certificate::{
 pub use response::HttpResponse;
 pub use script_cookie::{
     build_cookie, cookie_id, matching_cookies, to_entry, CookieEntry, CookieInput, UrlScope,
+};
+pub use spec_fetch::{
+    redirect_target_allowed, same_origin, SpecFetchFailure, SpecFetchOutcome, SpecFetchRequest,
+    SpecFetcher, DEFAULT_MAX_SPEC_BYTES, MAX_SPEC_REDIRECTS,
 };
 pub use token_client::TokenClientProvider;
 pub use websocket::{

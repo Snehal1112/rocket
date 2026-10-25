@@ -727,7 +727,7 @@ fn identity_for_url(
 }
 
 /// The current app proxy setting, or the default (system) one when none is shared.
-fn read_proxy(shared: Option<&rocket_http::SharedProxy>) -> rocket_http::ResolvedProxy {
+pub(crate) fn read_proxy(shared: Option<&rocket_http::SharedProxy>) -> rocket_http::ResolvedProxy {
     match shared {
         // A poisoned lock only means a writer panicked; the value is still a whole proxy.
         Some(shared) => shared.read().unwrap_or_else(|e| e.into_inner()).clone(),
@@ -833,7 +833,7 @@ enum Scheme {
 
 /// Applies the app's proxy setting. `System` leaves reqwest's default, which reads the
 /// `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` environment variables.
-fn apply_proxy(
+pub(crate) fn apply_proxy(
     builder: reqwest::ClientBuilder,
     proxy: &rocket_http::ResolvedProxy,
 ) -> DomainResult<reqwest::ClientBuilder> {
