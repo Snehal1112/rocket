@@ -71,6 +71,7 @@ mod tests {
             secure: false,
             http_only: false,
             expires: None,
+            same_site: None,
         });
         jar
     }

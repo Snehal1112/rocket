@@ -5802,6 +5802,7 @@ dependencies = [
  "sha1 0.10.6",
  "sha2",
  "tokio",
+ "url",
  "urlencoding",
  "zeroize",
 ]

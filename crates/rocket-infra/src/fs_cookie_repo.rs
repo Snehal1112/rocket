@@ -102,6 +102,7 @@ mod tests {
             secure: true,
             http_only: true,
             expires: None,
+            same_site: None,
         });
         jar
     }

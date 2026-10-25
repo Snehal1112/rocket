@@ -17,6 +17,7 @@ pub mod proxy;
 pub mod request;
 pub mod resolved_certificate;
 pub mod response;
+pub mod script_cookie;
 pub mod token_client;
 mod util;
 pub mod websocket;
@@ -46,6 +47,9 @@ pub use resolved_certificate::{
     CertificateMaterial, CertificateSource, ResolvedClientCertificate, VaultCertificateBinding,
 };
 pub use response::HttpResponse;
+pub use script_cookie::{
+    build_cookie, cookie_id, matching_cookies, to_entry, CookieEntry, CookieInput, UrlScope,
+};
 pub use token_client::TokenClientProvider;
 pub use websocket::{
     WebSocketClient, WebSocketClose, WebSocketCommand, WebSocketConnectRequest, WebSocketEvent,

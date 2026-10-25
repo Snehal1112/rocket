@@ -12,6 +12,9 @@ pub struct Cookie {
     pub secure: bool,
     pub http_only: bool,
     pub expires: Option<String>,
+    /// The `SameSite` attribute as `Strict`, `Lax` or `None`; absent in older jar files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub same_site: Option<String>,
 }
 
 /// CookieJar aggregate — cookies grouped by domain.
@@ -82,7 +85,17 @@ pub fn default_cookie_path(request_path: &str) -> String {
 }
 
 /// Longest `Max-Age` kept, in seconds (400 days, as in RFC 6265bis).
-const MAX_COOKIE_AGE_SECS: i64 = 400 * 24 * 60 * 60;
+pub(crate) const MAX_COOKIE_AGE_SECS: i64 = 400 * 24 * 60 * 60;
+
+/// The canonical `SameSite` value (`Strict`, `Lax` or `None`) for `value`, ignoring case.
+pub(crate) fn normalize_same_site(value: &str) -> Option<String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "strict" => Some("Strict".to_string()),
+        "lax" => Some("Lax".to_string()),
+        "none" => Some("None".to_string()),
+        _ => None,
+    }
+}
 
 /// Reads one `Set-Cookie` header received from `host` for a request to `request_path`.
 ///
@@ -115,6 +128,7 @@ pub fn parse_set_cookie(
     let mut http_only = false;
     let mut expires: Option<DateTime<Utc>> = None;
     let mut max_age: Option<i64> = None;
+    let mut same_site: Option<String> = None;
     for attr in parts {
         let (key, val) = match attr.split_once('=') {
             Some((k, v)) => (k.trim(), v.trim()),
@@ -136,6 +150,7 @@ pub fn parse_set_cookie(
                     .map(|d| d.with_timezone(&Utc));
             }
             "max-age" => max_age = val.parse::<i64>().ok(),
+            "samesite" => same_site = normalize_same_site(val),
             _ => {}
         }
     }
@@ -168,6 +183,7 @@ pub fn parse_set_cookie(
                 secure,
                 http_only,
                 expires: None,
+                same_site,
             })
         }
     };
@@ -180,6 +196,7 @@ pub fn parse_set_cookie(
             secure,
             http_only,
             expires: Some(at.to_rfc3339()),
+            same_site,
         }),
         None => SetCookie::Remove {
             domain,
@@ -295,6 +312,7 @@ mod tests {
             secure: false,
             http_only: false,
             expires: None,
+            same_site: None,
         }
     }
 
@@ -350,6 +368,7 @@ mod tests {
             secure: false,
             http_only: false,
             expires: None,
+            same_site: None,
         }
     }
 
@@ -388,6 +407,7 @@ mod tests {
                 secure: true,
                 http_only: true,
                 expires: None,
+                same_site: None,
             })
         );
     }
@@ -533,5 +553,28 @@ mod tests {
         jar.add(cookie("c", "", "/"));
         let found = cookies_for_request(&[jar], "h.test", "/", false, now());
         assert_eq!(found.len(), 1);
+    }
+
+    #[test]
+    fn old_jar_yaml_without_same_site_loads_and_saves_without_the_key() {
+        let yaml = "domain: example.com\ncookies:\n- name: a\n  value: b\n  domain: example.com\n  path: /\n  secure: false\n  httpOnly: false\n  expires: null\n";
+        let jar: CookieJar = serde_yaml::from_str(yaml).expect("old yaml loads");
+        assert_eq!(jar.cookies[0].same_site, None);
+        let out = serde_yaml::to_string(&jar).expect("yaml saves");
+        assert!(!out.contains("sameSite"), "{out}");
+    }
+
+    #[test]
+    fn parse_set_cookie_keeps_same_site() {
+        let set = parse_set_cookie("a=1; SameSite=lax", "example.com", "/", now());
+        match set {
+            SetCookie::Store(c) => assert_eq!(c.same_site.as_deref(), Some("Lax")),
+            other => panic!("unexpected {other:?}"),
+        }
+        let set = parse_set_cookie("a=1", "example.com", "/", now());
+        match set {
+            SetCookie::Store(c) => assert_eq!(c.same_site, None),
+            other => panic!("unexpected {other:?}"),
+        }
     }
 }
