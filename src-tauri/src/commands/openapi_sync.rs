@@ -39,7 +39,9 @@ pub struct SyncStatusDto {
     pub last_checked_at: Option<String>,
     pub last_status: Option<LastStatusDto>,
     pub has_pending: bool,
-    pub has_token: bool,
+    /// Left out unless the caller asked for it with `includeToken`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub has_token: Option<bool>,
     /// `granted`, `missing` or `locationChanged`.
     pub consent: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -318,17 +320,21 @@ async fn run_blocking<T: Send + 'static>(
         .map_err(|e| e.to_string())
 }
 
-/// The sync status of a collection, or `None` when it has no OpenAPI source.
+/// The sync status of a collection, or `None` when it has no OpenAPI source. `hasToken` is
+/// filled only when `includeToken` is true.
 #[tauri::command]
 pub async fn openapi_sync_status(
     collection: String,
+    include_token: Option<bool>,
     workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
     fetcher: State<'_, Arc<dyn SpecFetcher>>,
 ) -> Result<Option<SyncStatusDto>, String> {
+    // The keychain is read only when the caller asks for the token state.
+    let include_token = include_token.unwrap_or(false);
     let result = run_blocking(
         Arc::clone(workspace_path.inner()),
         Arc::clone(fetcher.inner()),
-        move |service| status_or_none(service.status_of(&collection)),
+        move |service| status_or_none(service.status_of(&collection, include_token)),
     )
     .await?;
     Ok(result)
@@ -589,6 +595,22 @@ pub async fn openapi_sync_check_now(
     .await
 }
 
+/// Publishes `OpenApiSyncApplied` once for a finished apply, whatever its report holds. A call
+/// that failed before doing anything publishes nothing.
+fn publish_applied(
+    events: &dyn EventPublisher,
+    collection: &str,
+    result: &Result<ApplyReport, DomainError>,
+) {
+    if let Ok(report) = result {
+        events.publish(rocket_shared::events::DomainEvent::OpenApiSyncApplied {
+            collection: collection.to_string(),
+            applied: report.applied.len(),
+            stale: report.stale.len(),
+        });
+    }
+}
+
 /// Sets how often this machine checks the spec. Anything but `off` needs an approval.
 #[tauri::command]
 pub async fn openapi_sync_set_interval(
@@ -690,6 +712,7 @@ pub async fn openapi_sync_revoke_consent(
 pub async fn openapi_sync_apply(
     collection: String,
     selection: SelectionDto,
+    app: tauri::AppHandle,
     workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
     fetcher: State<'_, Arc<dyn SpecFetcher>>,
 ) -> Result<ApplyReportDto, String> {
@@ -700,7 +723,10 @@ pub async fn openapi_sync_apply(
         // The apply never awaits, so driving it here only waits on the collection lock
         // and the files.
         move |service| {
-            tauri::async_runtime::block_on(service.apply(&collection, &selection)).map(report_dto)
+            let result = tauri::async_runtime::block_on(service.apply(&collection, &selection));
+            let events = crate::tauri_event_bus::TauriEventBus::new(app);
+            publish_applied(&events, &collection, &result);
+            result.map(report_dto)
         },
     )
     .await
@@ -801,7 +827,7 @@ mod tests {
                 code: "not_found".to_string(),
             }),
             has_pending: false,
-            has_token: true,
+            has_token: Some(true),
             consent: rocket_collection::ConsentState::Granted,
             last_message: Some("The server could not be reached.".to_string()),
         });
@@ -975,6 +1001,71 @@ mod tests {
     }
 
     #[test]
+    fn has_token_is_left_out_when_not_asked() {
+        let view = |has_token| SyncStatusView {
+            location: "https://example.com/spec.json".to_string(),
+            interval: SyncInterval::Off,
+            last_checked_at: None,
+            last_status: None,
+            has_pending: false,
+            has_token,
+            consent: ConsentState::Granted,
+            last_message: None,
+        };
+        let json = serde_json::to_value(status_dto(view(None))).expect("json");
+        assert!(json.get("hasToken").is_none());
+        let json = serde_json::to_value(status_dto(view(Some(false)))).expect("json");
+        assert_eq!(json["hasToken"], false);
+    }
+
+    #[derive(Default)]
+    struct Recorded(Mutex<Vec<rocket_shared::events::DomainEvent>>);
+
+    impl EventPublisher for Recorded {
+        fn publish(&self, event: rocket_shared::events::DomainEvent) {
+            self.0.lock().expect("lock").push(event);
+        }
+    }
+
+    fn report(applied: usize, stale: usize) -> ApplyReport {
+        ApplyReport {
+            applied: (0..applied)
+                .map(|i| rocket_import::AppliedItem {
+                    key: format!("k{i}"),
+                    kind: AppliedKind::Created,
+                    request_path: format!("p{i}"),
+                })
+                .collect(),
+            stale: (0..stale).map(|i| format!("s{i}")).collect(),
+            not_rewritable: vec![],
+            deleted: vec![],
+            detached: vec![],
+            skipped: 0,
+            remaining: 0,
+        }
+    }
+
+    #[test]
+    fn apply_publishes_one_event() {
+        use rocket_shared::events::DomainEvent;
+        let events = Recorded::default();
+        publish_applied(&events, "api", &Ok(report(3, 1)));
+        let seen = events.0.lock().expect("lock");
+        assert_eq!(seen.len(), 1);
+        assert!(matches!(
+            &seen[0],
+            DomainEvent::OpenApiSyncApplied { collection, applied: 3, stale: 1 } if collection == "api"
+        ));
+    }
+
+    #[test]
+    fn a_failed_apply_publishes_nothing() {
+        let events = Recorded::default();
+        publish_applied(&events, "api", &Err(DomainError::NotFound("x".to_string())));
+        assert!(events.0.lock().expect("lock").is_empty());
+    }
+
+    #[test]
     fn the_status_dto_names_every_consent_state() {
         for (state, name) in [
             (ConsentState::Granted, "granted"),
@@ -987,7 +1078,7 @@ mod tests {
                 last_checked_at: None,
                 last_status: None,
                 has_pending: false,
-                has_token: false,
+                has_token: None,
                 consent: state,
                 last_message: None,
             });

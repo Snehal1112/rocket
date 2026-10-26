@@ -667,6 +667,13 @@ pub enum DomainEvent {
         collection: String,
         status: String,
     },
+    /// Emitted once after an OpenAPI sync apply finished. `applied` and `stale` are counts,
+    /// so the event carries no names or paths. It is a refresh signal.
+    OpenApiSyncApplied {
+        collection: String,
+        applied: usize,
+        stale: usize,
+    },
 
     // Load test events
     /// Emitted every 250 ms while a load test runs. The payload fields keep
@@ -1168,6 +1175,20 @@ mod tests {
         assert_eq!(
             json,
             r#"{"type":"openApiSyncChecked","collection":"my-api","status":"changed"}"#
+        );
+    }
+
+    #[test]
+    fn openapi_sync_applied_wire_shape() {
+        let event = DomainEvent::OpenApiSyncApplied {
+            collection: "api".into(),
+            applied: 3,
+            stale: 1,
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"type":"openApiSyncApplied","collection":"api","applied":3,"stale":1}"#
         );
     }
 

@@ -11,6 +11,7 @@ pub mod assistant_chip_text;
 pub mod callback_listener;
 pub(crate) mod client_certificates;
 pub mod collection_export_service;
+pub(crate) mod collection_lock;
 pub mod collection_runner_service;
 pub mod collection_service;
 pub mod collection_trust;
@@ -22,6 +23,8 @@ pub mod cookie_service;
 mod collection_service_examples_tests;
 #[cfg(test)]
 mod duplicate_request_e2e_tests;
+#[cfg(test)]
+mod openapi_sync_lock_tests;
 pub mod env_audit;
 pub mod environment_service;
 pub mod event_caps;

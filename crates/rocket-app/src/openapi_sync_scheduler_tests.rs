@@ -405,7 +405,7 @@ fn due_targets_skips_collections_without_consent() {
     let id = format!("src-{}", "moved");
     w.consent.revoke(&root, &id).expect("revoke");
     assert!(w.service().due_targets(t0()).is_empty());
-    let status = w.service().status(&root).expect("status");
+    let status = w.service().status(&root, false).expect("status");
     assert_eq!(status.interval, SyncInterval::Off);
     assert_eq!(status.consent, rocket_collection::ConsentState::Missing);
 }
@@ -426,7 +426,7 @@ fn opt_in_root_alone_no_longer_turns_checks_on() {
     FsOpenApiLocalRepo.save(&root, &local).expect("save");
     assert!(w.service().due_targets(t0()).is_empty());
     assert_eq!(
-        w.service().status(&root).expect("status").interval,
+        w.service().status(&root, false).expect("status").interval,
         SyncInterval::Off
     );
 }
@@ -443,7 +443,7 @@ fn set_interval_turns_checks_on_and_off() {
     assert_eq!(w.local("mine").opt_in_root, None);
     assert_eq!(names(&svc.due_targets(t0())), vec!["mine"]);
     assert_eq!(
-        svc.status(&root).expect("status").interval,
+        svc.status(&root, false).expect("status").interval,
         SyncInterval::Hourly
     );
     svc.set_interval(&root, SyncInterval::Off).expect("off");

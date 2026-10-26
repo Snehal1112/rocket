@@ -1,3 +1,4 @@
+use crate::collection_lock::collection_lock;
 use crate::flow_references::FlowReferenceUpdater;
 use rocket_audit::{
     actor::AuditActor,
@@ -49,6 +50,47 @@ impl CollectionService {
     pub fn with_flow_references(mut self, updater: Arc<dyn FlowReferenceUpdater>) -> Self {
         self.flow_refs = Some(updater);
         self
+    }
+
+    /// Runs `f` while holding the collection lock of `collection`, so an editor write and an
+    /// OpenAPI sync apply never interleave. Lock order: this lock first, then the sync
+    /// transaction's guard. The std mutex is not reentrant, so a public method locks once and
+    /// calls only `*_unlocked` helpers inside. When the root is unknown (the repository has no
+    /// path, or the collection is missing) `f` runs without the lock and reports its own error.
+    fn locked<T>(&self, collection: &str, f: impl FnOnce() -> T) -> T {
+        let Ok(root) = self.repo.collection_root_path(collection) else {
+            return f();
+        };
+        let lock = collection_lock(&root);
+        let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+        f()
+    }
+
+    /// Like `locked` for a move between two collections. Both locks are taken in path order,
+    /// so two opposite moves cannot deadlock, and once when both names are one collection.
+    fn locked_pair<T>(&self, a: &str, b: &str, f: impl FnOnce() -> T) -> T {
+        if a == b {
+            return self.locked(a, f);
+        }
+        let (Ok(root_a), Ok(root_b)) = (
+            self.repo.collection_root_path(a),
+            self.repo.collection_root_path(b),
+        ) else {
+            return self.locked(a, f);
+        };
+        let (la, lb) = (collection_lock(&root_a), collection_lock(&root_b));
+        if Arc::ptr_eq(&la, &lb) {
+            let _guard = la.lock().unwrap_or_else(|e| e.into_inner());
+            return f();
+        }
+        let (first, second) = if root_a <= root_b {
+            (&la, &lb)
+        } else {
+            (&lb, &la)
+        };
+        let _g1 = first.lock().unwrap_or_else(|e| e.into_inner());
+        let _g2 = second.lock().unwrap_or_else(|e| e.into_inner());
+        f()
     }
 
     /// Rewrites flow references after a successful move inside one collection.
@@ -170,14 +212,16 @@ impl CollectionService {
         path: &str,
         request: &WebSocketRequest,
     ) -> DomainResult<WebSocketRequest> {
-        let actual_path = self
-            .repo
-            .save_websocket_request(collection, path, request)?;
-        self.events.publish(DomainEvent::RequestSaved {
-            collection: collection.to_string(),
-            path: actual_path.clone(),
-        });
-        self.repo.get_websocket_request(collection, &actual_path)
+        self.locked(collection, || {
+            let actual_path = self
+                .repo
+                .save_websocket_request(collection, path, request)?;
+            self.events.publish(DomainEvent::RequestSaved {
+                collection: collection.to_string(),
+                path: actual_path.clone(),
+            });
+            self.repo.get_websocket_request(collection, &actual_path)
+        })
     }
 
     /// Get the full GraphQL request at `path`.
@@ -196,12 +240,14 @@ impl CollectionService {
         path: &str,
         request: &GraphQlRequest,
     ) -> DomainResult<GraphQlRequest> {
-        let actual_path = self.repo.save_graphql_request(collection, path, request)?;
-        self.events.publish(DomainEvent::RequestSaved {
-            collection: collection.to_string(),
-            path: actual_path.clone(),
-        });
-        self.repo.get_graphql_request(collection, &actual_path)
+        self.locked(collection, || {
+            let actual_path = self.repo.save_graphql_request(collection, path, request)?;
+            self.events.publish(DomainEvent::RequestSaved {
+                collection: collection.to_string(),
+                path: actual_path.clone(),
+            });
+            self.repo.get_graphql_request(collection, &actual_path)
+        })
     }
 
     /// Get the full gRPC request at `path`.
@@ -216,12 +262,14 @@ impl CollectionService {
         path: &str,
         request: &GrpcRequest,
     ) -> DomainResult<GrpcRequest> {
-        let actual_path = self.repo.save_grpc_request(collection, path, request)?;
-        self.events.publish(DomainEvent::RequestSaved {
-            collection: collection.to_string(),
-            path: actual_path.clone(),
-        });
-        self.repo.get_grpc_request(collection, &actual_path)
+        self.locked(collection, || {
+            let actual_path = self.repo.save_grpc_request(collection, path, request)?;
+            self.events.publish(DomainEvent::RequestSaved {
+                collection: collection.to_string(),
+                path: actual_path.clone(),
+            });
+            self.repo.get_grpc_request(collection, &actual_path)
+        })
     }
 
     pub fn create(&self, name: &str) -> DomainResult<Collection> {
@@ -246,6 +294,7 @@ impl CollectionService {
     }
 
     pub fn delete(&self, name: &str) -> DomainResult<()> {
+        self.locked(name, || {
         let identity = self.repo.collection_identity(name).ok();
         self.repo.delete(name)?;
         if let (Some(trust), Some(identity)) = (&self.trust, identity) {
@@ -264,9 +313,11 @@ impl CollectionService {
             name: name.to_string(),
         });
         Ok(())
+        })
     }
 
     pub fn rename(&self, old_name: &str, new_name: &str) -> DomainResult<()> {
+        self.locked(old_name, || {
         Collection::validate_name(new_name)?;
         let old_identity = self.repo.collection_identity(old_name).ok();
         self.repo.rename(old_name, new_name)?;
@@ -284,6 +335,7 @@ impl CollectionService {
             new_name: new_name.to_string(),
         });
         Ok(())
+        })
     }
 
     pub fn save_request(
@@ -292,12 +344,14 @@ impl CollectionService {
         path: &str,
         request: &Request,
     ) -> DomainResult<Request> {
-        let actual_path = self.repo.save_request(collection, path, request)?;
-        self.events.publish(DomainEvent::RequestSaved {
-            collection: collection.to_string(),
-            path: actual_path.clone(),
-        });
-        self.repo.get_request(collection, &actual_path)
+        self.locked(collection, || {
+            let actual_path = self.repo.save_request(collection, path, request)?;
+            self.events.publish(DomainEvent::RequestSaved {
+                collection: collection.to_string(),
+                path: actual_path.clone(),
+            });
+            self.repo.get_request(collection, &actual_path)
+        })
     }
 
     pub fn rename_request(
@@ -306,53 +360,55 @@ impl CollectionService {
         old_path: &str,
         new_name: &str,
     ) -> DomainResult<()> {
-        let kind = self.repo.request_kind(collection, old_path)?;
-        if kind == RequestKind::GraphQl {
-            let mut request = self.repo.get_graphql_request(collection, old_path)?;
+        self.locked(collection, || {
+            let kind = self.repo.request_kind(collection, old_path)?;
+            if kind == RequestKind::GraphQl {
+                let mut request = self.repo.get_graphql_request(collection, old_path)?;
+                request.name = new_name.to_string();
+                let actual_path = self
+                    .repo
+                    .save_graphql_request(collection, old_path, &request)?;
+                self.events.publish(DomainEvent::RequestSaved {
+                    collection: collection.to_string(),
+                    path: actual_path,
+                });
+                return Ok(());
+            }
+            if kind == RequestKind::WebSocket {
+                let mut websocket = self.repo.get_websocket_request(collection, old_path)?;
+                websocket.name = new_name.to_string();
+                let actual_path = self
+                    .repo
+                    .save_websocket_request(collection, old_path, &websocket)?;
+                self.events.publish(DomainEvent::RequestSaved {
+                    collection: collection.to_string(),
+                    path: actual_path,
+                });
+                return Ok(());
+            }
+            if kind == RequestKind::Grpc {
+                let mut request = self.repo.get_grpc_request(collection, old_path)?;
+                request.name = new_name.to_string();
+                let actual_path = self
+                    .repo
+                    .save_grpc_request(collection, old_path, &request)?;
+                self.events.publish(DomainEvent::RequestSaved {
+                    collection: collection.to_string(),
+                    path: actual_path,
+                });
+                return Ok(());
+            }
+            // Only update the name field inside the JSON. The filename stays the same.
+            // This produces a single Modify filesystem event.
+            let mut request = self.repo.get_request(collection, old_path)?;
             request.name = new_name.to_string();
-            let actual_path = self
-                .repo
-                .save_graphql_request(collection, old_path, &request)?;
+            let actual_path = self.repo.save_request(collection, old_path, &request)?;
             self.events.publish(DomainEvent::RequestSaved {
                 collection: collection.to_string(),
                 path: actual_path,
             });
-            return Ok(());
-        }
-        if kind == RequestKind::WebSocket {
-            let mut websocket = self.repo.get_websocket_request(collection, old_path)?;
-            websocket.name = new_name.to_string();
-            let actual_path = self
-                .repo
-                .save_websocket_request(collection, old_path, &websocket)?;
-            self.events.publish(DomainEvent::RequestSaved {
-                collection: collection.to_string(),
-                path: actual_path,
-            });
-            return Ok(());
-        }
-        if kind == RequestKind::Grpc {
-            let mut request = self.repo.get_grpc_request(collection, old_path)?;
-            request.name = new_name.to_string();
-            let actual_path = self
-                .repo
-                .save_grpc_request(collection, old_path, &request)?;
-            self.events.publish(DomainEvent::RequestSaved {
-                collection: collection.to_string(),
-                path: actual_path,
-            });
-            return Ok(());
-        }
-        // Only update the name field inside the JSON. The filename stays the same.
-        // This produces a single Modify filesystem event.
-        let mut request = self.repo.get_request(collection, old_path)?;
-        request.name = new_name.to_string();
-        let actual_path = self.repo.save_request(collection, old_path, &request)?;
-        self.events.publish(DomainEvent::RequestSaved {
-            collection: collection.to_string(),
-            path: actual_path,
-        });
-        Ok(())
+            Ok(())
+        })
     }
 
     pub fn update_request_docs(
@@ -361,81 +417,101 @@ impl CollectionService {
         path: &str,
         docs: Option<String>,
     ) -> DomainResult<()> {
-        let kind = self.repo.request_kind(collection, path)?;
-        if kind == RequestKind::GraphQl {
-            let mut request = self.repo.get_graphql_request(collection, path)?;
+        self.locked(collection, || {
+            let kind = self.repo.request_kind(collection, path)?;
+            if kind == RequestKind::GraphQl {
+                let mut request = self.repo.get_graphql_request(collection, path)?;
+                request.docs = docs.map(Documentation::text);
+                let actual_path = self.repo.save_graphql_request(collection, path, &request)?;
+                self.events.publish(DomainEvent::RequestSaved {
+                    collection: collection.to_string(),
+                    path: actual_path,
+                });
+                return Ok(());
+            }
+            if kind == RequestKind::WebSocket {
+                let mut websocket = self.repo.get_websocket_request(collection, path)?;
+                websocket.docs = docs;
+                let actual_path = self
+                    .repo
+                    .save_websocket_request(collection, path, &websocket)?;
+                self.events.publish(DomainEvent::RequestSaved {
+                    collection: collection.to_string(),
+                    path: actual_path,
+                });
+                return Ok(());
+            }
+            if kind == RequestKind::Grpc {
+                let mut request = self.repo.get_grpc_request(collection, path)?;
+                request.docs = docs;
+                let actual_path = self.repo.save_grpc_request(collection, path, &request)?;
+                self.events.publish(DomainEvent::RequestSaved {
+                    collection: collection.to_string(),
+                    path: actual_path,
+                });
+                return Ok(());
+            }
+            let mut request = self.repo.get_request(collection, path)?;
             request.docs = docs.map(Documentation::text);
-            let actual_path = self.repo.save_graphql_request(collection, path, &request)?;
+            let actual_path = self.repo.save_request(collection, path, &request)?;
             self.events.publish(DomainEvent::RequestSaved {
                 collection: collection.to_string(),
                 path: actual_path,
             });
-            return Ok(());
-        }
-        if kind == RequestKind::WebSocket {
-            let mut websocket = self.repo.get_websocket_request(collection, path)?;
-            websocket.docs = docs;
-            let actual_path = self
-                .repo
-                .save_websocket_request(collection, path, &websocket)?;
-            self.events.publish(DomainEvent::RequestSaved {
-                collection: collection.to_string(),
-                path: actual_path,
-            });
-            return Ok(());
-        }
-        if kind == RequestKind::Grpc {
-            let mut request = self.repo.get_grpc_request(collection, path)?;
-            request.docs = docs;
-            let actual_path = self.repo.save_grpc_request(collection, path, &request)?;
-            self.events.publish(DomainEvent::RequestSaved {
-                collection: collection.to_string(),
-                path: actual_path,
-            });
-            return Ok(());
-        }
-        let mut request = self.repo.get_request(collection, path)?;
-        request.docs = docs.map(Documentation::text);
-        let actual_path = self.repo.save_request(collection, path, &request)?;
-        self.events.publish(DomainEvent::RequestSaved {
-            collection: collection.to_string(),
-            path: actual_path,
-        });
-        Ok(())
+            Ok(())
+        })
     }
 
     pub fn delete_request(&self, collection: &str, path: &str) -> DomainResult<()> {
-        self.repo.delete_request(collection, path)?;
-        self.events.publish(DomainEvent::RequestDeleted {
-            collection: collection.to_string(),
-            path: path.to_string(),
-        });
-        Ok(())
+        self.locked(collection, || {
+            self.repo.delete_request(collection, path)?;
+            self.events.publish(DomainEvent::RequestDeleted {
+                collection: collection.to_string(),
+                path: path.to_string(),
+            });
+            Ok(())
+        })
     }
 
     pub fn create_folder(&self, collection: &str, path: &str) -> DomainResult<()> {
-        self.repo.create_folder(collection, path)?;
-        self.events.publish(DomainEvent::FolderCreated {
-            collection: collection.to_string(),
-            path: path.to_string(),
-        });
-        Ok(())
+        self.locked(collection, || {
+            self.repo.create_folder(collection, path)?;
+            self.events.publish(DomainEvent::FolderCreated {
+                collection: collection.to_string(),
+                path: path.to_string(),
+            });
+            Ok(())
+        })
     }
 
     /// Creates a folder that must not exist yet. See
     /// `CollectionRepository::create_folder_exclusive`.
     pub fn create_folder_exclusive(&self, collection: &str, path: &str) -> DomainResult<()> {
-        self.repo.create_folder_exclusive(collection, path)?;
-        self.events.publish(DomainEvent::FolderCreated {
-            collection: collection.to_string(),
-            path: path.to_string(),
-        });
-        Ok(())
+        self.locked(collection, || {
+            self.repo.create_folder_exclusive(collection, path)?;
+            self.events.publish(DomainEvent::FolderCreated {
+                collection: collection.to_string(),
+                path: path.to_string(),
+            });
+            Ok(())
+        })
     }
 
     /// Saves a request that must not exist yet. See
     /// `CollectionRepository::create_request_exclusive`.
     pub fn create_request_exclusive(
+        &self,
+        collection: &str,
+        path: &str,
+        request: &Request,
+    ) -> DomainResult<Request> {
+        self.locked(collection, || {
+            self.create_request_exclusive_unlocked(collection, path, request)
+        })
+    }
+
+    /// The body of `create_request_exclusive`. The caller holds the collection lock.
+    fn create_request_exclusive_unlocked(
         &self,
         collection: &str,
         path: &str,
@@ -461,17 +537,26 @@ impl CollectionService {
         request: &Request,
     ) -> DomainResult<Request> {
         let file_path = rocket_collection::request_filename_for(path);
-        if self.repo.path_exists(collection, &file_path)? {
-            return Err(DomainError::AlreadyExists(format!(
-                "{collection}/{file_path}"
-            )));
-        }
-        self.create_request_exclusive(collection, &file_path, request)
+        self.locked(collection, || {
+            if self.repo.path_exists(collection, &file_path)? {
+                return Err(DomainError::AlreadyExists(format!(
+                    "{collection}/{file_path}"
+                )));
+            }
+            self.create_request_exclusive_unlocked(collection, &file_path, request)
+        })
     }
 
     /// Duplicates an HTTP request found by its full path. The copy gets a new
     /// uid and a unique name in the source's folder, and no file is replaced.
     pub fn duplicate_request(&self, collection: &str, path: &str) -> DomainResult<Request> {
+        self.locked(collection, || {
+            self.duplicate_request_unlocked(collection, path)
+        })
+    }
+
+    /// The body of `duplicate_request`. The caller holds the collection lock.
+    fn duplicate_request_unlocked(&self, collection: &str, path: &str) -> DomainResult<Request> {
         if self.repo.request_kind(collection, path)? != RequestKind::Http {
             return Err(DomainError::InvalidInput(
                 "Only HTTP requests can be duplicated".into(),
@@ -509,7 +594,7 @@ impl CollectionService {
             copy.name = format!("{}{suffix}", source.name);
             copy.seq = None;
             copy.file_name = None;
-            match self.create_request_exclusive(collection, &candidate, &copy) {
+            match self.create_request_exclusive_unlocked(collection, &candidate, &copy) {
                 Ok(saved) => return Ok(saved),
                 Err(DomainError::AlreadyExists(_)) => continue,
                 Err(e) => return Err(e),
@@ -529,25 +614,31 @@ impl CollectionService {
         dst_collection: &str,
         dst_path: &str,
     ) -> DomainResult<()> {
-        self.repo
-            .move_item_no_replace(src_collection, src_path, dst_collection, dst_path)?;
-        self.events.publish(DomainEvent::ItemMoved {
-            src_collection: src_collection.to_string(),
-            src_path: src_path.to_string(),
-            dst_collection: dst_collection.to_string(),
-            dst_path: dst_path.to_string(),
-        });
+        // The flow rewrite runs after the lock is released.
+        self.locked_pair(src_collection, dst_collection, || {
+            self.repo
+                .move_item_no_replace(src_collection, src_path, dst_collection, dst_path)?;
+            self.events.publish(DomainEvent::ItemMoved {
+                src_collection: src_collection.to_string(),
+                src_path: src_path.to_string(),
+                dst_collection: dst_collection.to_string(),
+                dst_path: dst_path.to_string(),
+            });
+            Ok::<(), DomainError>(())
+        })?;
         self.after_move(src_collection, src_path, dst_collection, dst_path);
         Ok(())
     }
 
     pub fn delete_folder(&self, collection: &str, path: &str) -> DomainResult<()> {
-        self.repo.delete_folder(collection, path)?;
-        self.events.publish(DomainEvent::FolderDeleted {
-            collection: collection.to_string(),
-            path: path.to_string(),
-        });
-        Ok(())
+        self.locked(collection, || {
+            self.repo.delete_folder(collection, path)?;
+            self.events.publish(DomainEvent::FolderDeleted {
+                collection: collection.to_string(),
+                path: path.to_string(),
+            });
+            Ok(())
+        })
     }
 
     /// Creates a starter `.js` file. The file watcher reports the change to the UI.
@@ -557,7 +648,9 @@ impl CollectionService {
         folder_path: &str,
         name: &str,
     ) -> DomainResult<String> {
-        self.repo.create_script_file(collection, folder_path, name)
+        self.locked(collection, || {
+            self.repo.create_script_file(collection, folder_path, name)
+        })
     }
 
     pub fn read_script_file(&self, collection: &str, path: &str) -> DomainResult<String> {
@@ -570,7 +663,9 @@ impl CollectionService {
         path: &str,
         content: &str,
     ) -> DomainResult<()> {
-        self.repo.save_script_file(collection, path, content)
+        self.locked(collection, || {
+            self.repo.save_script_file(collection, path, content)
+        })
     }
 
     pub fn rename_script_file(
@@ -579,11 +674,15 @@ impl CollectionService {
         path: &str,
         new_name: &str,
     ) -> DomainResult<String> {
-        self.repo.rename_script_file(collection, path, new_name)
+        self.locked(collection, || {
+            self.repo.rename_script_file(collection, path, new_name)
+        })
     }
 
     pub fn delete_script_file(&self, collection: &str, path: &str) -> DomainResult<()> {
-        self.repo.delete_script_file(collection, path)
+        self.locked(collection, || {
+            self.repo.delete_script_file(collection, path)
+        })
     }
 
     pub fn move_item(
@@ -593,14 +692,18 @@ impl CollectionService {
         dst_collection: &str,
         dst_path: &str,
     ) -> DomainResult<()> {
-        self.repo
-            .move_item(src_collection, src_path, dst_collection, dst_path)?;
-        self.events.publish(DomainEvent::ItemMoved {
-            src_collection: src_collection.to_string(),
-            src_path: src_path.to_string(),
-            dst_collection: dst_collection.to_string(),
-            dst_path: dst_path.to_string(),
-        });
+        // The flow rewrite runs after the lock is released.
+        self.locked_pair(src_collection, dst_collection, || {
+            self.repo
+                .move_item(src_collection, src_path, dst_collection, dst_path)?;
+            self.events.publish(DomainEvent::ItemMoved {
+                src_collection: src_collection.to_string(),
+                src_path: src_path.to_string(),
+                dst_collection: dst_collection.to_string(),
+                dst_path: dst_path.to_string(),
+            });
+            Ok::<(), DomainError>(())
+        })?;
         self.after_move(src_collection, src_path, dst_collection, dst_path);
         Ok(())
     }
@@ -614,13 +717,15 @@ impl CollectionService {
         phase: RequestScriptPhase,
         body: String,
     ) -> DomainResult<()> {
-        self.repo
-            .save_request_script(collection, request_path, phase, body)?;
-        self.events.publish(DomainEvent::RequestSaved {
-            collection: collection.to_string(),
-            path: request_path.to_string(),
-        });
-        Ok(())
+        self.locked(collection, || {
+            self.repo
+                .save_request_script(collection, request_path, phase, body)?;
+            self.events.publish(DomainEvent::RequestSaved {
+                collection: collection.to_string(),
+                path: request_path.to_string(),
+            });
+            Ok(())
+        })
     }
 
     pub fn reorder_items(
@@ -629,13 +734,15 @@ impl CollectionService {
         folder_path: &str,
         ordered_names: &[String],
     ) -> DomainResult<()> {
-        self.repo
-            .reorder_items(collection, folder_path, ordered_names)?;
-        self.events.publish(DomainEvent::ItemsReordered {
-            collection: collection.to_string(),
-            folder_path: folder_path.to_string(),
-        });
-        Ok(())
+        self.locked(collection, || {
+            self.repo
+                .reorder_items(collection, folder_path, ordered_names)?;
+            self.events.publish(DomainEvent::ItemsReordered {
+                collection: collection.to_string(),
+                folder_path: folder_path.to_string(),
+            });
+            Ok(())
+        })
     }
 
     pub fn get_settings(&self, name: &str) -> DomainResult<rocket_collection::CollectionSettings> {
@@ -647,19 +754,21 @@ impl CollectionService {
         name: &str,
         settings: &rocket_collection::CollectionSettings,
     ) -> DomainResult<()> {
-        // The capability fields are requests that only the trust service may change. Keep
-        // what the file has and ignore the incoming values, so an ordinary settings save
-        // can neither approve nor drop a request.
-        let on_disk = self.repo.get_settings(name)?;
-        let mut merged = settings.clone();
-        merged.sandbox_mode = on_disk.sandbox_mode;
-        merged.script_context_roots = on_disk.script_context_roots;
-        merged.agent_autonomy_enabled = on_disk.agent_autonomy_enabled;
-        self.repo.save_settings(name, &merged)?;
-        self.events.publish(DomainEvent::CollectionSettingsSaved {
-            collection: name.to_string(),
-        });
-        Ok(())
+        self.locked(name, || {
+            // The capability fields are requests that only the trust service may change. Keep
+            // what the file has and ignore the incoming values, so an ordinary settings save
+            // can neither approve nor drop a request.
+            let on_disk = self.repo.get_settings(name)?;
+            let mut merged = settings.clone();
+            merged.sandbox_mode = on_disk.sandbox_mode;
+            merged.script_context_roots = on_disk.script_context_roots;
+            merged.agent_autonomy_enabled = on_disk.agent_autonomy_enabled;
+            self.repo.save_settings(name, &merged)?;
+            self.events.publish(DomainEvent::CollectionSettingsSaved {
+                collection: name.to_string(),
+            });
+            Ok(())
+        })
     }
 
     pub fn get_folder_chain_variables(
@@ -685,13 +794,15 @@ impl CollectionService {
         folder_path: &str,
         vars: Vec<CollectionVariable>,
     ) -> DomainResult<()> {
-        self.repo
-            .save_folder_variables(collection, folder_path, vars)?;
-        self.events.publish(DomainEvent::FolderVariablesSaved {
-            collection: collection.to_string(),
-            folder_path: folder_path.to_string(),
-        });
-        Ok(())
+        self.locked(collection, || {
+            self.repo
+                .save_folder_variables(collection, folder_path, vars)?;
+            self.events.publish(DomainEvent::FolderVariablesSaved {
+                collection: collection.to_string(),
+                folder_path: folder_path.to_string(),
+            });
+            Ok(())
+        })
     }
 
     /// Reads one folder's own settings from its folder.yml. No chain walk.
@@ -710,13 +821,15 @@ impl CollectionService {
         folder_path: &str,
         settings: &FolderSettings,
     ) -> DomainResult<()> {
-        self.repo
-            .save_folder_settings(collection, folder_path, settings)?;
-        self.events.publish(DomainEvent::FolderSettingsSaved {
-            collection: collection.to_string(),
-            folder_path: folder_path.to_string(),
-        });
-        Ok(())
+        self.locked(collection, || {
+            self.repo
+                .save_folder_settings(collection, folder_path, settings)?;
+            self.events.publish(DomainEvent::FolderSettingsSaved {
+                collection: collection.to_string(),
+                folder_path: folder_path.to_string(),
+            });
+            Ok(())
+        })
     }
 
     pub fn get_request_variables(
@@ -733,13 +846,15 @@ impl CollectionService {
         request_path: &str,
         vars: Vec<CollectionVariable>,
     ) -> DomainResult<()> {
-        self.repo
-            .save_request_variables(collection, request_path, vars)?;
-        self.events.publish(DomainEvent::RequestVariablesSaved {
-            collection: collection.to_string(),
-            request_path: request_path.to_string(),
-        });
-        Ok(())
+        self.locked(collection, || {
+            self.repo
+                .save_request_variables(collection, request_path, vars)?;
+            self.events.publish(DomainEvent::RequestVariablesSaved {
+                collection: collection.to_string(),
+                request_path: request_path.to_string(),
+            });
+            Ok(())
+        })
     }
 
     /// Lists the saved examples of an HTTP request. Publishes nothing.
@@ -758,10 +873,12 @@ impl CollectionService {
         request_path: &str,
         example: HttpRequestExample,
     ) -> DomainResult<()> {
-        self.repo
-            .add_request_example(collection, request_path, example)?;
-        self.publish_request_saved(collection, request_path);
-        Ok(())
+        self.locked(collection, || {
+            self.repo
+                .add_request_example(collection, request_path, example)?;
+            self.publish_request_saved(collection, request_path);
+            Ok(())
+        })
     }
 
     /// Renames an example of an HTTP request, then tells listeners the request changed.
@@ -772,10 +889,12 @@ impl CollectionService {
         old_name: &str,
         new_name: &str,
     ) -> DomainResult<()> {
-        self.repo
-            .rename_request_example(collection, request_path, old_name, new_name)?;
-        self.publish_request_saved(collection, request_path);
-        Ok(())
+        self.locked(collection, || {
+            self.repo
+                .rename_request_example(collection, request_path, old_name, new_name)?;
+            self.publish_request_saved(collection, request_path);
+            Ok(())
+        })
     }
 
     /// Deletes an example of an HTTP request, then tells listeners the request changed.
@@ -785,10 +904,12 @@ impl CollectionService {
         request_path: &str,
         name: &str,
     ) -> DomainResult<()> {
-        self.repo
-            .delete_request_example(collection, request_path, name)?;
-        self.publish_request_saved(collection, request_path);
-        Ok(())
+        self.locked(collection, || {
+            self.repo
+                .delete_request_example(collection, request_path, name)?;
+            self.publish_request_saved(collection, request_path);
+            Ok(())
+        })
     }
 
     fn publish_request_saved(&self, collection: &str, request_path: &str) {

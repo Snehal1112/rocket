@@ -30,6 +30,7 @@ use rocket_shared::error::{DomainError, DomainResult};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
+use crate::collection_lock::collection_lock;
 use crate::openapi_sync_apply::ApplyDeps;
 
 const TOKEN_KEY: &str = "token";
@@ -57,7 +58,8 @@ pub struct SyncStatusView {
     pub last_checked_at: Option<String>,
     pub last_status: Option<SyncStatus>,
     pub has_pending: bool,
-    pub has_token: bool,
+    /// Whether a token is stored. `None` unless the caller asked, so the keychain is not read.
+    pub has_token: Option<bool>,
     /// Whether this machine approved checks for the source's current location.
     pub consent: ConsentState,
     /// A short safe sentence about the last failed check, if there is one.
@@ -84,23 +86,6 @@ pub struct OpenApiSyncService {
     local: Option<Box<dyn OpenApiLocalRepository>>,
     /// Set by `with_consent`. Without it no source has consent, so nothing checks.
     consent: Option<Arc<dyn OpenApiConsentStore>>,
-}
-
-type LockMap =
-    std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, Arc<std::sync::Mutex<()>>>>;
-
-static COLLECTION_LOCKS: std::sync::OnceLock<LockMap> = std::sync::OnceLock::new();
-
-/// The lock of one collection, shared by every service in the process (commands build a
-/// service per call). A holder never awaits while it holds the lock and takes the file
-/// transaction's own guard only after this one, so the two cannot deadlock.
-pub(crate) fn collection_lock(root: &Path) -> Arc<std::sync::Mutex<()>> {
-    let key = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    let mut map = COLLECTION_LOCKS
-        .get_or_init(Default::default)
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    Arc::clone(map.entry(key).or_default())
 }
 
 pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
@@ -713,7 +698,13 @@ impl OpenApiSyncService {
         Ok(CheckOutcome::Changed { spec_sha256: hash })
     }
 
-    pub fn status(&self, collection_root: &Path) -> DomainResult<SyncStatusView> {
+    /// The sync state of a collection root. The keychain is read only when `include_token`
+    /// is set and the location is approved.
+    pub fn status(
+        &self,
+        collection_root: &Path,
+        include_token: bool,
+    ) -> DomainResult<SyncStatusView> {
         let source = self.load(collection_root)?;
         let local: OpenApiLocalState = self
             .local_repo()?
@@ -739,7 +730,7 @@ impl OpenApiSyncService {
             last_checked_at,
             last_status,
             has_pending: source.pending_sha256.is_some(),
-            has_token: self.stored_token(collection_root, &source).is_some(),
+            has_token: include_token.then(|| self.stored_token(collection_root, &source).is_some()),
             consent,
             last_message: if matches!(local.last_status, Some(SyncStatus::Failed { .. })) {
                 local.last_message.clone()
@@ -1859,7 +1850,7 @@ mod tests {
             let text = String::from_utf8_lossy(&bytes);
             assert!(!text.contains(TOKEN), "{}", file.display());
         }
-        let status = f.svc.status(f.root()).expect("status");
+        let status = f.svc.status(f.root(), true).expect("status");
         assert!(!format!("{status:?}").contains(TOKEN));
     }
 
@@ -1993,11 +1984,14 @@ mod tests {
             std::fs::copy(&file, &to).expect("copy");
         }
         // The copy has no approval on this machine, so the keychain is not read for it.
-        let status = f.svc.status(copy.path()).expect("status");
-        assert!(!status.has_token);
+        let status = f.svc.status(copy.path(), true).expect("status");
+        assert_eq!(status.has_token, Some(false));
         assert_eq!(status.consent, ConsentState::Missing);
         f.svc.grant_current(copy.path()).expect("grant");
-        assert!(f.svc.status(copy.path()).expect("status").has_token);
+        assert_eq!(
+            f.svc.status(copy.path(), true).expect("status").has_token,
+            Some(true)
+        );
     }
 
     #[test]
@@ -2005,10 +1999,16 @@ mod tests {
         let mut src = source(github());
         src.source_id = String::new();
         let f = Fixture::new(src);
-        assert!(!f.svc.status(f.root()).expect("status").has_token);
+        assert_eq!(
+            f.svc.status(f.root(), true).expect("status").has_token,
+            Some(false)
+        );
         f.svc.set_token(f.root(), TOKEN).expect("token");
         assert!(!f.load().source_id.is_empty());
-        assert!(f.svc.status(f.root()).expect("status").has_token);
+        assert_eq!(
+            f.svc.status(f.root(), true).expect("status").has_token,
+            Some(true)
+        );
     }
 
     #[test]
@@ -2020,7 +2020,10 @@ mod tests {
         assert_eq!(f.local().sync_interval, SyncInterval::Daily);
         f.svc.set_token(f.root(), TOKEN).expect("token");
         f.svc.clear_token(f.root()).expect("clear");
-        assert!(!f.svc.status(f.root()).expect("status").has_token);
+        assert_eq!(
+            f.svc.status(f.root(), true).expect("status").has_token,
+            Some(false)
+        );
     }
 
     #[test]
@@ -2031,13 +2034,16 @@ mod tests {
         f.svc
             .set_interval(f.root(), SyncInterval::Weekly)
             .expect("interval");
-        let s = f.svc.status(f.root()).expect("status");
+        let s = f.svc.status(f.root(), true).expect("status");
         assert!(s.has_pending);
-        assert!(!s.has_token);
+        assert_eq!(s.has_token, Some(false));
         assert_eq!(s.interval, SyncInterval::Weekly);
         assert_eq!(s.location, "https://github.com/o/r/blob/main/api.json");
         f.svc.set_token(f.root(), TOKEN).expect("token");
-        assert!(f.svc.status(f.root()).expect("status").has_token);
+        assert_eq!(
+            f.svc.status(f.root(), true).expect("status").has_token,
+            Some(true)
+        );
     }
 
     #[tokio::test]
@@ -2094,13 +2100,16 @@ mod tests {
             assert!(!message.contains(bad), "{message}");
         }
         assert_eq!(
-            f.svc.status(f.root()).expect("status").last_message,
+            f.svc.status(f.root(), true).expect("status").last_message,
             Some(message)
         );
         f.fetcher.push(Ok(SpecFetchOutcome::NotModified));
         f.svc.check(f.root()).await.expect("check");
         assert_eq!(f.local().last_message, None);
-        assert_eq!(f.svc.status(f.root()).expect("status").last_message, None);
+        assert_eq!(
+            f.svc.status(f.root(), true).expect("status").last_message,
+            None
+        );
     }
 
     #[tokio::test]
@@ -2141,7 +2150,7 @@ mod tests {
             "last_checked_at: '2026-10-25T12:00:00+00:00'\nlast_status:\n  state: changed\n",
         );
         std::fs::write(f.root().join(".rocket/openapi-source.yml"), yaml).expect("write");
-        let s = f.svc.status(f.root()).expect("status");
+        let s = f.svc.status(f.root(), true).expect("status");
         assert_eq!(
             s.last_checked_at.as_deref(),
             Some("2026-10-25T12:00:00+00:00")
@@ -2152,7 +2161,7 @@ mod tests {
         l.last_checked_at = Some(fixed_now().to_rfc3339());
         l.last_status = Some(SyncStatus::Unchanged);
         FsOpenApiLocalRepo.save(f.root(), &l).expect("save");
-        let s = f.svc.status(f.root()).expect("status");
+        let s = f.svc.status(f.root(), true).expect("status");
         assert_eq!(s.last_status, Some(SyncStatus::Unchanged));
     }
 
@@ -2163,7 +2172,7 @@ mod tests {
         yaml.push_str("sync_interval: hourly\n");
         std::fs::write(f.root().join(".rocket/openapi-source.yml"), yaml).expect("write");
         assert_eq!(f.load().sync_interval, SyncInterval::Hourly);
-        let s = f.svc.status(f.root()).expect("status");
+        let s = f.svc.status(f.root(), true).expect("status");
         assert_eq!(s.interval, SyncInterval::Off);
     }
 

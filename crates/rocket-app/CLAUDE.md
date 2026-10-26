@@ -40,6 +40,7 @@ touches the filesystem or any I/O directly — those concerns live in
 - `reorder_items` — reorders items within a folder by supplying the new name order.
 - `list_request_examples` / `add_request_example` / `rename_request_example` / `delete_request_example` — saved examples of one HTTP request, stored in the request file's `examples` list. Add, rename and delete publish `RequestSaved` only after the repo call succeeds; list publishes nothing. Names are trimmed, 1 to 120 characters, no control characters, unique case-insensitively (`InvalidInput`, `AlreadyExists`). One example is at most 1 MiB as YAML. Non-HTTP files are `InvalidInput`.
 - `get_settings` / `save_settings` — read and write per-collection settings (auth, headers, variables).
+- Every method that writes collection files holds `collection_lock(root)` (`collection_lock.rs`, shared with the OpenAPI sync apply) for its whole load-modify-write, taken once per public method (a std mutex is not reentrant; inner calls use `*_unlocked` helpers). Lock order: collection lock first, then the sync transaction guard. The sync apply never calls `CollectionService`. Read paths and `create` (no root yet) take no lock.
 
 ### WorkspaceService
 Constructor takes **two** repos: `WorkspaceRepository` (registry) and `WorkspaceConfigRepository` (`workspace.yml` files).

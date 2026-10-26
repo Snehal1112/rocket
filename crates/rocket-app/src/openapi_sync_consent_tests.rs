@@ -180,9 +180,9 @@ async fn check_with_location_changed_makes_no_request_and_reads_no_token() {
     assert_eq!(failed_code(outcome), "location_changed");
     w.assert_untouched();
     // Status does not read the keychain either, and says what happened.
-    let status = w.svc.status(w.root()).expect("status");
+    let status = w.svc.status(w.root(), true).expect("status");
     assert_eq!(status.consent, ConsentState::LocationChanged);
-    assert!(!status.has_token);
+    assert_eq!(status.has_token, Some(false));
     assert_eq!(w.reads(), 0);
 }
 
@@ -220,8 +220,8 @@ fn consent_is_per_root_so_a_copied_folder_is_missing() {
         w.svc.consent_state(copy.path()).expect("state"),
         ConsentState::Missing
     );
-    let status = w.svc.status(copy.path()).expect("status");
-    assert!(!status.has_token);
+    let status = w.svc.status(copy.path(), true).expect("status");
+    assert_eq!(status.has_token, Some(false));
     assert_eq!(w.reads(), 0);
     // Approving the copy does not touch the original, and revoking it leaves the original.
     w.svc.grant_current(copy.path()).expect("grant copy");
@@ -243,7 +243,10 @@ async fn a_service_without_a_consent_store_never_checks_or_reads_the_keychain() 
     .with_local(Box::new(FsOpenApiLocalRepo));
     let outcome = svc.check(w.root()).await.expect("check");
     assert_eq!(failed_code(outcome), "consent_required");
-    assert!(!svc.status(w.root()).expect("status").has_token);
+    assert_eq!(
+        svc.status(w.root(), true).expect("status").has_token,
+        Some(false)
+    );
     w.assert_untouched();
 }
 
@@ -573,4 +576,19 @@ fn a_link_that_does_not_round_trip_through_display_text_can_still_be_granted() {
         .save(w2.root(), &source(loc))
         .expect("seed");
     assert!(w2.svc.grant_consent_for_link(w2.root(), other).is_err());
+}
+
+#[test]
+fn status_without_include_token_never_reads_the_keychain() {
+    let w = World::new();
+    w.svc.grant_current(w.root()).expect("grant");
+    let before = w.reads();
+    let status = w.svc.status(w.root(), false).expect("status");
+    assert_eq!(status.consent, ConsentState::Granted);
+    assert_eq!(status.has_token, None);
+    assert_eq!(w.reads(), before, "no keychain read");
+    // Asking for the token reads it once, and only with consent.
+    let status = w.svc.status(w.root(), true).expect("status");
+    assert_eq!(status.has_token, Some(true));
+    assert_eq!(w.reads(), before + 1);
 }

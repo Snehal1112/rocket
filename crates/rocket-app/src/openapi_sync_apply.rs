@@ -17,7 +17,8 @@ use rocket_import::{
 };
 use rocket_shared::error::{DomainError, DomainResult};
 
-use crate::openapi_sync_service::{collection_lock, sha256_hex, OpenApiSyncService};
+use crate::collection_lock::collection_lock;
+use crate::openapi_sync_service::{sha256_hex, OpenApiSyncService};
 use crate::openapi_sync_view::{PlanView, UnchangedView};
 
 const SOURCE_REL: &str = ".rocket/openapi-source.yml";
@@ -361,12 +362,16 @@ impl OpenApiSyncService {
     }
 
     /// The sync state of a collection by name, resolved in the pinned active workspace.
-    pub fn status_of(&self, collection: &str) -> DomainResult<crate::SyncStatusView> {
+    pub fn status_of(
+        &self,
+        collection: &str,
+        include_token: bool,
+    ) -> DomainResult<crate::SyncStatusView> {
         let deps = self.deps()?;
         let pinned = deps.collections.pinned();
         let repo: &dyn CollectionRepository =
             pinned.as_deref().unwrap_or(deps.collections.as_ref());
-        self.status(&repo.collection_root_path(collection)?)
+        self.status(&repo.collection_root_path(collection)?, include_token)
     }
 
     /// Finishes or undoes an interrupted apply of one collection.
