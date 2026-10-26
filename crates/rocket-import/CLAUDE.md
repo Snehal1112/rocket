@@ -168,6 +168,20 @@ Plan 5, task 3. Code is in `openapi/sync/{plan,rename}.rs`. `build_sync_plan(&Sy
 - Rename hints are a hint only. A Removed and a New item pair when they are the single candidate on both sides by (method, URL) or by (method, name). Any ambiguity, by either rule, gives no hint. Hash-map grouping keeps it linear.
 - Variables: `baseUrl` follows the scalar rule (listed when the spec differs from the baseline and from the user's value; with no baseline the user's value is the baseline), and `AddSecurity` lists scheme variables not in `existing_variables`.
 
+### Apply
+
+Plan 6, task 2. Code is in `openapi/sync/{apply,apply_types,apply_paths,spec}.rs`. `build_apply(&ApplyInputs) -> ImportResult<ApplyOutput>` is pure: it returns file changes and new state, and the caller stages them in one `CollectionFileTx`.
+
+- `ParsedSpec::parse(text)` is the public entry; `SyncInputs.incoming` is a `&ParsedSpec`.
+- Inputs: the plan inputs, `pending_sha256`, a `Selection` (approved items with `item_digest` and choices, skips, variable names, rename links), a `RequestRenderer`, `existing_paths` (every file of the collection relative to its root, requests and `folder.yml`) and the collection settings.
+- `RequestRenderer` has four methods: `render`, `render_settings`, `render_folder` (bytes of a new `folder.yml`) and `can_rewrite` (the round-trip guard: false when the request file holds more than Rocket models). No YAML is written in this crate.
+- `item_digest` covers key, kind, fingerprint, each change, the request uid and path, the removal state and the merged result. An approved item whose digest differs from the fresh plan is `stale` and nothing changes for it.
+- New: folder and file names go through `unique_segment` with the importer's reserved lists, a taken stem gets `-2` and the name gets ` (n)`. A folder is reused in any letter case; a missing one is created with a `folder.yml`. Every path passes `rocket_collection::validate_rel_path` and no path repeats (case-folded).
+- Changed: `merge_item_indexed` with the user's choices, source `baseline_hash` and `request_path` updated, the baseline entry replaced by the spec's request (carried name, uid of the current request). A request that fails `can_rewrite` goes to `not_rewritable` and stays.
+- Removed: deleted only when `edited == Some(false)`; otherwise detached (source and baseline entries dropped, file kept).
+- Variables: `baseUrl` changes only when `VariableChange.baseline` equals the current value; `AddSecurity` adds a secret empty variable once.
+- Finalize when `remaining == 0` and nothing is stale: `spec_sha256 = pending_sha256`, pending cleared, status `Unchanged`. `converter_version` is never changed.
+
 ### Importing from a file or a link
 
 Plan 3 of the OpenAPI series. Code is in `openapi/entry.rs`; both methods return `OpenApiImportResult { report, collection, source_url, source_id, warnings }` (`source_id` is `None` for a file import).

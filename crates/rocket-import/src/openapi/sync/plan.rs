@@ -3,11 +3,12 @@
 
 use super::merge::{merge_request, request_is_edited, Choice, FieldOutcome, MergeOutcome};
 use super::rename::{pair_renames, RenameFacts};
+use super::spec::ParsedSpec;
 use crate::converter::openapi::{
     baseline_hash, convert_operation, security_variable_names, BASE_URL_VARIABLE, CONVERTER_VERSION,
 };
 use crate::openapi::layout::folder_names;
-use crate::openapi::{GroupBy, OpenApiDoc, Operation};
+use crate::openapi::{GroupBy, Operation};
 use rocket_collection::openapi_baseline::OpenApiBaseline;
 use rocket_collection::openapi_source::{OpenApiSource, SourceOperation};
 use rocket_collection::Request;
@@ -29,7 +30,7 @@ pub struct CurrentRequest {
 pub struct SyncInputs<'a> {
     pub source: &'a OpenApiSource,
     pub baseline: Option<&'a OpenApiBaseline>,
-    pub incoming: &'a OpenApiDoc,
+    pub incoming: &'a ParsedSpec,
     pub current: &'a [CurrentRequest],
     pub current_base_url: Option<&'a str>,
     pub existing_variables: &'a [String],
@@ -55,6 +56,9 @@ pub enum SyncItem {
         name: String,
         merge: MergeOutcome,
         fingerprint: String,
+        /// The spec's request with the baseline's duplicate-name suffix carried over. The
+        /// apply step stores it as the new baseline entry.
+        spec: Request,
     },
     Removed {
         key: String,
@@ -77,7 +81,7 @@ impl SyncItem {
         }
     }
 
-    fn fingerprint(&self) -> &str {
+    pub(crate) fn fingerprint(&self) -> &str {
         match self {
             SyncItem::New { fingerprint, .. } | SyncItem::Changed { fingerprint, .. } => {
                 fingerprint
@@ -186,6 +190,7 @@ fn build_indexes<'a>(inputs: &SyncInputs<'a>) -> Indexes<'a> {
             .unwrap_or_default(),
         incoming_keys: inputs
             .incoming
+            .doc()
             .operations
             .iter()
             .map(|o| o.key.as_str())
@@ -197,10 +202,10 @@ fn build_indexes<'a>(inputs: &SyncInputs<'a>) -> Indexes<'a> {
 // follow the incoming order, then Removed follows the source order (rule 8).
 fn classify(inputs: &SyncInputs, idx: &Indexes, plan: &mut SyncPlan) -> Vec<Draft> {
     let group_by = GroupBy::parse(&inputs.source.group_by).unwrap_or_default();
-    let schemes = &inputs.incoming.security_schemes;
+    let schemes = &inputs.incoming.doc().security_schemes;
     let mut drafts = Vec::new();
 
-    for (n, op) in inputs.incoming.operations.iter().enumerate() {
+    for (n, op) in inputs.incoming.doc().operations.iter().enumerate() {
         let seq = u32::try_from(n + 1).unwrap_or(u32::MAX);
         let incoming = convert_operation(op, schemes, seq).request;
         match idx.source_by_key.get(op.key.as_str()) {
@@ -311,6 +316,7 @@ fn changed_item(
         name: cur.request.name.clone(),
         merge,
         fingerprint: fingerprint(&spec),
+        spec,
     })
 }
 
@@ -331,6 +337,69 @@ pub fn merge_item(
         .and_then(|b| b.operations.iter().find(|o| o.key == source_op.key))
         .map(|o| &o.request);
     merge_core(request, source_op, current, incoming, choices).0
+}
+
+/// Like `merge_item`, for a caller that already looked the trusted baseline request up in an
+/// index. Pass `None` when the baseline is missing, untrusted or lacks the key.
+pub(crate) fn merge_item_indexed(
+    baseline_request: Option<&Request>,
+    source_op: &SourceOperation,
+    current: &Request,
+    incoming: &Request,
+    choices: &BTreeMap<String, Choice>,
+) -> MergeOutcome {
+    merge_core(baseline_request, source_op, current, incoming, choices).0
+}
+
+/// A hex SHA-256 that changes with anything the user was shown about an item: the key, the
+/// kind, the fingerprint and every change (field, outcome, yours, spec). It also covers the
+/// request identity, the removal state and the merged result, so an edit made after the plan
+/// was shown makes the digest differ.
+pub fn item_digest(item: &SyncItem) -> String {
+    let body = match item {
+        SyncItem::New { folder, .. } => serde_json::json!({ "kind": "new", "folder": folder }),
+        SyncItem::Changed {
+            uid,
+            request_path,
+            merge,
+            ..
+        } => {
+            let changes: Vec<_> = merge
+                .changes
+                .iter()
+                .map(|c| {
+                    serde_json::json!([
+                        c.field,
+                        format!("{:?}", c.outcome),
+                        c.baseline,
+                        c.yours,
+                        c.spec
+                    ])
+                })
+                .collect();
+            serde_json::json!({
+                "kind": "changed",
+                "uid": uid,
+                "path": request_path,
+                "changes": changes,
+                "merged": fingerprint(&merge.merged),
+                "cautious": merge.cautious,
+            })
+        }
+        SyncItem::Removed {
+            uid,
+            request_path,
+            edited,
+            ..
+        } => serde_json::json!({
+            "kind": "removed",
+            "uid": uid,
+            "path": request_path,
+            "edited": edited,
+        }),
+    };
+    let canonical = serde_json::json!([item.key(), body, item.fingerprint()]);
+    format!("{:x}", Sha256::digest(canonical.to_string().as_bytes()))
 }
 
 /// The shared path: returns the outcome and the incoming request after the name fix.
@@ -483,7 +552,7 @@ fn hint_renames(drafts: &mut [Draft]) {
 fn variable_changes(inputs: &SyncInputs) -> Vec<VariableChange> {
     let mut out = Vec::new();
     let non_empty = |s: &str| (!s.trim().is_empty()).then(|| s.to_string());
-    let spec = inputs.incoming.servers.first().and_then(|s| non_empty(s));
+    let spec = inputs.incoming.doc().servers.first().and_then(|s| non_empty(s));
     let yours = inputs.current_base_url.and_then(non_empty);
     // With no baseline the user's value stands in for it, so only the spec's news shows.
     let baseline = match inputs.baseline {
@@ -505,7 +574,7 @@ fn variable_changes(inputs: &SyncInputs) -> Vec<VariableChange> {
     }
 
     let mut known: HashSet<String> = inputs.existing_variables.iter().cloned().collect();
-    for scheme in &inputs.incoming.security_schemes {
+    for scheme in &inputs.incoming.doc().security_schemes {
         for name in security_variable_names(scheme) {
             if known.insert(name.clone()) {
                 out.push(VariableChange {
@@ -524,7 +593,7 @@ fn variable_changes(inputs: &SyncInputs) -> Vec<VariableChange> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::openapi::parse_openapi;
+    use crate::openapi::{parse_openapi, OpenApiDoc};
     use rocket_collection::openapi_baseline::{BaselineOperation, BASELINE_FILE_VERSION};
     use rocket_collection::openapi_source::{SpecLocation, SyncInterval, SOURCE_FILE_VERSION};
     use std::time::Instant;
@@ -682,7 +751,7 @@ mod tests {
         build_sync_plan(&SyncInputs {
             source: &w.source,
             baseline,
-            incoming,
+            incoming: &ParsedSpec::from_doc(incoming.clone()),
             current: &w.current,
             current_base_url: Some(BASE),
             existing_variables: &w.variables,
@@ -1061,7 +1130,7 @@ mod tests {
         let p = build_sync_plan(&SyncInputs {
             source: &w.source,
             baseline: Some(&w.baseline),
-            incoming: &new,
+            incoming: &ParsedSpec::from_doc(new.clone()),
             current: &w.current,
             current_base_url: Some("https://mine.example.com"),
             existing_variables: &w.variables,

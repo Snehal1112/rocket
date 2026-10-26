@@ -1319,7 +1319,7 @@ pub struct OpenApiImportOutcome {
 pub(crate) const MAX_WSDL_BYTES: usize = 32 * 1024 * 1024;
 
 /// File stems the collection store treats as metadata, not requests.
-const REQUEST_RESERVED: &[&str] = &[
+pub(crate) const REQUEST_RESERVED: &[&str] = &[
     "folder",
     "_order",
     "opencollection",
@@ -1327,9 +1327,9 @@ const REQUEST_RESERVED: &[&str] = &[
     "collection",
 ];
 /// Folder names hidden in the tree at any depth.
-const PORT_RESERVED: &[&str] = &["environments"];
+pub(crate) const PORT_RESERVED: &[&str] = &["environments"];
 /// Folder names hidden at the collection root. Services live at the root.
-const SERVICE_RESERVED: &[&str] = &["environments", "flows"];
+pub(crate) const SERVICE_RESERVED: &[&str] = &["environments", "flows"];
 
 /// Folder and file name segment for a WSDL name. Never empty, at most 100 characters.
 fn wsdl_path_segment(name: &str) -> String {
@@ -1404,7 +1404,7 @@ fn is_windows_device_name(name: &str) -> bool {
 /// Matching is case-insensitive. A taken or reserved name gets `-2`, `-3`, ... and is
 /// shortened first so the result stays within the length limit. Returns the segment
 /// and the suffix number (1 when none was needed).
-fn unique_segment(
+pub(crate) fn unique_segment(
     used: &mut std::collections::HashSet<String>,
     name: &str,
     reserved: &[&str],

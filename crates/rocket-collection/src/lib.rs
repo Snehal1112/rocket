@@ -34,7 +34,9 @@ pub use request::{
 pub use openapi_baseline::{
     BaselineOperation, OpenApiBaseline, OpenApiBaselineRepository, BASELINE_FILE_VERSION,
 };
-pub use file_tx::{CollectionFileTx, CollectionFileTxFactory, RecoveryOutcome};
+pub use file_tx::{
+    validate_rel_path, CollectionFileTx, CollectionFileTxFactory, RecoveryOutcome,
+};
 pub use openapi_local::{OpenApiLocalRepository, OpenApiLocalState, LOCAL_STATE_FILE_VERSION};
 pub use request_kind::RequestKind;
 pub use request_summary::RequestSummary;
