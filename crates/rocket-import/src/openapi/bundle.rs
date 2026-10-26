@@ -43,6 +43,10 @@ pub struct Bundle {
     pub notes: Vec<String>,
     /// True when a file could not be fetched or parsed, or a limit was hit.
     pub incomplete: bool,
+    /// True only when a fetch itself failed (an error, or a 304 on a fresh request). A limit
+    /// or an unusable file is deterministic and does not set it. A 304 on a fresh fetch is
+    /// treated like a failure because the body is missing.
+    pub fetch_failed: bool,
 }
 
 /// What one `$ref` string points at.
@@ -504,6 +508,7 @@ async fn bundle_with_limit(
         refs: Vec::new(),
         notes: Vec::new(),
         incomplete: false,
+        fetch_failed: false,
     };
     // One budget for the main text and every file, so many files cannot add up past it. Its
     // node limit grows with the bytes accepted so far (`node_limit` of their total).
@@ -575,6 +580,7 @@ async fn bundle_with_limit(
             }) => (body, etag, last_modified),
             Ok(SpecFetchOutcome::NotModified) => {
                 bundle.incomplete = true;
+                bundle.fetch_failed = true;
                 bundle.notes.push(format!(
                     "The file {label} could not be loaded: the server sent no content."
                 ));
@@ -591,6 +597,7 @@ async fn bundle_with_limit(
             }
             Err(failure) => {
                 bundle.incomplete = true;
+                bundle.fetch_failed = true;
                 bundle.notes.push(format!(
                     "The file {label} could not be loaded. {}",
                     failure_text(&failure, token_sent)

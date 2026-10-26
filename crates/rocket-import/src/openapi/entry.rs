@@ -205,7 +205,7 @@ impl ImportService {
             etag,
             last_modified,
             bundle.refs.clone(),
-            bundle.incomplete,
+            bundle.fetch_failed,
             &imported,
         );
         let root = self.collections_root().join(&imported.collection);
@@ -355,7 +355,23 @@ mod tests {
     }
 
     /// Serves a different body per address. An address that is not listed is not found.
-    struct MapFetcher(Vec<(String, String, Option<String>)>);
+    struct MapFetcher {
+        files: Vec<(String, String, Option<String>)>,
+        requests: Mutex<Vec<SpecFetchRequest>>,
+    }
+
+    impl MapFetcher {
+        fn new(files: Vec<(String, String, Option<String>)>) -> Self {
+            Self {
+                files,
+                requests: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn requests(&self) -> Vec<SpecFetchRequest> {
+            self.requests.lock().expect("lock").clone()
+        }
+    }
 
     #[async_trait]
     impl SpecFetcher for MapFetcher {
@@ -363,7 +379,8 @@ mod tests {
             &self,
             request: SpecFetchRequest,
         ) -> Result<SpecFetchOutcome, SpecFetchFailure> {
-            match self.0.iter().find(|(url, _, _)| *url == request.url) {
+            self.requests.lock().expect("lock").push(request.clone());
+            match self.files.iter().find(|(url, _, _)| *url == request.url) {
                 Some((url, body, etag)) => Ok(SpecFetchOutcome::Fetched {
                     body: body.as_bytes().to_vec(),
                     etag: etag.clone(),
@@ -375,8 +392,10 @@ mod tests {
         }
     }
 
-    const SAMPLE_LINK: &str = "https://example.com/specs/api-example.yaml";
-    const DEFS_URL: &str = "https://example.com/defs/definitions.yaml";
+    const SAMPLE_LINK: &str = "https://github.com/teamdigitale/api-openapi-samples/blob/master/openapi-v3/api-example.yaml";
+    const SAMPLE_RAW: &str = "https://raw.githubusercontent.com/teamdigitale/api-openapi-samples/master/openapi-v3/api-example.yaml";
+    const DEFS_URL: &str =
+        "https://raw.githubusercontent.com/teamdigitale/openapi/0.0.3/docs/definitions.yaml";
     const SAMPLE_SPEC: &str = r##"
 openapi: 3.0.3
 info: { title: Sample, version: '1' }
@@ -385,15 +404,15 @@ paths:
     get:
       operationId: listItems
       parameters:
-        - $ref: 'https://example.com/defs/definitions.yaml#/parameters/limit'
-        - $ref: 'https://example.com/defs/definitions.yaml#/parameters/offset'
-        - $ref: 'https://example.com/defs/definitions.yaml#/parameters/sort'
+        - $ref: 'https://raw.githubusercontent.com/teamdigitale/openapi/0.0.3/docs/definitions.yaml#/parameters/limit'
+        - $ref: 'https://raw.githubusercontent.com/teamdigitale/openapi/0.0.3/docs/definitions.yaml#/parameters/offset'
+        - $ref: 'https://raw.githubusercontent.com/teamdigitale/openapi/0.0.3/docs/definitions.yaml#/parameters/sort'
       responses: { '200': { description: ok } }
   /things:
     get:
       operationId: listThings
       parameters:
-        - $ref: 'https://example.com/defs/definitions.yaml#/parameters/limit'
+        - $ref: 'https://raw.githubusercontent.com/teamdigitale/openapi/0.0.3/docs/definitions.yaml#/parameters/limit'
       responses: { '200': { description: ok } }
 "##;
     const DEFS: &str = r##"
@@ -409,7 +428,7 @@ parameters:
     }
 
     fn sample_fetcher(defs: bool) -> MapFetcher {
-        let mut files = vec![(SAMPLE_LINK.to_string(), SAMPLE_SPEC.to_string(), None)];
+        let mut files = vec![(SAMPLE_RAW.to_string(), SAMPLE_SPEC.to_string(), None)];
         if defs {
             files.push((
                 DEFS_URL.to_string(),
@@ -417,16 +436,17 @@ parameters:
                 Some("\"d1\"".to_string()),
             ));
         }
-        MapFetcher(files)
+        MapFetcher::new(files)
     }
 
     #[tokio::test]
     async fn import_follows_a_remote_parameter_file() {
         let ws = TempDir::new().expect("tempdir");
         let service = ImportService::new_with_workspace_path(ws.path());
+        let fetcher = sample_fetcher(true);
         let result = service
             .import_openapi_url(
-                &sample_fetcher(true),
+                &fetcher,
                 &FsOpenApiSourceRepo,
                 &FsOpenApiBaselineRepo,
                 SAMPLE_LINK,
@@ -436,6 +456,11 @@ parameters:
             )
             .await
             .expect("import");
+        let requests = fetcher.requests();
+        assert_eq!(requests.len(), 2, "main and definitions only");
+        assert_eq!(requests[0].url, SAMPLE_RAW);
+        assert_eq!(requests[1].url, DEFS_URL);
+        assert!(requests[1].bearer_token.is_none());
         assert_eq!(result.report.imported, 2);
         assert!(
             result.report.skipped.is_empty(),
@@ -468,11 +493,12 @@ parameters:
             .iter()
             .find(|op| op.key == "listItems")
             .expect("operation");
-        let request = std::fs::read_to_string(root.join(format!("{}.yml", first.request_path)))
-            .expect("request file");
-        for name in ["limit", "offset", "sort"] {
-            assert!(request.contains(name), "{name} missing in {request}");
-        }
+        let repo = FsCollectionRepo::new_standalone(ws.path().join("collections"));
+        let saved = repo
+            .get_request(&result.collection, &first.request_path)
+            .expect("saved request");
+        let names: Vec<&str> = saved.query_params.iter().map(|q| q.key.as_str()).collect();
+        assert_eq!(names, vec!["limit", "offset", "sort"]);
     }
 
     #[tokio::test]
@@ -494,6 +520,13 @@ parameters:
         assert_eq!(result.report.imported, 2);
         assert_eq!(result.warnings.len(), 1, "{:?}", result.warnings);
         assert!(result.warnings[0].contains("definitions.yaml"));
+        // The bundler's note is the one warning. The unresolved refs also reach the report as
+        // grouped NotFollowed rows (four refs to the same file), which is accepted.
+        assert_eq!(result.report.skipped.len(), 4, "{:?}", result.report.skipped);
+        assert!(result.report.skipped.iter().all(|i| matches!(
+            &i.reason,
+            crate::report::SkipReason::NotFollowed(t) if t == "a $ref to definitions.yaml was not loaded"
+        )));
         let root = ws.path().join("collections").join(&result.collection);
         let source = FsOpenApiSourceRepo
             .load(&root)
@@ -501,6 +534,49 @@ parameters:
             .expect("source file");
         assert!(source.remote_refs.is_empty());
         assert!(source.remote_refs_incomplete);
+    }
+
+    #[tokio::test]
+    async fn a_limit_hit_is_not_recorded_as_a_fetch_failure() {
+        // 21 distinct files is one over the limit of 20, so the bundle is incomplete but
+        // nothing failed to download.
+        let mut spec = String::from(
+            "openapi: 3.0.3\ninfo: { title: T, version: '1' }\npaths:\n  /a:\n    get:\n      parameters:\n",
+        );
+        let mut files = vec![];
+        for i in 0..21 {
+            let url = format!("https://example.com/defs/p{i}.yaml");
+            spec.push_str(&format!("        - $ref: '{url}#/p'\n"));
+            files.push((
+                url,
+                format!("p: {{ name: p{i}, in: query }}\n"),
+                None::<String>,
+            ));
+        }
+        spec.push_str("      responses: { '200': { description: ok } }\n");
+        files.push((SAMPLE_RAW.to_string(), spec, None));
+        let ws = TempDir::new().expect("tempdir");
+        let service = ImportService::new_with_workspace_path(ws.path());
+        let result = service
+            .import_openapi_url(
+                &MapFetcher::new(files),
+                &FsOpenApiSourceRepo,
+                &FsOpenApiBaselineRepo,
+                SAMPLE_LINK,
+                GroupBy::Tags,
+                None,
+                "ws",
+            )
+            .await
+            .expect("import");
+        assert!(!result.warnings.is_empty());
+        let root = ws.path().join("collections").join(&result.collection);
+        let source = FsOpenApiSourceRepo
+            .load(&root)
+            .expect("load")
+            .expect("source file");
+        assert_eq!(source.remote_refs.len(), 20);
+        assert!(!source.remote_refs_incomplete);
     }
 
     #[tokio::test]
@@ -562,8 +638,8 @@ parameters:
         );
         let ws = TempDir::new().expect("tempdir");
         let service = ImportService::new_with_workspace_path(ws.path());
-        let fetcher = MapFetcher(vec![
-            (SAMPLE_LINK.to_string(), spec, None),
+        let fetcher = MapFetcher::new(vec![
+            (SAMPLE_RAW.to_string(), spec, None),
             (DEFS_URL.to_string(), DEFS.to_string(), None),
         ]);
         let result = service

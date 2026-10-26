@@ -322,11 +322,7 @@ async fn the_users_case_parameters_limit_offset_sort_resolve() {
         }]
     );
     let doc = crate::openapi::parse_openapi(&bundle.text).expect("parse");
-    assert!(
-        doc.warnings.iter().all(|w| !w.contains("remote $ref")),
-        "{:?}",
-        doc.warnings
-    );
+    assert!(doc.warnings.is_empty(), "{:?}", doc.warnings);
     let names: Vec<_> = doc.operations[0]
         .parameters
         .iter()
