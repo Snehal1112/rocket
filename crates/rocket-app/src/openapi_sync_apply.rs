@@ -241,6 +241,7 @@ impl OpenApiSyncService {
             output.local.last_status = Some(SyncStatus::Unchanged);
             output.local.consecutive_failures = 0;
             output.local.not_before = None;
+            output.local.last_message = None;
         }
 
         let extra = vec![

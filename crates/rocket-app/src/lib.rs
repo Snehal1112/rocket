@@ -146,7 +146,9 @@ pub use openapi_sync_view::{PlanView, UnchangedView};
 pub use openapi_sync_scheduler::{
     OpenApiSyncScheduler, SchedulerConfig, SchedulerHandle, ServiceFactory,
 };
-pub use openapi_sync_service::{CheckOutcome, OpenApiSyncService, SyncStatusView, SyncTarget};
+pub use openapi_sync_service::{
+    safe_message, CheckOutcome, OpenApiSyncService, SyncStatusView, SyncTarget,
+};
 pub use proposal_service::ProposalService;
 pub use proxy_settings_service::{PasswordChange, ProxySettingsService, ProxySettingsView};
 pub use runner_sequence::{build_step_input, flatten_run_set, RunItem};

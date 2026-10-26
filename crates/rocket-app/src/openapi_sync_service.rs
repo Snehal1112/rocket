@@ -127,7 +127,7 @@ fn failure_code(failure: &SpecFetchFailure) -> &'static str {
 
 /// A fixed sentence per failure code for the stored status. It is never built from the
 /// network, a URL or a token, so it is safe to keep and show.
-fn safe_message(code: &str) -> &'static str {
+pub fn safe_message(code: &str) -> &'static str {
     match code {
         "not_found" => "The file was not found, or it needs a sign-in.",
         "unauthorized" => "The server refused access to the file.",

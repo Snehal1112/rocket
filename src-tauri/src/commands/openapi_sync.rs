@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use std::collections::BTreeMap;
 
-use rocket_app::{CheckOutcome, OpenApiSyncService, PlanView, SyncStatusView};
+use rocket_app::{safe_message, CheckOutcome, OpenApiSyncService, PlanView, SyncStatusView};
 use rocket_collection::openapi_source::{SyncInterval, SyncStatus};
 use rocket_collection::ConsentState;
 use rocket_http::SpecFetcher;
@@ -15,6 +15,7 @@ use rocket_import::{
     SkipRequest, SyncItem, VariableApproval, VariableChange, VariableKind,
 };
 use rocket_shared::error::DomainError;
+use rocket_shared::events::EventPublisher;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
@@ -302,6 +303,9 @@ fn status_or_none(
     }
 }
 
+/// What a caller sees when a blocking task panics or is cancelled. The panic payload stays out.
+const TASK_FAILED: &str = "The sync task failed. Try again.";
+
 /// Runs a blocking service call off the async runtime.
 async fn run_blocking<T: Send + 'static>(
     workspace_path: Arc<Mutex<PathBuf>>,
@@ -310,7 +314,7 @@ async fn run_blocking<T: Send + 'static>(
 ) -> Result<T, String> {
     tokio::task::spawn_blocking(move || call(make_sync_service(workspace_path, fetcher)))
         .await
-        .map_err(|e| format!("the sync task failed: {e}"))?
+        .map_err(|_| TASK_FAILED.to_string())?
         .map_err(|e| e.to_string())
 }
 
@@ -377,21 +381,23 @@ fn check_outcome_dto(outcome: CheckOutcome) -> CheckOutcomeDto {
             message: None,
             retry_after_secs: None,
         },
+        // The message is a fixed sentence for the code. The outcome's own text may come from
+        // the network, so it is never forwarded.
         CheckOutcome::Failed {
             code,
-            message,
             retry_after_secs,
+            ..
         } => CheckOutcomeDto {
             state: "failed",
+            message: Some(safe_message(&code).to_string()),
             code: Some(code),
-            message: Some(message),
             retry_after_secs,
         },
     }
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ApprovedItemDto {
     pub key: String,
     pub digest: String,
@@ -415,7 +421,7 @@ pub struct VariableApprovalDto {
 }
 
 #[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SelectionDto {
     #[serde(default)]
     pub items: Vec<ApprovedItemDto>,
@@ -553,24 +559,34 @@ fn grant_error_text(error: DomainError) -> String {
 #[tauri::command]
 pub async fn openapi_sync_check_now(
     collection: String,
+    app: tauri::AppHandle,
     workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
     fetcher: State<'_, Arc<dyn SpecFetcher>>,
 ) -> Result<CheckOutcomeDto, String> {
-    let root = run_blocking(
+    run_blocking(
         Arc::clone(workspace_path.inner()),
         Arc::clone(fetcher.inner()),
-        move |service| service.root_of(&collection),
+        move |service| {
+            let root = service.root_of(&collection)?;
+            // The whole check runs on a blocking thread. It holds no std guard across an
+            // await, and its fetches still run on the runtime.
+            let result = tauri::async_runtime::block_on(service.check(&root));
+            // The same refresh signal the background check sends.
+            let status = match &result {
+                Ok(CheckOutcome::Unchanged) => "unchanged",
+                Ok(CheckOutcome::Changed { .. }) => "changed",
+                _ => "failed",
+            };
+            crate::tauri_event_bus::TauriEventBus::new(app).publish(
+                rocket_shared::events::DomainEvent::OpenApiSyncChecked {
+                    collection,
+                    status: status.to_string(),
+                },
+            );
+            result.map(check_outcome_dto)
+        },
     )
-    .await?;
-    let service = make_sync_service(
-        Arc::clone(workspace_path.inner()),
-        Arc::clone(fetcher.inner()),
-    );
-    service
-        .check(&root)
-        .await
-        .map(check_outcome_dto)
-        .map_err(|e| e.to_string())
+    .await
 }
 
 /// Sets how often this machine checks the spec. Anything but `off` needs an approval.
@@ -647,7 +663,7 @@ pub async fn openapi_sync_grant_consent(
         service.grant_consent(&root, &location)
     })
     .await
-    .map_err(|e| format!("the sync task failed: {e}"))?;
+    .map_err(|_| TASK_FAILED.to_string())?;
     result.map_err(grant_error_text)
 }
 
@@ -678,15 +694,16 @@ pub async fn openapi_sync_apply(
     fetcher: State<'_, Arc<dyn SpecFetcher>>,
 ) -> Result<ApplyReportDto, String> {
     let selection = selection_from_dto(selection)?;
-    let service = make_sync_service(
+    run_blocking(
         Arc::clone(workspace_path.inner()),
         Arc::clone(fetcher.inner()),
-    );
-    service
-        .apply(&collection, &selection)
-        .await
-        .map(report_dto)
-        .map_err(|e| e.to_string())
+        // The apply never awaits, so driving it here only waits on the collection lock
+        // and the files.
+        move |service| {
+            tauri::async_runtime::block_on(service.apply(&collection, &selection)).map(report_dto)
+        },
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -919,7 +936,7 @@ mod tests {
         let json = serde_json::to_value(failed).expect("json");
         assert_eq!(
             json,
-            json!({"state": "failed", "code": "rate_limited", "message": "Slow down.",
+            json!({"state": "failed", "code": "rate_limited", "message": safe_message("rate_limited"),
                 "retryAfterSecs": 60})
         );
         let changed = check_outcome_dto(CheckOutcome::Changed {
@@ -929,6 +946,55 @@ mod tests {
             serde_json::to_value(changed).expect("json"),
             json!({"state": "changed"})
         );
+    }
+
+    #[test]
+    fn a_failed_outcome_never_forwards_raw_error_text() {
+        let failed = check_outcome_dto(CheckOutcome::Failed {
+            code: "network".to_string(),
+            message: "error sending https://h/x?token=ghp_secret123".to_string(),
+            retry_after_secs: None,
+        });
+        let text = serde_json::to_string(&failed).expect("json");
+        assert!(!text.contains("https://"), "{text}");
+        assert!(!text.contains("ghp_"), "{text}");
+        assert!(!text.contains("token="), "{text}");
+        assert_eq!(failed.code.as_deref(), Some("network"));
+        assert!(failed.message.is_some());
+    }
+
+    #[test]
+    fn a_misspelled_selection_key_is_refused() {
+        let top: Result<SelectionDto, _> =
+            serde_json::from_value(json!({"renamelinks": [["a", "b"]]}));
+        assert!(top.is_err());
+        let item: Result<SelectionDto, _> = serde_json::from_value(json!({
+            "items": [{"key": "a", "digest": "d", "choice": {}}]
+        }));
+        assert!(item.is_err());
+    }
+
+    #[test]
+    fn the_status_dto_names_every_consent_state() {
+        for (state, name) in [
+            (ConsentState::Granted, "granted"),
+            (ConsentState::Missing, "missing"),
+            (ConsentState::LocationChanged, "locationChanged"),
+        ] {
+            let dto = status_dto(SyncStatusView {
+                location: "https://example.com/spec.json".to_string(),
+                interval: SyncInterval::Off,
+                last_checked_at: None,
+                last_status: None,
+                has_pending: false,
+                has_token: false,
+                consent: state,
+                last_message: None,
+            });
+            let json = serde_json::to_value(dto).expect("json");
+            assert_eq!(json["consent"], name);
+            assert!(json.get("lastMessage").is_none());
+        }
     }
 
     #[test]

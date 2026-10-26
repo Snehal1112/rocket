@@ -1164,3 +1164,22 @@ async fn a_changed_referenced_file_applies_the_new_parameter_and_keeps_user_edit
 
 #[path = "openapi_sync_plan_tests.rs"]
 mod plan_tests;
+
+#[tokio::test]
+async fn a_finalized_apply_clears_the_failure_message() {
+    let w = world().await;
+    w.check_with(v2()).await;
+    let mut local = w.svc.local_state(&w.name).expect("local");
+    local.last_message = Some("The server could not be reached.".to_string());
+    rocket_infra::FsOpenApiLocalRepo
+        .save(&w.root, &local)
+        .expect("save");
+    let plan = w.plan();
+    let selection = w.approve(&plan, &[]);
+    let report = w.svc.apply(&w.name, &selection).await.expect("apply");
+    assert_eq!(report.remaining, 0);
+    assert_eq!(
+        w.svc.local_state(&w.name).expect("local").last_message,
+        None
+    );
+}
