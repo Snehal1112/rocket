@@ -23,8 +23,16 @@ function outcomeText(outcome: OpenApiCheckOutcome): string {
   return `${message} ${retryHint(outcome.retryAfterSecs)}`;
 }
 
-/** Runs one check on demand. It needs the spec link to be approved on this machine. */
-export function CheckNowButton({ collection, consent }: CheckNowButtonProps) {
+export interface CheckRunner {
+  run: () => void;
+  pending: boolean;
+  granted: boolean;
+  text: string | null;
+  failed: boolean;
+}
+
+/** One check state for every Check now trigger of a collection, so they share it. */
+export function useCheckRunner(collection: string, consent: OpenApiConsent): CheckRunner {
   const check = useCheckNow(collection);
   // A ref closes the gap before the pending state renders on a fast double click.
   const busy = useRef(false);
@@ -35,7 +43,7 @@ export function CheckNowButton({ collection, consent }: CheckNowButtonProps) {
     if (consent !== 'granted') reset();
   }, [consent, reset]);
   const run = () => {
-    if (busy.current) return;
+    if (busy.current || !granted) return;
     busy.current = true;
     check.mutate(undefined, {
       onSettled: () => {
@@ -47,20 +55,21 @@ export function CheckNowButton({ collection, consent }: CheckNowButtonProps) {
   if (check.isError) text = `${syncErrorMessage(check.error)} ${retryHint()}`;
   else if (check.data) text = outcomeText(check.data);
   const failed = check.isError || check.data?.state === 'failed';
+  return { run, pending: check.isPending, granted, text, failed };
+}
+
+/** The Check now button for a runner shared with other triggers. */
+export function CheckNowButtonView({ runner }: { runner: CheckRunner }) {
+  const { run, pending, granted, text, failed } = runner;
   return (
     <div className='flex flex-col items-start gap-1'>
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
             <span className='inline-flex' tabIndex={granted ? undefined : 0}>
-              <Button
-                size='sm'
-                variant='outline'
-                onClick={run}
-                disabled={check.isPending || !granted}
-              >
+              <Button size='sm' variant='outline' onClick={run} disabled={pending || !granted}>
                 <RefreshCw
-                  className={cn('mr-1 h-3.5 w-3.5', check.isPending && 'animate-spin')}
+                  className={cn('mr-1 h-3.5 w-3.5', pending && 'animate-spin')}
                   aria-hidden='true'
                 />
                 Check now
@@ -84,4 +93,9 @@ export function CheckNowButton({ collection, consent }: CheckNowButtonProps) {
       )}
     </div>
   );
+}
+
+/** Runs one check on demand. It needs the spec link to be approved on this machine. */
+export function CheckNowButton({ collection, consent }: CheckNowButtonProps) {
+  return <CheckNowButtonView runner={useCheckRunner(collection, consent)} />;
 }

@@ -99,6 +99,27 @@ describe('SpecSyncConnectionDialog', () => {
     expect(screen.getByRole('combobox', { name: 'Check frequency' })).toBeDisabled();
   });
 
+  it('turns back on with the last frequency the stored status had', () => {
+    vi.mocked(tauriApi.setOpenApiSyncInterval).mockResolvedValue(undefined);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const tree = (interval: 'off' | 'weekly') => (
+      <QueryClientProvider client={queryClient}>
+        <SpecSyncConnectionDialog
+          collection='d18'
+          status={makeStatus({ interval })}
+          open
+          onOpenChange={vi.fn()}
+        />
+      </QueryClientProvider>
+    );
+    const view = render(tree('weekly'));
+    view.rerender(tree('off'));
+    const user = userEvent.setup();
+    return user.click(screen.getByRole('switch', { name: SWITCH })).then(() => {
+      expect(tauriApi.setOpenApiSyncInterval).toHaveBeenCalledWith('d18', 'weekly');
+    });
+  });
+
   it('lists the 7 frequencies and sets one', async () => {
     vi.mocked(tauriApi.setOpenApiSyncInterval).mockResolvedValue(undefined);
     const user = renderDialog('d5', makeStatus({ interval: 'daily' }));
@@ -127,8 +148,10 @@ describe('SpecSyncConnectionDialog', () => {
     expect(
       screen.getByText('This setting is not understood. Pick a frequency.'),
     ).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: SWITCH })).not.toBeChecked();
     const select = screen.getByRole('combobox', { name: 'Check frequency' });
     expect(select).toBeEnabled();
+    expect(select).toHaveAttribute('aria-describedby', 'spec-sync-unknown');
     expect(select).toHaveTextContent('');
   });
 

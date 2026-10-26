@@ -1,14 +1,16 @@
-import { screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useEffect } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { clearApplyState } from '@/lib/queries/openapi-sync-queries';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { clearApplyState, useApplySync } from '@/lib/queries/openapi-sync-queries';
 import * as tauriApi from '@/lib/tauri-api';
 import { renderWithQuery } from '@/test/trust-fixtures';
 import { DisconnectSyncDialog } from '../DisconnectSyncDialog';
 
 vi.mock('@/lib/tauri-api', async () => {
   const actual = await vi.importActual<typeof tauriApi>('@/lib/tauri-api');
-  return { ...actual, disconnectOpenApiSync: vi.fn() };
+  return { ...actual, disconnectOpenApiSync: vi.fn(), applyOpenApiSync: vi.fn() };
 });
 
 function renderDialog() {
@@ -72,5 +74,45 @@ describe('DisconnectSyncDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Disconnect' }));
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(onDone).not.toHaveBeenCalled();
+  });
+
+  it('starts unticked again after Cancel and reopen', async () => {
+    const queryClient = new QueryClient();
+    const tree = (open: boolean) => (
+      <QueryClientProvider client={queryClient}>
+        <DisconnectSyncDialog collection='c1' open={open} onOpenChange={vi.fn()} />
+      </QueryClientProvider>
+    );
+    const view = render(tree(true));
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('checkbox'));
+    expect(screen.getByRole('checkbox')).toBeChecked();
+    view.rerender(tree(false));
+    view.rerender(tree(true));
+    expect(screen.getByRole('checkbox')).not.toBeChecked();
+  });
+
+  it('is disabled with a sentence while an apply runs', async () => {
+    vi.mocked(tauriApi.applyOpenApiSync).mockReturnValue(new Promise(() => undefined));
+    function Starter() {
+      const apply = useApplySync('c1');
+      useEffect(() => {
+        apply.mutate({ approved: [], choices: [], skips: [], variables: [], renameLinks: [] } as never);
+        // biome-ignore lint/correctness/useExhaustiveDependencies: start once.
+      }, []);
+      return null;
+    }
+    renderWithQuery(
+      <>
+        <Starter />
+        <DisconnectSyncDialog collection='c1' open onOpenChange={vi.fn()} />
+      </>,
+    );
+    expect(screen.getByRole('button', { name: 'Disconnect' })).toBeDisabled();
+    expect(
+      screen.getByText('An apply is running on this collection. Try again when it finishes.', {
+        selector: 'p[role=alert]',
+      }),
+    ).toBeInTheDocument();
   });
 });

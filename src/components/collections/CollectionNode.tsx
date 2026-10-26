@@ -121,7 +121,7 @@ export function CollectionNode({
   const [createRequestOpen, setCreateRequestOpen] = useState(false);
   const [newScriptOpen, setNewScriptOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
-  // The sync status is only asked for once a menu of this collection has been opened.
+  // The sync status is only asked for once the row is hovered, focused or a menu opens.
   const [menuSeen, setMenuSeen] = useState(false);
   const specSync = useOpenApiSyncStatus(summary.name, false, menuSeen);
   // Fetch the flow list only while the node is expanded.
@@ -396,6 +396,8 @@ export function CollectionNode({
               className='font-medium'
               onClick={handleClick}
               onDoubleClick={handleDoubleClick}
+              onPointerEnter={() => setMenuSeen(true)}
+              onFocus={() => setMenuSeen(true)}
               aria-label={`${open ? 'Collapse' : 'Expand'} collection ${summary.name}`}
             >
               <TreeChevron open={open} />
@@ -485,6 +487,8 @@ export function CollectionNode({
               <button
                 type='button'
                 aria-label={`Actions for ${summary.name}`}
+                onPointerEnter={() => setMenuSeen(true)}
+                onFocus={() => setMenuSeen(true)}
                 className='sticky right-1 -ml-6 shrink-0 h-5 w-5 flex items-center justify-center rounded-sm opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-muted text-foreground'
                 onClick={(e) => e.stopPropagation()}
               >
@@ -515,7 +519,7 @@ export function CollectionNode({
               <DropdownMenuItem onClick={() => setExportOpen(true)}>
                 <Download aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Export...
               </DropdownMenuItem>
-              {specSync.data && (
+              {(specSync.data || specSync.isError) && (
                 <DropdownMenuItem onClick={openSpecSync}>
                   <RefreshCw aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> OpenAPI sync
                 </DropdownMenuItem>
@@ -582,7 +586,7 @@ export function CollectionNode({
         <ContextMenuItem onClick={() => setExportOpen(true)}>
           <Download aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Export...
         </ContextMenuItem>
-        {specSync.data && (
+        {(specSync.data || specSync.isError) && (
           <ContextMenuItem onClick={openSpecSync}>
             <RefreshCw aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> OpenAPI sync
           </ContextMenuItem>

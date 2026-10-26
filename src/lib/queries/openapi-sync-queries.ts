@@ -159,7 +159,6 @@ export function useDisconnectSync(collection: string) {
     networkMode: 'always',
     mutationFn: (removeToken?: boolean) => disconnectOpenApiSync(collection, removeToken),
     onSuccess: () => {
-      setApplying(collection, false);
       setLastApply(collection, null);
     },
     onSettled: () => {

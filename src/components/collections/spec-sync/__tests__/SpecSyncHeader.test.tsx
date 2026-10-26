@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import * as tauriApi from '@/lib/tauri-api';
@@ -92,6 +92,24 @@ describe('SpecSyncHeader', () => {
       await user.click(screen.getByRole('button', { name: 'Spec sync actions' }));
       await user.click(await screen.findByRole('menuitem', { name: 'Check now' }));
       expect(tauriApi.checkOpenApiSyncNow).toHaveBeenCalledWith('c');
+    });
+
+    it('shares the check state between the menu and the button', async () => {
+      vi.mocked(tauriApi.checkOpenApiSyncNow).mockResolvedValue({ state: 'unchanged' });
+      const user = userEvent.setup();
+      renderWithQuery(<SpecSyncHeader collection='c' status={makeStatus()} />);
+      await user.click(screen.getByRole('button', { name: 'Spec sync actions' }));
+      await user.click(await screen.findByRole('menuitem', { name: 'Check now' }));
+      expect(await screen.findByText('No changes in the spec.')).toBeInTheDocument();
+    });
+
+    it('disables the button while a menu check runs', async () => {
+      vi.mocked(tauriApi.checkOpenApiSyncNow).mockReturnValue(new Promise(() => undefined));
+      const user = userEvent.setup();
+      renderWithQuery(<SpecSyncHeader collection='c' status={makeStatus()} />);
+      await user.click(screen.getByRole('button', { name: 'Spec sync actions' }));
+      await user.click(await screen.findByRole('menuitem', { name: 'Check now' }));
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Check now' })).toBeDisabled());
     });
 
     it('disables the menu check without consent', async () => {

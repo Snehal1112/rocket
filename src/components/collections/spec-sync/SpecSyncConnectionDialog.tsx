@@ -63,7 +63,7 @@ function ConnectionBody({
   const granted = status.consent === 'granted';
   const github = isGithubLocation(status.location);
   const unknown = status.intervalUnknown === true;
-  const autoOn = status.interval !== 'off' || unknown;
+  const autoOn = status.interval !== 'off';
   // The token flag is only requested while this dialog is open.
   const tokenStatus = useOpenApiSyncStatus(collection, true);
   const hasToken = tokenStatus.data?.hasToken === true;
@@ -80,6 +80,8 @@ function ConnectionBody({
   const [lastChosen, setLastChosen] = useState<OpenApiSyncInterval>(
     status.interval !== 'off' ? status.interval : DEFAULT_FREQUENCY,
   );
+  // A stored frequency that is not off wins, so a change made elsewhere is followed.
+  if (status.interval !== 'off' && status.interval !== lastChosen) setLastChosen(status.interval);
   const { reset: resetSetToken } = setToken;
   const { short, full } = splitLocation(status.location);
 
@@ -113,6 +115,10 @@ function ConnectionBody({
 
   const intervalError = interval.isError ? syncErrorMessage(interval.error) : null;
   const clearError = clearToken.isError ? syncErrorMessage(clearToken.error) : null;
+  const describedBy =
+    [unknown && 'spec-sync-unknown', intervalError && 'spec-sync-interval-error']
+      .filter(Boolean)
+      .join(' ') || undefined;
   const revokeError = revoke.isError ? syncErrorMessage(revoke.error) : null;
 
   return (
@@ -155,11 +161,16 @@ function ConnectionBody({
         <div className='flex flex-col gap-1.5'>
           <Label htmlFor='spec-sync-interval'>Check frequency</Label>
           <Select
-            value={unknown ? '' : autoOn ? status.interval : ''}
+            value={unknown ? '' : lastChosen}
             onValueChange={(v) => pickFrequency(v as OpenApiSyncInterval)}
-            disabled={!autoOn || !granted || interval.isPending}
+            disabled={(!autoOn && !unknown) || !granted || interval.isPending}
           >
-            <SelectTrigger id='spec-sync-interval' aria-label='Check frequency' className='w-48'>
+            <SelectTrigger
+              id='spec-sync-interval'
+              aria-label='Check frequency'
+              aria-describedby={describedBy}
+              className='w-48'
+            >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -171,7 +182,7 @@ function ConnectionBody({
             </SelectContent>
           </Select>
           {unknown && (
-            <p className='text-xs text-muted-foreground'>
+            <p id='spec-sync-unknown' className='text-xs text-muted-foreground'>
               This setting is not understood. Pick a frequency.
             </p>
           )}
@@ -182,7 +193,7 @@ function ConnectionBody({
             </p>
           )}
           {intervalError && (
-            <p role='alert' className='text-xs text-destructive'>
+            <p id='spec-sync-interval-error' role='alert' className='text-xs text-destructive'>
               {intervalError}
             </p>
           )}

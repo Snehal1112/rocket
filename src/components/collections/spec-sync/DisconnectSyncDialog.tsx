@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -11,7 +11,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
-import { useDisconnectSync } from '@/lib/queries/openapi-sync-queries';
+import { useDisconnectSync, useIsApplying } from '@/lib/queries/openapi-sync-queries';
 import { syncErrorMessage } from './syncErrors';
 
 interface DisconnectSyncDialogProps {
@@ -31,6 +31,15 @@ export function DisconnectSyncDialog({
 }: DisconnectSyncDialogProps) {
   const disconnect = useDisconnectSync(collection);
   const [removeToken, setRemoveToken] = useState(false);
+  const applying = useIsApplying(collection);
+  const { reset } = disconnect;
+  // A reopened dialog starts clean: the box unticked and no old error.
+  useEffect(() => {
+    if (open) {
+      setRemoveToken(false);
+      reset();
+    }
+  }, [open, reset]);
   // A ref closes the gap before the pending state renders on a fast double click.
   const busy = useRef(false);
   const run = () => {
@@ -46,7 +55,11 @@ export function DisconnectSyncDialog({
       },
     });
   };
-  const error = disconnect.isError ? syncErrorMessage(disconnect.error) : null;
+  const error = applying
+    ? 'An apply is running on this collection. Try again when it finishes.'
+    : disconnect.isError
+      ? syncErrorMessage(disconnect.error)
+      : null;
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
@@ -76,7 +89,7 @@ export function DisconnectSyncDialog({
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           {/* A plain button keeps the dialog open until the call succeeds. */}
-          <Button variant='destructive' onClick={run} disabled={disconnect.isPending}>
+          <Button variant='destructive' onClick={run} disabled={disconnect.isPending || applying}>
             Disconnect
           </Button>
         </AlertDialogFooter>

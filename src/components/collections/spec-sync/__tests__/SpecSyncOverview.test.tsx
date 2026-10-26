@@ -33,4 +33,13 @@ describe('SpecSyncOverview', () => {
     );
     expect(screen.getByText('Not checked yet')).toBeInTheDocument();
   });
+
+  it('counts variable changes as pending updates', () => {
+    const plan = makePlan({
+      items: [],
+      variableChanges: [{ name: 'baseUrl', kind: 'baseUrl' }] as never,
+    });
+    render(<SpecSyncOverview plan={plan} status={makeStatus()} />);
+    expect(screen.getByTestId('overview-pending')).toHaveTextContent('1');
+  });
 });

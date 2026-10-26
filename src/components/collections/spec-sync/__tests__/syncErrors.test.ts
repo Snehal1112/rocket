@@ -61,4 +61,10 @@ describe('syncErrorMessage', () => {
     expect(syncErrorMessage(undefined)).toBe(GENERIC_SYNC_ERROR);
     expect(syncErrorMessage({ a: 1 })).toBe(GENERIC_SYNC_ERROR);
   });
+
+  it('maps the disconnect failure sentence', () => {
+    expect(syncErrorMessage('The sync settings could not be removed. Try again.')).toBe(
+      'The sync settings could not be removed. Try again.',
+    );
+  });
 });

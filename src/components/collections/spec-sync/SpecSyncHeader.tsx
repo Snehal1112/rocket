@@ -8,10 +8,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { useCheckNow } from '@/lib/queries/openapi-sync-queries';
 import { formatRelativeTime } from '@/lib/relative-time';
 import type { OpenApiSyncStatus } from '@/lib/tauri-api';
-import { CheckNowButton } from './CheckNowButton';
+import { CheckNowButtonView, useCheckRunner } from './CheckNowButton';
 import { SpecSyncConnectionDialog } from './SpecSyncConnectionDialog';
 import { intervalLabel, splitLocation } from './specSyncView';
 
@@ -24,7 +23,7 @@ interface SpecSyncHeaderProps {
 export function SpecSyncHeader({ collection, status }: SpecSyncHeaderProps) {
   const [showFull, setShowFull] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const check = useCheckNow(collection);
+  const runner = useCheckRunner(collection, status.consent);
   const failed = status.lastStatus?.state === 'failed';
   const { short, full } = splitLocation(status.location);
   return (
@@ -49,8 +48,8 @@ export function SpecSyncHeader({ collection, status }: SpecSyncHeaderProps) {
                   Edit connection settings
                 </DropdownMenuItem>
                 <DropdownMenuItem
-                  disabled={status.consent !== 'granted' || check.isPending}
-                  onSelect={() => check.mutate()}
+                  disabled={!runner.granted || runner.pending}
+                  onSelect={runner.run}
                 >
                   Check now
                 </DropdownMenuItem>
@@ -79,7 +78,7 @@ export function SpecSyncHeader({ collection, status }: SpecSyncHeaderProps) {
             <span>Check interval: {intervalLabel(status.interval)}</span>
           </div>
         </div>
-        <CheckNowButton collection={collection} consent={status.consent} />
+        <CheckNowButtonView runner={runner} />
       </div>
       {failed && (
         <Alert variant='destructive'>

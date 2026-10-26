@@ -35,7 +35,11 @@ export function SpecSyncOverview({ plan, status }: SpecSyncOverviewProps) {
         label='Changed in your collection'
         value={plan.items.filter(locallyEdited).length}
       />
-      <Stat id='overview-pending' label='Spec updates pending' value={plan.items.length} />
+      <Stat
+        id='overview-pending'
+        label='Spec updates pending'
+        value={plan.items.length + plan.variableChanges.length}
+      />
       <span className='ml-auto text-xs text-muted-foreground'>
         {status.lastCheckedAt
           ? `Last checked ${formatRelativeTime(status.lastCheckedAt)}`

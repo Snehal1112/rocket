@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CollectionNode } from '@/components/collections/CollectionNode';
@@ -61,11 +61,24 @@ describe('CollectionNode OpenAPI sync entry', () => {
     });
   });
 
-  it('asks for the sync status only once a menu is opened', async () => {
+  it('asks for the sync status only once the row is hovered', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
+    const user = userEvent.setup();
     renderNode();
-    await screen.findByLabelText('Actions for my-collection');
+    const actions = await screen.findByLabelText('Actions for my-collection');
     expect(tauriApi.getOpenApiSyncStatus).not.toHaveBeenCalled();
+    await user.hover(actions);
+    await waitFor(() => expect(tauriApi.getOpenApiSyncStatus).toHaveBeenCalled());
+  });
+
+  it('shows the entry when the status errored, like the section does', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockRejectedValue('state file unreadable');
+    const user = userEvent.setup();
+    renderNode();
+    await user.hover(await screen.findByLabelText('Actions for my-collection'));
+    await waitFor(() => expect(tauriApi.getOpenApiSyncStatus).toHaveBeenCalled());
+    await user.click(screen.getByLabelText('Actions for my-collection'));
+    expect(await screen.findByRole('menuitem', { name: /OpenAPI sync/ })).toBeInTheDocument();
   });
 
   it('shows OpenAPI sync for a collection with a source and opens the section', async () => {
@@ -84,9 +97,14 @@ describe('CollectionNode OpenAPI sync entry', () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(null);
     const user = userEvent.setup();
     renderNode();
-    await user.click(await screen.findByLabelText('Actions for my-collection'));
-    await screen.findByRole('menuitem', { name: /Overview/ });
+    await user.hover(await screen.findByLabelText('Actions for my-collection'));
     await waitFor(() => expect(tauriApi.getOpenApiSyncStatus).toHaveBeenCalled());
+    // Let the settled null result reach the component before asserting absence.
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await user.click(screen.getByLabelText('Actions for my-collection'));
+    await screen.findByRole('menuitem', { name: /Overview/ });
     expect(screen.queryByRole('menuitem', { name: /OpenAPI sync/ })).toBeNull();
   });
 });
