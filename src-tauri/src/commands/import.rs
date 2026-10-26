@@ -176,6 +176,7 @@ fn store_token(
     token: &str,
 ) -> bool {
     OpenApiSyncService::new(Arc::clone(fetcher), Box::new(FsOpenApiSourceRepo), secrets)
+        .with_local(Box::new(FsOpenApiLocalRepo))
         .set_token(collection_root, token)
         .is_ok()
 }
@@ -186,8 +187,9 @@ pub(crate) fn make_sync_service(
     fetcher: Arc<dyn SpecFetcher>,
 ) -> OpenApiSyncService {
     let secrets: Arc<dyn SecretStore> = Arc::new(KeyringSecretStore::new_openapi_sync());
-    OpenApiSyncService::new(fetcher, Box::new(FsOpenApiSourceRepo), secrets).with_apply(
-        rocket_app::ApplyDeps {
+    OpenApiSyncService::new(fetcher, Box::new(FsOpenApiSourceRepo), secrets)
+        .with_local(Box::new(FsOpenApiLocalRepo))
+        .with_apply(rocket_app::ApplyDeps {
             collections: Box::new(SharedPathCollectionRepo::new(active_workspace_path)),
             baselines: Box::new(FsOpenApiBaselineRepo),
             locals: Box::new(FsOpenApiLocalRepo),
@@ -195,8 +197,7 @@ pub(crate) fn make_sync_service(
             renderer: Arc::new(|root: &std::path::Path| {
                 Box::new(FsRequestRenderer::for_collection(root.to_path_buf()))
             }),
-        },
-    )
+        })
 }
 
 /// Finishes or undoes interrupted syncs of the active workspace on a background task. The

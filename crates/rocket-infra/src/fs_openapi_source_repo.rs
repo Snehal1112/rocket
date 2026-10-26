@@ -102,7 +102,7 @@ impl OpenApiSourceRepository for FsOpenApiSourceRepo {
 mod tests {
     use super::*;
     use rocket_collection::openapi_source::{
-        SourceOperation, SpecLocation, SyncInterval, SyncStatus, SOURCE_FILE_VERSION,
+        SourceOperation, SpecLocation, SyncInterval, SOURCE_FILE_VERSION,
     };
     use rocket_collection::CollectionRepository;
     use tempfile::tempdir;
@@ -132,11 +132,9 @@ mod tests {
                 baseline_hash: "cd".repeat(32),
             }],
             source_id: "id-1".to_string(),
-            sync_interval: SyncInterval::Daily,
-            last_checked_at: Some("2026-10-26T12:00:00+00:00".to_string()),
-            last_status: Some(SyncStatus::Failed {
-                code: "not_found".to_string(),
-            }),
+            sync_interval: SyncInterval::Off,
+            last_checked_at: None,
+            last_status: None,
             pending_sha256: Some("ef".repeat(32)),
         }
     }
@@ -260,8 +258,11 @@ mod tests {
         FsOpenApiSourceRepo.save(dir.path(), &source).expect("save");
         let text = std::fs::read_to_string(dir.path().join(".rocket/openapi-source.yml"))
             .expect("file should exist");
-        assert!(text.contains("sync_interval:"), "{text}");
-        assert!(text.contains("last_checked_at:"), "{text}");
+        assert!(text.contains("source_id:"), "{text}");
+        // The legacy timing fields are never written again.
+        assert!(!text.contains("sync_interval:"), "{text}");
+        assert!(!text.contains("last_checked_at:"), "{text}");
+        assert!(!text.contains("last_status:"), "{text}");
         assert!(!text.to_lowercase().contains("token"), "{text}");
         assert_eq!(
             FsOpenApiSourceRepo.load(dir.path()).expect("load"),

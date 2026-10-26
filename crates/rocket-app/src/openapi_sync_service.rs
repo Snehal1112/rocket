@@ -10,6 +10,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use rocket_collection::openapi_local::{OpenApiLocalRepository, OpenApiLocalState};
+use rocket_collection::openapi_schedule::clamp_retry_after;
 use rocket_collection::openapi_source::{
     OpenApiSource, OpenApiSourceRepository, SpecLocation, SyncInterval, SyncStatus,
 };
@@ -59,6 +61,8 @@ pub struct OpenApiSyncService {
     clock: Clock,
     /// Set by `with_apply`. Without it `apply` and `recover` refuse.
     pub(crate) apply_deps: Option<ApplyDeps>,
+    /// Set by `with_local`. Without it the repository of the apply deps is used.
+    local: Option<Box<dyn OpenApiLocalRepository>>,
 }
 
 type LockMap =
@@ -135,6 +139,27 @@ impl OpenApiSyncService {
             secrets,
             clock: Arc::new(Utc::now),
             apply_deps: None,
+            local: None,
+        }
+    }
+
+    /// Adds the repository of the local state, where the interval and the check timing live.
+    pub fn with_local(mut self, local: Box<dyn OpenApiLocalRepository>) -> Self {
+        self.local = Some(local);
+        self
+    }
+
+    /// The local state repository: the one given to `with_local`, else the apply deps' one.
+    /// A service with neither refuses, so timing is never dropped without a word.
+    pub(crate) fn local_repo(&self) -> DomainResult<&dyn OpenApiLocalRepository> {
+        if let Some(local) = &self.local {
+            return Ok(local.as_ref());
+        }
+        match &self.apply_deps {
+            Some(deps) => Ok(deps.locals.as_ref()),
+            None => Err(DomainError::Internal(
+                "The local sync state is not set up.".to_string(),
+            )),
         }
     }
 
@@ -180,25 +205,47 @@ impl OpenApiSyncService {
             .map(Zeroizing::new)
     }
 
-    /// Records a failed check and returns its outcome.
+    /// Records a failed check in the local state and returns its outcome.
     fn fail(
         &self,
         root: &Path,
-        mut source: OpenApiSource,
-        now: String,
+        now: &DateTime<Utc>,
         code: &str,
         message: String,
         retry_after_secs: Option<u64>,
     ) -> DomainResult<CheckOutcome> {
-        source.last_checked_at = Some(now);
-        source.last_status = Some(SyncStatus::Failed {
+        let locals = self.local_repo()?;
+        let mut local = locals.load(root)?.unwrap_or_default();
+        local.last_checked_at = Some(now.to_rfc3339());
+        local.last_status = Some(SyncStatus::Failed {
             code: code.to_string(),
         });
-        self.sources.save(root, &source)?;
+        local.consecutive_failures = local.consecutive_failures.saturating_add(1);
+        local.not_before = retry_after_secs.map(|secs| {
+            let secs = i64::try_from(clamp_retry_after(secs)).unwrap_or(0);
+            (*now + chrono::Duration::seconds(secs)).to_rfc3339()
+        });
+        locals.save(root, &local)?;
         Ok(CheckOutcome::Failed {
             message,
             retry_after_secs,
         })
+    }
+
+    /// Records a finished check in the local state. A success resets the failure state.
+    fn record_success(
+        &self,
+        root: &Path,
+        now: &DateTime<Utc>,
+        status: SyncStatus,
+    ) -> DomainResult<()> {
+        let locals = self.local_repo()?;
+        let mut local = locals.load(root)?.unwrap_or_default();
+        local.last_checked_at = Some(now.to_rfc3339());
+        local.last_status = Some(status);
+        local.consecutive_failures = 0;
+        local.not_before = None;
+        locals.save(root, &local)
     }
 
     /// True when the pending hash has its file and the file matches. No pending hash is fine.
@@ -219,6 +266,7 @@ impl OpenApiSyncService {
 
     pub async fn check(&self, collection_root: &Path) -> DomainResult<CheckOutcome> {
         self.settle(collection_root)?;
+        self.local_repo()?;
         // Rule 1: a source file is required. Only a GitHub location gets a token.
         let mut source = self.load(collection_root)?;
         let read = match source.location {
@@ -231,7 +279,7 @@ impl OpenApiSyncService {
             _ => None,
         };
         let token_sent = token.is_some();
-        let now = (self.clock)().to_rfc3339();
+        let now = (self.clock)();
 
         // Rule 2: send the stored validators.
         // A pending hash without its file would make a 304 answer stick forever, so the
@@ -275,8 +323,7 @@ impl OpenApiSyncService {
                 };
                 return self.fail(
                     collection_root,
-                    source,
-                    now,
+                    &now,
                     failure_code(&failure),
                     message,
                     retry,
@@ -284,24 +331,25 @@ impl OpenApiSyncService {
             }
             // Rule 3: the server says nothing changed since the validators.
             Ok(SpecFetchOutcome::NotModified) => {
-                source.last_checked_at = Some(now);
                 if !self.pending_is_sound(collection_root, &source) {
                     // The pending copy is gone, so there is nothing to keep. Forget the
                     // validators, and the next check fetches the spec again.
                     source.etag = None;
                     source.last_modified = None;
                     source.pending_sha256 = None;
+                    self.sources.save(collection_root, &source)?;
                 }
-                let outcome = if let Some(pending) = source.pending_sha256.clone() {
-                    source.last_status = Some(SyncStatus::Changed);
-                    CheckOutcome::Changed {
-                        spec_sha256: pending,
-                    }
+                let (outcome, status) = if let Some(pending) = source.pending_sha256.clone() {
+                    (
+                        CheckOutcome::Changed {
+                            spec_sha256: pending,
+                        },
+                        SyncStatus::Changed,
+                    )
                 } else {
-                    source.last_status = Some(SyncStatus::Unchanged);
-                    CheckOutcome::Unchanged
+                    (CheckOutcome::Unchanged, SyncStatus::Unchanged)
                 };
-                self.sources.save(collection_root, &source)?;
+                self.record_success(collection_root, &now, status)?;
                 return Ok(outcome);
             }
             Ok(SpecFetchOutcome::Fetched {
@@ -316,8 +364,7 @@ impl OpenApiSyncService {
         if let Err(e) = check_spec_text(&body) {
             return self.fail(
                 collection_root,
-                source,
-                now,
+                &now,
                 "not_a_spec",
                 capitalize(&e.to_string()),
                 None,
@@ -325,7 +372,6 @@ impl OpenApiSyncService {
         }
 
         let hash = sha256_hex(&body);
-        source.last_checked_at = Some(now);
         source.etag = etag;
         source.last_modified = last_modified;
 
@@ -333,9 +379,9 @@ impl OpenApiSyncService {
         if hash == source.spec_sha256 {
             // Save first: a leftover pending file is harmless, a hash without a file is not.
             source.pending_sha256 = None;
-            source.last_status = Some(SyncStatus::Unchanged);
             self.sources.save(collection_root, &source)?;
             self.sources.clear_pending(collection_root)?;
+            self.record_success(collection_root, &now, SyncStatus::Unchanged)?;
             return Ok(CheckOutcome::Unchanged);
         }
 
@@ -347,18 +393,28 @@ impl OpenApiSyncService {
             self.sources.save_pending(collection_root, &body)?;
             source.pending_sha256 = Some(hash.clone());
         }
-        source.last_status = Some(SyncStatus::Changed);
         self.sources.save(collection_root, &source)?;
+        self.record_success(collection_root, &now, SyncStatus::Changed)?;
         Ok(CheckOutcome::Changed { spec_sha256: hash })
     }
 
     pub fn status(&self, collection_root: &Path) -> DomainResult<SyncStatusView> {
         let source = self.load(collection_root)?;
+        let local: OpenApiLocalState = self
+            .local_repo()?
+            .load(collection_root)?
+            .unwrap_or_default();
+        // The legacy source timing is only a fallback until the local state has a check.
+        let (last_checked_at, last_status) = if local.last_checked_at.is_some() {
+            (local.last_checked_at.clone(), local.last_status.clone())
+        } else {
+            (source.last_checked_at.clone(), source.last_status.clone())
+        };
         Ok(SyncStatusView {
             location: source.location.display_url(),
-            interval: source.sync_interval,
-            last_checked_at: source.last_checked_at.clone(),
-            last_status: source.last_status.clone(),
+            interval: local.sync_interval,
+            last_checked_at,
+            last_status,
             has_pending: source.pending_sha256.is_some(),
             has_token: self.stored_token(&source).is_some(),
         })
@@ -368,9 +424,12 @@ impl OpenApiSyncService {
         self.settle(collection_root)?;
         let lock = collection_lock(collection_root);
         let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
-        let mut source = self.load(collection_root)?;
-        source.sync_interval = interval;
-        self.sources.save(collection_root, &source)
+        // The source file must exist, so a stray folder gets no local state.
+        self.load(collection_root)?;
+        let locals = self.local_repo()?;
+        let mut local = locals.load(collection_root)?.unwrap_or_default();
+        local.sync_interval = interval;
+        locals.save(collection_root, &local)
     }
 
     pub fn set_token(&self, collection_root: &Path, token: &str) -> DomainResult<()> {
@@ -409,7 +468,7 @@ impl OpenApiSyncService {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use rocket_infra::FsOpenApiSourceRepo;
+    use rocket_infra::{FsOpenApiLocalRepo, FsOpenApiSourceRepo};
     use std::collections::HashMap;
     use std::collections::VecDeque;
     use std::sync::Mutex;
@@ -597,6 +656,7 @@ mod tests {
                 Box::new(FsOpenApiSourceRepo),
                 Arc::clone(&secrets) as Arc<dyn SecretStore>,
             )
+            .with_local(Box::new(FsOpenApiLocalRepo))
             .with_clock(Arc::new(fixed_now));
             Self {
                 dir,
@@ -613,6 +673,15 @@ mod tests {
                 .load(self.root())
                 .expect("load")
                 .expect("source")
+        }
+        fn local(&self) -> OpenApiLocalState {
+            FsOpenApiLocalRepo
+                .load(self.root())
+                .expect("load")
+                .unwrap_or_default()
+        }
+        fn source_bytes(&self) -> Vec<u8> {
+            std::fs::read(self.root().join(".rocket/openapi-source.yml")).expect("source file")
         }
         fn pending(&self) -> Option<Vec<u8>> {
             FsOpenApiSourceRepo
@@ -643,9 +712,9 @@ mod tests {
             Some("Mon, 01 Jan 2026 00:00:00 GMT")
         );
         assert_eq!(req.max_bytes, DEFAULT_MAX_SPEC_BYTES);
-        let s = f.load();
-        assert_eq!(s.last_checked_at, Some(fixed_now().to_rfc3339()));
-        assert_eq!(s.last_status, Some(SyncStatus::Unchanged));
+        let l = f.local();
+        assert_eq!(l.last_checked_at, Some(fixed_now().to_rfc3339()));
+        assert_eq!(l.last_status, Some(SyncStatus::Unchanged));
     }
 
     #[tokio::test]
@@ -684,7 +753,7 @@ mod tests {
         assert_eq!(s.spec_sha256, before.spec_sha256);
         assert_eq!(s.operations, before.operations);
         assert_eq!(s.pending_sha256, Some(hash));
-        assert_eq!(s.last_status, Some(SyncStatus::Changed));
+        assert_eq!(f.local().last_status, Some(SyncStatus::Changed));
         assert_eq!(s.etag.as_deref(), Some("\"v2\""));
     }
 
@@ -727,7 +796,7 @@ mod tests {
         let out = f.svc.check(f.root()).await.expect("second");
         assert!(matches!(out, CheckOutcome::Changed { .. }), "{out:?}");
         assert_eq!(f.pending(), Some(changed("a")));
-        assert_eq!(f.load().last_status, Some(SyncStatus::Changed));
+        assert_eq!(f.local().last_status, Some(SyncStatus::Changed));
     }
 
     #[tokio::test]
@@ -757,9 +826,10 @@ mod tests {
         assert_eq!(s.spec_sha256, src.spec_sha256);
         assert_eq!(s.pending_sha256, src.pending_sha256);
         assert_eq!(f.pending(), Some(b"kept".to_vec()));
-        assert_eq!(s.last_checked_at, Some(fixed_now().to_rfc3339()));
+        let l = f.local();
+        assert_eq!(l.last_checked_at, Some(fixed_now().to_rfc3339()));
         assert_eq!(
-            s.last_status,
+            l.last_status,
             Some(SyncStatus::Failed {
                 code: "not_a_spec".into()
             })
@@ -801,9 +871,10 @@ mod tests {
                 other => panic!("{other:?}"),
             }
             let s = f.load();
-            assert_eq!(s.last_checked_at, Some(fixed_now().to_rfc3339()));
+            let l = f.local();
+            assert_eq!(l.last_checked_at, Some(fixed_now().to_rfc3339()));
             assert_eq!(
-                s.last_status,
+                l.last_status,
                 Some(SyncStatus::Failed { code: code.into() })
             );
             assert_eq!(s.etag, src.etag);
@@ -924,6 +995,7 @@ mod tests {
             Box::new(FsOpenApiSourceRepo),
             Arc::new(LockedSecrets),
         )
+        .with_local(Box::new(FsOpenApiLocalRepo))
         .with_clock(Arc::new(fixed_now));
         (dir, fetcher, svc)
     }
@@ -971,7 +1043,8 @@ mod tests {
             Arc::new(SharedFetcher(Arc::clone(&fetcher))),
             Box::new(FlakyRepo(Arc::clone(&fail))),
             Arc::new(MemSecrets::default()),
-        );
+        )
+        .with_local(Box::new(FsOpenApiLocalRepo));
         fetcher.push(fetched(fixture(), "\"v2\""));
         assert!(svc.check(dir.path()).await.is_err());
         // The failed save left the hash and the file in step.
@@ -1021,7 +1094,7 @@ mod tests {
         f.svc
             .set_interval(f.root(), SyncInterval::Daily)
             .expect("interval");
-        assert_eq!(f.load().sync_interval, SyncInterval::Daily);
+        assert_eq!(f.local().sync_interval, SyncInterval::Daily);
         f.svc.set_token(f.root(), TOKEN).expect("token");
         f.svc.clear_token(f.root()).expect("clear");
         assert!(!f.svc.status(f.root()).expect("status").has_token);
@@ -1031,8 +1104,10 @@ mod tests {
     fn status_reports_pending_and_token_flags() {
         let mut src = source(github());
         src.pending_sha256 = Some("abc".into());
-        src.sync_interval = SyncInterval::Weekly;
         let f = Fixture::new(src);
+        f.svc
+            .set_interval(f.root(), SyncInterval::Weekly)
+            .expect("interval");
         let s = f.svc.status(f.root()).expect("status");
         assert!(s.has_pending);
         assert!(!s.has_token);
@@ -1049,7 +1124,117 @@ mod tests {
             Arc::new(SharedFetcher(Arc::new(FakeFetcher::default()))),
             Box::new(FsOpenApiSourceRepo),
             Arc::new(MemSecrets::default()),
+        )
+        .with_local(Box::new(FsOpenApiLocalRepo));
+        assert!(svc.check(dir.path()).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn check_writes_timing_to_the_local_state_not_the_source() {
+        let f = Fixture::new(source(github()));
+        let before = f.source_bytes();
+        f.fetcher.push(Ok(SpecFetchOutcome::NotModified));
+        f.svc.check(f.root()).await.expect("check");
+        assert_eq!(f.source_bytes(), before);
+        assert_eq!(f.local().last_checked_at, Some(fixed_now().to_rfc3339()));
+    }
+
+    #[tokio::test]
+    async fn failure_counts_and_success_resets() {
+        let f = Fixture::new(source(github()));
+        f.fetcher.push(Err(SpecFetchFailure::NotFound));
+        f.fetcher.push(Err(SpecFetchFailure::Network("x".into())));
+        f.svc.check(f.root()).await.expect("first");
+        assert_eq!(f.local().consecutive_failures, 1);
+        f.svc.check(f.root()).await.expect("second");
+        assert_eq!(f.local().consecutive_failures, 2);
+        assert_eq!(f.local().not_before, None);
+        f.fetcher.push(Ok(SpecFetchOutcome::NotModified));
+        f.svc.check(f.root()).await.expect("third");
+        let l = f.local();
+        assert_eq!(l.consecutive_failures, 0);
+        assert_eq!(l.not_before, None);
+        assert_eq!(l.last_status, Some(SyncStatus::Unchanged));
+    }
+
+    #[tokio::test]
+    async fn rate_limit_sets_not_before() {
+        let f = Fixture::new(source(github()));
+        f.fetcher.push(Err(SpecFetchFailure::RateLimited {
+            retry_after_secs: Some(600),
+        }));
+        f.svc.check(f.root()).await.expect("check");
+        let expected = (fixed_now() + chrono::Duration::seconds(600)).to_rfc3339();
+        assert_eq!(f.local().not_before, Some(expected));
+        // A success clears it.
+        f.fetcher.push(Ok(SpecFetchOutcome::NotModified));
+        f.svc.check(f.root()).await.expect("check");
+        assert_eq!(f.local().not_before, None);
+    }
+
+    #[test]
+    fn set_interval_writes_the_local_state() {
+        let f = Fixture::new(source(github()));
+        let before = f.source_bytes();
+        f.svc
+            .set_interval(f.root(), SyncInterval::Hourly)
+            .expect("interval");
+        assert_eq!(f.local().sync_interval, SyncInterval::Hourly);
+        assert_eq!(f.source_bytes(), before);
+        f.svc
+            .set_interval(f.root(), SyncInterval::Off)
+            .expect("interval");
+        assert_eq!(f.local().sync_interval, SyncInterval::Off);
+    }
+
+    #[test]
+    fn status_falls_back_to_legacy_source_timing() {
+        let f = Fixture::new(source(github()));
+        let mut yaml = String::from_utf8(f.source_bytes()).expect("utf8");
+        yaml.push_str(
+            "last_checked_at: '2026-10-25T12:00:00+00:00'\nlast_status:\n  state: changed\n",
+        );
+        std::fs::write(f.root().join(".rocket/openapi-source.yml"), yaml).expect("write");
+        let s = f.svc.status(f.root()).expect("status");
+        assert_eq!(
+            s.last_checked_at.as_deref(),
+            Some("2026-10-25T12:00:00+00:00")
+        );
+        assert_eq!(s.last_status, Some(SyncStatus::Changed));
+        // Once the local state has a check, it wins.
+        let mut l = OpenApiLocalState::default();
+        l.last_checked_at = Some(fixed_now().to_rfc3339());
+        l.last_status = Some(SyncStatus::Unchanged);
+        FsOpenApiLocalRepo.save(f.root(), &l).expect("save");
+        let s = f.svc.status(f.root()).expect("status");
+        assert_eq!(s.last_status, Some(SyncStatus::Unchanged));
+    }
+
+    #[test]
+    fn a_committed_hourly_source_does_not_turn_the_interval_on() {
+        let f = Fixture::new(source(github()));
+        let mut yaml = String::from_utf8(f.source_bytes()).expect("utf8");
+        yaml.push_str("sync_interval: hourly\n");
+        std::fs::write(f.root().join(".rocket/openapi-source.yml"), yaml).expect("write");
+        assert_eq!(f.load().sync_interval, SyncInterval::Hourly);
+        let s = f.svc.status(f.root()).expect("status");
+        assert_eq!(s.interval, SyncInterval::Off);
+    }
+
+    #[tokio::test]
+    async fn without_a_local_repository_check_and_set_interval_fail() {
+        let dir = TempDir::new().expect("tempdir");
+        FsOpenApiSourceRepo
+            .save(dir.path(), &source(github()))
+            .expect("seed");
+        let fetcher = Arc::new(FakeFetcher::default());
+        let svc = OpenApiSyncService::new(
+            Arc::new(SharedFetcher(Arc::clone(&fetcher))),
+            Box::new(FsOpenApiSourceRepo),
+            Arc::new(MemSecrets::default()),
         );
         assert!(svc.check(dir.path()).await.is_err());
+        assert!(svc.set_interval(dir.path(), SyncInterval::Daily).is_err());
+        assert!(fetcher.requests.lock().expect("lock").is_empty());
     }
 }

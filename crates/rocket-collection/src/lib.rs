@@ -6,6 +6,7 @@ pub mod graphql_request;
 pub mod file_tx;
 pub mod openapi_baseline;
 pub mod openapi_local;
+pub mod openapi_schedule;
 pub mod openapi_source;
 pub mod grpc_request;
 pub mod repository;
@@ -39,6 +40,9 @@ pub use file_tx::{
     validate_rel_path, CollectionFileTx, CollectionFileTxFactory, RecoveryOutcome,
 };
 pub use openapi_local::{OpenApiLocalRepository, OpenApiLocalState, LOCAL_STATE_FILE_VERSION};
+pub use openapi_schedule::{
+    backoff_secs, clamp_retry_after, jitter_secs, next_check_at, SchedulePlan,
+};
 pub use request_kind::RequestKind;
 pub use request_renderer::RequestRenderer;
 pub use request_summary::RequestSummary;

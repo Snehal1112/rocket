@@ -3,7 +3,7 @@
 use super::*;
 use crate::openapi_sync_service::{sha256_hex, CheckOutcome};
 use async_trait::async_trait;
-use rocket_collection::openapi_source::OpenApiSourceRepository;
+use rocket_collection::openapi_source::{OpenApiSourceRepository, SyncInterval, SyncStatus};
 use rocket_environment::SecretStore;
 use rocket_http::spec_fetch::{SpecFetchFailure, SpecFetchOutcome, SpecFetchRequest, SpecFetcher};
 use rocket_import::{
@@ -446,6 +446,29 @@ async fn apply_changes_the_files_and_the_state_together() {
     w.assert_fully_applied();
     w.no_transaction_leftovers();
     assert!(w.root.join(".rocket/openapi-local.json").is_file());
+}
+
+#[tokio::test]
+async fn apply_keeps_the_timing_fields() {
+    let w = world().await;
+    w.svc
+        .set_interval(&w.root, SyncInterval::Daily)
+        .expect("interval");
+    w.check_with(v2()).await;
+    let before = w.svc.local_state(&w.name).expect("local");
+    assert_eq!(before.sync_interval, SyncInterval::Daily);
+    assert!(before.last_checked_at.is_some());
+    let plan = w.plan();
+    w.svc
+        .apply(&w.name, &w.approve(&plan, &[]))
+        .await
+        .expect("apply");
+    let after = w.svc.local_state(&w.name).expect("local");
+    assert_eq!(after.sync_interval, SyncInterval::Daily);
+    assert_eq!(after.last_checked_at, before.last_checked_at);
+    assert_eq!(after.consecutive_failures, before.consecutive_failures);
+    assert_eq!(after.not_before, before.not_before);
+    assert_eq!(after.last_status, Some(SyncStatus::Unchanged));
 }
 
 #[tokio::test]

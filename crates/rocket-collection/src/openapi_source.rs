@@ -29,12 +29,14 @@ pub struct OpenApiSource {
     /// Stable id of this source, used to key the keychain token. Empty in files from Plan 2.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub source_id: String,
-    #[serde(default, skip_serializing_if = "SyncInterval::is_off")]
+    /// Legacy, read only. The interval now lives in the local state and this value is ignored.
+    #[serde(default, skip_serializing)]
     pub sync_interval: SyncInterval,
-    /// RFC 3339 UTC time of the last check.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Legacy, read only. A fallback for the status view until the local state has a check.
+    #[serde(default, skip_serializing)]
     pub last_checked_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Legacy, read only. A fallback for the status view until the local state has a check.
+    #[serde(default, skip_serializing)]
     pub last_status: Option<SyncStatus>,
     /// Hex SHA-256 of the newer spec kept in the pending copy, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -61,7 +63,7 @@ pub enum SyncInterval {
 }
 
 impl SyncInterval {
-    fn is_off(&self) -> bool {
+    pub(crate) fn is_off(&self) -> bool {
         matches!(self, SyncInterval::Off)
     }
 
@@ -86,24 +88,6 @@ impl SyncInterval {
             "monthly" => Some(SyncInterval::Monthly),
             _ => None,
         }
-    }
-
-    /// True when a check should run now. An unreadable or future last check counts as due.
-    pub fn is_due(self, last_checked_at: Option<&str>, now: chrono::DateTime<chrono::Utc>) -> bool {
-        let Some(secs) = self.as_secs() else {
-            return false;
-        };
-        let Some(last) = last_checked_at else {
-            return true;
-        };
-        let Ok(last) = chrono::DateTime::parse_from_rfc3339(last) else {
-            return true;
-        };
-        let elapsed = now.signed_duration_since(last.with_timezone(&chrono::Utc));
-        let Ok(secs) = i64::try_from(secs) else {
-            return true;
-        };
-        elapsed.num_seconds() < 0 || elapsed.num_seconds() >= secs
     }
 }
 
@@ -190,17 +174,6 @@ impl SpecLocation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{DateTime, Duration, Utc};
-
-    fn now() -> DateTime<Utc> {
-        DateTime::parse_from_rfc3339("2026-10-26T12:00:00Z")
-            .expect("date")
-            .with_timezone(&Utc)
-    }
-
-    fn ago(d: Duration) -> String {
-        (now() - d).to_rfc3339()
-    }
 
     #[test]
     fn old_source_file_loads_with_defaults() {
@@ -214,6 +187,18 @@ mod tests {
     }
 
     #[test]
+    fn legacy_timing_fields_are_read_but_never_written() {
+        let yaml = "version: 1\nlocation:\n  kind: https\n  url: https://example.com/a.json\nsync_interval: hourly\nlast_checked_at: '2026-10-26T12:00:00+00:00'\nlast_status:\n  state: changed\n";
+        let source: OpenApiSource = serde_yaml::from_str(yaml).expect("parse");
+        assert_eq!(source.sync_interval, SyncInterval::Hourly);
+        assert_eq!(source.last_status, Some(SyncStatus::Changed));
+        let out = serde_yaml::to_string(&source).expect("write");
+        assert!(!out.contains("sync_interval"), "{out}");
+        assert!(!out.contains("last_checked_at"), "{out}");
+        assert!(!out.contains("last_status"), "{out}");
+    }
+
+    #[test]
     fn interval_seconds() {
         assert_eq!(SyncInterval::Off.as_secs(), None);
         assert_eq!(SyncInterval::Hourly.as_secs(), Some(3600));
@@ -223,26 +208,6 @@ mod tests {
         assert_eq!(SyncInterval::parse("daily"), Some(SyncInterval::Daily));
         assert_eq!(SyncInterval::parse("Daily"), None);
         assert_eq!(SyncInterval::parse(""), None);
-    }
-
-    #[test]
-    fn is_due_follows_the_interval() {
-        let n = now();
-        assert!(!SyncInterval::Off.is_due(None, n));
-        assert!(!SyncInterval::Off.is_due(Some(&ago(Duration::days(900))), n));
-        assert!(SyncInterval::Hourly.is_due(None, n));
-        assert!(!SyncInterval::Hourly.is_due(Some(&ago(Duration::minutes(59))), n));
-        assert!(SyncInterval::Hourly.is_due(Some(&ago(Duration::minutes(60))), n));
-        assert!(!SyncInterval::Monthly.is_due(Some(&ago(Duration::days(29))), n));
-        assert!(SyncInterval::Monthly.is_due(Some(&ago(Duration::days(30))), n));
-    }
-
-    #[test]
-    fn is_due_when_the_last_check_is_unreadable_or_in_the_future() {
-        let n = now();
-        assert!(SyncInterval::Daily.is_due(Some("not a date"), n));
-        let future = (n + Duration::hours(1)).to_rfc3339();
-        assert!(SyncInterval::Daily.is_due(Some(&future), n));
     }
 
     #[test]

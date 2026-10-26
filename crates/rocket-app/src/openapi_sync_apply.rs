@@ -9,7 +9,7 @@ use std::sync::Arc;
 use rocket_collection::file_tx::{CollectionFileTx, CollectionFileTxFactory, RecoveryOutcome};
 use rocket_collection::openapi_baseline::{OpenApiBaseline, OpenApiBaselineRepository};
 use rocket_collection::openapi_local::{OpenApiLocalRepository, OpenApiLocalState};
-use rocket_collection::openapi_source::OpenApiSource;
+use rocket_collection::openapi_source::{OpenApiSource, SyncStatus};
 use rocket_collection::{CollectionItem, CollectionRepository, Folder};
 use rocket_import::{
     build_apply, ApplyInputs, ApplyReport, CurrentRequest, FileChangeKind, ParsedSpec,
@@ -139,7 +139,7 @@ impl OpenApiSyncService {
         flatten(&collection.root, "", &mut current);
         Ok(Loaded {
             baseline: deps.baselines.load(root)?,
-            local: deps.locals.load(root)?.unwrap_or_default(),
+            local: self.local_repo()?.load(root)?.unwrap_or_default(),
             existing_paths: deps.tx.list_files(root)?,
             settings: repo.get_settings(name)?,
             source,
@@ -185,7 +185,7 @@ impl OpenApiSyncService {
             .find(|v| v.key == BASE_URL_KEY)
             .map(|v| v.value.clone());
         let renderer = (deps.renderer)(&root);
-        let output = build_apply(&ApplyInputs {
+        let mut output = build_apply(&ApplyInputs {
             plan_inputs: SyncInputs {
                 source: &loaded.source,
                 baseline: loaded.baseline.as_ref(),
@@ -202,6 +202,16 @@ impl OpenApiSyncService {
             settings: &loaded.settings,
         })
         .map_err(|e| DomainError::InvalidInput(e.to_string()))?;
+
+        // The apply owns the skips only. The interval and the check timing stay as loaded.
+        let skips = std::mem::take(&mut output.local.skips);
+        output.local = OpenApiLocalState {
+            skips,
+            ..loaded.local.clone()
+        };
+        if output.finalized {
+            output.local.last_status = Some(SyncStatus::Unchanged);
+        }
 
         let extra = vec![
             (SOURCE_REL, Some(to_yaml(&output.source)?)),
@@ -294,7 +304,7 @@ impl OpenApiSyncService {
         let repo: &dyn CollectionRepository =
             pinned.as_deref().unwrap_or(deps.collections.as_ref());
         let root = repo.collection_root_path(collection)?;
-        Ok(deps.locals.load(&root)?.unwrap_or_default())
+        Ok(self.local_repo()?.load(&root)?.unwrap_or_default())
     }
 }
 
