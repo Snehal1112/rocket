@@ -144,11 +144,14 @@ impl OpenApiSyncScheduler {
                 continue;
             }
             ran += 1;
-            // Each check gets its own task, so a panic fails that check, not the loop. The
+            // Each check gets its own blocking-pool thread, so a panic fails that check, not the
+            // loop, and the lock waits and file work of a check never hold a runtime worker. The
             // loop awaits it, which keeps one check at a time and never cancels it on stop.
             let service = (self.factory)();
             let root = target.root.clone();
-            let result = match tokio::spawn(async move { service.check(&root).await }).await {
+            let handle = tokio::runtime::Handle::current();
+            let task = tokio::task::spawn_blocking(move || handle.block_on(service.check(&root)));
+            let result = match task.await {
                 Ok(result) => result,
                 Err(_) => {
                     tracing::warn!(code = "check_panicked", "sync check task failed");

@@ -65,7 +65,7 @@ fn editor_save_waits_for_a_running_apply_and_the_reverse() {
 
     // Forward: an apply holds the lock, the editor save waits and then lands.
     let lock = collection_lock(&root);
-    let guard = lock.lock().expect("apply lock");
+    let guard = lock.lock();
     let (done_tx, done_rx) = channel();
     let saver = {
         let svc = Arc::clone(&svc);
@@ -111,12 +111,12 @@ fn editor_save_waits_for_a_running_apply_and_the_reverse() {
     };
     inside_rx.recv_timeout(LONG).expect("the save is running");
     assert!(
-        lock.try_lock().is_err(),
+        lock.try_lock().is_none(),
         "an apply must wait for a running save"
     );
     release_tx.send(()).expect("release");
     saver.join().expect("join");
-    assert!(lock.try_lock().is_ok(), "the lock is free again");
+    assert!(lock.try_lock().is_some(), "the lock is free again");
 }
 
 #[test]
@@ -141,7 +141,7 @@ fn a_method_that_calls_another_locked_method_does_not_deadlock() {
     let name = rx.recv_timeout(LONG).expect("no deadlock");
     worker.join().expect("join");
     assert_eq!(name, "Login copy");
-    assert!(collection_lock(&root).try_lock().is_ok());
+    assert!(collection_lock(&root).try_lock().is_some());
 }
 
 #[test]
@@ -190,7 +190,7 @@ fn a_trust_toggle_waits_for_the_collection_lock_and_both_updates_land() {
     ));
     // An apply holds the lock and rewrites the settings file meanwhile.
     let lock = collection_lock(&root);
-    let guard = lock.lock().expect("apply lock");
+    let guard = lock.lock();
     let (tx, rx) = channel();
     let toggler = {
         let trust = Arc::clone(&trust);

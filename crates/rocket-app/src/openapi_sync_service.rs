@@ -219,7 +219,7 @@ impl OpenApiSyncService {
     /// the link parser (two such locations could display alike).
     pub fn grant_consent(&self, root: &Path, expected_location: &str) -> DomainResult<()> {
         let lock = collection_lock(root);
-        let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = lock.lock();
         let source = self.load(root)?;
         if source.location.display_url() != expected_location {
             return Err(DomainError::Conflict(
@@ -239,7 +239,7 @@ impl OpenApiSyncService {
         let location =
             parse_spec_url(link).map_err(|e| DomainError::InvalidInput(e.to_string()))?;
         let lock = collection_lock(root);
-        let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = lock.lock();
         let source = self.load(root)?;
         // The typed link must be the source's location itself, not just look like it.
         if source.location != location {
@@ -253,7 +253,7 @@ impl OpenApiSyncService {
     /// Withdraws the approval of this collection folder on this machine.
     pub fn revoke_consent(&self, root: &Path) -> DomainResult<()> {
         let lock = collection_lock(root);
-        let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = lock.lock();
         let source = self.load(root)?;
         let store = self.consent.as_ref().ok_or_else(|| {
             DomainError::Internal("The sync approvals are not set up.".to_string())
@@ -539,7 +539,7 @@ impl OpenApiSyncService {
         // The fetch can take long, so the lock was not held. Reload the source now and apply
         // only what the check owns, so a change made by an apply meanwhile is not undone.
         let lock = collection_lock(collection_root);
-        let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = lock.lock();
         let mut source = self.load(collection_root)?;
         // A source file rewritten during the fetch is not the one that was approved, so
         // nothing from this fetch is saved.
@@ -828,7 +828,7 @@ impl OpenApiSyncService {
     pub fn set_interval(&self, collection_root: &Path, interval: SyncInterval) -> DomainResult<()> {
         self.settle(collection_root)?;
         let lock = collection_lock(collection_root);
-        let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = lock.lock();
         // The source file must exist, so a stray folder gets no local state.
         let source = self.load(collection_root)?;
         // Turning checks on needs an approval of the current location. Off always works.
@@ -846,7 +846,7 @@ impl OpenApiSyncService {
     pub fn set_token(&self, collection_root: &Path, token: &str) -> DomainResult<()> {
         self.settle(collection_root)?;
         let lock = collection_lock(collection_root);
-        let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = lock.lock();
         let mut source = self.load(collection_root)?;
         if !matches!(source.location, SpecLocation::Github { .. }) {
             return Err(tokens_need_github());

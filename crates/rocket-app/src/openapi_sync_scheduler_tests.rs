@@ -99,8 +99,10 @@ impl SpecFetcher for SharedFetcher {
             gate.started.notify_one();
             gate.go.notified().await;
         }
-        // A short pause lets a second concurrent check show up if the loop allowed one.
-        tokio::time::sleep(Duration::from_millis(5)).await;
+        // A short pause lets a second concurrent check show up if the loop allowed one. Checks
+        // run on a blocking thread, where paused test time never advances, so this is a real
+        // sleep.
+        std::thread::sleep(Duration::from_millis(5));
         f.in_flight.fetch_sub(1, Ordering::SeqCst);
         let answer = *f.answer.lock().expect("lock");
         match answer {
@@ -575,7 +577,9 @@ async fn stop_does_not_cancel_a_running_check() {
     *w.fetcher.gate.lock().expect("lock") = Some(Arc::clone(&gate));
     let events = Arc::new(Recorder::default());
     let handle = w.scheduler(&events).start();
-    tokio::time::sleep(Duration::from_secs(31)).await;
+    // The check runs on a blocking thread, and paused time does not advance while one is
+    // running. So this waits exactly the launch delay and no more.
+    tokio::time::sleep(Duration::from_secs(30)).await;
     gate.started.notified().await;
     handle.stop();
     gate.go.notify_one();

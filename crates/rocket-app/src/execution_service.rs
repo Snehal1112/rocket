@@ -7136,7 +7136,7 @@ mod tests {
         ));
         // An apply holds the lock, so the script write must wait and then land.
         let lock = crate::collection_lock::collection_lock(dir.path());
-        let guard = lock.lock().expect("apply lock");
+        let guard = lock.lock();
         let (tx, rx) = std::sync::mpsc::channel();
         let writer = {
             let svc = Arc::clone(&svc);

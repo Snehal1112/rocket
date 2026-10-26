@@ -75,7 +75,7 @@ impl CollectionService {
         };
         let (la, lb) = (collection_lock(&root_a), collection_lock(&root_b));
         if Arc::ptr_eq(&la, &lb) {
-            let _guard = la.lock().unwrap_or_else(|e| e.into_inner());
+            let _guard = la.lock();
             return f();
         }
         let (first, second) = if root_a <= root_b {
@@ -83,8 +83,8 @@ impl CollectionService {
         } else {
             (&lb, &la)
         };
-        let _g1 = first.lock().unwrap_or_else(|e| e.into_inner());
-        let _g2 = second.lock().unwrap_or_else(|e| e.into_inner());
+        let _g1 = first.lock();
+        let _g2 = second.lock();
         f()
     }
 
