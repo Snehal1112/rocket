@@ -6,10 +6,12 @@
 //! Log lines carry codes and counts only.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
+use rocket_shared::error::DomainError;
 use rocket_shared::events::{DomainEvent, EventPublisher};
 use tokio::sync::watch;
 
@@ -103,7 +105,7 @@ impl OpenApiSyncScheduler {
     }
 
     async fn run(self, mut stop: watch::Receiver<bool>) {
-        let mut errors: HashMap<String, ErrorBackoff> = HashMap::new();
+        let mut errors: HashMap<PathBuf, ErrorBackoff> = HashMap::new();
         if !sleep_or_stop(&mut stop, self.config.launch_delay).await {
             return;
         }
@@ -115,7 +117,11 @@ impl OpenApiSyncScheduler {
         }
     }
 
-    async fn tick(&self, errors: &mut HashMap<String, ErrorBackoff>, stop: &watch::Receiver<bool>) {
+    async fn tick(
+        &self,
+        errors: &mut HashMap<PathBuf, ErrorBackoff>,
+        stop: &watch::Receiver<bool>,
+    ) {
         let now = (self.clock)();
         let factory = Arc::clone(&self.factory);
         // The due list reads one local file per collection, so it runs off the async threads.
@@ -128,41 +134,48 @@ impl OpenApiSyncScheduler {
         };
         // Forget collections that are no longer due or listed. A held-back one stays due, so
         // its failure count survives until the delay ends and doubles on the next error.
-        errors.retain(|name, _| targets.iter().any(|t| &t.collection == name));
+        errors.retain(|root, _| targets.iter().any(|t| &t.root == root));
         let mut ran = 0usize;
         for target in targets {
             if ran >= self.config.max_checks_per_tick || *stop.borrow() {
                 break;
             }
-            if errors
-                .get(&target.collection)
-                .is_some_and(|e| e.until > now)
-            {
+            if errors.get(&target.root).is_some_and(|e| e.until > now) {
                 continue;
             }
             ran += 1;
+            // Each check gets its own task, so a panic fails that check, not the loop. The
+            // loop awaits it, which keeps one check at a time and never cancels it on stop.
             let service = (self.factory)();
-            let result = service.check(&target.root).await;
+            let root = target.root.clone();
+            let result = match tokio::spawn(async move { service.check(&root).await }).await {
+                Ok(result) => result,
+                Err(_) => {
+                    tracing::warn!(code = "check_panicked", "sync check task failed");
+                    Err(DomainError::Internal("The sync check stopped.".to_string()))
+                }
+            };
             let status = match result {
                 Ok(CheckOutcome::Unchanged) => {
-                    errors.remove(&target.collection);
+                    errors.remove(&target.root);
                     "unchanged"
                 }
                 Ok(CheckOutcome::Changed { .. }) => {
-                    errors.remove(&target.collection);
+                    errors.remove(&target.root);
                     "changed"
                 }
                 Ok(CheckOutcome::Failed { .. }) => {
-                    errors.remove(&target.collection);
+                    errors.remove(&target.root);
                     "failed"
                 }
                 Err(_) => {
                     let failures = errors
-                        .get(&target.collection)
+                        .get(&target.root)
                         .map_or(1, |e| e.failures.saturating_add(1));
                     let secs = error_backoff_secs(failures);
-                    let until = now + chrono::Duration::seconds(secs);
-                    errors.insert(target.collection.clone(), ErrorBackoff { failures, until });
+                    // The delay starts when the check failed, not when the tick began.
+                    let until = (self.clock)() + chrono::Duration::seconds(secs);
+                    errors.insert(target.root.clone(), ErrorBackoff { failures, until });
                     tracing::debug!(
                         code = "check_error",
                         failures,

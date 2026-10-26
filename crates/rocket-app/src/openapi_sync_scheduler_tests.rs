@@ -60,6 +60,7 @@ struct FakeFetcher {
     in_flight: AtomicUsize,
     max_in_flight: AtomicUsize,
     gate: Mutex<Option<Arc<Gate>>>,
+    panic_once: std::sync::atomic::AtomicBool,
 }
 
 impl FakeFetcher {
@@ -70,6 +71,7 @@ impl FakeFetcher {
             in_flight: AtomicUsize::new(0),
             max_in_flight: AtomicUsize::new(0),
             gate: Mutex::new(None),
+            panic_once: std::sync::atomic::AtomicBool::new(false),
         })
     }
     fn calls(&self) -> usize {
@@ -87,6 +89,9 @@ impl SpecFetcher for SharedFetcher {
     ) -> Result<SpecFetchOutcome, SpecFetchFailure> {
         let f = &self.0;
         f.calls.fetch_add(1, Ordering::SeqCst);
+        if f.panic_once.swap(false, Ordering::SeqCst) {
+            panic!("fetcher panic for a test");
+        }
         let now = f.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
         f.max_in_flight.fetch_max(now, Ordering::SeqCst);
         let gate = f.gate.lock().expect("lock").clone();
@@ -133,7 +138,7 @@ impl SecretStore for NoSecrets {
 /// A transaction factory whose recovery fails for the named collections and counts the tries.
 struct PickyTx {
     inner: FsFileTxFactory,
-    bad: HashSet<String>,
+    bad: Mutex<HashSet<String>>,
     bad_tries: AtomicUsize,
 }
 
@@ -146,7 +151,7 @@ impl CollectionFileTxFactory for PickyTx {
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or_default();
-        if self.bad.contains(name) {
+        if self.bad.lock().expect("lock").contains(name) {
             self.bad_tries.fetch_add(1, Ordering::SeqCst);
             return Err(DomainError::Internal("recovery blocked".into()));
         }
@@ -188,7 +193,7 @@ impl World {
             fetcher: FakeFetcher::new(answer),
             tx: Arc::new(PickyTx {
                 inner: FsFileTxFactory::new(),
-                bad: bad.iter().map(|s| s.to_string()).collect(),
+                bad: Mutex::new(bad.iter().map(|s| s.to_string()).collect()),
                 bad_tries: AtomicUsize::new(0),
             }),
             now: Arc::new(Mutex::new(t0())),
@@ -331,23 +336,26 @@ fn ago(secs: i64) -> DateTime<Utc> {
     t0() - chrono::Duration::seconds(secs)
 }
 
-/// Waits (in virtual time) until the condition holds, giving blocking work real time to finish.
+/// Waits until the condition holds, with a real-time deadline of 10 s. Blocking work runs on
+/// real threads, so each round also gives it a little real time.
 async fn wait_until(cond: impl Fn() -> bool) {
-    for _ in 0..5000 {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
         if cond() {
             return;
         }
         tokio::time::sleep(Duration::from_millis(1)).await;
-        std::thread::sleep(Duration::from_micros(200));
+        std::thread::sleep(std::time::Duration::from_micros(200));
     }
     panic!("condition not reached");
 }
 
-/// Lets the loop run for a short virtual span so an unwanted action would show.
+/// Lets the loop run for about 100 ms of real time so an unwanted action would show.
 async fn settle() {
-    for _ in 0..50 {
+    let end = std::time::Instant::now() + std::time::Duration::from_millis(100);
+    while std::time::Instant::now() < end {
         tokio::time::sleep(Duration::from_millis(1)).await;
-        std::thread::sleep(Duration::from_micros(200));
+        std::thread::sleep(std::time::Duration::from_micros(200));
     }
 }
 
@@ -400,14 +408,14 @@ fn oldest_due_first() {
 }
 
 #[test]
-fn an_unreadable_local_file_is_skipped_not_fatal() {
+fn an_unreadable_local_file_is_listed_first_not_skipped() {
     let w = World::new(Answer::Same, &[]);
     let bad = w.seed("broken", Some(SyncInterval::Hourly), None);
     w.seed("fine", Some(SyncInterval::Hourly), None);
     std::fs::write(bad.join(".rocket/openapi-local.json"), "{ not json").expect("write");
     assert_eq!(
         names(&w.service().due_targets(t0())),
-        vec!["fine".to_string()]
+        vec!["broken".to_string(), "fine".to_string()]
     );
 }
 
@@ -581,4 +589,93 @@ async fn after_a_long_pause_checks_run_in_batches_not_all_at_once() {
     wait_until(|| w.fetcher.calls() >= 12).await;
     settle().await;
     assert_eq!(w.fetcher.calls(), 12);
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unreadable_local_file_gets_failed_and_is_then_held_back() {
+    let w = World::new(Answer::Same, &[]);
+    let bad = w.seed("broken", Some(SyncInterval::Hourly), None);
+    std::fs::write(bad.join(".rocket/openapi-local.json"), "{ not json").expect("write");
+    let events = Arc::new(Recorder::default());
+    let _handle = w.scheduler(&events).start();
+    tokio::time::sleep(Duration::from_secs(31)).await;
+    wait_until(|| events.all().len() == 1).await;
+    assert_eq!(
+        events.all(),
+        vec![("broken".to_string(), "failed".to_string())]
+    );
+    tokio::time::sleep(Duration::from_secs(600)).await;
+    settle().await;
+    assert_eq!(events.all().len(), 1);
+    assert_eq!(w.fetcher.calls(), 0);
+    w.set_now(t0() + chrono::Duration::minutes(16));
+    tokio::time::sleep(Duration::from_secs(120)).await;
+    wait_until(|| events.all().len() == 2).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_panic_in_a_check_fails_that_collection_and_the_next_still_runs() {
+    let w = World::new(Answer::Same, &[]);
+    w.seed("a", Some(SyncInterval::Hourly), None);
+    w.seed("b", Some(SyncInterval::Hourly), None);
+    w.fetcher.panic_once.store(true, Ordering::SeqCst);
+    let events = Arc::new(Recorder::default());
+    let _handle = w.scheduler(&events).start();
+    tokio::time::sleep(Duration::from_secs(31)).await;
+    wait_until(|| events.all().len() == 2).await;
+    let mut statuses: Vec<String> = events.all().into_iter().map(|(_, s)| s).collect();
+    statuses.sort();
+    assert_eq!(
+        statuses,
+        vec!["failed".to_string(), "unchanged".to_string()]
+    );
+    // The loop is still alive: a later collection is checked on a following tick.
+    w.seed("c", Some(SyncInterval::Hourly), None);
+    tokio::time::sleep(Duration::from_secs(61)).await;
+    wait_until(|| events.all().len() == 3).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn stop_during_the_sleep_between_ticks_ends_the_loop() {
+    let w = World::new(Answer::Same, &[]);
+    w.seed("a", Some(SyncInterval::Hourly), None);
+    let events = Arc::new(Recorder::default());
+    let handle = w.scheduler(&events).start();
+    tokio::time::sleep(Duration::from_secs(31)).await;
+    wait_until(|| events.all().len() == 1).await;
+    handle.stop();
+    w.seed("late", Some(SyncInterval::Hourly), None);
+    w.set_now(t0() + chrono::Duration::minutes(5));
+    tokio::time::sleep(Duration::from_secs(300)).await;
+    settle().await;
+    assert_eq!(w.fetcher.calls(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_success_clears_the_error_backoff() {
+    let w = World::new(Answer::Same, &["a"]);
+    w.seed("a", Some(SyncInterval::Hourly), None);
+    let events = Arc::new(Recorder::default());
+    let _handle = w.scheduler(&events).start();
+    let tries = || w.tx.bad_tries.load(Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_secs(31)).await;
+    wait_until(|| tries() == 1).await;
+    // Second error after 15 minutes, so the delay is now 30 minutes.
+    w.set_now(t0() + chrono::Duration::minutes(16));
+    tokio::time::sleep(Duration::from_secs(120)).await;
+    wait_until(|| tries() == 2).await;
+    // The collection heals and a check past the 30 minute delay succeeds.
+    w.tx.bad.lock().expect("lock").clear();
+    w.set_now(t0() + chrono::Duration::minutes(50));
+    tokio::time::sleep(Duration::from_secs(120)).await;
+    wait_until(|| events.all().last().is_some_and(|(_, s)| s == "unchanged")).await;
+    // It breaks again once it is due. The delay starts over at 15 minutes.
+    w.tx.bad.lock().expect("lock").insert("a".to_string());
+    let broken_at = t0() + chrono::Duration::minutes(50 + 70);
+    w.set_now(broken_at);
+    tokio::time::sleep(Duration::from_secs(120)).await;
+    wait_until(|| tries() == 3).await;
+    w.set_now(broken_at + chrono::Duration::minutes(16));
+    tokio::time::sleep(Duration::from_secs(120)).await;
+    wait_until(|| tries() == 4).await;
 }

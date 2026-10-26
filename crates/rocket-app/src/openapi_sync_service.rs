@@ -431,7 +431,10 @@ impl OpenApiSyncService {
     /// The collections of the pinned active workspace whose check is due at `now`, oldest due
     /// first. Timing comes from the local state only, never from the source file's legacy
     /// fields. Without apply deps (where the collection list lives) the list is empty. A
-    /// collection whose files cannot be read is skipped and counted in a debug log. This does
+    /// collection whose local or source file cannot be read is listed first, so its check
+    /// fails before any request and the caller can report and back off; only a collection
+    /// whose path cannot be found is skipped (counted in a debug log). Cost per call is one
+    /// local-state read per collection plus one source read for each enabled one. This does
     /// blocking file reads, so async callers run it through `spawn_blocking`.
     pub fn due_targets(&self, now: DateTime<Utc>) -> Vec<SyncTarget> {
         let (Some(deps), Ok(locals)) = (&self.apply_deps, self.local_repo()) else {
@@ -446,6 +449,9 @@ impl OpenApiSyncService {
         };
         let mut due: Vec<(DateTime<Utc>, SyncTarget)> = Vec::new();
         let mut skipped = 0usize;
+        let mut unreadable: Vec<(DateTime<Utc>, SyncTarget)> = Vec::new();
+        let first = || DateTime::<Utc>::MIN_UTC;
+        let target = |collection: String, root: std::path::PathBuf| SyncTarget { collection, root };
         for summary in names {
             let Ok(root) = repo.collection_root_path(&summary.name) else {
                 skipped += 1;
@@ -455,7 +461,7 @@ impl OpenApiSyncService {
                 Ok(Some(local)) => local,
                 Ok(None) => continue,
                 Err(_) => {
-                    skipped += 1;
+                    unreadable.push((first(), target(summary.name, root)));
                     continue;
                 }
             };
@@ -466,7 +472,7 @@ impl OpenApiSyncService {
                 Ok(Some(source)) => source,
                 Ok(None) => continue,
                 Err(_) => {
-                    skipped += 1;
+                    unreadable.push((first(), target(summary.name, root)));
                     continue;
                 }
             };
@@ -489,9 +495,10 @@ impl OpenApiSyncService {
                 ));
             }
         }
-        if skipped > 0 {
-            tracing::debug!(skipped, "sync targets skipped for unreadable files");
+        if skipped > 0 || !unreadable.is_empty() {
+            tracing::debug!(skipped, unreadable = unreadable.len(), "sync targets with problems");
         }
+        due.extend(unreadable);
         due.sort_by_key(|(at, _)| *at);
         due.into_iter().map(|(_, target)| target).collect()
     }
