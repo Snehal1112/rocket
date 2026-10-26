@@ -41,7 +41,7 @@ pub use file_tx::{
     validate_rel_path, CollectionFileTx, CollectionFileTxFactory, RecoveryOutcome,
 };
 pub use openapi_consent::{
-    consent_root_key, ConsentState, InMemoryConsentStore, OpenApiConsent, OpenApiConsentStore,
+    consent_root_key, location_key, ConsentState, InMemoryConsentStore, OpenApiConsent, OpenApiConsentStore,
 };
 pub use openapi_local::{OpenApiLocalRepository, OpenApiLocalState, LOCAL_STATE_FILE_VERSION};
 pub use openapi_schedule::{

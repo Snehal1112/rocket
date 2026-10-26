@@ -27,8 +27,10 @@ struct ConsentFile {
 struct ConsentRecord {
     root: String,
     source_id: String,
+    /// The structural location key. A record from before this field has none and reads as
+    /// missing, so it fails closed. The old `location` display text is ignored.
     #[serde(default)]
-    location: String,
+    location_key: String,
     #[serde(default)]
     granted_at: String,
 }
@@ -81,7 +83,11 @@ impl FsOpenApiConsentRepo {
             Loaded::Corrupt => return Err(Self::unreadable()),
         };
         change(&mut file);
-        let yaml = serde_yaml::to_string(&file).map_err(|_| {
+        self.write(&file)
+    }
+
+    fn write(&self, file: &ConsentFile) -> DomainResult<()> {
+        let yaml = serde_yaml::to_string(file).map_err(|_| {
             DomainError::Internal("Failed to serialize the OpenAPI sync approvals".into())
         })?;
         atomic_write(&self.path, yaml.as_bytes())?;
@@ -97,9 +103,10 @@ impl OpenApiConsentStore for FsOpenApiConsentRepo {
                 .sources
                 .into_iter()
                 .find(|r| r.root == key && r.source_id == source_id)
+                .filter(|r| !r.location_key.is_empty())
                 .map(|r| OpenApiConsent {
                     source_id: r.source_id,
-                    location: r.location,
+                    location: r.location_key,
                     granted_at: r.granted_at,
                 }),
             // Missing and damaged files both mean: nothing is approved.
@@ -115,7 +122,7 @@ impl OpenApiConsentStore for FsOpenApiConsentRepo {
             file.sources.push(ConsentRecord {
                 root: key.clone(),
                 source_id: source_id.to_string(),
-                location: location.to_string(),
+                location_key: location.to_string(),
                 granted_at: chrono::Utc::now().to_rfc3339(),
             });
         })
@@ -123,15 +130,16 @@ impl OpenApiConsentStore for FsOpenApiConsentRepo {
 
     fn revoke(&self, root: &Path, source_id: &str) -> DomainResult<()> {
         let key = consent_root_key(root);
-        match self.load() {
+        // The file is read inside the lock, so a grant in between is not lost.
+        let _guard = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut file = match self.load() {
             Loaded::Missing => return Ok(()),
             Loaded::Corrupt => return Err(Self::unreadable()),
-            Loaded::Ok(_) => {}
-        }
-        self.update(|file| {
-            file.sources
-                .retain(|r| !(r.root == key && r.source_id == source_id));
-        })
+            Loaded::Ok(file) => file,
+        };
+        file.sources
+            .retain(|r| !(r.root == key && r.source_id == source_id));
+        self.write(&file)
     }
 }
 
@@ -174,6 +182,29 @@ mod openapi_consent_tests {
         assert_eq!(got.location, "two");
         let text = fs::read_to_string(dir.path().join("openapi-sync.yml")).expect("read");
         assert_eq!(text.matches("source_id: s1").count(), 1);
+    }
+
+    #[test]
+    fn an_old_record_without_a_location_key_reads_as_missing() {
+        let dir = TempDir::new().expect("dir");
+        let root = TempDir::new().expect("root");
+        let key = consent_root_key(root.path());
+        let text = format!(
+            "version: 1\nsources:\n- root: {key}\n  source_id: s1\n  location: https://github.com/o/r/blob/main/a.json\n  granted_at: x\n"
+        );
+        fs::write(dir.path().join("openapi-sync.yml"), text).expect("write");
+        let store = repo(&dir);
+        assert!(store.get(root.path(), "s1").expect("get").is_none());
+        // A new grant replaces the old record.
+        store.grant(root.path(), "s1", "key").expect("grant");
+        assert_eq!(
+            store
+                .get(root.path(), "s1")
+                .expect("get")
+                .expect("rec")
+                .location,
+            "key"
+        );
     }
 
     #[test]

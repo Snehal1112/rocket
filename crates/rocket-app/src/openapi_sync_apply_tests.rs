@@ -294,7 +294,7 @@ async fn world_from(
     )
     .with_consent(Arc::new(rocket_collection::InMemoryConsentStore::new()))
     .with_apply(deps(&ws_path, tx));
-    svc.grant_consent(&root).expect("consent");
+    svc.grant_current(&root).expect("consent");
     World {
         repo: rocket_infra::FsCollectionRepo::new_standalone(ws_path.join("collections")),
         _ws: ws,

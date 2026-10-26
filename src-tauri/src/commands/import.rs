@@ -368,7 +368,7 @@ pub async fn import_openapi_url(
         Arc::new(KeyringSecretStore::new_openapi_sync()),
     )
     .with_consent(openapi_consent_store())
-    .grant_consent(&root);
+    .grant_consent_for_link(&root, &link);
     if approval.is_err() {
         dto.warnings.push(CONSENT_NOT_SAVED.to_string());
     }

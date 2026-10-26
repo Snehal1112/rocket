@@ -10,11 +10,14 @@ use std::sync::Mutex;
 
 use rocket_shared::error::DomainResult;
 
+use crate::openapi_source::SpecLocation;
+
 /// The approval the user gave for one source of one collection folder.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenApiConsent {
     pub source_id: String,
-    /// The normalized spec location (`display_url`) that was approved.
+    /// The structural key (`location_key`) of the approved location. It is never the display
+    /// text, because two different locations can display alike.
     pub location: String,
     /// RFC 3339 UTC time of the approval.
     pub granted_at: String,
@@ -33,6 +36,12 @@ pub enum ConsentState {
     Granted,
     Missing,
     LocationChanged,
+}
+
+/// A one-to-one key of a spec location: the variant and every field, as JSON. Two locations
+/// have the same key only when they are equal. An empty key never matches anything.
+pub fn location_key(location: &SpecLocation) -> String {
+    serde_json::to_string(location).unwrap_or_default()
 }
 
 /// The key of a collection folder: canonical when it exists, else as given.

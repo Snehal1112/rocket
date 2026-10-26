@@ -258,7 +258,11 @@ impl World {
             FsOpenApiLocalRepo.save(&root, &local).expect("local");
             // A collection with an interval was set up on this machine, so it has consent.
             self.consent
-                .grant(&root, &source.source_id, &source.location.display_url())
+                .grant(
+                    &root,
+                    &source.source_id,
+                    &rocket_collection::location_key(&source.location),
+                )
                 .expect("consent");
         }
         root
@@ -432,6 +436,9 @@ fn set_interval_turns_checks_on_and_off() {
     let w = World::new(Answer::Same, &[]);
     let root = w.seed("mine", None, None);
     let svc = w.service();
+    // Turning checks on needs an approval first.
+    assert!(svc.set_interval(&root, SyncInterval::Hourly).is_err());
+    svc.grant_current(&root).expect("grant");
     svc.set_interval(&root, SyncInterval::Hourly).expect("on");
     assert_eq!(w.local("mine").opt_in_root, None);
     assert_eq!(names(&svc.due_targets(t0())), vec!["mine"]);

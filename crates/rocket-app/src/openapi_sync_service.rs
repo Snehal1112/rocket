@@ -3,14 +3,15 @@
 //! A check never changes the collection. A newer valid spec is kept as a pending copy next to
 //! the source file. If a fetch or parse fails, the last good copy stays and nothing is applied.
 //! The token lives in the OS keychain only. It is never written to the collection folder.
-//! The keychain entry is keyed by the source id, so a copied collection folder shares its
-//! token with the original.
+//! The keychain entry is keyed by the source id only. Nothing in the key binds it to a
+//! location, so the consent record (see `consent_state`) is what keeps the token from being
+//! sent to a place the user did not approve on this machine.
 
 use std::path::Path;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
-use rocket_collection::openapi_consent::{ConsentState, OpenApiConsentStore};
+use rocket_collection::openapi_consent::{location_key, ConsentState, OpenApiConsentStore};
 use rocket_collection::openapi_local::{OpenApiLocalRepository, OpenApiLocalState};
 use rocket_collection::openapi_schedule::{clamp_retry_after, next_check_at, SchedulePlan};
 use rocket_collection::openapi_source::{
@@ -22,7 +23,8 @@ use rocket_http::spec_fetch::{
 };
 use rocket_import::{
     bundle_spec, check_spec_text, fetch_failure_message, fetch_target, lost_refs_message,
-    ref_failure_message, refs_unchanged_labeled, whole_bundle_failed_message, Bundle,
+    parse_spec_url, ref_failure_message, refs_unchanged_labeled, whole_bundle_failed_message,
+    Bundle,
 };
 use rocket_shared::error::{DomainError, DomainResult};
 use sha2::{Digest, Sha256};
@@ -181,7 +183,9 @@ impl OpenApiSyncService {
         };
         Ok(match store.get(root, &source.source_id)? {
             None => ConsentState::Missing,
-            Some(c) if c.location == source.location.display_url() => ConsentState::Granted,
+            Some(c) if !c.location.is_empty() && c.location == location_key(&source.location) => {
+                ConsentState::Granted
+            }
             Some(_) => ConsentState::LocationChanged,
         })
     }
@@ -200,17 +204,82 @@ impl OpenApiSyncService {
         self.consent_state_of(root, &source)
     }
 
-    /// Approves the source's current location for this collection folder on this machine.
-    pub fn grant_consent(&self, root: &Path) -> DomainResult<()> {
+    /// Approves the location the user was shown (`expected_location`, the display text) for
+    /// this collection folder on this machine. Under the collection lock it reloads the
+    /// source, so the approval is for what is in the file now. It refuses when the file
+    /// shows another location, and when the location does not survive a round trip through
+    /// the link parser (two such locations could display alike).
+    pub fn grant_consent(&self, root: &Path, expected_location: &str) -> DomainResult<()> {
+        let lock = collection_lock(root);
+        let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         let source = self.load(root)?;
-        self.grant_for(root, &source)
+        if source.location.display_url() != expected_location {
+            return Err(DomainError::Conflict(
+                "The spec link changed. Check the link and approve it again.".to_string(),
+            ));
+        }
+        if parse_spec_url(&source.location.display_url()).ok().as_ref() != Some(&source.location) {
+            return Err(DomainError::InvalidInput(
+                "This spec location cannot be approved because its link is ambiguous.".to_string(),
+            ));
+        }
+        self.grant_key(root, &source.source_id, &location_key(&source.location))
     }
 
-    fn grant_for(&self, root: &Path, source: &OpenApiSource) -> DomainResult<()> {
+    /// Approves the link the user typed, for a collection just imported from it.
+    pub fn grant_consent_for_link(&self, root: &Path, link: &str) -> DomainResult<()> {
+        let location =
+            parse_spec_url(link).map_err(|e| DomainError::InvalidInput(e.to_string()))?;
+        self.grant_consent(root, &location.display_url())
+    }
+
+    fn grant_key(&self, root: &Path, source_id: &str, key: &str) -> DomainResult<()> {
         let store = self.consent.as_ref().ok_or_else(|| {
             DomainError::Internal("The sync approvals are not set up.".to_string())
         })?;
-        store.grant(root, &source.source_id, &source.location.display_url())
+        store.grant(root, source_id, key)
+    }
+
+    /// Test helper: approves whatever location the file shows now.
+    #[cfg(test)]
+    pub(crate) fn grant_current(&self, root: &Path) -> DomainResult<()> {
+        let source = self.load(root)?;
+        self.grant_consent(root, &source.location.display_url())
+    }
+
+    /// The source when this machine approved its current location, else the refusal to give.
+    /// Callers use the returned source for everything that follows, so what is fetched is
+    /// what was approved.
+    fn gated_source(&self, root: &Path) -> DomainResult<Result<OpenApiSource, CheckOutcome>> {
+        let source = self.load(root)?;
+        Ok(match self.consent_state_of(root, &source)? {
+            ConsentState::Granted => Ok(source),
+            ConsentState::Missing => Err(CheckOutcome::Failed {
+                code: "consent_required".to_string(),
+                message: "Approve this spec link on this machine before it is checked.".to_string(),
+                retry_after_secs: None,
+            }),
+            ConsentState::LocationChanged => Err(CheckOutcome::Failed {
+                code: "location_changed".to_string(),
+                message:
+                    "The spec link changed since you approved it. Approve the new link to check it."
+                        .to_string(),
+                retry_after_secs: None,
+            }),
+        })
+    }
+
+    /// An error unless the source's current location is approved. Writes call this first.
+    fn require_granted(&self, root: &Path, source: &OpenApiSource) -> DomainResult<()> {
+        match self.consent_state_of(root, source)? {
+            ConsentState::Granted => Ok(()),
+            ConsentState::Missing => Err(DomainError::Conflict(
+                "consent_required: approve this spec link on this machine first.".to_string(),
+            )),
+            ConsentState::LocationChanged => Err(DomainError::Conflict(
+                "location_changed: the spec link changed, approve the new link first.".to_string(),
+            )),
+        }
     }
 
     /// The local state repository: the one given to `with_local`, else the apply deps' one.
@@ -331,38 +400,22 @@ impl OpenApiSyncService {
         Ok(())
     }
 
-    /// The failed outcome for a source without consent, or `None` when it is approved. It
-    /// records nothing and touches neither the network nor the keychain.
-    fn consent_refusal(&self, root: &Path) -> DomainResult<Option<CheckOutcome>> {
-        let source = self.load(root)?;
-        Ok(match self.consent_state_of(root, &source)? {
-            ConsentState::Granted => None,
-            ConsentState::Missing => Some(CheckOutcome::Failed {
-                code: "consent_required".to_string(),
-                message: "Approve this spec link on this machine before it is checked.".to_string(),
-                retry_after_secs: None,
-            }),
-            ConsentState::LocationChanged => Some(CheckOutcome::Failed {
-                code: "location_changed".to_string(),
-                message:
-                    "The spec link changed since you approved it. Approve the new link to check it."
-                        .to_string(),
-                retry_after_secs: None,
-            }),
-        })
-    }
-
     pub async fn check(&self, collection_root: &Path) -> DomainResult<CheckOutcome> {
         // The consent gate comes first: no recovery, no keychain read and no request
         // without an approval of the current location on this machine.
-        if let Some(refusal) = self.consent_refusal(collection_root)? {
+        if let Err(refusal) = self.gated_source(collection_root)? {
             return Ok(refusal);
         }
         self.settle(collection_root)?;
         // A local state that cannot be read fails the check before any request goes out.
         self.local_repo()?.load(collection_root)?;
-        // Rule 1: a source file is required. Only a GitHub location gets a token.
-        let mut source = self.load(collection_root)?;
+        // Recovery can rewrite the source file, so the gate runs again and the source it
+        // returns is the one used below. Rule 1: a source file is required. Only a GitHub
+        // location gets a token.
+        let mut source = match self.gated_source(collection_root)? {
+            Ok(source) => source,
+            Err(refusal) => return Ok(refusal),
+        };
         let read = match source.location {
             SpecLocation::Github { .. } => self.read_token(collection_root, &source),
             SpecLocation::Https { .. } => TokenRead::None,
@@ -723,15 +776,15 @@ impl OpenApiSyncService {
         let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         // The source file must exist, so a stray folder gets no local state.
         let source = self.load(collection_root)?;
+        // Turning checks on needs an approval of the current location. Off always works.
+        if interval != SyncInterval::Off {
+            self.require_granted(collection_root, &source)?;
+        }
         let locals = self.local_repo()?;
         let mut local = locals.load(collection_root)?.unwrap_or_default();
         local.sync_interval = interval;
         // The legacy opt-in is ignored from now on, so it is no longer written.
         local.opt_in_root = None;
-        // Turning checks on is an act on this machine, so it approves the shown location.
-        if interval != SyncInterval::Off {
-            self.grant_for(collection_root, &source)?;
-        }
         locals.save(collection_root, &local)
     }
 
@@ -747,14 +800,16 @@ impl OpenApiSyncService {
         if token.is_empty() {
             return Err(DomainError::InvalidInput("The token is empty.".to_string()));
         }
-        // A file from an older version has no id yet.
+        // Nothing is written, not even the keychain, before the location is approved.
+        self.require_granted(collection_root, &source)?;
+        // A file from an older version has no id yet. The approval it has moves to the new id.
         if source.source_id.is_empty() {
+            let key = location_key(&source.location);
             source.source_id = OpenApiSource::new_source_id();
             self.sources.save(collection_root, &source)?;
+            self.grant_key(collection_root, &source.source_id, &key)?;
         }
-        self.secrets.set(&source.source_id, TOKEN_KEY, token)?;
-        // Saving a token for this link approves the link on this machine.
-        self.grant_for(collection_root, &source)
+        self.secrets.set(&source.source_id, TOKEN_KEY, token)
     }
 
     pub fn clear_token(&self, collection_root: &Path) -> DomainResult<()> {
@@ -966,7 +1021,7 @@ mod tests {
             .with_local(Box::new(FsOpenApiLocalRepo))
             .with_consent(Arc::new(rocket_collection::InMemoryConsentStore::new()))
             .with_clock(Arc::new(fixed_now));
-            svc.grant_consent(dir.path()).expect("consent");
+            svc.grant_current(dir.path()).expect("consent");
             Self {
                 dir,
                 fetcher,
@@ -1793,7 +1848,7 @@ mod tests {
         .with_local(Box::new(FsOpenApiLocalRepo))
         .with_consent(Arc::new(rocket_collection::InMemoryConsentStore::new()))
         .with_clock(Arc::new(fixed_now));
-        svc.grant_consent(dir.path()).expect("consent");
+        svc.grant_current(dir.path()).expect("consent");
         (dir, fetcher, svc)
     }
 
@@ -1843,7 +1898,7 @@ mod tests {
         )
         .with_local(Box::new(FsOpenApiLocalRepo))
         .with_consent(Arc::new(rocket_collection::InMemoryConsentStore::new()));
-        svc.grant_consent(dir.path()).expect("consent");
+        svc.grant_current(dir.path()).expect("consent");
         fetcher.push(fetched(fixture(), "\"v2\""));
         assert!(svc.check(dir.path()).await.is_err());
         // The failed save left the hash and the file in step.
@@ -1877,7 +1932,7 @@ mod tests {
         let status = f.svc.status(copy.path()).expect("status");
         assert!(!status.has_token);
         assert_eq!(status.consent, ConsentState::Missing);
-        f.svc.grant_consent(copy.path()).expect("grant");
+        f.svc.grant_current(copy.path()).expect("grant");
         assert!(f.svc.status(copy.path()).expect("status").has_token);
     }
 
@@ -2038,7 +2093,7 @@ mod tests {
             Arc::new(MemSecrets::default()),
         )
         .with_consent(Arc::new(rocket_collection::InMemoryConsentStore::new()));
-        svc.grant_consent(dir.path()).expect("consent");
+        svc.grant_current(dir.path()).expect("consent");
         assert!(svc.check(dir.path()).await.is_err());
         assert!(svc.set_interval(dir.path(), SyncInterval::Daily).is_err());
         assert!(fetcher.requests.lock().expect("lock").is_empty());
@@ -2108,7 +2163,7 @@ mod tests {
         .with_local(Box::new(FsOpenApiLocalRepo))
         .with_consent(Arc::clone(&consent))
         .with_clock(Arc::new(fixed_now));
-        svc.grant_consent(&root).expect("consent");
+        svc.grant_current(&root).expect("consent");
         svc.check(&root).await.expect("check");
         let local = FsOpenApiLocalRepo
             .load(&root)
