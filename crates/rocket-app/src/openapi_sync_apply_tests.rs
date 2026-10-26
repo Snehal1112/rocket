@@ -940,3 +940,66 @@ async fn the_same_body_rewrites_a_missing_pending_copy() {
         .expect("pending is back");
     assert_eq!(sha256_hex(&pending), sha256_hex(v2().as_bytes()));
 }
+
+/// Replaces the journal with a foreign one just before the commit, like another process would.
+struct TakeOverFactory(rocket_infra::FsFileTxFactory);
+
+struct TakeOverTx {
+    inner: Box<dyn CollectionFileTx>,
+    root: PathBuf,
+}
+
+impl CollectionFileTx for TakeOverTx {
+    fn stage_put(&mut self, rel: &str, bytes: &[u8]) -> DomainResult<()> {
+        self.inner.stage_put(rel, bytes)
+    }
+    fn stage_delete(&mut self, rel: &str) -> DomainResult<()> {
+        self.inner.stage_delete(rel)
+    }
+    fn commit(self: Box<Self>) -> DomainResult<()> {
+        std::fs::write(
+            self.root.join(".rocket/apply-journal.json"),
+            r#"{"version":1,"id":"foreign","phase":"staging","ops":[]}"#,
+        )
+        .expect("journal");
+        self.inner.commit()
+    }
+    fn abort(self: Box<Self>) {
+        self.inner.abort()
+    }
+}
+
+impl CollectionFileTxFactory for TakeOverFactory {
+    fn begin(&self, root: &Path) -> DomainResult<Box<dyn CollectionFileTx>> {
+        Ok(Box::new(TakeOverTx {
+            inner: self.0.begin(root)?,
+            root: root.to_path_buf(),
+        }))
+    }
+    fn recover(&self, root: &Path) -> DomainResult<RecoveryOutcome> {
+        self.0.recover(root)
+    }
+    fn list_files(&self, root: &Path) -> DomainResult<std::collections::HashSet<String>> {
+        self.0.list_files(root)
+    }
+}
+
+#[tokio::test]
+async fn a_lost_staging_area_is_reported_and_the_foreign_journal_is_left_alone() {
+    let w = world_with(Arc::new(TakeOverFactory(
+        rocket_infra::FsFileTxFactory::new(),
+    )))
+    .await;
+    w.check_with(v2()).await;
+    let before = w.source();
+    let plan = w.plan();
+    let err = w
+        .svc
+        .apply(&w.name, &w.approve(&plan, &[]))
+        .await
+        .expect_err("conflict");
+    assert!(matches!(err, DomainError::Conflict(_)), "{err}");
+    // No recovery ran, so the other process's journal is still there.
+    assert!(w.root.join(".rocket/apply-journal.json").is_file());
+    assert_eq!(w.source().spec_sha256, before.spec_sha256);
+}

@@ -257,7 +257,10 @@ fn journal_is_garbage(root: &Path) -> bool {
         return false;
     }
     match std::fs::read_to_string(journal_path(root)) {
-        Ok(text) => text.trim().is_empty() || serde_json::from_str::<Journal>(&text).is_err(),
+        // Valid JSON of another shape may be a newer format, so it is never discarded.
+        Ok(text) => {
+            text.trim().is_empty() || serde_json::from_str::<serde_json::Value>(&text).is_err()
+        }
         Err(_) => false,
     }
 }
@@ -1055,6 +1058,15 @@ mod tests {
                 .expect("begin works again")
                 .abort();
         }
+    }
+
+    #[test]
+    fn a_journal_of_a_newer_format_is_an_error_and_is_kept() {
+        let dir = tempdir().expect("tempdir");
+        let text = r#"{"version":99,"phase":"future","steps":[]}"#;
+        write(dir.path(), ".rocket/apply-journal.json", text);
+        assert!(factory().recover(dir.path()).is_err());
+        assert_eq!(read(dir.path(), ".rocket/apply-journal.json"), text);
     }
 
     #[test]

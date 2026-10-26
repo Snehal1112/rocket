@@ -218,6 +218,11 @@ impl OpenApiSyncService {
             return Err(e);
         }
         if let Err(e) = tx.commit() {
+            // The staging area was lost or taken over. A journal may be live in another
+            // process, so it is left alone.
+            if matches!(e, DomainError::Conflict(_)) {
+                return Err(e);
+            }
             // A failed commit can leave a journal that recovery finishes or undoes.
             return match deps.tx.recover(&root) {
                 Ok(RecoveryOutcome::Finished { .. }) => Ok(output.report),
