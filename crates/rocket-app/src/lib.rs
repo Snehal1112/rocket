@@ -56,6 +56,7 @@ pub mod load_test_service;
 pub mod mcp_read_views;
 pub mod mcp_tool_service;
 pub mod oauth2_service;
+pub mod openapi_sync_apply;
 pub mod openapi_sync_service;
 pub mod proposal_service;
 pub mod proxy_settings_service;
@@ -138,6 +139,7 @@ pub use mcp_tool_service::{
     WORKSPACE_ASSISTANT_INSTRUCTIONS,
 };
 pub use oauth2_service::OAuth2Service;
+pub use openapi_sync_apply::{ApplyDeps, RendererFactory};
 pub use openapi_sync_service::{CheckOutcome, OpenApiSyncService, SyncStatusView};
 pub use proposal_service::ProposalService;
 pub use proxy_settings_service::{PasswordChange, ProxySettingsService, ProxySettingsView};

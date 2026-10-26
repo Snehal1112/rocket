@@ -477,7 +477,12 @@ pub fn run() {
             let spec_fetcher: Arc<dyn rocket_http::SpecFetcher> = Arc::new(
                 rocket_infra::ReqwestSpecFetcher::new().with_proxy(Arc::clone(&shared_proxy)),
             );
-            app.manage(spec_fetcher);
+            app.manage(Arc::clone(&spec_fetcher));
+            // Settle a sync apply that a crash cut short, off the startup path.
+            commands::import::recover_openapi_syncs(
+                Arc::clone(&active_workspace_path),
+                spec_fetcher,
+            );
             let proxy_svc = rocket_app::ProxySettingsService::new(
                 Box::new(rocket_infra::FsProxySettingsRepo::new(
                     data_dir.join("proxy.yml"),

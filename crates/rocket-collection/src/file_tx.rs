@@ -88,4 +88,15 @@ pub trait CollectionFileTxFactory: Send + Sync {
     fn begin(&self, collection_root: &Path) -> DomainResult<Box<dyn CollectionFileTx>>;
     /// Finishes or undoes a transaction that a crash left behind.
     fn recover(&self, collection_root: &Path) -> DomainResult<RecoveryOutcome>;
+    /// Every file of the collection as a path relative to its root, with `/` separators.
+    /// The `.rocket` and `.git` folders are left out. The default refuses, so a factory that
+    /// cannot list files never lets an apply pick names blindly.
+    fn list_files(
+        &self,
+        _collection_root: &Path,
+    ) -> DomainResult<std::collections::HashSet<String>> {
+        Err(DomainError::Internal(
+            "listing the collection files is not available".into(),
+        ))
+    }
 }

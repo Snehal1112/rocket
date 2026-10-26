@@ -188,6 +188,14 @@ Plan 6, task 2. Code is in `openapi/sync/{apply,apply_types,apply_paths,spec}.rs
 - A generated name whose path fails the transaction rules falls back to `unnamed` (with the usual unique suffix); the apply never fails on a hostile name.
 - Finalize when `remaining == 0` and nothing is stale: `spec_sha256 = pending_sha256`, pending cleared, status `Unchanged`. `converter_version` is never changed.
 
+### Applying through the transaction (Plan 6, task 3)
+
+- `OpenApiSyncService::apply(collection, &Selection)` lives in `rocket-app` (`openapi_sync_apply.rs`). It runs `recover`, checks `sha256(pending) == pending_sha256` (else `Conflict`), flattens the HTTP requests (uid and extensionless path), lists the files through `CollectionFileTxFactory::list_files`, calls `build_apply`, and stages every `FileChange` plus the source (YAML), baseline and local state (JSON) and, when `finalized`, a delete of the pending copy.
+- After any `Err` from `commit`, `apply` calls `recover` for the collection before it returns the error, because a failed commit can leave a journal that recovery finishes forward.
+- `FsRequestRenderer` (`rocket-infra`) implements all four `RequestRenderer` methods over a throwaway `FsCollectionRepo`. `can_rewrite` needs `FsRequestRenderer::for_collection(root)`; it re-renders the request and compares YAML values with the file, and fails closed without a root.
+- `recover(collection)`, `recover_all()` and `local_state(collection)` are on the same service. `src-tauri` runs `recover_all` on a background task at startup and after `switch_workspace`.
+- Wire the dependencies with `OpenApiSyncService::with_apply(ApplyDeps { .. })`; without it `apply` and `recover` refuse.
+
 ### Importing from a file or a link
 
 Plan 3 of the OpenAPI series. Code is in `openapi/entry.rs`; both methods return `OpenApiImportResult { report, collection, source_url, source_id, warnings }` (`source_id` is `None` for a file import).

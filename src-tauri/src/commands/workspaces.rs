@@ -76,12 +76,19 @@ pub fn switch_workspace(
     svc: State<'_, Mutex<WorkspaceService>>,
     watcher: State<'_, NotifyFileWatcher>,
     flow_exec: State<'_, FlowExecutionService>,
+    active_path: State<'_, Arc<Mutex<PathBuf>>>,
+    fetcher: State<'_, Arc<dyn rocket_http::SpecFetcher>>,
     app: tauri::AppHandle,
 ) -> Result<WorkspaceDto, DomainError> {
     let workspace = svc
         .lock()
         .map_err(|_| DomainError::Internal("workspace service lock poisoned".into()))?
         .switch(&id)?;
+    // The new workspace may hold a sync apply that a crash cut short.
+    crate::commands::import::recover_openapi_syncs(
+        Arc::clone(active_path.inner()),
+        Arc::clone(fetcher.inner()),
+    );
     // Cached flow runs belong to the old workspace. A same-named flow in the
     // new one is a different flow.
     flow_exec.clear_run_cache();

@@ -22,6 +22,8 @@ use rocket_shared::error::{DomainError, DomainResult};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
+use crate::openapi_sync_apply::ApplyDeps;
+
 const TOKEN_KEY: &str = "token";
 
 /// What one check found.
@@ -52,12 +54,14 @@ type Clock = Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>;
 
 pub struct OpenApiSyncService {
     fetcher: Arc<dyn SpecFetcher>,
-    sources: Box<dyn OpenApiSourceRepository>,
+    pub(crate) sources: Box<dyn OpenApiSourceRepository>,
     secrets: Arc<dyn SecretStore>,
     clock: Clock,
+    /// Set by `with_apply`. Without it `apply` and `recover` refuse.
+    pub(crate) apply_deps: Option<ApplyDeps>,
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
         .map(|b| format!("{b:02x}"))
@@ -113,7 +117,14 @@ impl OpenApiSyncService {
             sources,
             secrets,
             clock: Arc::new(Utc::now),
+            apply_deps: None,
         }
+    }
+
+    /// Adds what applying changes needs, so existing call sites keep compiling.
+    pub fn with_apply(mut self, deps: ApplyDeps) -> Self {
+        self.apply_deps = Some(deps);
+        self
     }
 
     /// Replaces the clock, so tests can use a fixed time.
@@ -122,7 +133,7 @@ impl OpenApiSyncService {
         self
     }
 
-    fn load(&self, root: &Path) -> DomainResult<OpenApiSource> {
+    pub(crate) fn load(&self, root: &Path) -> DomainResult<OpenApiSource> {
         self.sources.load(root)?.ok_or_else(|| {
             DomainError::NotFound("This collection has no OpenAPI source.".to_string())
         })

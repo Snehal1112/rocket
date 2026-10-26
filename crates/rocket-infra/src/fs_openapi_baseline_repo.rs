@@ -160,7 +160,10 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         crate::ensure_gitignore(dir.path()).expect("ensure");
         let text = std::fs::read_to_string(dir.path().join(".rocket/.gitignore")).expect("file");
-        assert_eq!(text, "openapi-baseline.json\nopenapi-pending.spec\n");
+        assert_eq!(
+            text,
+            "openapi-baseline.json\nopenapi-pending.spec\nopenapi-local.json\napply-journal.json\nstaging/\n"
+        );
     }
 
     #[test]
@@ -177,7 +180,7 @@ mod tests {
         let text = std::fs::read_to_string(dir.path().join(".rocket/.gitignore")).expect("file");
         assert_eq!(
             text,
-            "my-notes.txt\nopenapi-pending.spec\nopenapi-baseline.json\n"
+            "my-notes.txt\nopenapi-pending.spec\nopenapi-baseline.json\nopenapi-local.json\napply-journal.json\nstaging/\n"
         );
     }
 

@@ -8,8 +8,9 @@ use rocket_import::{
     EnvironmentRepositoryFactory, GroupBy, ImportReport, ImportService, OpenApiImportResult,
 };
 use rocket_infra::{
-    FsCollectionRepo, FsEnvironmentRepo, FsOpenApiBaselineRepo, FsOpenApiSourceRepo,
-    KeyringSecretStore,
+    FsCollectionRepo, FsEnvironmentRepo, FsFileTxFactory, FsOpenApiBaselineRepo,
+    FsOpenApiLocalRepo, FsOpenApiSourceRepo, FsRequestRenderer, KeyringSecretStore,
+    SharedPathCollectionRepo,
 };
 use serde::Serialize;
 use tauri::State;
@@ -177,6 +178,44 @@ fn store_token(
     OpenApiSyncService::new(Arc::clone(fetcher), Box::new(FsOpenApiSourceRepo), secrets)
         .set_token(collection_root, token)
         .is_ok()
+}
+
+/// Builds the sync service with everything applying needs, for the active workspace.
+pub(crate) fn make_sync_service(
+    active_workspace_path: Arc<Mutex<PathBuf>>,
+    fetcher: Arc<dyn SpecFetcher>,
+) -> OpenApiSyncService {
+    let secrets: Arc<dyn SecretStore> = Arc::new(KeyringSecretStore::new_openapi_sync());
+    OpenApiSyncService::new(fetcher, Box::new(FsOpenApiSourceRepo), secrets).with_apply(
+        rocket_app::ApplyDeps {
+            collections: Box::new(SharedPathCollectionRepo::new(active_workspace_path)),
+            baselines: Box::new(FsOpenApiBaselineRepo),
+            locals: Box::new(FsOpenApiLocalRepo),
+            tx: Arc::new(FsFileTxFactory::new()),
+            renderer: Arc::new(|root: &std::path::Path| {
+                Box::new(FsRequestRenderer::for_collection(root.to_path_buf()))
+            }),
+        },
+    )
+}
+
+/// Finishes or undoes interrupted syncs of the active workspace on a background task. The
+/// log lines carry counts only.
+pub(crate) fn recover_openapi_syncs(
+    active_workspace_path: Arc<Mutex<PathBuf>>,
+    fetcher: Arc<dyn SpecFetcher>,
+) {
+    tauri::async_runtime::spawn_blocking(move || {
+        let service = make_sync_service(active_workspace_path, fetcher);
+        for (_, outcome) in service.recover_all() {
+            match outcome {
+                rocket_collection::file_tx::RecoveryOutcome::RolledBack { files } => {
+                    tracing::warn!(files, "an interrupted sync apply was undone");
+                }
+                other => tracing::info!(?other, "an interrupted sync apply was settled"),
+            }
+        }
+    });
 }
 
 /// Import an OpenAPI or Swagger spec file as a new collection.

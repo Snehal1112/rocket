@@ -8,17 +8,17 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
 };
 
+#[cfg(test)]
+use rocket_collection::file_tx::OWNED_STATE_FILES;
 use rocket_collection::file_tx::{
     validate_rel_path, CollectionFileTx, CollectionFileTxFactory, RecoveryOutcome,
 };
-#[cfg(test)]
-use rocket_collection::file_tx::OWNED_STATE_FILES;
 use rocket_shared::error::{DomainError, DomainResult};
 use serde::{Deserialize, Serialize};
 
@@ -64,7 +64,7 @@ struct Journal {
     ops: Vec<JournalOp>,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 struct HookState {
     at: usize,
     count: AtomicUsize,
@@ -75,13 +75,13 @@ struct HookState {
 /// test sees the disk as a real crash would leave it.
 #[derive(Clone, Default)]
 struct FaultHook {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     inner: Option<Arc<HookState>>,
 }
 
 impl FaultHook {
     fn check(&self) -> io::Result<()> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         if let Some(inner) = &self.inner {
             if inner.count.fetch_add(1, Ordering::SeqCst) == inner.at {
                 return Err(io::Error::other("injected fault"));
@@ -90,17 +90,17 @@ impl FaultHook {
         Ok(())
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     fn is_crash(&self) -> bool {
         self.inner.as_ref().is_some_and(|i| i.crash)
     }
 
-    #[cfg(not(test))]
+    #[cfg(not(any(test, feature = "test-support")))]
     fn is_crash(&self) -> bool {
         false
     }
 
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     fn at(at: usize, crash: bool) -> Self {
         Self {
             inner: Some(Arc::new(HookState {
@@ -133,16 +133,16 @@ impl FsFileTxFactory {
         Self::default()
     }
 
-    #[cfg(test)]
-    fn with_fault(step: usize) -> Self {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn with_fault(step: usize) -> Self {
         Self {
             hook: FaultHook::at(step, false),
             rollback_hook: FaultHook::default(),
         }
     }
 
-    #[cfg(test)]
-    fn with_crash(step: usize) -> Self {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn with_crash(step: usize) -> Self {
         Self {
             hook: FaultHook::at(step, true),
             rollback_hook: FaultHook::default(),
@@ -461,7 +461,7 @@ impl FsFileTx {
                 match roll_back_and_clean(&self.root, &mut journal, &self.rollback_hook) {
                     Ok(_) => Err(e),
                     Err(rollback_err) => Err(DomainError::Internal(format!(
-                        "{e}; the files could not be restored yet and are restored by the next recovery: {rollback_err}"
+                        "{e}; the files could not be restored yet, so the apply may be finished or restored by the next recovery: {rollback_err}"
                     ))),
                 }
             }
@@ -513,7 +513,50 @@ impl CollectionFileTx for FsFileTx {
     }
 }
 
+/// Collects the files under `dir` without following links. Folders that cannot be read fail
+/// the listing, so a half-known collection is never used.
+fn walk_files(
+    root: &Path,
+    dir: &Path,
+    out: &mut std::collections::HashSet<String>,
+) -> DomainResult<()> {
+    let entries = std::fs::read_dir(dir).map_err(|e| io_err("a folder could not be listed", e))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| io_err("a folder could not be listed", e))?;
+        let path = entry.path();
+        let Ok(rel) = path.strip_prefix(root) else {
+            continue;
+        };
+        let rel = rel
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join("/");
+        if rel == ".rocket" || rel == ".git" {
+            continue;
+        }
+        let kind = entry
+            .file_type()
+            .map_err(|e| io_err("a file could not be inspected", e))?;
+        if kind.is_dir() {
+            walk_files(root, &path, out)?;
+        } else {
+            out.insert(rel);
+        }
+    }
+    Ok(())
+}
+
 impl CollectionFileTxFactory for FsFileTxFactory {
+    fn list_files(
+        &self,
+        collection_root: &Path,
+    ) -> DomainResult<std::collections::HashSet<String>> {
+        let mut out = std::collections::HashSet::new();
+        walk_files(collection_root, collection_root, &mut out)?;
+        Ok(out)
+    }
+
     fn begin(&self, collection_root: &Path) -> DomainResult<Box<dyn CollectionFileTx>> {
         guard(collection_root, ".rocket")?;
         crate::rocket_dir::ensure_gitignore(collection_root)?;

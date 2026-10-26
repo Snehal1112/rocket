@@ -5871,6 +5871,7 @@ dependencies = [
  "rocket-grpc",
  "rocket-history",
  "rocket-http",
+ "rocket-import",
  "rocket-scripting",
  "rocket-shared",
  "rocket-workspace",

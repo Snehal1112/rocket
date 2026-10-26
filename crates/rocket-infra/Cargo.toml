@@ -3,6 +3,10 @@ name = "rocket-infra"
 version.workspace = true
 edition.workspace = true
 
+[features]
+# Exposes the fault hooks of the file transaction to the tests of other crates.
+test-support = []
+
 [dependencies]
 # WebSocket client. `native-tls` matches reqwest's TLS backend, so HTTP and WebSocket trust the
 # same OS certificate store. `native-tls` itself is needed to build the permissive connector used
@@ -27,6 +31,8 @@ tonic = { version = "0.14.6", default-features = false, features = ["codegen", "
 rocket-http.workspace = true
 rocket-history.workspace = true
 rocket-workspace.workspace = true
+rocket-import = { path = "../rocket-import" }
+tempfile = "3"
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
@@ -78,7 +84,6 @@ rustix = { version = "1", default-features = false, features = ["std", "process"
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_Foundation"] }
 
 [dev-dependencies]
-tempfile = "3"
 wiremock = "0.6"
 futures-util = "0.3"
 rcgen = { version = "0.13", default-features = false, features = ["crypto", "ring", "pem"] }

@@ -40,6 +40,6 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 tempfile = "3"
-rocket-infra.workspace = true
+rocket-infra = { workspace = true, features = ["test-support"] }
 wiremock = "0.6"
 zip = "2"
