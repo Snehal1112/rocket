@@ -33,7 +33,7 @@ export function MethodBreakdown({ items }: MethodBreakdownProps) {
   return (
     <Card>
       <CardHeader className='pb-2 pt-4 px-4'>
-        <CardTitle className='text-sm font-semibold'>Method Breakdown</CardTitle>
+        <CardTitle className='text-base font-semibold'>Method Breakdown</CardTitle>
       </CardHeader>
       <CardContent className='space-y-3 px-4 pb-4'>
         {rows.length === 0 ? (

@@ -618,6 +618,12 @@ html.windows.window-inactive #root {
   box-shadow: none;
 }
 
+/* Secondary text on the overview reads at 4.0:1 with the global dark token, so lift it here.
+   60% lightness gives about 6:1 on the card surface. Scoped so other views are unchanged. */
+.dark .collection-overview-workbench {
+  --muted-foreground: 0 0% 60%;
+}
+
 /* Git hover actions — CSS hover avoids mouseenter timing issues when rows
    appear under an existing cursor position (e.g. after git init).
    All rules are custom (no Tailwind hidden class) to avoid layer-cascade

@@ -380,7 +380,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
 
                 <Card>
                   <CardHeader className='pb-2 pt-4 px-4'>
-                    <span className='text-sm font-semibold'>Default Headers</span>
+                    <span className='text-base font-semibold tracking-tight'>Default Headers</span>
                   </CardHeader>
                   <CardContent className='px-4 pb-4'>
                     <HeadersEditor
@@ -390,29 +390,36 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
                         setIsDirty(true);
                       }}
                     />
-                    <div className='flex justify-end mt-3'>
-                      <Button
-                        size='sm'
-                        onClick={() => void triggerSave()}
-                        disabled={!isDirty || saveState !== 'idle'}
-                        className={cn('gap-1.5', saveState === 'success' && 'text-green-600')}
-                      >
-                        {saveState === 'saving' ? (
-                          <Loader2 className='h-3.5 w-3.5 animate-spin' />
-                        ) : saveState === 'success' ? (
-                          <Check className='h-3.5 w-3.5' />
-                        ) : (
-                          <Save className='h-3.5 w-3.5' />
-                        )}
-                        {saveState === 'success' ? 'Saved' : 'Save'}
-                      </Button>
-                    </div>
+                    {/* An empty, unchanged list has nothing to save, so hide the button. */}
+                    {(headers.length > 0 || isDirty || saveState !== 'idle') && (
+                      <div className='flex justify-end mt-3'>
+                        <Button
+                          size='sm'
+                          onClick={() => void triggerSave()}
+                          disabled={!isDirty || saveState !== 'idle'}
+                          className={cn(
+                            'gap-1.5',
+                            saveState === 'success' && 'text-green-600',
+                            !isDirty && saveState === 'idle' && 'opacity-40',
+                          )}
+                        >
+                          {saveState === 'saving' ? (
+                            <Loader2 className='h-3.5 w-3.5 animate-spin' />
+                          ) : saveState === 'success' ? (
+                            <Check className='h-3.5 w-3.5' />
+                          ) : (
+                            <Save className='h-3.5 w-3.5' />
+                          )}
+                          {saveState === 'success' ? 'Saved' : 'Save'}
+                        </Button>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
 
                 <Card>
                   <CardHeader className='pb-2 pt-4 px-4'>
-                    <span className='text-sm font-semibold'>Requests</span>
+                    <span className='text-base font-semibold tracking-tight'>Requests</span>
                   </CardHeader>
                   <CardContent className='px-4 pb-4'>
                     <RequestList items={items} collectionName={collectionName} />
@@ -421,7 +428,9 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
 
                 <Card>
                   <CardHeader className='pb-2 pt-4 px-4'>
-                    <span className='text-sm font-semibold'>Permissions on this computer</span>
+                    <span className='text-base font-semibold tracking-tight'>
+                      Permissions on this computer
+                    </span>
                   </CardHeader>
                   <CardContent className='px-4 pb-4'>
                     <CollectionTrustSection collection={collectionName} />
@@ -430,7 +439,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
 
                 <Card>
                   <CardHeader className='pb-2 pt-4 px-4'>
-                    <span className='text-sm font-semibold'>Tags</span>
+                    <span className='text-base font-semibold tracking-tight'>Tags</span>
                   </CardHeader>
                   <CardContent className='px-4 pb-4'>
                     <TagsList collection={collection} />
