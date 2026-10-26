@@ -151,6 +151,8 @@ pub(crate) fn channel_for(event: &DomainEvent) -> &'static str {
         DomainEvent::AssistantConversationSaved { .. } => "assistant-conversation-saved",
         DomainEvent::AssistantConversationDeleted { .. } => "assistant-conversation-deleted",
         DomainEvent::AssistantConversationsCleared => "assistant-conversations-cleared",
+        // A background OpenAPI sync check finished. The payload names the collection only.
+        DomainEvent::OpenApiSyncChecked { .. } => "openapi-sync-checked",
         // Load test events keep the channel names the frontend listens on.
         DomainEvent::LoadTestProgress(_) => "load_test_progress",
         DomainEvent::LoadTestComplete(_) => "load_test_complete",

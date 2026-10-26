@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use rocket_collection::openapi_local::{OpenApiLocalRepository, OpenApiLocalState};
-use rocket_collection::openapi_schedule::clamp_retry_after;
+use rocket_collection::openapi_schedule::{clamp_retry_after, next_check_at, SchedulePlan};
 use rocket_collection::openapi_source::{
     OpenApiSource, OpenApiSourceRepository, SpecLocation, SyncInterval, SyncStatus,
 };
@@ -50,6 +50,13 @@ pub struct SyncStatusView {
     pub last_status: Option<SyncStatus>,
     pub has_pending: bool,
     pub has_token: bool,
+}
+
+/// A collection whose background check is due.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncTarget {
+    pub collection: String,
+    pub root: std::path::PathBuf,
 }
 
 type Clock = Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>;
@@ -419,6 +426,74 @@ impl OpenApiSyncService {
             has_pending: source.pending_sha256.is_some(),
             has_token: self.stored_token(&source).is_some(),
         })
+    }
+
+    /// The collections of the pinned active workspace whose check is due at `now`, oldest due
+    /// first. Timing comes from the local state only, never from the source file's legacy
+    /// fields. Without apply deps (where the collection list lives) the list is empty. A
+    /// collection whose files cannot be read is skipped and counted in a debug log. This does
+    /// blocking file reads, so async callers run it through `spawn_blocking`.
+    pub fn due_targets(&self, now: DateTime<Utc>) -> Vec<SyncTarget> {
+        let (Some(deps), Ok(locals)) = (&self.apply_deps, self.local_repo()) else {
+            return Vec::new();
+        };
+        let pinned = deps.collections.pinned();
+        let repo: &dyn rocket_collection::CollectionRepository =
+            pinned.as_deref().unwrap_or(deps.collections.as_ref());
+        let Ok(names) = repo.list() else {
+            tracing::debug!(code = "list_failed", "sync targets could not be listed");
+            return Vec::new();
+        };
+        let mut due: Vec<(DateTime<Utc>, SyncTarget)> = Vec::new();
+        let mut skipped = 0usize;
+        for summary in names {
+            let Ok(root) = repo.collection_root_path(&summary.name) else {
+                skipped += 1;
+                continue;
+            };
+            let local = match locals.load(&root) {
+                Ok(Some(local)) => local,
+                Ok(None) => continue,
+                Err(_) => {
+                    skipped += 1;
+                    continue;
+                }
+            };
+            if local.sync_interval == SyncInterval::Off {
+                continue;
+            }
+            let source = match self.sources.load(&root) {
+                Ok(Some(source)) => source,
+                Ok(None) => continue,
+                Err(_) => {
+                    skipped += 1;
+                    continue;
+                }
+            };
+            let plan = SchedulePlan {
+                interval: local.sync_interval,
+                source_id: &source.source_id,
+                last_checked_at: local.last_checked_at.as_deref(),
+                last_failed: matches!(local.last_status, Some(SyncStatus::Failed { .. })),
+                consecutive_failures: local.consecutive_failures,
+                not_before: local.not_before.as_deref(),
+                now,
+            };
+            if let Some(at) = next_check_at(&plan).filter(|at| *at <= now) {
+                due.push((
+                    at,
+                    SyncTarget {
+                        collection: summary.name,
+                        root,
+                    },
+                ));
+            }
+        }
+        if skipped > 0 {
+            tracing::debug!(skipped, "sync targets skipped for unreadable files");
+        }
+        due.sort_by_key(|(at, _)| *at);
+        due.into_iter().map(|(_, target)| target).collect()
     }
 
     pub fn set_interval(&self, collection_root: &Path, interval: SyncInterval) -> DomainResult<()> {

@@ -28,6 +28,7 @@ touches the filesystem or any I/O directly — those concerns live in
 | `WebSocketService` | Session registry for WebSocket connections, keyed by a frontend-chosen session id. `connect`/`send`/`disconnect`/`end_all_sessions` over `Arc<dyn WebSocketClient>`; inbound frames and lifecycle leave as `WebSocketMessage` and `WebSocketStatus` events (exactly one terminal status, then the id is free). A `disconnect` during the handshake cancels it and closes the late socket. `RequestExecutionService::resolve_websocket` and `resolve_websocket_message` (in `execution_service/websocket_resolution.rs`) apply variables, collection defaults and auth; OAuth, Digest, NTLM, WSSE and SigV4 are refused for WebSocket with an explicit error. |
 | `GraphQlSubscriptionService` | GraphQL subscriptions over the `WebSocketClient` port, keyed by a frontend-chosen session id. `resolve_graphql_subscription` resolves the request (variables, collection headers, auth, `http`→`ws` scheme) through `resolve_websocket`; `start`/`stop`/`end_all` drive one task per subscription. The message formats of `graphql-transport-ws` and legacy `graphql-ws` live in the pure `graphql_subscription/protocol.rs`; the server's chosen subprotocol decides the dialect. `subscribe` is sent only after `connection_ack` (10 s limit). Results leave as `GraphQlSubscriptionMessage` and `GraphQlSubscriptionStatus` events (exactly one terminal status). |
 | `event_caps` | Live event size caps (`cap_with_marker`, `...[truncated N bytes]`): 256 KiB per gRPC stream message, GraphQL subscription result and WebSocket frame (binary is cut before base64 and flagged `truncated`), 1000 console entries and test results with 16 KiB per string. Only the event is capped, never history or the returned output. |
+| `OpenApiSyncScheduler` | Background supervisor for OpenAPI sync checks (`openapi_sync_scheduler.rs`). See "OpenAPI sync scheduler" below. |
 | `WorkspaceService` | Create, switch, rename, close, delete, pin/unpin workspaces; link external collections; toggle multi-workspace mode; mutates the shared `Arc<Mutex<PathBuf>>` active path on switch. |
 
 ## Service Method Details
@@ -95,6 +96,10 @@ src-tauri (Tauri commands)
 ```
 
 `src-tauri/src/lib.rs` constructs each service by injecting concrete `rocket-infra` implementations, then stores them in Tauri managed state. Tauri commands call service methods directly; services never call back into Tauri.
+
+## OpenAPI sync scheduler (`openapi_sync_scheduler.rs`)
+
+`OpenApiSyncScheduler::new(service_factory, events, SchedulerConfig)` and `start()` run one loop on the tokio runtime: a 30 s launch delay, then a 60 s tick, at most 5 checks per tick, one at a time. Each tick runs `OpenApiSyncService::due_targets(now)` through `spawn_blocking` (one local-state read per collection) and each `check` directly on the loop task. `due_targets` reads timing only from `OpenApiLocalState` through `next_check_at`, never from the legacy fields of the source file. It needs apply deps (the collection list) and is empty without them. A collection with no local state or the interval off is never listed. An error from `check` (an unreadable or newer local file, a failed recovery) cannot store a failure count, so the scheduler holds an in-memory delay per collection (15 min, doubled, capped at 6 h) and skips it until then. After each check it publishes `OpenApiSyncChecked { collection, status }` (`unchanged`, `changed` or `failed`; an error is `failed`), a refresh signal with no URL or message. `SchedulerHandle::stop` (also on drop) ends the loop, even during a sleep, and never cancels a check in flight. Logs carry codes and counts only.
 
 ## Flow Auth nodes (`flow_auth.rs`)
 

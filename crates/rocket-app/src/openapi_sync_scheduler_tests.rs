@@ -1,0 +1,584 @@
+//! Tests for the due list and the supervisor, on real temporary collections.
+
+use super::*;
+use crate::openapi_sync_apply::ApplyDeps;
+use crate::openapi_sync_service::SyncTarget;
+use async_trait::async_trait;
+use rocket_collection::file_tx::{CollectionFileTx, CollectionFileTxFactory, RecoveryOutcome};
+use rocket_collection::openapi_local::{OpenApiLocalRepository, OpenApiLocalState};
+use rocket_collection::openapi_source::{
+    OpenApiSource, OpenApiSourceRepository, SpecLocation, SyncInterval, SyncStatus,
+};
+use rocket_collection::CollectionRepository;
+use rocket_environment::SecretStore;
+use rocket_http::spec_fetch::{SpecFetchFailure, SpecFetchOutcome, SpecFetchRequest, SpecFetcher};
+use rocket_infra::{FsFileTxFactory, FsOpenApiLocalRepo, FsOpenApiSourceRepo};
+use rocket_shared::error::{DomainError, DomainResult};
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
+use tempfile::TempDir;
+
+fn t0() -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339("2026-10-26T12:00:00Z")
+        .expect("date")
+        .with_timezone(&Utc)
+}
+
+fn fixture() -> Vec<u8> {
+    let path = format!(
+        "{}/../rocket-import/tests/fixtures/openapi/orders-3.0.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    std::fs::read(path).expect("fixture")
+}
+
+fn changed_body() -> Vec<u8> {
+    let mut v: serde_json::Value = serde_json::from_slice(&fixture()).expect("json");
+    v["paths"]["/extra"] = serde_json::json!({
+        "get": { "operationId": "extra", "responses": { "200": { "description": "ok" } } }
+    });
+    serde_json::to_vec(&v).expect("json")
+}
+
+#[derive(Clone, Copy)]
+enum Answer {
+    Same,
+    Changed,
+    NotFound,
+}
+
+struct Gate {
+    started: tokio::sync::Notify,
+    go: tokio::sync::Notify,
+}
+
+struct FakeFetcher {
+    answer: Mutex<Answer>,
+    calls: AtomicUsize,
+    in_flight: AtomicUsize,
+    max_in_flight: AtomicUsize,
+    gate: Mutex<Option<Arc<Gate>>>,
+}
+
+impl FakeFetcher {
+    fn new(answer: Answer) -> Arc<Self> {
+        Arc::new(Self {
+            answer: Mutex::new(answer),
+            calls: AtomicUsize::new(0),
+            in_flight: AtomicUsize::new(0),
+            max_in_flight: AtomicUsize::new(0),
+            gate: Mutex::new(None),
+        })
+    }
+    fn calls(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+}
+
+struct SharedFetcher(Arc<FakeFetcher>);
+
+#[async_trait]
+impl SpecFetcher for SharedFetcher {
+    async fn fetch(
+        &self,
+        _request: SpecFetchRequest,
+    ) -> Result<SpecFetchOutcome, SpecFetchFailure> {
+        let f = &self.0;
+        f.calls.fetch_add(1, Ordering::SeqCst);
+        let now = f.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+        f.max_in_flight.fetch_max(now, Ordering::SeqCst);
+        let gate = f.gate.lock().expect("lock").clone();
+        if let Some(gate) = gate {
+            gate.started.notify_one();
+            gate.go.notified().await;
+        }
+        // A short pause lets a second concurrent check show up if the loop allowed one.
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        f.in_flight.fetch_sub(1, Ordering::SeqCst);
+        let answer = *f.answer.lock().expect("lock");
+        match answer {
+            Answer::Same => Ok(SpecFetchOutcome::Fetched {
+                body: fixture(),
+                etag: None,
+                last_modified: None,
+                final_url: "https://x".into(),
+            }),
+            Answer::Changed => Ok(SpecFetchOutcome::Fetched {
+                body: changed_body(),
+                etag: None,
+                last_modified: None,
+                final_url: "https://x".into(),
+            }),
+            Answer::NotFound => Err(SpecFetchFailure::NotFound),
+        }
+    }
+}
+
+struct NoSecrets;
+
+impl SecretStore for NoSecrets {
+    fn get(&self, _: &str, _: &str) -> DomainResult<Option<String>> {
+        Ok(None)
+    }
+    fn set(&self, _: &str, _: &str, _: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    fn delete(&self, _: &str, _: &str) -> DomainResult<()> {
+        Ok(())
+    }
+}
+
+/// A transaction factory whose recovery fails for the named collections and counts the tries.
+struct PickyTx {
+    inner: FsFileTxFactory,
+    bad: HashSet<String>,
+    bad_tries: AtomicUsize,
+}
+
+impl CollectionFileTxFactory for PickyTx {
+    fn begin(&self, root: &Path) -> DomainResult<Box<dyn CollectionFileTx>> {
+        self.inner.begin(root)
+    }
+    fn recover(&self, root: &Path) -> DomainResult<RecoveryOutcome> {
+        let name = root
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default();
+        if self.bad.contains(name) {
+            self.bad_tries.fetch_add(1, Ordering::SeqCst);
+            return Err(DomainError::Internal("recovery blocked".into()));
+        }
+        self.inner.recover(root)
+    }
+    fn list_files(&self, root: &Path) -> DomainResult<HashSet<String>> {
+        self.inner.list_files(root)
+    }
+}
+
+#[derive(Default)]
+struct Recorder(Mutex<Vec<(String, String)>>);
+
+impl EventPublisher for Recorder {
+    fn publish(&self, event: DomainEvent) {
+        if let DomainEvent::OpenApiSyncChecked { collection, status } = event {
+            self.0.lock().expect("lock").push((collection, status));
+        }
+    }
+}
+
+impl Recorder {
+    fn all(&self) -> Vec<(String, String)> {
+        self.0.lock().expect("lock").clone()
+    }
+}
+
+struct World {
+    ws: TempDir,
+    fetcher: Arc<FakeFetcher>,
+    tx: Arc<PickyTx>,
+    now: Arc<Mutex<DateTime<Utc>>>,
+}
+
+impl World {
+    fn new(answer: Answer, bad: &[&str]) -> Self {
+        Self {
+            ws: TempDir::new().expect("tempdir"),
+            fetcher: FakeFetcher::new(answer),
+            tx: Arc::new(PickyTx {
+                inner: FsFileTxFactory::new(),
+                bad: bad.iter().map(|s| s.to_string()).collect(),
+                bad_tries: AtomicUsize::new(0),
+            }),
+            now: Arc::new(Mutex::new(t0())),
+        }
+    }
+
+    fn repo(&self) -> rocket_infra::FsCollectionRepo {
+        rocket_infra::FsCollectionRepo::new_standalone(self.ws.path().join("collections"))
+    }
+
+    fn set_now(&self, at: DateTime<Utc>) {
+        *self.now.lock().expect("lock") = at;
+    }
+
+    fn clock(&self) -> Arc<dyn Fn() -> DateTime<Utc> + Send + Sync> {
+        let now = Arc::clone(&self.now);
+        Arc::new(move || *now.lock().expect("lock"))
+    }
+
+    fn root(&self, name: &str) -> PathBuf {
+        self.repo().collection_root_path(name).expect("root")
+    }
+
+    /// Creates a collection with a source file and, when given, a local state.
+    fn seed(
+        &self,
+        name: &str,
+        interval: Option<SyncInterval>,
+        last: Option<DateTime<Utc>>,
+    ) -> PathBuf {
+        self.repo().create(name).expect("create");
+        let root = self.root(name);
+        let source = OpenApiSource {
+            version: 1,
+            location: SpecLocation::Https {
+                url: "https://example.com/spec.json".into(),
+            },
+            group_by: "tags".into(),
+            spec_sha256: crate::openapi_sync_service::sha256_hex(&fixture()),
+            etag: None,
+            last_modified: None,
+            operations: Vec::new(),
+            source_id: format!("src-{name}"),
+            // The legacy interval stays hourly: the scheduler must ignore it.
+            sync_interval: SyncInterval::Hourly,
+            last_checked_at: None,
+            last_status: None,
+            pending_sha256: None,
+        };
+        FsOpenApiSourceRepo.save(&root, &source).expect("source");
+        if let Some(interval) = interval {
+            let local = OpenApiLocalState {
+                sync_interval: interval,
+                last_checked_at: last.map(|t| t.to_rfc3339()),
+                last_status: last.map(|_| SyncStatus::Unchanged),
+                ..OpenApiLocalState::default()
+            };
+            FsOpenApiLocalRepo.save(&root, &local).expect("local");
+        }
+        root
+    }
+
+    fn deps(&self) -> ApplyDeps {
+        ApplyDeps {
+            collections: Box::new(self.repo()),
+            baselines: Box::new(rocket_infra::FsOpenApiBaselineRepo),
+            locals: Box::new(FsOpenApiLocalRepo),
+            tx: Arc::clone(&self.tx) as Arc<dyn CollectionFileTxFactory>,
+            renderer: Arc::new(|root: &Path| {
+                Box::new(rocket_infra::FsRequestRenderer::for_collection(
+                    root.to_path_buf(),
+                ))
+            }),
+        }
+    }
+
+    fn service(&self) -> OpenApiSyncService {
+        OpenApiSyncService::new(
+            Arc::new(SharedFetcher(Arc::clone(&self.fetcher))),
+            Box::new(FsOpenApiSourceRepo),
+            Arc::new(NoSecrets),
+        )
+        .with_local(Box::new(FsOpenApiLocalRepo))
+        .with_apply(self.deps())
+        .with_clock(self.clock())
+    }
+
+    fn factory(&self) -> ServiceFactory {
+        let fetcher = Arc::clone(&self.fetcher);
+        let tx = Arc::clone(&self.tx);
+        let ws = self.ws.path().to_path_buf();
+        let clock = self.clock();
+        Arc::new(move || {
+            let deps = ApplyDeps {
+                collections: Box::new(rocket_infra::FsCollectionRepo::new_standalone(
+                    ws.join("collections"),
+                )),
+                baselines: Box::new(rocket_infra::FsOpenApiBaselineRepo),
+                locals: Box::new(FsOpenApiLocalRepo),
+                tx: Arc::clone(&tx) as Arc<dyn CollectionFileTxFactory>,
+                renderer: Arc::new(|root: &Path| {
+                    Box::new(rocket_infra::FsRequestRenderer::for_collection(
+                        root.to_path_buf(),
+                    ))
+                }),
+            };
+            OpenApiSyncService::new(
+                Arc::new(SharedFetcher(Arc::clone(&fetcher))),
+                Box::new(FsOpenApiSourceRepo),
+                Arc::new(NoSecrets),
+            )
+            .with_local(Box::new(FsOpenApiLocalRepo))
+            .with_apply(deps)
+            .with_clock(Arc::clone(&clock))
+        })
+    }
+
+    fn scheduler(&self, events: &Arc<Recorder>) -> OpenApiSyncScheduler {
+        OpenApiSyncScheduler::new(
+            self.factory(),
+            Arc::clone(events) as Arc<dyn EventPublisher>,
+            SchedulerConfig::default(),
+        )
+        .with_clock(self.clock())
+    }
+
+    fn local(&self, name: &str) -> OpenApiLocalState {
+        FsOpenApiLocalRepo
+            .load(&self.root(name))
+            .expect("load")
+            .unwrap_or_default()
+    }
+}
+
+fn names(targets: &[SyncTarget]) -> Vec<String> {
+    targets.iter().map(|t| t.collection.clone()).collect()
+}
+
+fn ago(secs: i64) -> DateTime<Utc> {
+    t0() - chrono::Duration::seconds(secs)
+}
+
+/// Waits (in virtual time) until the condition holds, giving blocking work real time to finish.
+async fn wait_until(cond: impl Fn() -> bool) {
+    for _ in 0..5000 {
+        if cond() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        std::thread::sleep(Duration::from_micros(200));
+    }
+    panic!("condition not reached");
+}
+
+/// Lets the loop run for a short virtual span so an unwanted action would show.
+async fn settle() {
+    for _ in 0..50 {
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        std::thread::sleep(Duration::from_micros(200));
+    }
+}
+
+// Due list.
+
+#[test]
+fn lists_only_collections_with_an_interval_that_are_due() {
+    let w = World::new(Answer::Same, &[]);
+    w.seed("never", None, None);
+    w.seed("off", Some(SyncInterval::Off), Some(ago(10 * 3600)));
+    w.seed("fresh", Some(SyncInterval::Hourly), Some(ago(10)));
+    w.seed("overdue", Some(SyncInterval::Hourly), Some(ago(3 * 3600)));
+    w.seed("first", Some(SyncInterval::Daily), None);
+    let mut got = names(&w.service().due_targets(t0()));
+    got.sort();
+    assert_eq!(got, vec!["first".to_string(), "overdue".to_string()]);
+}
+
+#[test]
+fn a_collection_without_local_state_is_not_listed() {
+    let w = World::new(Answer::Same, &[]);
+    // The source file says hourly, yet there is no local state.
+    w.seed("plain", None, None);
+    assert!(w.service().due_targets(t0()).is_empty());
+}
+
+#[test]
+fn without_apply_deps_nothing_is_listed() {
+    let w = World::new(Answer::Same, &[]);
+    w.seed("a", Some(SyncInterval::Hourly), None);
+    let svc = OpenApiSyncService::new(
+        Arc::new(SharedFetcher(Arc::clone(&w.fetcher))),
+        Box::new(FsOpenApiSourceRepo),
+        Arc::new(NoSecrets),
+    )
+    .with_local(Box::new(FsOpenApiLocalRepo));
+    assert!(svc.due_targets(t0()).is_empty());
+}
+
+#[test]
+fn oldest_due_first() {
+    let w = World::new(Answer::Same, &[]);
+    w.seed("x", Some(SyncInterval::Daily), Some(ago(30 * 3600)));
+    w.seed("y", Some(SyncInterval::Daily), Some(ago(90 * 3600)));
+    w.seed("z", Some(SyncInterval::Daily), Some(ago(26 * 3600)));
+    assert_eq!(
+        names(&w.service().due_targets(t0())),
+        vec!["y".to_string(), "x".to_string(), "z".to_string()]
+    );
+}
+
+#[test]
+fn an_unreadable_local_file_is_skipped_not_fatal() {
+    let w = World::new(Answer::Same, &[]);
+    let bad = w.seed("broken", Some(SyncInterval::Hourly), None);
+    w.seed("fine", Some(SyncInterval::Hourly), None);
+    std::fs::write(bad.join(".rocket/openapi-local.json"), "{ not json").expect("write");
+    assert_eq!(
+        names(&w.service().due_targets(t0())),
+        vec!["fine".to_string()]
+    );
+}
+
+// Supervisor.
+
+#[tokio::test(start_paused = true)]
+async fn first_check_waits_for_the_launch_delay() {
+    let w = World::new(Answer::Same, &[]);
+    w.seed("a", Some(SyncInterval::Hourly), None);
+    let events = Arc::new(Recorder::default());
+    let _handle = w.scheduler(&events).start();
+    tokio::time::sleep(Duration::from_secs(29)).await;
+    settle().await;
+    assert_eq!(w.fetcher.calls(), 0);
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    wait_until(|| w.fetcher.calls() == 1).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn checks_run_one_at_a_time_and_at_most_the_per_tick_limit() {
+    let w = World::new(Answer::Same, &[]);
+    for i in 0..8 {
+        w.seed(&format!("c{i}"), Some(SyncInterval::Hourly), None);
+    }
+    let events = Arc::new(Recorder::default());
+    let _handle = w.scheduler(&events).start();
+    tokio::time::sleep(Duration::from_secs(31)).await;
+    wait_until(|| w.fetcher.calls() >= 5).await;
+    settle().await;
+    assert_eq!(w.fetcher.calls(), 5);
+    assert_eq!(w.fetcher.max_in_flight.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failed_check_is_not_retried_before_its_backoff_even_after_a_restart() {
+    let w = World::new(Answer::NotFound, &[]);
+    w.seed("a", Some(SyncInterval::Hourly), None);
+    let events = Arc::new(Recorder::default());
+    let first = w.scheduler(&events).start();
+    tokio::time::sleep(Duration::from_secs(31)).await;
+    wait_until(|| w.fetcher.calls() == 1).await;
+    wait_until(|| events.all().len() == 1).await;
+    first.stop();
+    assert_eq!(w.local("a").consecutive_failures, 1);
+    // A second scheduler over the same collection sees the stored failure.
+    let _second = w.scheduler(&events).start();
+    tokio::time::sleep(Duration::from_secs(600)).await;
+    settle().await;
+    assert_eq!(w.fetcher.calls(), 1);
+    // Past the 15 minute backoff the check is allowed again.
+    w.set_now(t0() + chrono::Duration::minutes(16));
+    tokio::time::sleep(Duration::from_secs(120)).await;
+    wait_until(|| w.fetcher.calls() == 2).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_changed_result_publishes_the_event_with_status_changed() {
+    let w = World::new(Answer::Changed, &[]);
+    w.seed("a", Some(SyncInterval::Hourly), None);
+    let events = Arc::new(Recorder::default());
+    let _handle = w.scheduler(&events).start();
+    tokio::time::sleep(Duration::from_secs(31)).await;
+    wait_until(|| !events.all().is_empty()).await;
+    assert_eq!(events.all(), vec![("a".to_string(), "changed".to_string())]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn stop_ends_the_loop_during_a_sleep() {
+    let w = World::new(Answer::Same, &[]);
+    w.seed("a", Some(SyncInterval::Hourly), None);
+    let events = Arc::new(Recorder::default());
+    let handle = w.scheduler(&events).start();
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    handle.stop();
+    tokio::time::sleep(Duration::from_secs(3600)).await;
+    settle().await;
+    assert_eq!(w.fetcher.calls(), 0);
+}
+
+#[tokio::test(start_paused = true)]
+async fn stop_does_not_cancel_a_running_check() {
+    let w = World::new(Answer::Changed, &[]);
+    w.seed("a", Some(SyncInterval::Hourly), None);
+    w.seed("b", Some(SyncInterval::Hourly), None);
+    let gate = Arc::new(Gate {
+        started: tokio::sync::Notify::new(),
+        go: tokio::sync::Notify::new(),
+    });
+    *w.fetcher.gate.lock().expect("lock") = Some(Arc::clone(&gate));
+    let events = Arc::new(Recorder::default());
+    let handle = w.scheduler(&events).start();
+    tokio::time::sleep(Duration::from_secs(31)).await;
+    gate.started.notified().await;
+    handle.stop();
+    gate.go.notify_one();
+    wait_until(|| events.all().len() == 1).await;
+    tokio::time::sleep(Duration::from_secs(300)).await;
+    settle().await;
+    // The running check finished and published, and the second one never started.
+    assert_eq!(events.all().len(), 1);
+    assert_eq!(w.fetcher.calls(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_check_error_for_one_collection_does_not_stop_the_next() {
+    let w = World::new(Answer::Same, &["a-bad"]);
+    w.seed("a-bad", Some(SyncInterval::Hourly), None);
+    w.seed("b-good", Some(SyncInterval::Hourly), None);
+    let events = Arc::new(Recorder::default());
+    let _handle = w.scheduler(&events).start();
+    tokio::time::sleep(Duration::from_secs(31)).await;
+    wait_until(|| events.all().len() == 2).await;
+    let mut got = events.all();
+    got.sort();
+    assert_eq!(
+        got,
+        vec![
+            ("a-bad".to_string(), "failed".to_string()),
+            ("b-good".to_string(), "unchanged".to_string())
+        ]
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_check_that_errors_is_delayed_in_memory_and_doubles() {
+    let w = World::new(Answer::Same, &["a-bad"]);
+    w.seed("a-bad", Some(SyncInterval::Hourly), None);
+    let events = Arc::new(Recorder::default());
+    let _handle = w.scheduler(&events).start();
+    tokio::time::sleep(Duration::from_secs(31)).await;
+    wait_until(|| w.tx.bad_tries.load(Ordering::SeqCst) >= 1).await;
+    // Many ticks later, still inside the first 15 minute delay, it is not tried again.
+    // The tries count settle too, so the first check's own try is the baseline.
+    let after_first = w.tx.bad_tries.load(Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_secs(600)).await;
+    settle().await;
+    assert_eq!(w.tx.bad_tries.load(Ordering::SeqCst), after_first);
+    // Past 15 minutes it runs again.
+    w.set_now(t0() + chrono::Duration::minutes(16));
+    tokio::time::sleep(Duration::from_secs(120)).await;
+    wait_until(|| w.tx.bad_tries.load(Ordering::SeqCst) > after_first).await;
+    let second = w.tx.bad_tries.load(Ordering::SeqCst);
+    // The second delay is 30 minutes, so 20 minutes later it is still held back.
+    w.set_now(t0() + chrono::Duration::minutes(36));
+    tokio::time::sleep(Duration::from_secs(300)).await;
+    settle().await;
+    assert_eq!(w.tx.bad_tries.load(Ordering::SeqCst), second);
+    // Every failure published `failed`.
+    assert!(events.all().iter().all(|(_, s)| s == "failed"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn after_a_long_pause_checks_run_in_batches_not_all_at_once() {
+    let w = World::new(Answer::Same, &[]);
+    for i in 0..12 {
+        w.seed(&format!("c{i:02}"), Some(SyncInterval::Hourly), Some(t0()));
+    }
+    // The clock is one month ahead, so all twelve are overdue.
+    w.set_now(t0() + chrono::Duration::days(30));
+    let events = Arc::new(Recorder::default());
+    let _handle = w.scheduler(&events).start();
+    tokio::time::sleep(Duration::from_secs(31)).await;
+    wait_until(|| w.fetcher.calls() >= 5).await;
+    settle().await;
+    assert_eq!(w.fetcher.calls(), 5);
+    tokio::time::sleep(Duration::from_secs(60)).await;
+    wait_until(|| w.fetcher.calls() >= 10).await;
+    settle().await;
+    assert_eq!(w.fetcher.calls(), 10);
+    tokio::time::sleep(Duration::from_secs(60)).await;
+    wait_until(|| w.fetcher.calls() >= 12).await;
+    settle().await;
+    assert_eq!(w.fetcher.calls(), 12);
+}

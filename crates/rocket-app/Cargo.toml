@@ -43,3 +43,4 @@ tempfile = "3"
 rocket-infra = { workspace = true, features = ["test-support"] }
 wiremock = "0.6"
 zip = "2"
+tokio = { workspace = true, features = ["test-util"] }

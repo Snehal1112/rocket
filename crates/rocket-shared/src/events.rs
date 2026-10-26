@@ -661,6 +661,12 @@ pub enum DomainEvent {
     },
     /// Emitted after every stored conversation of the workspace was deleted.
     AssistantConversationsCleared,
+    /// Emitted after a background OpenAPI sync check. `status` is `unchanged`,
+    /// `changed` or `failed`. It is a refresh signal and carries no URL or message.
+    OpenApiSyncChecked {
+        collection: String,
+        status: String,
+    },
 
     // Load test events
     /// Emitted every 250 ms while a load test runs. The payload fields keep
@@ -1149,6 +1155,19 @@ mod tests {
         assert_eq!(
             json,
             r#"{"type":"collectionTrustChanged","collection":"my-api"}"#
+        );
+    }
+
+    #[test]
+    fn openapi_sync_checked_wire_shape() {
+        let event = DomainEvent::OpenApiSyncChecked {
+            collection: "my-api".into(),
+            status: "changed".into(),
+        };
+        let json = serde_json::to_string(&event).expect("serialize");
+        assert_eq!(
+            json,
+            r#"{"type":"openApiSyncChecked","collection":"my-api","status":"changed"}"#
         );
     }
 
