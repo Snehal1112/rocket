@@ -82,6 +82,9 @@ export function SpecSyncTab({ collection }: SpecSyncTabProps) {
     [planData, approved],
   );
 
+  // An emptied selection, for example after a plan change, closes the dialog for good.
+  if (confirmOpen && approvedItems.length + variables.size === 0) setConfirmOpen(false);
+
   const onSettledOk = useCallback((r: OpenApiApplyReport) => setReport(r), []);
   const confirmApply = () => {
     setConfirmOpen(false);
@@ -199,6 +202,7 @@ export function SpecSyncTab({ collection }: SpecSyncTabProps) {
           filteredCount={matchedKeys.length + matchedVariables.length}
           selectedCount={approved.size + variables.size}
           itemSelectedCount={approvedItems.length}
+          locked={plan.isPlaceholderData}
           busy={apply.isPending || applyingAnywhere || plan.isPlaceholderData}
           onSelectAll={selectAll}
           onSelectNone={selectNone}
@@ -233,6 +237,7 @@ export function SpecSyncTab({ collection }: SpecSyncTabProps) {
               onChoose={sel.setChoice}
               onLink={sel.linkRename}
               onUnlink={sel.unlink}
+              linksLocked={plan.isPlaceholderData}
             />
           </div>
         </div>

@@ -30,6 +30,8 @@ interface SpecSyncDetailProps {
   onChoose: (key: string, field: string, choice: Choice) => void;
   onLink: (oldKey: string, newKey: string) => void;
   onUnlink: (oldKey: string) => void;
+  /** True while the plan is a placeholder, so a link would act on stale rows. */
+  linksLocked: boolean;
 }
 
 const CHOICE_OPTIONS: { value: Choice; label: string }[] = [
@@ -101,6 +103,7 @@ export function SpecSyncDetail({
   onChoose,
   onLink,
   onUnlink,
+  linksLocked,
 }: SpecSyncDetailProps) {
   const entry = findEntry(plan, selectedId);
   // The pair `[oldKey, newKey]` a rename hint points at, or null without a hint.
@@ -144,6 +147,7 @@ export function SpecSyncDetail({
                   variant='outline'
                   size='sm'
                   className='w-fit'
+                  disabled={linksLocked}
                   onClick={() => {
                     const pair = renameLink(entry.item);
                     if (pair) onLink(pair[0], pair[1]);
@@ -158,6 +162,7 @@ export function SpecSyncDetail({
                   variant='outline'
                   size='sm'
                   className='w-fit'
+                  disabled={linksLocked}
                   onClick={() => {
                     const old = linkedFrom(entry.item.key);
                     if (old) onUnlink(old);

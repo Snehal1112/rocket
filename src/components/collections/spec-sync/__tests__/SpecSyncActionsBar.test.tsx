@@ -11,6 +11,7 @@ function props(overrides: Partial<React.ComponentProps<typeof SpecSyncActionsBar
     selectedCount: 0,
     itemSelectedCount: 0,
     busy: false,
+    locked: false,
     onSelectAll: vi.fn(),
     onSelectNone: vi.fn(),
     onSkip: vi.fn(),
@@ -64,6 +65,12 @@ describe('SpecSyncActionsBar', () => {
     );
     expect(screen.getByRole('button', { name: /^Skip selected/ })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled();
+  });
+
+  it('disables Select all and Select none while locked', () => {
+    render(<SpecSyncActionsBar {...props({ locked: true, selectedCount: 1 })} />);
+    expect(screen.getByRole('button', { name: /^Select all/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Select none' })).toBeDisabled();
   });
 
   it('reports the search text', async () => {

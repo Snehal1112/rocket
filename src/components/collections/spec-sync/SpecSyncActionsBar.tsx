@@ -11,6 +11,8 @@ interface SpecSyncActionsBarProps {
   /** Selected requests only. Variables cannot be skipped. */
   itemSelectedCount: number;
   busy: boolean;
+  /** True while the plan is a placeholder, so selecting would act on stale rows. */
+  locked: boolean;
   onSelectAll: () => void;
   onSelectNone: () => void;
   onSkip: () => void;
@@ -25,6 +27,7 @@ export function SpecSyncActionsBar({
   selectedCount,
   itemSelectedCount,
   busy,
+  locked,
   onSelectAll,
   onSelectNone,
   onSkip,
@@ -43,10 +46,20 @@ export function SpecSyncActionsBar({
           className='h-9 pl-8'
         />
       </div>
-      <Button variant='outline' size='sm' onClick={onSelectAll} disabled={filteredCount === 0}>
+      <Button
+        variant='outline'
+        size='sm'
+        onClick={onSelectAll}
+        disabled={locked || filteredCount === 0}
+      >
         Select all ({filteredCount})
       </Button>
-      <Button variant='outline' size='sm' onClick={onSelectNone} disabled={selectedCount === 0}>
+      <Button
+        variant='outline'
+        size='sm'
+        onClick={onSelectNone}
+        disabled={locked || selectedCount === 0}
+      >
         Select none
       </Button>
       <span className='text-xs text-muted-foreground'>{selectedCount} selected</span>

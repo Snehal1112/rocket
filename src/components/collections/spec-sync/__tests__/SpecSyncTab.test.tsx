@@ -393,5 +393,9 @@ describe('SpecSyncTab actions', () => {
     await act(async () => onChecked?.({ collection: 'conf1' } as never));
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Apply now' })).toBeNull());
     expect(screen.getByText('0 selected')).toBeInTheDocument();
+    // Selecting again must not pop the dialog open by itself.
+    await user.click(await screen.findByRole('checkbox', { name: 'Select Add pet' }));
+    expect(screen.getByText('1 selected')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Apply now' })).toBeNull();
   });
 });

@@ -13,6 +13,7 @@ function props(overrides: Partial<React.ComponentProps<typeof SpecSyncDetail>> =
     onChoose: vi.fn(),
     onLink: vi.fn(),
     onUnlink: vi.fn(),
+    linksLocked: false,
     ...overrides,
   };
 }
@@ -106,6 +107,23 @@ describe('SpecSyncDetail', () => {
     });
     render(<SpecSyncDetail {...props({ plan, selectedId: 'new:GET /pets' })} />);
     expect(screen.queryByRole('button', { name: 'Link as rename' })).toBeNull();
+  });
+
+  it('disables Link and Unlink while locked', () => {
+    const { rerender } = render(
+      <SpecSyncDetail {...props({ selectedId: 'new:GET /pets', linksLocked: true })} />,
+    );
+    expect(screen.getByRole('button', { name: 'Link as rename' })).toBeDisabled();
+    rerender(
+      <SpecSyncDetail
+        {...props({
+          selectedId: 'changed:POST /pets',
+          links: [['GET /old', 'POST /pets']],
+          linksLocked: true,
+        })}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Unlink rename' })).toBeDisabled();
   });
 
   it('offers to unlink a changed item that came from a link', async () => {

@@ -1,19 +1,19 @@
 import { act, renderHook } from '@testing-library/react';
 import { useState } from 'react';
 import { describe, expect, it } from 'vitest';
-import type { OpenApiSyncItem } from '@/lib/tauri-api';
+import type { OpenApiSyncItem, OpenApiSyncPlan } from '@/lib/tauri-api';
 import { useSyncSelection } from '../useSyncSelection';
 import { changedItem, makePlan, newItem, removedItem } from './fixtures';
 
 type Links = Array<[string, string]>;
 
-function setup(plan = makePlan()) {
+function setup(plan: OpenApiSyncPlan | undefined = makePlan()) {
   return renderHook(
     ({ p }) => {
       const [links, setLinks] = useState<Links>([]);
       return useSyncSelection(p, links, setLinks);
     },
-    { initialProps: { p: plan } },
+    { initialProps: { p: plan as OpenApiSyncPlan | undefined } },
   );
 }
 
@@ -124,5 +124,15 @@ describe('useSyncSelection', () => {
     act(() => result.current.clearLinks());
     expect(result.current.links).toEqual([]);
     expect(result.current.selection.renameLinks).toEqual([]);
+  });
+
+  it('keeps the links when a plan arrives after an error under the same links', () => {
+    const { result, rerender } = setup();
+    act(() => result.current.linkRename('a', 'b'));
+    rerender({ p: makePlan({ items: [{ ...changedItem, digest: 'linked' }] }) });
+    // The plan query fails, then Check again succeeds under the same links.
+    rerender({ p: undefined });
+    rerender({ p: makePlan({ items: [{ ...changedItem, digest: 'again' }] }) });
+    expect(result.current.links).toEqual([['a', 'b']]);
   });
 });

@@ -65,8 +65,10 @@ export function useSyncSelection(
     setSeen({ signature, linksKey });
     setState(emptyState());
     // A new plan under the same links means the links were used up, so they must not be
-    // sent again. A plan that changed because a link was added keeps them.
-    if (links.length > 0 && seen.linksKey === linksKey) setLinks([]);
+    // sent again. A plan that changed because a link was added keeps them, and so does one
+    // that follows a failed plan, which has an empty signature.
+    if (links.length > 0 && signature !== '' && seen.signature !== '' && seen.linksKey === linksKey)
+      setLinks([]);
   }
 
   const toggle = useCallback((key: string) => {
