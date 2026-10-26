@@ -455,7 +455,15 @@ async fn apply_keeps_the_timing_fields() {
         .set_interval(&w.root, SyncInterval::Daily)
         .expect("interval");
     w.check_with(v2()).await;
+    // Seed failure fields that are not at their defaults, as a failed check would leave them.
+    let mut seeded = w.svc.local_state(&w.name).expect("local");
+    seeded.consecutive_failures = 2;
+    seeded.not_before = Some("2026-10-26T18:00:00+00:00".to_string());
+    rocket_infra::FsOpenApiLocalRepo
+        .save(&w.root, &seeded)
+        .expect("seed");
     let before = w.svc.local_state(&w.name).expect("local");
+    assert_eq!(before.consecutive_failures, 2);
     assert_eq!(before.sync_interval, SyncInterval::Daily);
     assert!(before.last_checked_at.is_some());
     let plan = w.plan();

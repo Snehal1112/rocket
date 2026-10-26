@@ -266,7 +266,8 @@ impl OpenApiSyncService {
 
     pub async fn check(&self, collection_root: &Path) -> DomainResult<CheckOutcome> {
         self.settle(collection_root)?;
-        self.local_repo()?;
+        // A local state that cannot be read fails the check before any request goes out.
+        self.local_repo()?.load(collection_root)?;
         // Rule 1: a source file is required. Only a GitHub location gets a token.
         let mut source = self.load(collection_root)?;
         let read = match source.location {
@@ -1236,5 +1237,74 @@ mod tests {
         assert!(svc.check(dir.path()).await.is_err());
         assert!(svc.set_interval(dir.path(), SyncInterval::Daily).is_err());
         assert!(fetcher.requests.lock().expect("lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_local_state_fails_the_check_before_any_request() {
+        for text in ["{ not json", "{\"version\": 2}"] {
+            let f = Fixture::new(source(github()));
+            std::fs::create_dir_all(f.root().join(".rocket")).expect("dir");
+            std::fs::write(f.root().join(".rocket/openapi-local.json"), text).expect("write");
+            assert!(f.svc.check(f.root()).await.is_err(), "{text}");
+            assert!(
+                f.fetcher.requests.lock().expect("lock").is_empty(),
+                "{text}"
+            );
+        }
+    }
+
+    /// Runs a callback while the fetch is in flight, then answers 304.
+    struct GatedFetcher(Box<dyn Fn() + Send + Sync>);
+
+    #[async_trait]
+    impl SpecFetcher for GatedFetcher {
+        async fn fetch(&self, _request: SpecFetchRequest) -> Reply {
+            (self.0)();
+            Ok(SpecFetchOutcome::NotModified)
+        }
+    }
+
+    #[tokio::test]
+    async fn a_check_keeps_local_changes_made_during_the_fetch() {
+        let dir = TempDir::new().expect("tempdir");
+        FsOpenApiSourceRepo
+            .save(dir.path(), &source(github()))
+            .expect("seed");
+        let root = dir.path().to_path_buf();
+        let mid_fetch = {
+            let root = root.clone();
+            move || {
+                let other = OpenApiSyncService::new(
+                    Arc::new(SharedFetcher(Arc::new(FakeFetcher::default()))),
+                    Box::new(FsOpenApiSourceRepo),
+                    Arc::new(MemSecrets::default()),
+                )
+                .with_local(Box::new(FsOpenApiLocalRepo));
+                other
+                    .set_interval(&root, SyncInterval::Weekly)
+                    .expect("interval");
+                let mut local = FsOpenApiLocalRepo
+                    .load(&root)
+                    .expect("load")
+                    .unwrap_or_default();
+                local.skips.insert("listPets".into(), "fp".into());
+                FsOpenApiLocalRepo.save(&root, &local).expect("save");
+            }
+        };
+        let svc = OpenApiSyncService::new(
+            Arc::new(GatedFetcher(Box::new(mid_fetch))),
+            Box::new(FsOpenApiSourceRepo),
+            Arc::new(MemSecrets::default()),
+        )
+        .with_local(Box::new(FsOpenApiLocalRepo))
+        .with_clock(Arc::new(fixed_now));
+        svc.check(&root).await.expect("check");
+        let local = FsOpenApiLocalRepo
+            .load(&root)
+            .expect("load")
+            .expect("state");
+        assert_eq!(local.sync_interval, SyncInterval::Weekly);
+        assert_eq!(local.skips.get("listPets").map(String::as_str), Some("fp"));
+        assert_eq!(local.last_checked_at, Some(fixed_now().to_rfc3339()));
     }
 }

@@ -67,9 +67,11 @@ pub fn backoff_secs(failures: u32, interval: SyncInterval, retry_after_secs: Opt
 }
 
 fn add_secs(time: DateTime<Utc>, secs: u64) -> DateTime<Utc> {
-    let secs = i64::try_from(secs).unwrap_or(i64::MAX / 4_000);
-    time.checked_add_signed(Duration::seconds(secs))
-        .unwrap_or(time)
+    // An overflow means "far away", never "now".
+    let secs = i64::try_from(secs).unwrap_or(i64::MAX);
+    Duration::try_seconds(secs)
+        .and_then(|d| time.checked_add_signed(d))
+        .unwrap_or(DateTime::<Utc>::MAX_UTC)
 }
 
 /// When the next check is due. `None` when the interval is off. A missing, unreadable or
@@ -80,15 +82,16 @@ pub fn next_check_at(plan: &SchedulePlan) -> Option<DateTime<Utc>> {
         .last_checked_at
         .and_then(parse)
         .filter(|last| *last <= plan.now);
-    let Some(last) = last else {
-        return Some(plan.now);
-    };
-    let due = if plan.last_failed {
-        let failures = plan.consecutive_failures.max(1);
-        add_secs(last, backoff_secs(failures, plan.interval, None))
-    } else {
-        let delay = interval_secs + jitter_secs(plan.source_id, plan.interval);
-        add_secs(last, delay)
+    let due = match last {
+        None => plan.now,
+        Some(last) if plan.last_failed => {
+            let failures = plan.consecutive_failures.max(1);
+            add_secs(last, backoff_secs(failures, plan.interval, None))
+        }
+        Some(last) => {
+            let delay = interval_secs + jitter_secs(plan.source_id, plan.interval);
+            add_secs(last, delay)
+        }
     };
     match plan.not_before.and_then(parse) {
         Some(floor) if floor > due => Some(floor),
@@ -211,5 +214,21 @@ mod tests {
         let early = (now() + Duration::minutes(1)).to_rfc3339();
         p.not_before = Some(&early);
         assert_eq!(next_check_at(&p), Some(now() + Duration::seconds(900)));
+        // The floor also holds for a missing or future last check.
+        p.not_before = Some(&floor);
+        p.last_checked_at = None;
+        assert_eq!(next_check_at(&p), Some(now() + Duration::hours(5)));
+        let future = (now() + Duration::hours(2)).to_rfc3339();
+        p.last_checked_at = Some(&future);
+        assert_eq!(next_check_at(&p), Some(now() + Duration::hours(5)));
+        p.not_before = Some(&early);
+        assert_eq!(next_check_at(&p), Some(now() + Duration::minutes(1)));
+        p.not_before = Some("not a date");
+        assert_eq!(next_check_at(&p), Some(now()));
+    }
+
+    #[test]
+    fn an_overflowing_delay_is_far_away_not_now() {
+        assert_eq!(add_secs(now(), u64::MAX), DateTime::<Utc>::MAX_UTC);
     }
 }
