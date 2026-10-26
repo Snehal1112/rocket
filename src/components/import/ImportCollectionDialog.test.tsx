@@ -135,7 +135,7 @@ describe('ImportCollectionDialog OpenAPI source', () => {
     await userEvent.type(screen.getByRole('textbox'), '  https://example.com/o.json ');
     await userEvent.click(screen.getByRole('button', { name: 'Import' }));
     await waitFor(() =>
-      expect(mockImportOpenApiUrl).toHaveBeenCalledWith('https://example.com/o.json', 'tags', 'ws1'),
+      expect(mockImportOpenApiUrl).toHaveBeenCalledWith('https://example.com/o.json', 'tags', 'ws1', undefined),
     );
   });
 
@@ -147,7 +147,7 @@ describe('ImportCollectionDialog OpenAPI source', () => {
     await userEvent.click(screen.getByRole('radio', { name: 'Path' }));
     await userEvent.click(screen.getByRole('button', { name: 'Import' }));
     await waitFor(() =>
-      expect(mockImportOpenApiUrl).toHaveBeenCalledWith('https://example.com/o.json', 'paths', 'ws1'),
+      expect(mockImportOpenApiUrl).toHaveBeenCalledWith('https://example.com/o.json', 'paths', 'ws1', undefined),
     );
   });
 
@@ -189,5 +189,94 @@ describe('ImportCollectionDialog OpenAPI source', () => {
     await userEvent.type(screen.getByRole('textbox'), 'https://example.com/o.json');
     await userEvent.click(screen.getByRole('button', { name: 'Import' }));
     expect(await screen.findByText('This link points at a commit')).toBeInTheDocument();
+  });
+  it('shows a token field in Link mode and hides it in File mode', async () => {
+    renderDialog();
+    await openOpenApiTab();
+    expect(screen.getByLabelText('Access token (optional)')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        'Only for private GitHub repositories. Kept in your system keychain, never in the collection.',
+      ),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'File' }));
+    expect(screen.queryByLabelText('Access token (optional)')).not.toBeInTheDocument();
+  });
+
+  it('describes private repository support on the tab', async () => {
+    renderDialog();
+    await openOpenApiTab();
+    expect(screen.getByText(/private repositories need a token/i)).toBeInTheDocument();
+    expect(screen.queryByText(/not supported yet/i)).not.toBeInTheDocument();
+  });
+
+  it('the token field is a password input', async () => {
+    renderDialog();
+    await openOpenApiTab();
+    expect(screen.getByLabelText('Access token (optional)')).toHaveAttribute('type', 'password');
+  });
+
+  it('sends the trimmed token with the link', async () => {
+    mockImportOpenApiUrl.mockResolvedValue(openApiResult);
+    renderDialog();
+    await openOpenApiTab();
+    await userEvent.type(screen.getByRole('textbox'), 'https://github.com/o/r/blob/main/a.yaml');
+    await userEvent.type(screen.getByLabelText('Access token (optional)'), '  t0k  ');
+    await userEvent.click(screen.getByRole('button', { name: 'Import' }));
+    await waitFor(() =>
+      expect(mockImportOpenApiUrl).toHaveBeenCalledWith(
+        'https://github.com/o/r/blob/main/a.yaml',
+        'tags',
+        'ws1',
+        't0k',
+      ),
+    );
+  });
+
+  it('sends no token when the field is blank', async () => {
+    mockImportOpenApiUrl.mockResolvedValue(openApiResult);
+    renderDialog();
+    await openOpenApiTab();
+    await userEvent.type(screen.getByRole('textbox'), 'https://example.com/o.json');
+    await userEvent.type(screen.getByLabelText('Access token (optional)'), '   ');
+    await userEvent.click(screen.getByRole('button', { name: 'Import' }));
+    await waitFor(() =>
+      expect(mockImportOpenApiUrl).toHaveBeenCalledWith(
+        'https://example.com/o.json',
+        'tags',
+        'ws1',
+        undefined,
+      ),
+    );
+  });
+
+  it('clears the token when the dialog closes and reopens', async () => {
+    renderDialog();
+    await openOpenApiTab();
+    await userEvent.type(screen.getByLabelText('Access token (optional)'), 't0k');
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Bruno' })).toBeInTheDocument());
+    await openOpenApiTab();
+    expect(screen.getByLabelText('Access token (optional)')).toHaveValue('');
+  });
+
+  it('clears the token when the tab changes', async () => {
+    renderDialog();
+    await openOpenApiTab();
+    await userEvent.type(screen.getByLabelText('Access token (optional)'), 't0k');
+    await userEvent.click(screen.getByRole('button', { name: 'WSDL' }));
+    await openOpenApiTab();
+    expect(screen.getByLabelText('Access token (optional)')).toHaveValue('');
+  });
+
+  it('does not show the token on the done screen', async () => {
+    mockImportOpenApiUrl.mockResolvedValue(openApiResult);
+    renderDialog();
+    await openOpenApiTab();
+    await userEvent.type(screen.getByRole('textbox'), 'https://github.com/o/r/blob/main/a.yaml');
+    await userEvent.type(screen.getByLabelText('Access token (optional)'), 't0k');
+    await userEvent.click(screen.getByRole('button', { name: 'Import' }));
+    expect(await screen.findByText('Import complete')).toBeInTheDocument();
+    expect(document.body.innerHTML).not.toContain('t0k');
   });
 });

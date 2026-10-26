@@ -50,7 +50,7 @@ const IMPORT_DESCRIPTIONS: Record<ImportSource, string> = {
   postman: 'Select a Postman Collection JSON file (v2.0 or v2.1).',
   wsdl: 'Select a WSDL 1.1 file. You get one request per SOAP operation, with the envelope and SOAP headers filled in.',
   openapi:
-    'Import an OpenAPI 3.0, 3.1 or Swagger 2.0 spec (JSON or YAML) from a link or a file. GitHub file links work. Private repositories are not supported yet.',
+    'Import an OpenAPI 3.0, 3.1 or Swagger 2.0 spec (JSON or YAML) from a link or a file. GitHub file links work, and private repositories need a token.',
 };
 
 const EMPTY_HEADLINES: Record<ImportSource, string> = {
@@ -98,6 +98,8 @@ export function ImportCollectionDialog({
   const [skippedOpen, setSkippedOpen] = useState(false);
   const [openapiMode, setOpenapiMode] = useState<OpenApiMode>('link');
   const [link, setLink] = useState('');
+  // Held in state only. It is never shown again and is cleared on close and tab switch.
+  const [token, setToken] = useState('');
   const [groupBy, setGroupBy] = useState<OpenApiGroupBy>('tags');
   const [warnings, setWarnings] = useState<string[]>([]);
 
@@ -117,6 +119,7 @@ export function ImportCollectionDialog({
       setSkippedOpen(false);
       setOpenapiMode('link');
       setLink('');
+      setToken('');
       setGroupBy('tags');
       setWarnings([]);
     }, 200);
@@ -134,6 +137,7 @@ export function ImportCollectionDialog({
     setError(null);
     setOpenapiMode('link');
     setLink('');
+    setToken('');
     setGroupBy('tags');
   }
 
@@ -238,7 +242,7 @@ export function ImportCollectionDialog({
       if (importSource === 'openapi') {
         const imported =
           openapiMode === 'link'
-            ? await importOpenApiUrl(link.trim(), groupBy, targetWsId)
+            ? await importOpenApiUrl(link.trim(), groupBy, targetWsId, token.trim() || undefined)
             : await importOpenApiFile(source?.path ?? '', groupBy, targetWsId);
         result = imported.report;
         importWarnings = imported.warnings;
@@ -262,6 +266,7 @@ export function ImportCollectionDialog({
 
       setReport(result);
       setWarnings(importWarnings);
+      setToken('');
       setDialogState('done');
       onImportComplete?.();
     } catch (err) {
@@ -349,12 +354,30 @@ export function ImportCollectionDialog({
               )}
 
               {isOpenApiLink && (
-                <Input
-                  value={link}
-                  onChange={(e) => setLink(e.target.value)}
-                  placeholder='https://github.com/owner/repo/blob/main/openapi.yaml'
-                  aria-label='Spec link'
-                />
+                <div className='space-y-3'>
+                  <Input
+                    value={link}
+                    onChange={(e) => setLink(e.target.value)}
+                    placeholder='https://github.com/owner/repo/blob/main/openapi.yaml'
+                    aria-label='Spec link'
+                  />
+                  <div className='space-y-1'>
+                    <Label htmlFor='openapi-token' className='text-xs font-medium'>
+                      Access token (optional)
+                    </Label>
+                    <Input
+                      id='openapi-token'
+                      type='password'
+                      autoComplete='off'
+                      value={token}
+                      onChange={(e) => setToken(e.target.value)}
+                    />
+                    <p className='text-[11px] text-muted-foreground'>
+                      Only for private GitHub repositories. Kept in your system keychain, never in
+                      the collection.
+                    </p>
+                  </div>
+                </div>
               )}
 
               {/* Drop zone */}

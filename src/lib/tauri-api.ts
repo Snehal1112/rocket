@@ -1902,7 +1902,14 @@ export const importOpenApiUrl = (
   link: string,
   groupBy: OpenApiGroupBy,
   targetWorkspaceId: string,
-) => invoke<OpenApiImportResult>('import_openapi_url', { link, groupBy, targetWorkspaceId });
+  token?: string,
+) =>
+  invoke<OpenApiImportResult>('import_openapi_url', {
+    link,
+    groupBy,
+    targetWorkspaceId,
+    ...(token === undefined ? {} : { token }),
+  });
 
 // ============================================================
 // UI state persistence

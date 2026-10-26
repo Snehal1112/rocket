@@ -28,6 +28,24 @@ describe('OpenAPI import API', () => {
     });
   });
 
+  it('importOpenApiUrl passes the token when given', async () => {
+    vi.mocked(invoke).mockResolvedValue(result);
+    await importOpenApiUrl('https://github.com/o/r/blob/main/a.yaml', 'tags', 'ws1', 't0k');
+    expect(invoke).toHaveBeenCalledWith('import_openapi_url', {
+      link: 'https://github.com/o/r/blob/main/a.yaml',
+      groupBy: 'tags',
+      targetWorkspaceId: 'ws1',
+      token: 't0k',
+    });
+  });
+
+  it('importOpenApiUrl leaves the token key out when not given', async () => {
+    vi.mocked(invoke).mockResolvedValue(result);
+    await importOpenApiUrl('https://x.test/a.yaml', 'tags', 'ws1');
+    const args = vi.mocked(invoke).mock.calls[0][1] as Record<string, unknown>;
+    expect('token' in args).toBe(false);
+  });
+
   it('importOpenApiFile invokes the file command', async () => {
     vi.mocked(invoke).mockResolvedValue(result);
     await expect(importOpenApiFile('/tmp/a.yaml', 'paths', 'ws1')).resolves.toEqual(result);
