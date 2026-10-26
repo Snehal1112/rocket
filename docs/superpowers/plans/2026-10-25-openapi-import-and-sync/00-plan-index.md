@@ -23,7 +23,7 @@ Rules for every plan:
 |---|---|---|
 | P4 | `plan-04-check-and-token.md`: sync state in the source file, `OpenApiSyncService` (conditional fetch, pending copy, token in the keychain), import with a token. Done on branch openapi-import (a26a3384..71594576), final review clean | P2, P3 |
 | P5 | `plan-05-diff-and-merge.md`: baseline snapshot of converted requests (written at import), per-request three-way merge, sync plan (New, Changed, Removed, rename hints, skips, cautious mode). Done on branch openapi-sync-diff (92d797e1..12bacf9f), final review clean after one fix wave, not yet merged to main | P1, P2, P4 |
-| P6 | `plan-06-apply-and-recovery.md`: file transaction with journal and recovery, apply builder (stale-approval digests, round-trip guard, skips, rename links), `OpenApiSyncService::apply` and launch recovery. Written, waiting for review | P5 |
+| P6 | `plan-06-apply-and-recovery.md`: file transaction with journal and recovery, apply builder (stale-approval digests, round-trip guard, skips, rename links), `OpenApiSyncService::apply` and launch recovery. Done on branch openapi-sync-apply (3aa8cb17..), final review clean after one fix wave, not yet merged to main | P5 |
 | P7 | Scheduler: supervisor, intervals, jitter, backoff, launch catch-up, notice | P4 |
 | P8 | Spec sync tab: list and detail | P5, P6 |
 | P9 | Spec sync tab: skip, apply, Check now, interval settings, token field | P7, P8 |
@@ -59,4 +59,13 @@ Rules for every plan:
 - Decide what `converter_version` the baseline gets after a partial apply: keeping the old one is safe but noisy, bumping it is safe for the three-way merge but trusts older snapshots.
 - Skips are keyed by operation key and fingerprint; the store, `CurrentRequest` loading, `existing_variables` and `current_base_url` are Plan 6 work. A skip recorded before the duplicate-name fix would show again (safe direction).
 - Small: `VariableChange.baseline` holds the raw baseline base URL; normalize an empty string to `None` (a spec with no servers that later adds one would otherwise look edited). A real summary that ends in ` (n)` and then drops it is reported as no name change (rare, documented). `AddSecurity` repeats for a variable the user deleted. Label converter-version changes in the UI ("rules updated").
-- Carried from Plan 4: before applying, verify `sha256(load_pending()) == pending_sha256`; on a 304 with a missing pending file, refetch without validators.
+- Carried from Plan 4: before applying, verify `sha256(load_pending()) == pending_sha256`; on a 304 with a missing pending file, refetch without validators. (Done in Plan 6.)
+
+## Carry-forward from the Plan 6 final review (for Plans 7 and 9)
+
+- P9: the apply and `check` commands must run through `spawn_blocking` (or the locked part of `check`). The per-collection lock is a std mutex and apply does blocking file work, so a `check` waiting behind a long apply would hold a runtime worker. Never hold a `FsFileTx` across an `.await` or a `recover`.
+- P9: the `Selection` carries `VariableApproval { name, digest }` per variable and `rename_links`; build digests with `plan_with_links`. The "Link as rename" button passes `(old_key, new_key)`.
+- P9: editor saves (`CollectionService`) are not covered by the sync lock; an editor save between apply's load and commit is overwritten. Decide before the Spec sync tab can apply (share the save mutex, or refuse while a tab is dirty).
+- P7: move check timing (`last_checked_at`, `last_status`) out of `openapi-source.yml` into the local state. A partial apply followed by an upstream revert to the old spec reads as Unchanged (check Rule 5 compares against `spec_sha256`); mark a partial apply so the plan still runs.
+- Not fixed, cross-process: two Rocket instances on one collection (no single-instance plugin). The commit re-check and the journal `create_new` limit the damage; the busy-root guard keys on the raw path while the sync lock canonicalizes it.
+- Parked: settings rewrite has no round-trip guard (same as a normal settings save); empty folders left after a rollback; serializer duplication between the repos and apply (add a `to_bytes` on the repo traits); error text in logs may carry paths; `COLLECTION_LOCKS` never shrinks; variable names and item keys share one stale list in the report.
