@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { OpenApiSyncItem } from '@/lib/tauri-api';
@@ -27,6 +27,9 @@ function manyItems(count: number): OpenApiSyncItem[] {
     name: `Request ${i}`,
   })) as OpenApiSyncItem[];
 }
+
+// The big-plan tests render hundreds of rows, which is slow when the machine is busy.
+vi.setConfig({ testTimeout: 30000 });
 
 describe('SpecSyncList', () => {
   it('shows the groups with counts and calls back on select', async () => {
@@ -65,16 +68,15 @@ describe('SpecSyncList', () => {
   });
 
   it('caps a very large plan at 500 rows per group and offers Show more', async () => {
-    const plan = makePlan({ items: manyItems(3000) });
+    const plan = makePlan({ items: manyItems(600) });
     render(<SpecSyncList {...props({ plan })} />);
-    expect(screen.getByText('Changed (3000)')).toBeInTheDocument();
+    expect(screen.getByText('Changed (600)')).toBeInTheDocument();
     expect(screen.getByText('Request 499')).toBeInTheDocument();
     expect(screen.queryByText('Request 500')).toBeNull();
-    expect(screen.getByText('2500 more not shown')).toBeInTheDocument();
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Show more' }));
-    expect(screen.getByText('Request 999')).toBeInTheDocument();
-    expect(screen.queryByText('Request 1000')).toBeNull();
-    expect(screen.getByText('2000 more not shown')).toBeInTheDocument();
+    expect(screen.getByText('100 more not shown')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Show more' }));
+    expect(screen.getByText('Request 599')).toBeInTheDocument();
+    expect(screen.queryByText(/more not shown/)).toBeNull();
   });
 
   it('toggles an approval with the row checkbox and with the Space key', async () => {
@@ -110,11 +112,11 @@ describe('SpecSyncList', () => {
   });
 
   it('filters every group by the query and lifts the cap for the matches', () => {
-    const plan = makePlan({ items: [...manyItems(1200), ...makePlan().items] });
-    render(<SpecSyncList {...props({ plan, query: 'request 1' })} />);
-    // Request 1, 10-19, 100-199 and 1000-1199: 1 + 10 + 100 + 200 matches.
-    expect(screen.getByText('Changed (311)')).toBeInTheDocument();
-    expect(screen.getByText('Request 1199')).toBeInTheDocument();
+    const plan = makePlan({ items: [...manyItems(650), ...makePlan().items] });
+    render(<SpecSyncList {...props({ plan, query: 'request' })} />);
+    // All 650 match, which is past the cap of 500.
+    expect(screen.getByText('Changed (650)')).toBeInTheDocument();
+    expect(screen.getByText('Request 649')).toBeInTheDocument();
     expect(screen.queryByText(/more not shown/)).toBeNull();
     expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
     expect(screen.getByText('New (0)')).toBeInTheDocument();

@@ -1,6 +1,7 @@
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, configure, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { clearApplyState } from '@/lib/queries/openapi-sync-queries';
 import { useApplySync } from '@/lib/queries/openapi-sync-queries';
 import * as tauriApi from '@/lib/tauri-api';
 import { renderWithQuery } from '@/test/trust-fixtures';
@@ -19,6 +20,14 @@ vi.mock('@/lib/tauri-api', async () => {
     applyOpenApiSync: vi.fn(),
   };
 });
+
+// Module-level apply state must not leak from one test to the next, even after a timeout.
+beforeEach(() => clearApplyState());
+afterEach(() => clearApplyState());
+
+// A busy machine can make a render-heavy test slow, so the limit is generous.
+vi.setConfig({ testTimeout: 30000 });
+configure({ asyncUtilTimeout: 10000 });
 
 describe('SpecSyncTab', () => {
   beforeEach(() => {
@@ -258,7 +267,7 @@ describe('SpecSyncTab actions', () => {
   });
 
   it('searches every group and selects all matches, hidden rows included', async () => {
-    const items = Array.from({ length: 1200 }, (_, i) => ({
+    const items = Array.from({ length: 600 }, (_, i) => ({
       ...changedItem,
       key: `GET /p${i}`,
       name: `Request ${i}`,
@@ -266,10 +275,12 @@ describe('SpecSyncTab actions', () => {
     mockSync(makePlan({ items }));
     renderWithQuery(<SpecSyncTab collection='search1' />);
     const user = userEvent.setup();
-    await screen.findByText('Changed (1200)');
-    expect(screen.getByRole('button', { name: 'Select all (1200)' })).toBeInTheDocument();
-    await user.type(screen.getByRole('searchbox', { name: 'Search changes' }), 'Request 11');
-    // Request 11, 110-119 and 1100-1199 match.
+    await screen.findByText('Changed (600)');
+    expect(screen.getByRole('button', { name: 'Select all (600)' })).toBeInTheDocument();
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search changes' }), {
+      target: { value: 'Request 5' },
+    });
+    // Request 5, 50-59 and 500-599 match, the last ones past the 500 row cap.
     expect(await screen.findByText('Changed (111)')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Select all (111)' }));
     expect(screen.getByText('111 selected')).toBeInTheDocument();

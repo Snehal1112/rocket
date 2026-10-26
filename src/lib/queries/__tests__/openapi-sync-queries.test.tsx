@@ -1,10 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import { beforeEach, describe, expect, it, type MockInstance, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from 'vitest';
 import * as tauriApi from '@/lib/tauri-api';
 import { collectionKeys } from '../collection-queries';
 import {
+  clearApplyState,
   openApiSyncKeys,
   useApplySync,
   useCheckNow,
@@ -44,7 +45,10 @@ describe('openapi sync queries', () => {
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   );
 
+  afterEach(() => clearApplyState());
+
   beforeEach(() => {
+    clearApplyState();
     vi.clearAllMocks();
     client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(null);
