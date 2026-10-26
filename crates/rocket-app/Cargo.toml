@@ -15,6 +15,7 @@ rocket-environment.workspace = true
 rocket-flow.workspace = true
 rocket-git.workspace = true
 rocket-http.workspace = true
+rocket-import = { path = "../rocket-import" }
 rocket-history.workspace = true
 rocket-workspace.workspace = true
 serde.workspace = true
@@ -40,6 +41,5 @@ tokio-tungstenite = { version = "0.30", default-features = false, features = ["h
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 tempfile = "3"
 rocket-infra.workspace = true
-rocket-import = { path = "../rocket-import" }
 wiremock = "0.6"
 zip = "2"

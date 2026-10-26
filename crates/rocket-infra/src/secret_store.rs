@@ -43,6 +43,14 @@ impl KeyringSecretStore {
         }
     }
 
+    /// Backs the GitHub token of an OpenAPI sync source (scope_id = source id, key = `token`).
+    /// A separate keychain service from the other namespaces so the entries can never collide.
+    pub fn new_openapi_sync() -> Self {
+        Self {
+            service: "com.rocketapi.openapi-sync",
+        }
+    }
+
     /// Backs agent credentials saved from the agent dialog. A separate keychain
     /// service from the other namespaces so the entries can never collide.
     pub fn new_agent_credentials() -> Self {
@@ -127,6 +135,20 @@ mod tests {
             KeyringSecretStore::new_proxy(),
         ] {
             assert_ne!(agent.service, other.service);
+        }
+    }
+
+    #[test]
+    fn the_openapi_sync_namespace_is_distinct() {
+        let sync = KeyringSecretStore::new_openapi_sync();
+        assert_eq!(sync.service, "com.rocketapi.openapi-sync");
+        for other in [
+            KeyringSecretStore::new_env_secrets(),
+            KeyringSecretStore::new_vault_connections(),
+            KeyringSecretStore::new_proxy(),
+            KeyringSecretStore::new_agent_credentials(),
+        ] {
+            assert_ne!(sync.service, other.service);
         }
     }
 

@@ -10,4 +10,4 @@ pub(crate) use model::{Operation, ParamLocation, Parameter, SecurityScheme, Secu
 pub(crate) use reader::parse_openapi;
 pub use source_record::source_record;
 pub use source_url::{fetch_target, parse_spec_url, FetchTarget};
-pub use entry::OpenApiImportResult;
+pub use entry::{check_spec_text, fetch_failure_message, OpenApiImportResult};

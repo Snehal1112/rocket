@@ -23,9 +23,13 @@ pub struct OpenApiImportResult {
     pub warnings: Vec<String>,
 }
 
-/// A message the user can act on. Private repositories need a token, which is not wired yet.
-fn describe_fetch_failure(failure: &SpecFetchFailure) -> String {
+/// A message the user can act on. `token_sent` says whether the request carried a token.
+pub fn fetch_failure_message(failure: &SpecFetchFailure, token_sent: bool) -> String {
     match failure {
+        SpecFetchFailure::Unauthorized | SpecFetchFailure::NotFound if token_sent => {
+            "The file was not found, or the token was rejected or lacks Contents read access."
+                .to_string()
+        }
         SpecFetchFailure::Unauthorized | SpecFetchFailure::NotFound => {
             "The file was not found, or it is private or needs a sign-in. \
              Private links are not supported yet."
@@ -33,6 +37,18 @@ fn describe_fetch_failure(failure: &SpecFetchFailure) -> String {
         }
         other => other.to_string(),
     }
+}
+
+/// Used by the import path, which never sends a token.
+fn describe_fetch_failure(failure: &SpecFetchFailure) -> String {
+    fetch_failure_message(failure, false)
+}
+
+/// Checks that the bytes are UTF-8 text that parses as a supported spec. Writes nothing.
+pub fn check_spec_text(bytes: &[u8]) -> ImportResult<()> {
+    let text = std::str::from_utf8(bytes)
+        .map_err(|_| ImportError::NotAnOpenApiSpec("the file is not text".to_string()))?;
+    crate::openapi::parse_openapi(text).map(|_| ())
 }
 
 /// How sure we are that a link points to a commit.
@@ -468,6 +484,21 @@ mod tests {
         assert!(describe_fetch_failure(&limited).contains("60"));
         assert!(describe_fetch_failure(&SpecFetchFailure::TooLarge).contains("25 MB"));
         assert!(describe_fetch_failure(&SpecFetchFailure::NotHttps).contains("https"));
+    }
+
+    #[test]
+    fn token_failure_text_names_the_token() {
+        let with = fetch_failure_message(&SpecFetchFailure::Unauthorized, true);
+        assert!(with.contains("token"), "{with}");
+        let without = fetch_failure_message(&SpecFetchFailure::Unauthorized, false);
+        assert!(without.contains("private"), "{without}");
+    }
+
+    #[test]
+    fn check_spec_text_accepts_a_spec_and_rejects_the_rest() {
+        assert!(check_spec_text(fixture().as_bytes()).is_ok());
+        assert!(check_spec_text(b"<html></html>").is_err());
+        assert!(check_spec_text(&[0xff, 0xfe, 0x00]).is_err());
     }
 
     #[test]

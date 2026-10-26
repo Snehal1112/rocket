@@ -13,6 +13,6 @@ pub use importer::{
 };
 pub use converter::openapi::baseline_hash;
 pub use openapi::{
-    fetch_target, parse_spec_url, source_record, FetchTarget, GroupBy, OpenApiImportResult,
+    check_spec_text, fetch_failure_message, fetch_target, parse_spec_url, source_record, FetchTarget, GroupBy, OpenApiImportResult,
 };
 pub use report::{ImportReport, SkipReason, SkippedItem};
