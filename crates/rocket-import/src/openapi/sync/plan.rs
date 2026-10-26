@@ -81,7 +81,8 @@ impl SyncItem {
         }
     }
 
-    pub(crate) fn fingerprint(&self) -> &str {
+    /// The fingerprint of the item. A removed item has the fixed value `removed`.
+    pub fn fingerprint(&self) -> &str {
         match self {
             SyncItem::New { fingerprint, .. } | SyncItem::Changed { fingerprint, .. } => {
                 fingerprint

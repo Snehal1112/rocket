@@ -78,6 +78,7 @@ pub enum SyncItemDto {
         key: String,
         name: String,
         digest: String,
+        fingerprint: String,
         request_path: String,
         /// `null` when it cannot be known, which the apply treats as edited.
         edited: Option<bool>,
@@ -216,6 +217,7 @@ fn item_dto(item: &SyncItem, digest: &str) -> SyncItemDto {
             key: key.clone(),
             name: name.clone(),
             digest,
+            fingerprint: item.fingerprint().to_string(),
             request_path: request_path.clone(),
             edited: *edited,
             possibly_renamed_to: possibly_renamed_to.clone(),
@@ -272,6 +274,18 @@ fn plan_dto(view: PlanView) -> SyncPlanDto {
     }
 }
 
+/// A collection without an OpenAPI source gives `None`. An unknown collection name is NotFound
+/// too, so it gives `None` on purpose. Any other error is kept.
+fn status_or_none(
+    result: Result<SyncStatusView, DomainError>,
+) -> Result<Option<SyncStatusDto>, DomainError> {
+    match result {
+        Ok(view) => Ok(Some(status_dto(view))),
+        Err(DomainError::NotFound(_)) => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
 /// Runs a blocking service call off the async runtime.
 async fn run_blocking<T: Send + 'static>(
     workspace_path: Arc<Mutex<PathBuf>>,
@@ -294,11 +308,7 @@ pub async fn openapi_sync_status(
     let result = run_blocking(
         Arc::clone(workspace_path.inner()),
         Arc::clone(fetcher.inner()),
-        move |service| match service.status_of(&collection) {
-            Ok(view) => Ok(Some(status_dto(view))),
-            Err(DomainError::NotFound(_)) => Ok(None),
-            Err(e) => Err(e),
-        },
+        move |service| status_or_none(service.status_of(&collection)),
     )
     .await?;
     Ok(result)
@@ -439,9 +449,18 @@ mod tests {
         let json = serde_json::to_value(plan_dto(view(vec![item]))).expect("json");
         assert_eq!(json["items"][0]["kind"], "removed");
         assert!(json["items"][0]["edited"].is_null());
+        assert_eq!(json["items"][0]["fingerprint"], "removed");
         assert!(json["items"][0]
             .as_object()
             .expect("object")
             .contains_key("edited"));
+    }
+
+    #[test]
+    fn a_missing_source_maps_to_none_and_other_errors_stay() {
+        let none = status_or_none(Err(DomainError::NotFound("x".to_string())));
+        assert!(matches!(none, Ok(None)));
+        let err = status_or_none(Err(DomainError::Internal("x".to_string())));
+        assert!(err.is_err());
     }
 }

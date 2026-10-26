@@ -108,3 +108,23 @@ async fn plan_does_not_write_any_file() {
     assert_eq!(listing(&w.root), before);
     assert_eq!(w.snapshot(), bytes);
 }
+
+#[tokio::test]
+async fn status_of_a_collection_without_a_source_is_not_found() {
+    let w = world().await;
+    std::fs::remove_file(w.root.join(".rocket/openapi-source.yml")).expect("remove");
+    let err = w.svc.status_of(&w.name).expect_err("no source");
+    assert!(matches!(err, DomainError::NotFound(_)), "got {err:?}");
+}
+
+#[tokio::test]
+async fn status_of_an_unreadable_source_file_is_an_error() {
+    let w = world().await;
+    std::fs::write(
+        w.root.join(".rocket/openapi-source.yml"),
+        b"{{{ not yaml: [",
+    )
+    .expect("write");
+    let err = w.svc.status_of(&w.name).expect_err("unreadable");
+    assert!(!matches!(err, DomainError::NotFound(_)), "got {err:?}");
+}
