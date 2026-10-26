@@ -41,7 +41,7 @@ describe('SpecSyncList', () => {
     expect(screen.getByText(/Old request/)).toBeInTheDocument();
   });
 
-  it('renders a very large plan', () => {
+  it('caps a very large plan at 500 rows per group', () => {
     const items: OpenApiSyncItem[] = Array.from({ length: 3000 }, (_, i) => ({
       ...changedItem,
       key: `GET /p${i}`,
@@ -49,6 +49,8 @@ describe('SpecSyncList', () => {
     })) as OpenApiSyncItem[];
     render(<SpecSyncList plan={makePlan({ items })} selectedId={null} onSelect={vi.fn()} />);
     expect(screen.getByText('Changed (3000)')).toBeInTheDocument();
-    expect(screen.getByText('Request 2999')).toBeInTheDocument();
+    expect(screen.getByText('Request 499')).toBeInTheDocument();
+    expect(screen.queryByText('Request 500')).toBeNull();
+    expect(screen.getByText('2500 more not shown')).toBeInTheDocument();
   });
 });

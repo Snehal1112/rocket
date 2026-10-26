@@ -61,8 +61,10 @@ export function SpecSyncDetail({ plan, selectedId }: SpecSyncDetailProps) {
             what you have wherever it is unsure.
           </p>
         )}
-        {plan.warnings.map((w) => (
-          <p key={w} className='rounded-md border p-2 text-xs text-muted-foreground'>
+        {plan.warnings.map((w, i) => (
+          // Warnings can repeat, so the index keeps the keys unique.
+          // biome-ignore lint/suspicious/noArrayIndexKey: the list is static and read-only.
+          <p key={i} className='rounded-md border p-2 text-xs text-muted-foreground'>
             {w}
           </p>
         ))}
@@ -94,6 +96,7 @@ export function SpecSyncDetail({ plan, selectedId }: SpecSyncDetailProps) {
                     This request is handled with extra care.
                   </p>
                 )}
+                <p className='break-all text-xs text-muted-foreground'>{entry.item.requestPath}</p>
                 {entry.item.changes.map((c) => (
                   <FieldBlock key={c.field} change={c} />
                 ))}

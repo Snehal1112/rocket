@@ -50,12 +50,21 @@ export type SyncEntry =
   | { type: 'item'; item: OpenApiSyncItem }
   | { type: 'variable'; change: OpenApiVariableChange };
 
+const entryCache = new WeakMap<OpenApiSyncPlan, Map<string, SyncEntry>>();
+
+/** Looks an entry up by id. The map is built once per plan, so a big plan stays cheap. */
 export function findEntry(plan: OpenApiSyncPlan, id: string | null): SyncEntry | null {
   if (!id) return null;
-  const item = plan.items.find((i) => itemId(i) === id);
-  if (item) return { type: 'item', item };
-  const change = plan.variableChanges.find((v) => variableId(v) === id);
-  return change ? { type: 'variable', change } : null;
+  let map = entryCache.get(plan);
+  if (!map) {
+    map = new Map();
+    for (const change of plan.variableChanges) {
+      map.set(variableId(change), { type: 'variable', change });
+    }
+    for (const item of plan.items) map.set(itemId(item), { type: 'item', item });
+    entryCache.set(plan, map);
+  }
+  return map.get(id) ?? null;
 }
 
 const OUTCOME_LABEL: Record<OpenApiFieldChange['outcome'], string> = {
@@ -114,5 +123,5 @@ export function syncErrorMessage(err: unknown): string {
 
 /** True when the pending copy no longer matches the one that was checked. */
 export function isPendingChangedError(err: unknown): boolean {
-  return syncErrorMessage(err).startsWith('Conflict');
+  return syncErrorMessage(err).includes('pending spec changed');
 }

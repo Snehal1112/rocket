@@ -19,6 +19,22 @@ export function useOpenApiSyncStatus(collection: string | null | undefined) {
   });
 }
 
+/**
+ * Whether the Spec sync section is offered for a collection. It is true when the status
+ * resolved to a source, or errored, so an unreadable state file still shows its message.
+ * `pending` is true while the status loads.
+ */
+export function useSpecSyncAvailability(collection: string | null | undefined): {
+  available: boolean;
+  pending: boolean;
+} {
+  const { data, isError, isPending, fetchStatus } = useOpenApiSyncStatus(collection);
+  return {
+    available: !!data || isError,
+    pending: !!collection && isPending && fetchStatus !== 'idle',
+  };
+}
+
 /** The plan of the pending spec. It only runs while enabled. */
 export function useOpenApiSyncPlan(collection: string | null | undefined, enabled: boolean) {
   return useQuery({

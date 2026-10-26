@@ -6,6 +6,7 @@ import { makePlan } from './fixtures';
 describe('SpecSyncDetail', () => {
   it('shows each changed field with baseline, yours, spec and the outcome', () => {
     render(<SpecSyncDetail plan={makePlan()} selectedId='changed:POST /pets' />);
+    expect(screen.getByText('pets/add-pet.yml')).toBeInTheDocument();
     expect(screen.getByText('Header Accept')).toBeInTheDocument();
     expect(screen.getByText('Body $.a.b')).toBeInTheDocument();
     expect(screen.getByText('Spec wins')).toBeInTheDocument();

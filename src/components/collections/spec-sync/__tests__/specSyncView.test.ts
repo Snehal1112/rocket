@@ -42,7 +42,8 @@ describe('specSyncView', () => {
   });
 
   it('detects the pending-changed conflict', () => {
-    expect(isPendingChangedError('Conflict: pending spec hash differs')).toBe(true);
+    expect(isPendingChangedError('Conflict: the pending spec changed, check again')).toBe(true);
     expect(isPendingChangedError(new Error('boom'))).toBe(false);
+    expect(isPendingChangedError('Conflict: an earlier apply is not finished yet')).toBe(false);
   });
 });

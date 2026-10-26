@@ -64,7 +64,7 @@ describe('SpecSyncTab', () => {
 
   it('asks for a new check when the pending spec changed', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
-    vi.mocked(tauriApi.getOpenApiSyncPlan).mockRejectedValue('Conflict: pending hash differs');
+    vi.mocked(tauriApi.getOpenApiSyncPlan).mockRejectedValue('Conflict: the pending spec changed, check again');
     renderWithQuery(<SpecSyncTab collection='c' />);
     expect(await screen.findByText('The pending spec changed, check again')).toBeInTheDocument();
   });

@@ -24,6 +24,7 @@ import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { METHOD_TEXT_COLOR } from '@/lib/colors';
 import { mapApiRequestToState } from '@/lib/pane-utils';
+import { useSpecSyncAvailability } from '@/lib/queries/openapi-sync-queries';
 import { useSwitchWorkspace, useWorkspaces } from '@/lib/queries/workspace-queries';
 import { getCollection, listCollections } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
@@ -147,6 +148,7 @@ function deriveSegments(
   workspaceName: string,
   workspaces: Array<{ id: string; name: string }>,
   nav: NavActions,
+  specSyncAvailable: boolean,
 ): Segment[] {
   if (isRequestTab(tab)) {
     if (!tab.source) return [{ label: 'Unsaved Request' }];
@@ -301,7 +303,7 @@ function deriveSegments(
       'auth',
       'variables',
       'documentation',
-      'spec-sync',
+      ...(specSyncAvailable ? (['spec-sync'] as const) : []),
     ];
     return [
       {
@@ -705,9 +707,12 @@ export function BreadcrumbBar({ tab }: BreadcrumbBarProps) {
     ],
   );
 
+  const { available: specSyncAvailable } = useSpecSyncAvailability(
+    isCollectionTab(tab) ? tab.collectionName : null,
+  );
   const segments = useMemo(
-    () => deriveSegments(tab, workspaceName, workspaces, nav),
-    [tab, workspaceName, workspaces, nav],
+    () => deriveSegments(tab, workspaceName, workspaces, nav, specSyncAvailable),
+    [tab, workspaceName, workspaces, nav, specSyncAvailable],
   );
   const [openPickerIndex, setOpenPickerIndex] = useState<number | null>(null);
 
