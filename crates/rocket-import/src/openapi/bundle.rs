@@ -422,6 +422,15 @@ fn failure_text(failure: &SpecFetchFailure, token_sent: bool) -> String {
     }
 }
 
+/// The message of a failed check of one referenced file. It names the file by its label and
+/// never quotes a network error, which can hold a redirect address.
+pub fn ref_failure_message(label: &str, failure: &SpecFetchFailure) -> String {
+    format!(
+        "A file the spec refers to could not be loaded: {label}. {}",
+        failure_text(failure, false)
+    )
+}
+
 struct Queued {
     url: String,
     depth: usize,
@@ -695,6 +704,19 @@ pub async fn refs_unchanged(
     token: Option<&str>,
     previous: &[RemoteRefState],
 ) -> Result<bool, SpecFetchFailure> {
+    refs_unchanged_labeled(fetcher, location, token, previous)
+        .await
+        .map_err(|(_, failure)| failure)
+}
+
+/// The same as `refs_unchanged`, but a failure also names the file by its label (a file name
+/// or host, never a query or a path).
+pub async fn refs_unchanged_labeled(
+    fetcher: &dyn SpecFetcher,
+    location: &SpecLocation,
+    token: Option<&str>,
+    previous: &[RemoteRefState],
+) -> Result<bool, (String, SpecFetchFailure)> {
     for state in previous {
         if !matches!(classify(&state.url, None), Target::Remote { .. }) {
             return Ok(false);
@@ -702,7 +724,11 @@ pub async fn refs_unchanged(
         let mut request = request_for(&state.url, location, token, DEFAULT_MAX_SPEC_BYTES);
         request.if_none_match = state.etag.clone();
         request.if_modified_since = state.last_modified.clone();
-        match fetcher.fetch(request).await? {
+        match fetcher
+            .fetch(request)
+            .await
+            .map_err(|f| (file_label(&state.url), f))?
+        {
             SpecFetchOutcome::NotModified => {}
             SpecFetchOutcome::Fetched { .. } => return Ok(false),
         }

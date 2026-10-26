@@ -1131,19 +1131,15 @@ async fn a_changed_referenced_file_applies_the_new_parameter_and_keeps_user_edit
     let mut request = w.repo.get_request(&w.name, &path).expect("get");
     request.url = "https://edited.example.com/pets".to_string();
     w.repo.save_request(&w.name, &path, &request).expect("save");
-    // Only the file changes: a new parameter appears. The main spec still answers 304.
+    // Only the file changes: `limit` moves from the query to a header. The main body stays
+    // the same and still answers 304.
     w.fetcher.files.lock().expect("lock").insert(
         DEFS.to_string(),
         (
-            defs_body(true).replace(
-                "offset:",
-                "page: { name: page, in: query, schema: { type: integer } }\n  offset:",
-            ),
+            defs_body(true).replace("name: limit, in: query", "name: limit, in: header"),
             "\"r2\"".to_string(),
         ),
     );
-    let main = spec_with_refs(&["limit", "offset", "page"]);
-    *w.fetcher.body.lock().expect("lock") = main;
     let out = w.svc.check(&w.root).await.expect("check");
     assert!(matches!(out, CheckOutcome::Changed { .. }), "{out:?}");
     let plan = w.plan();
@@ -1158,6 +1154,8 @@ async fn a_changed_referenced_file_applies_the_new_parameter_and_keeps_user_edit
         .iter()
         .map(|q| q.key.as_str())
         .collect();
-    assert!(names.contains(&"page"), "{names:?}");
+    assert!(!names.contains(&"limit"), "{names:?}");
+    assert!(names.contains(&"offset"), "{names:?}");
+    assert!(applied.headers.iter().any(|h| h.key == "limit"));
     assert_eq!(w.source().remote_refs[0].etag.as_deref(), Some("\"r2\""));
 }

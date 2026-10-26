@@ -20,7 +20,8 @@ use rocket_http::spec_fetch::{
     SpecFetchFailure, SpecFetchOutcome, SpecFetchRequest, SpecFetcher, DEFAULT_MAX_SPEC_BYTES,
 };
 use rocket_import::{
-    bundle_spec, check_spec_text, fetch_failure_message, fetch_target, refs_unchanged, Bundle,
+    bundle_spec, check_spec_text, fetch_failure_message, fetch_target, ref_failure_message,
+    refs_unchanged_labeled, Bundle,
 };
 use rocket_shared::error::{DomainError, DomainResult};
 use sha2::{Digest, Sha256};
@@ -326,12 +327,16 @@ impl OpenApiSyncService {
         let mut result = self.fetcher.fetch(request.clone()).await;
 
         // Rule 3 refinement: a 304 of the main spec says nothing about the files it refers to.
-        if matches!(result, Ok(SpecFetchOutcome::NotModified)) && !source.remote_refs.is_empty() {
+        // A failure of a stored file carries the file's label, so its message names that file.
+        let mut ref_label: Option<String> = None;
+        if matches!(result, Ok(SpecFetchOutcome::NotModified))
+            && (!source.remote_refs.is_empty() || source.remote_refs_incomplete)
+        {
             let unchanged = if source.remote_refs_incomplete {
                 // Stored validators are not trusted, so the full path runs.
                 Ok(false)
             } else {
-                refs_unchanged(
+                refs_unchanged_labeled(
                     self.fetcher.as_ref(),
                     &source.location,
                     token.as_ref().map(|t| t.as_str()),
@@ -352,7 +357,10 @@ impl OpenApiSyncService {
                         other => other,
                     };
                 }
-                Err(failure) => result = Err(failure),
+                Err((label, failure)) => {
+                    ref_label = Some(label);
+                    result = Err(failure);
+                }
             }
         }
 
@@ -390,6 +398,9 @@ impl OpenApiSyncService {
                     _ => None,
                 };
                 let message = match failure {
+                    _ if ref_label.is_some() => {
+                        ref_failure_message(ref_label.as_deref().unwrap_or("a file"), &failure)
+                    }
                     SpecFetchFailure::NotFound | SpecFetchFailure::Unauthorized
                         if keychain_failed =>
                     {
@@ -1082,6 +1093,174 @@ mod tests {
             .expect("lock")
             .iter()
             .all(|r| r.if_none_match.is_some()));
+        // Now one file answers 200: the main spec is fetched again without validators.
+        f.fetcher.push(Ok(SpecFetchOutcome::NotModified));
+        f.fetcher
+            .push(fetched(DEFS_BODY.as_bytes().to_vec(), "\"r2\""));
+        f.fetcher.push(fetched(
+            with_refs(&[&format!("{DEFS}#/parameters/p")]),
+            "\"m2\"",
+        ));
+        f.fetcher
+            .push(fetched(DEFS_BODY.as_bytes().to_vec(), "\"r2\""));
+        let out = f.svc.check(f.root()).await.expect("check");
+        assert!(matches!(out, CheckOutcome::Changed { .. }), "{out:?}");
+        assert_eq!(request_count(&f), 8);
+        let requests = f.fetcher.requests.lock().expect("lock");
+        assert_eq!(requests[6].url, "https://example.com/a.json");
+        assert_eq!(requests[6].if_none_match, None);
+        drop(requests);
+        assert_eq!(f.load().remote_refs[0].etag.as_deref(), Some("\"r2\""));
+        assert!(f.pending().is_some());
+    }
+
+    fn https_main() -> SpecLocation {
+        SpecLocation::Https {
+            url: "https://example.com/a.json".into(),
+        }
+    }
+
+    fn ref_to_defs() -> Vec<u8> {
+        with_refs(&[&format!("{DEFS}#/parameters/p")])
+    }
+
+    #[tokio::test]
+    async fn an_incomplete_flag_with_no_stored_refs_loads_the_files_on_a_304() {
+        let mut src = source(https_main());
+        src.remote_refs_incomplete = true;
+        let f = Fixture::new(src);
+        f.fetcher.push(Ok(SpecFetchOutcome::NotModified));
+        f.fetcher.push(fetched(ref_to_defs(), "\"m2\""));
+        f.fetcher
+            .push(fetched(DEFS_BODY.as_bytes().to_vec(), "\"r1\""));
+        let out = f.svc.check(f.root()).await.expect("check");
+        assert!(matches!(out, CheckOutcome::Changed { .. }), "{out:?}");
+        assert_eq!(request_count(&f), 3);
+        {
+            let requests = f.fetcher.requests.lock().expect("lock");
+            assert!(requests[0].if_none_match.is_some());
+            assert_eq!(requests[1].url, "https://example.com/a.json");
+            assert_eq!(requests[1].if_none_match, None);
+            assert_eq!(requests[2].url, DEFS);
+        }
+        let s = f.load();
+        assert!(!s.remote_refs_incomplete);
+        assert_eq!(s.remote_refs.len(), 1);
+        let text = String::from_utf8(f.pending().expect("pending")).expect("utf8");
+        assert!(text.contains("x-rocket-remote"), "the file is inlined");
+    }
+
+    #[tokio::test]
+    async fn an_incomplete_flag_skips_the_per_file_check() {
+        let mut src = with_ref_source(https_main(), DEFS);
+        src.remote_refs_incomplete = true;
+        let f = Fixture::new(src);
+        f.fetcher.push(Ok(SpecFetchOutcome::NotModified));
+        f.fetcher.push(fetched(ref_to_defs(), "\"m2\""));
+        f.fetcher
+            .push(fetched(DEFS_BODY.as_bytes().to_vec(), "\"r2\""));
+        let out = f.svc.check(f.root()).await.expect("check");
+        assert!(matches!(out, CheckOutcome::Changed { .. }), "{out:?}");
+        let requests = f.fetcher.requests.lock().expect("lock");
+        assert_eq!(requests.len(), 3);
+        // No request between the main 304 and the unconditional main fetch.
+        assert_eq!(requests[1].url, "https://example.com/a.json");
+        assert_eq!(requests[1].if_none_match, None);
+        assert!(requests
+            .iter()
+            .all(|r| r.if_none_match.as_deref() != Some("\"r1\"")));
+        drop(requests);
+        assert!(!f.load().remote_refs_incomplete);
+    }
+
+    #[tokio::test]
+    async fn a_failed_file_check_fails_with_the_usual_code_and_changes_nothing() {
+        let f = Fixture::new(with_ref_source(https_main(), DEFS));
+        let before = f.source_bytes();
+        f.fetcher.push(Ok(SpecFetchOutcome::NotModified));
+        f.fetcher.push(Err(SpecFetchFailure::NotFound));
+        let out = f.svc.check(f.root()).await.expect("check");
+        match out {
+            CheckOutcome::Failed { message, .. } => {
+                assert!(message.contains("defs.yaml"), "{message}");
+                assert!(!message.contains("keychain"), "{message}");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(f.source_bytes(), before);
+        assert_eq!(f.pending(), None);
+        assert_eq!(
+            f.local().last_status,
+            Some(SyncStatus::Failed {
+                code: "not_found".into()
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn a_file_check_network_error_never_quotes_the_error_text() {
+        let f = Fixture::new(with_ref_source(https_main(), DEFS));
+        f.fetcher.push(Ok(SpecFetchOutcome::NotModified));
+        f.fetcher.push(Err(SpecFetchFailure::Network(
+            "redirected to https://evil.example/x?k=secret".into(),
+        )));
+        let out = f.svc.check(f.root()).await.expect("check");
+        match out {
+            CheckOutcome::Failed { message, .. } => {
+                assert!(message.contains("defs.yaml"), "{message}");
+                assert!(
+                    !message.contains("evil") && !message.contains("secret"),
+                    "{message}"
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(
+            f.local().last_status,
+            Some(SyncStatus::Failed {
+                code: "network".into()
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refetch_that_answers_304_is_a_network_failure() {
+        let f = Fixture::new(with_ref_source(https_main(), DEFS));
+        let before = f.source_bytes();
+        f.fetcher.push(Ok(SpecFetchOutcome::NotModified));
+        f.fetcher
+            .push(fetched(DEFS_BODY.as_bytes().to_vec(), "\"r2\""));
+        f.fetcher.push(Ok(SpecFetchOutcome::NotModified));
+        let out = f.svc.check(f.root()).await.expect("check");
+        assert!(matches!(out, CheckOutcome::Failed { .. }), "{out:?}");
+        assert_eq!(f.source_bytes(), before);
+        assert_eq!(f.pending(), None);
+        assert_eq!(
+            f.local().last_status,
+            Some(SyncStatus::Failed {
+                code: "network".into()
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn a_deterministic_incomplete_bundle_is_a_success_with_the_flag_clear() {
+        let f = Fixture::new(source(https_main()));
+        let urls: Vec<String> = (0..21)
+            .map(|i| format!("https://example.com/f{i}.yaml#/parameters/p"))
+            .collect();
+        let refs: Vec<&str> = urls.iter().map(String::as_str).collect();
+        f.fetcher.push(fetched(with_refs(&refs), "\"m2\""));
+        for _ in 0..21 {
+            f.fetcher
+                .push(fetched(DEFS_BODY.as_bytes().to_vec(), "\"r\""));
+        }
+        let out = f.svc.check(f.root()).await.expect("check");
+        assert!(matches!(out, CheckOutcome::Changed { .. }), "{out:?}");
+        let s = f.load();
+        assert!(!s.remote_refs_incomplete);
+        assert_eq!(s.remote_refs.len(), 20);
+        assert_eq!(f.local().last_status, Some(SyncStatus::Changed));
     }
 
     #[tokio::test]
