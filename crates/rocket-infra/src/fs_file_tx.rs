@@ -2,8 +2,9 @@
 //!
 //! Staged files live in `<collection>/.rocket/staging/<id>/new`. Commit writes the journal as
 //! `committing`, then backs up, replaces or deletes each file in order, marking the op done.
-//! A failed commit restores every file from `staging/<id>/backup`. `recover` finishes or undoes
-//! a commit that a crash interrupted.
+//! A failed commit writes the journal as `rolling_back` and restores every file from
+//! `staging/<id>/backup`. `recover` finishes a `committing` journal or continues a
+//! `rolling_back` one, so a crash never leaves a mix of both directions.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -28,12 +29,19 @@ const OWNED_STATE_FILES: [&str; 4] = [
     "openapi-pending.spec",
     "openapi-local.json",
 ];
+/// Names that Windows treats as devices, with or without an extension.
+const RESERVED_NAMES: [&str; 22] = [
+    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum Phase {
     Staging,
     Committing,
+    #[serde(rename = "rolling_back")]
+    RollingBack,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -51,6 +59,12 @@ struct JournalOp {
     done: bool,
 }
 
+impl JournalOp {
+    fn is_put(&self) -> bool {
+        self.op == OpKind::Put
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Journal {
     version: u32,
@@ -59,29 +73,68 @@ struct Journal {
     ops: Vec<JournalOp>,
 }
 
-/// Fails the k-th filesystem step of a commit, in tests only.
+#[cfg(test)]
+struct HookState {
+    at: usize,
+    count: AtomicUsize,
+    crash: bool,
+}
+
+/// Fails the k-th filesystem step, in tests only. A crash hook also stops all clean-up, so the
+/// test sees the disk as a real crash would leave it.
 #[derive(Clone, Default)]
 struct FaultHook {
     #[cfg(test)]
-    inner: Option<Arc<(usize, AtomicUsize)>>,
+    inner: Option<Arc<HookState>>,
 }
 
 impl FaultHook {
     fn check(&self) -> io::Result<()> {
         #[cfg(test)]
         if let Some(inner) = &self.inner {
-            if inner.1.fetch_add(1, Ordering::SeqCst) == inner.0 {
+            if inner.count.fetch_add(1, Ordering::SeqCst) == inner.at {
                 return Err(io::Error::other("injected fault"));
             }
         }
         Ok(())
+    }
+
+    #[cfg(test)]
+    fn is_crash(&self) -> bool {
+        self.inner.as_ref().is_some_and(|i| i.crash)
+    }
+
+    #[cfg(not(test))]
+    fn is_crash(&self) -> bool {
+        false
+    }
+
+    #[cfg(test)]
+    fn at(at: usize, crash: bool) -> Self {
+        Self {
+            inner: Some(Arc::new(HookState {
+                at,
+                count: AtomicUsize::new(0),
+                crash,
+            })),
+        }
+    }
+
+    #[cfg(test)]
+    fn steps(&self) -> usize {
+        self.inner
+            .as_ref()
+            .map_or(0, |i| i.count.load(Ordering::SeqCst))
     }
 }
 
 /// The filesystem implementation of the transaction factory.
 #[derive(Default)]
 pub struct FsFileTxFactory {
+    /// Hook for the forward steps (backup, replace, delete, journal marks).
     hook: FaultHook,
+    /// Hook for the steps of a rollback.
+    rollback_hook: FaultHook,
 }
 
 impl FsFileTxFactory {
@@ -92,10 +145,32 @@ impl FsFileTxFactory {
     #[cfg(test)]
     fn with_fault(step: usize) -> Self {
         Self {
-            hook: FaultHook {
-                inner: Some(Arc::new((step, AtomicUsize::new(0)))),
-            },
+            hook: FaultHook::at(step, false),
+            rollback_hook: FaultHook::default(),
         }
+    }
+
+    #[cfg(test)]
+    fn with_crash(step: usize) -> Self {
+        Self {
+            hook: FaultHook::at(step, true),
+            rollback_hook: FaultHook::default(),
+        }
+    }
+
+    /// Fails forward step `step` and then rollback step `rollback_step`.
+    #[cfg(test)]
+    fn with_rollback_fault(step: usize, rollback_step: usize) -> Self {
+        Self {
+            hook: FaultHook::at(step, false),
+            rollback_hook: FaultHook::at(rollback_step, false),
+        }
+    }
+
+    /// Counts the forward steps and never fails.
+    #[cfg(test)]
+    fn counting() -> Self {
+        Self::with_fault(usize::MAX)
     }
 }
 
@@ -127,6 +202,26 @@ fn backup_path(root: &Path, id: &str, rel: &str) -> PathBuf {
     staging_dir(root, id).join("backup").join(rel)
 }
 
+/// Rejects a path that goes through a symbolic link, so a link inside the collection cannot
+/// send a write or a delete outside it. Parts that do not exist yet are fine.
+fn guard(root: &Path, rel: &str) -> DomainResult<()> {
+    let mut current = root.to_path_buf();
+    for part in rel.split('/') {
+        current.push(part);
+        match std::fs::symlink_metadata(&current) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                return Err(DomainError::InvalidInput(format!(
+                    "\"{rel}\" goes through a symbolic link"
+                )))
+            }
+            Ok(_) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => break,
+            Err(e) => return Err(io_err("a path could not be checked", e)),
+        }
+    }
+    Ok(())
+}
+
 /// Checks a path given to a transaction.
 fn validate_rel_path(rel: &str) -> DomainResult<()> {
     let bad = |why: &str| Err(DomainError::InvalidInput(format!("path \"{rel}\" {why}")));
@@ -146,19 +241,66 @@ fn validate_rel_path(rel: &str) -> DomainResult<()> {
     {
         return bad("has an empty, \".\" or \"..\" part");
     }
-    if parts[0] == ".rocket" && !(parts.len() == 2 && OWNED_STATE_FILES.contains(&parts[1])) {
+    for part in &parts {
+        if part.contains(':') {
+            return bad("has a part with a colon");
+        }
+        let stem = part.split('.').next().unwrap_or("").trim_end();
+        if RESERVED_NAMES
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case(stem))
+        {
+            return bad("has a part that Windows reserves as a device name");
+        }
+    }
+    if parts[0].eq_ignore_ascii_case(".rocket")
+        && !(parts[0] == ".rocket" && parts.len() == 2 && OWNED_STATE_FILES.contains(&parts[1]))
+    {
         return bad("is inside .rocket and is not a file this feature owns");
     }
     Ok(())
 }
 
+fn serialize_journal(journal: &Journal) -> DomainResult<Vec<u8>> {
+    serde_json::to_vec_pretty(journal)
+        .map_err(|e| DomainError::Internal(format!("{JOURNAL_FILE} could not be written: {e}")))
+}
+
 fn write_journal(root: &Path, journal: &Journal) -> DomainResult<()> {
-    let json = serde_json::to_vec_pretty(journal)
-        .map_err(|e| DomainError::Internal(format!("{JOURNAL_FILE} could not be written: {e}")))?;
+    guard(root, ".rocket/apply-journal.json")?;
+    let json = serialize_journal(journal)?;
     atomic_write(&journal_path(root), &json).map_err(|e| io_err(JOURNAL_FILE, e))
 }
 
+/// Writes the first journal of a transaction. It fails when one exists, so two processes
+/// cannot both begin.
+fn create_journal(root: &Path, journal: &Journal) -> DomainResult<()> {
+    use std::io::Write;
+    guard(root, ".rocket/apply-journal.json")?;
+    let json = serialize_journal(journal)?;
+    std::fs::create_dir_all(rocket_dir(root)).map_err(|e| io_err(JOURNAL_FILE, e))?;
+    let mut file = match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(journal_path(root))
+    {
+        Ok(file) => file,
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+            return Err(DomainError::Conflict(
+                "an earlier sync apply was interrupted; recover it first".to_string(),
+            ))
+        }
+        Err(e) => return Err(io_err(JOURNAL_FILE, e)),
+    };
+    if let Err(e) = file.write_all(&json).and_then(|()| file.sync_all()) {
+        let _ = std::fs::remove_file(journal_path(root));
+        return Err(io_err(JOURNAL_FILE, e));
+    }
+    Ok(())
+}
+
 fn read_journal(root: &Path) -> DomainResult<Option<Journal>> {
+    guard(root, ".rocket/apply-journal.json")?;
     let text = match std::fs::read_to_string(journal_path(root)) {
         Ok(text) => text,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
@@ -194,56 +336,50 @@ fn remove_staging(root: &Path, id: &str) {
     let _ = std::fs::remove_dir(staging_root(root));
 }
 
+/// Best effort: flushes a folder entry so a rename survives a power cut.
+fn sync_dir(dir: &Path) {
+    if let Ok(file) = std::fs::File::open(dir) {
+        let _ = file.sync_all();
+    }
+}
+
 fn move_file(from: &Path, to: &Path) -> io::Result<()> {
     if let Some(parent) = to.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::rename(from, to)
-}
-
-/// Removes empty folders from `dir` upward, never the collection root itself.
-fn prune_empty_parents(root: &Path, mut dir: &Path) {
-    while dir != root && dir.starts_with(root) {
-        if std::fs::remove_dir(dir).is_err() {
-            break;
-        }
-        match dir.parent() {
-            Some(parent) => dir = parent,
-            None => break,
-        }
+    std::fs::rename(from, to)?;
+    if let Some(parent) = to.parent() {
+        sync_dir(parent);
     }
+    if let Some(parent) = from.parent() {
+        sync_dir(parent);
+    }
+    Ok(())
 }
 
-/// Applies the ops that are not done, in order, stopping after `limit` of them when set.
-/// Safe to run again after a crash: it checks what is already in place.
+/// Applies the ops, in order, stopping after `limit` newly done ones when set. It checks what
+/// is already on disk, so it is safe to run again after a crash.
 fn apply_ops(
     root: &Path,
     journal: &mut Journal,
     hook: &FaultHook,
     limit: Option<usize>,
 ) -> DomainResult<usize> {
+    guard(root, ".rocket/staging")?;
     let mut applied = 0;
     for idx in 0..journal.ops.len() {
-        if journal.ops[idx].done {
-            continue;
-        }
-        if limit.is_some_and(|l| applied >= l) {
+        let was_done = journal.ops[idx].done;
+        if !was_done && limit.is_some_and(|l| applied >= l) {
             break;
         }
-        let id = journal.id.clone();
         let op = journal.ops[idx].clone();
+        guard(root, &op.path)?;
         let target = root.join(&op.path);
-        let backup = backup_path(root, &id, &op.path);
-        let staged = staged_path(root, &id, &op.path);
-        let put_pending = op.kind_is_put() && staged.exists();
-        // A put whose staged file is gone was already moved into place before a crash.
-        if op.kind_is_put() && !put_pending {
-            journal.ops[idx].done = true;
-            write_journal(root, journal)?;
-            applied += 1;
-            continue;
-        }
-        if !backup.exists() && target.is_file() {
+        let backup = backup_path(root, &journal.id, &op.path);
+        let staged = staged_path(root, &journal.id, &op.path);
+        // A put whose staged file is gone was already moved into place.
+        let put_pending = op.is_put() && staged.exists();
+        if (put_pending || !op.is_put()) && !backup.exists() && target.is_file() {
             hook.check().map_err(|e| io_err("backup failed", e))?;
             move_file(&target, &backup).map_err(|e| io_err("backup failed", e))?;
             journal.ops[idx].backup = true;
@@ -251,46 +387,65 @@ fn apply_ops(
         if put_pending {
             hook.check().map_err(|e| io_err("replace failed", e))?;
             move_file(&staged, &target).map_err(|e| io_err("replace failed", e))?;
-        } else {
-            // A delete: the backup move above already took the file away.
-            hook.check().map_err(|e| io_err("delete failed", e))?;
         }
-        journal.ops[idx].done = true;
-        write_journal(root, journal)?;
-        applied += 1;
+        if !was_done {
+            hook.check()
+                .map_err(|e| io_err("journal update failed", e))?;
+            journal.ops[idx].done = true;
+            write_journal(root, journal)?;
+            applied += 1;
+        }
     }
     Ok(applied)
 }
 
-impl JournalOp {
-    fn kind_is_put(&self) -> bool {
-        self.op == OpKind::Put
-    }
-}
-
-/// Restores every file touched by the journal. Returns how many ops changed something.
-fn rollback(root: &Path, journal: &Journal) -> DomainResult<usize> {
+/// Restores every file touched by the journal. Every step is decided from the disk, and a
+/// replaced new file goes back to its staged place, so a run cut short can run again.
+/// Returns how many ops changed something.
+fn rollback(root: &Path, journal: &Journal, hook: &FaultHook) -> DomainResult<usize> {
+    guard(root, ".rocket/staging")?;
     let mut changed = 0;
     for op in journal.ops.iter().rev() {
+        guard(root, &op.path)?;
         let target = root.join(&op.path);
         let backup = backup_path(root, &journal.id, &op.path);
         let staged = staged_path(root, &journal.id, &op.path);
+        let new_in_place = op.is_put() && !staged.exists() && target.is_file();
         if backup.exists() {
-            if target.exists() {
+            if new_in_place {
+                hook.check().map_err(|e| io_err("rollback failed", e))?;
+                move_file(&target, &staged).map_err(|e| io_err("rollback failed", e))?;
+            } else if target.is_file() {
+                hook.check().map_err(|e| io_err("rollback failed", e))?;
                 std::fs::remove_file(&target).map_err(|e| io_err("rollback failed", e))?;
             }
+            hook.check().map_err(|e| io_err("rollback failed", e))?;
             move_file(&backup, &target).map_err(|e| io_err("rollback failed", e))?;
             changed += 1;
-        } else if op.kind_is_put() && !staged.exists() && target.is_file() {
+        } else if new_in_place {
             // A new file that did not exist before.
-            std::fs::remove_file(&target).map_err(|e| io_err("rollback failed", e))?;
-            if let Some(parent) = target.parent() {
-                prune_empty_parents(root, parent);
-            }
+            hook.check().map_err(|e| io_err("rollback failed", e))?;
+            move_file(&target, &staged).map_err(|e| io_err("rollback failed", e))?;
             changed += 1;
         }
     }
     Ok(changed)
+}
+
+/// Marks the journal `rolling_back`, then restores the files. Keeps the journal when the
+/// restore fails, so the next `recover` continues it.
+fn roll_back_and_clean(
+    root: &Path,
+    journal: &mut Journal,
+    hook: &FaultHook,
+) -> DomainResult<usize> {
+    journal.phase = Phase::RollingBack;
+    write_journal(root, journal)?;
+    let files = rollback(root, journal, hook)?;
+    if let Err(e) = cleanup(root, &journal.id) {
+        tracing::warn!(error = %e, "the apply journal could not be cleaned up after a rollback");
+    }
+    Ok(files)
 }
 
 struct FsFileTx {
@@ -298,14 +453,10 @@ struct FsFileTx {
     id: String,
     ops: Vec<JournalOp>,
     hook: FaultHook,
+    rollback_hook: FaultHook,
 }
 
 impl FsFileTx {
-    fn forget(&mut self, rel: &str) {
-        self.ops.retain(|o| o.path != rel);
-        let _ = std::fs::remove_file(staged_path(&self.root, &self.id, rel));
-    }
-
     fn journal(&self, phase: Phase) -> Journal {
         Journal {
             version: JOURNAL_VERSION,
@@ -315,34 +466,65 @@ impl FsFileTx {
         }
     }
 
+    fn check_new_path(&self, rel: &str) -> DomainResult<()> {
+        validate_rel_path(rel)?;
+        guard(&self.root, ".rocket/staging")?;
+        guard(&self.root, rel)?;
+        let folded = rel.to_ascii_lowercase();
+        if self
+            .ops
+            .iter()
+            .any(|o| o.path.to_ascii_lowercase() == folded)
+        {
+            return Err(DomainError::InvalidInput(format!(
+                "path \"{rel}\" is staged twice (paths are compared without case)"
+            )));
+        }
+        Ok(())
+    }
+
     /// Commits, applying at most `limit` ops when set (tests use this to simulate a crash).
     fn commit_inner(&mut self, limit: Option<usize>) -> DomainResult<()> {
         let mut journal = self.journal(Phase::Committing);
-        write_journal(&self.root, &journal)?;
+        if let Err(e) = write_journal(&self.root, &journal) {
+            // Nothing was applied yet.
+            remove_staging(&self.root, &self.id);
+            let _ = std::fs::remove_file(journal_path(&self.root));
+            return Err(e);
+        }
         match apply_ops(&self.root, &mut journal, &self.hook, limit) {
             Ok(_) => {
                 if limit.is_none() {
-                    cleanup(&self.root, &self.id)?;
+                    // The commit worked. A leftover journal only makes the next recover a no-op.
+                    if let Err(e) = cleanup(&self.root, &self.id) {
+                        tracing::warn!(error = %e, "the apply journal could not be removed after a commit");
+                    }
                 }
                 Ok(())
             }
-            Err(e) => match rollback(&self.root, &journal) {
-                Ok(_) => {
-                    cleanup(&self.root, &self.id)?;
-                    Err(e)
+            Err(e) => {
+                if self.hook.is_crash() {
+                    return Err(e);
                 }
-                Err(rollback_err) => Err(DomainError::Internal(format!(
-                    "{e}; the files could not be restored either: {rollback_err}"
-                ))),
-            },
+                match roll_back_and_clean(&self.root, &mut journal, &self.rollback_hook) {
+                    Ok(_) => Err(e),
+                    Err(rollback_err) => Err(DomainError::Internal(format!(
+                        "{e}; the files could not be restored yet and are restored by the next recovery: {rollback_err}"
+                    ))),
+                }
+            }
         }
     }
 }
 
 impl CollectionFileTx for FsFileTx {
     fn stage_put(&mut self, rel_path: &str, bytes: &[u8]) -> DomainResult<()> {
-        validate_rel_path(rel_path)?;
-        self.forget(rel_path);
+        self.check_new_path(rel_path)?;
+        if std::fs::symlink_metadata(self.root.join(rel_path)).is_ok_and(|m| m.is_dir()) {
+            return Err(DomainError::InvalidInput(format!(
+                "path \"{rel_path}\" is a folder"
+            )));
+        }
         atomic_write(&staged_path(&self.root, &self.id, rel_path), bytes)
             .map_err(|e| io_err("a file could not be staged", e))?;
         self.ops.push(JournalOp {
@@ -355,8 +537,12 @@ impl CollectionFileTx for FsFileTx {
     }
 
     fn stage_delete(&mut self, rel_path: &str) -> DomainResult<()> {
-        validate_rel_path(rel_path)?;
-        self.forget(rel_path);
+        self.check_new_path(rel_path)?;
+        if std::fs::symlink_metadata(self.root.join(rel_path)).is_ok_and(|m| m.is_dir()) {
+            return Err(DomainError::InvalidInput(format!(
+                "path \"{rel_path}\" is a folder and cannot be deleted here"
+            )));
+        }
         self.ops.push(JournalOp {
             op: OpKind::Delete,
             path: rel_path.to_string(),
@@ -377,24 +563,25 @@ impl CollectionFileTx for FsFileTx {
 
 impl CollectionFileTxFactory for FsFileTxFactory {
     fn begin(&self, collection_root: &Path) -> DomainResult<Box<dyn CollectionFileTx>> {
-        if journal_path(collection_root).exists() {
-            return Err(DomainError::Conflict(
-                "an earlier sync apply was interrupted; recover it first".to_string(),
-            ));
-        }
+        guard(collection_root, ".rocket")?;
         crate::rocket_dir::ensure_gitignore(collection_root)?;
-        // No journal means any staging folder is a leftover.
-        let _ = std::fs::remove_dir_all(staging_root(collection_root));
         let id = uuid::Uuid::new_v4().to_string();
-        std::fs::create_dir_all(staging_dir(collection_root, &id))
-            .map_err(|e| io_err("the staging folder could not be created", e))?;
         let tx = FsFileTx {
             root: collection_root.to_path_buf(),
             id,
             ops: Vec::new(),
             hook: self.hook.clone(),
+            rollback_hook: self.rollback_hook.clone(),
         };
-        write_journal(collection_root, &tx.journal(Phase::Staging))?;
+        // Taking the journal first makes this process the only one that may touch staging.
+        create_journal(collection_root, &tx.journal(Phase::Staging))?;
+        guard(collection_root, ".rocket/staging")?;
+        // No other journal existed, so any staging folder is a leftover.
+        let _ = std::fs::remove_dir_all(staging_root(collection_root));
+        if let Err(e) = std::fs::create_dir_all(staging_dir(collection_root, &tx.id)) {
+            let _ = std::fs::remove_file(journal_path(collection_root));
+            return Err(io_err("the staging folder could not be created", e));
+        }
         Ok(Box::new(tx))
     }
 
@@ -402,20 +589,31 @@ impl CollectionFileTxFactory for FsFileTxFactory {
         let Some(mut journal) = read_journal(collection_root)? else {
             return Ok(RecoveryOutcome::Nothing);
         };
-        if journal.phase == Phase::Staging {
-            cleanup(collection_root, &journal.id)?;
-            return Ok(RecoveryOutcome::Discarded);
-        }
-        match apply_ops(collection_root, &mut journal, &self.hook, None) {
-            Ok(files) => {
+        match journal.phase {
+            Phase::Staging => {
                 cleanup(collection_root, &journal.id)?;
-                Ok(RecoveryOutcome::Finished { files })
+                Ok(RecoveryOutcome::Discarded)
             }
-            Err(_) => {
-                let files = rollback(collection_root, &journal)?;
+            Phase::RollingBack => {
+                let files = rollback(collection_root, &journal, &self.rollback_hook)?;
                 cleanup(collection_root, &journal.id)?;
                 Ok(RecoveryOutcome::RolledBack { files })
             }
+            Phase::Committing => match apply_ops(collection_root, &mut journal, &self.hook, None) {
+                Ok(files) => {
+                    cleanup(collection_root, &journal.id)?;
+                    Ok(RecoveryOutcome::Finished { files })
+                }
+                Err(e) => {
+                    if self.hook.is_crash() {
+                        return Err(e);
+                    }
+                    tracing::warn!(error = %e, "finishing an interrupted sync apply failed, rolling it back");
+                    let files =
+                        roll_back_and_clean(collection_root, &mut journal, &self.rollback_hook)?;
+                    Ok(RecoveryOutcome::RolledBack { files })
+                }
+            },
         }
     }
 }
@@ -479,6 +677,32 @@ mod tests {
         write(root, "keep.yml", "K1");
     }
 
+    /// The tree a successful six-op commit leaves.
+    fn final_tree() -> BTreeMap<String, Vec<u8>> {
+        let dir = tempdir().expect("tempdir");
+        seed(dir.path());
+        let mut tx = factory().begin(dir.path()).expect("begin");
+        stage_six(tx.as_mut());
+        tx.commit().expect("commit");
+        snapshot(dir.path())
+    }
+
+    /// How many hook steps a successful six-op commit takes.
+    fn six_op_steps() -> usize {
+        let dir = tempdir().expect("tempdir");
+        seed(dir.path());
+        let counting = FsFileTxFactory::counting();
+        let mut tx = counting.begin(dir.path()).expect("begin");
+        stage_six(tx.as_mut());
+        tx.commit().expect("commit");
+        counting.hook.steps()
+    }
+
+    fn no_leftovers(root: &Path) {
+        assert!(!root.join(".rocket/apply-journal.json").exists());
+        assert!(!root.join(".rocket/staging").exists());
+    }
+
     #[test]
     fn commit_applies_puts_and_deletes() {
         let dir = tempdir().expect("tempdir");
@@ -500,8 +724,7 @@ mod tests {
         let mut tx = factory().begin(dir.path()).expect("begin");
         tx.stage_put("a.yml", b"A2").expect("put");
         tx.commit().expect("commit");
-        assert!(!dir.path().join(".rocket/staging").exists());
-        assert!(!dir.path().join(".rocket/apply-journal.json").exists());
+        no_leftovers(dir.path());
     }
 
     #[test]
@@ -523,8 +746,9 @@ mod tests {
 
     #[test]
     fn failure_at_each_step_restores_every_file_byte_for_byte() {
-        let mut failures = 0;
-        for k in 0..30 {
+        let steps = six_op_steps();
+        assert_eq!(steps, 13, "the step count of the six-op commit changed");
+        for k in 0..=steps {
             let dir = tempdir().expect("tempdir");
             seed(dir.path());
             let before = snapshot(dir.path());
@@ -532,14 +756,114 @@ mod tests {
                 .begin(dir.path())
                 .expect("begin");
             stage_six(tx.as_mut());
-            if tx.commit().is_err() {
-                failures += 1;
+            let result = tx.commit();
+            if k < steps {
+                assert!(result.is_err(), "fault at step {k} did not fail the commit");
                 assert_eq!(snapshot(dir.path()), before, "fault at step {k}");
-                assert!(!dir.path().join(".rocket/apply-journal.json").exists());
-                assert!(!dir.path().join(".rocket/staging").exists());
+            } else {
+                result.expect("a fault past the last step changes nothing");
+                assert_eq!(snapshot(dir.path()), final_tree());
+            }
+            no_leftovers(dir.path());
+        }
+    }
+
+    #[test]
+    fn a_crash_at_each_step_is_finished_by_recover() {
+        let steps = six_op_steps();
+        let expected = final_tree();
+        for k in 0..steps {
+            let dir = tempdir().expect("tempdir");
+            seed(dir.path());
+            let mut tx = FsFileTxFactory::with_crash(k)
+                .begin(dir.path())
+                .expect("begin");
+            stage_six(tx.as_mut());
+            assert!(tx.commit().is_err(), "crash at step {k}");
+            let outcome = factory().recover(dir.path()).expect("recover");
+            assert!(
+                matches!(outcome, RecoveryOutcome::Finished { .. }),
+                "step {k}: {outcome:?}"
+            );
+            assert_eq!(snapshot(dir.path()), expected, "crash at step {k}");
+            no_leftovers(dir.path());
+        }
+    }
+
+    #[test]
+    fn a_failed_rollback_is_continued_by_recover() {
+        let steps = six_op_steps();
+        let mut rolled_back = 0;
+        for k in 0..steps {
+            for j in 0..4 {
+                let dir = tempdir().expect("tempdir");
+                seed(dir.path());
+                let before = snapshot(dir.path());
+                let mut tx = FsFileTxFactory::with_rollback_fault(k, j)
+                    .begin(dir.path())
+                    .expect("begin");
+                stage_six(tx.as_mut());
+                assert!(tx.commit().is_err());
+                let outcome = factory().recover(dir.path()).expect("recover");
+                if matches!(outcome, RecoveryOutcome::RolledBack { .. }) {
+                    rolled_back += 1;
+                }
+                assert_eq!(snapshot(dir.path()), before, "faults at {k} and {j}");
+                no_leftovers(dir.path());
             }
         }
-        assert!(failures >= 6, "only {failures} steps failed");
+        assert!(rolled_back > 0, "no rollback was ever cut short");
+    }
+
+    #[test]
+    fn recovery_that_crashes_is_run_again() {
+        let steps = six_op_steps();
+        let expected = final_tree();
+        for k in 0..steps {
+            let dir = tempdir().expect("tempdir");
+            seed(dir.path());
+            let mut tx = FsFileTxFactory::with_crash(steps / 2)
+                .begin(dir.path())
+                .expect("begin");
+            stage_six(tx.as_mut());
+            assert!(tx.commit().is_err());
+            // The first recovery crashes too (at step k, or finishes when k is past its work).
+            let _ = FsFileTxFactory::with_crash(k).recover(dir.path());
+            factory().recover(dir.path()).expect("second recover");
+            assert_eq!(snapshot(dir.path()), expected, "recovery crash at {k}");
+            no_leftovers(dir.path());
+        }
+    }
+
+    #[test]
+    fn a_rollback_started_by_recovery_and_cut_short_is_continued() {
+        let dir = tempdir().expect("tempdir");
+        seed(dir.path());
+        let before = snapshot(dir.path());
+        crashed_after(dir.path(), 2);
+        // The roll-forward fails at step 2, and then the rollback fails at its first step.
+        assert!(FsFileTxFactory::with_rollback_fault(2, 0)
+            .recover(dir.path())
+            .is_err());
+        assert_eq!(
+            factory().recover(dir.path()).expect("recover"),
+            RecoveryOutcome::RolledBack { files: 3 }
+        );
+        assert_eq!(snapshot(dir.path()), before);
+        no_leftovers(dir.path());
+    }
+
+    #[test]
+    fn a_journal_that_cannot_be_written_changes_nothing() {
+        let dir = tempdir().expect("tempdir");
+        seed(dir.path());
+        let before = snapshot(dir.path());
+        let mut tx = factory().begin(dir.path()).expect("begin");
+        std::fs::remove_file(dir.path().join(".rocket/apply-journal.json")).expect("remove");
+        std::fs::create_dir(dir.path().join(".rocket/apply-journal.json")).expect("dir");
+        stage_six(tx.as_mut());
+        assert!(tx.commit().is_err());
+        assert_eq!(snapshot(dir.path()), before);
     }
 
     #[test]
@@ -560,6 +884,8 @@ mod tests {
         let _open = factory().begin(dir.path()).expect("begin");
         let err = factory().begin(dir.path()).err().expect("conflict");
         assert!(matches!(err, DomainError::Conflict(_)), "{err}");
+        // The refused begin leaves the first transaction's staging alone.
+        assert!(dir.path().join(".rocket/staging").exists());
     }
 
     #[test]
@@ -574,7 +900,15 @@ mod tests {
             "a\\b",
             ".rocket/staging/x",
             ".rocket/other.txt",
+            ".ROCKET/openapi-baseline.json",
+            ".Rocket/Staging/x",
             "a\0b",
+            "c:/x",
+            "a/b:stream",
+            "CON",
+            "nul.txt",
+            "dir/Com1.yml",
+            "lpt9",
         ] {
             assert!(tx.stage_put(bad, b"x").is_err(), "{bad:?} was accepted");
             assert!(tx.stage_delete(bad).is_err(), "{bad:?} was accepted");
@@ -588,6 +922,55 @@ mod tests {
         for ok in OWNED_STATE_FILES {
             tx.stage_put(&format!(".rocket/{ok}"), b"x").expect(ok);
         }
+    }
+
+    #[test]
+    fn a_path_staged_twice_is_rejected_even_with_another_case() {
+        let dir = tempdir().expect("tempdir");
+        let mut tx = factory().begin(dir.path()).expect("begin");
+        tx.stage_put("Users/A.yml", b"1").expect("put");
+        assert!(tx.stage_put("Users/A.yml", b"2").is_err());
+        assert!(tx.stage_put("users/a.YML", b"2").is_err());
+        assert!(tx.stage_delete("USERS/a.yml").is_err());
+        tx.stage_put("users/b.yml", b"3").expect("other path");
+    }
+
+    #[test]
+    fn a_folder_cannot_be_deleted_or_replaced() {
+        let dir = tempdir().expect("tempdir");
+        write(dir.path(), "dir/b.yml", "B");
+        let mut tx = factory().begin(dir.path()).expect("begin");
+        let err = tx.stage_delete("dir").expect_err("folder");
+        assert!(matches!(err, DomainError::InvalidInput(_)), "{err}");
+        assert!(tx.stage_put("dir", b"x").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symbolic_links_are_refused() {
+        use std::os::unix::fs::symlink;
+        let outside = tempdir().expect("outside");
+        let dir = tempdir().expect("tempdir");
+        symlink(outside.path(), dir.path().join("link")).expect("symlink");
+        let mut tx = factory().begin(dir.path()).expect("begin");
+        assert!(tx.stage_put("link/x.yml", b"x").is_err());
+        assert!(tx.stage_delete("link/x.yml").is_err());
+        assert!(tx.stage_put("link", b"x").is_err());
+        assert_eq!(std::fs::read_dir(outside.path()).expect("dir").count(), 0);
+
+        // A journal that names a linked path is refused when it is applied.
+        let other = tempdir().expect("other");
+        let linked_rocket = tempdir().expect("linked");
+        symlink(linked_rocket.path(), other.path().join(".rocket")).expect("symlink");
+        let err = factory().begin(other.path()).err().expect("refused");
+        assert!(matches!(err, DomainError::InvalidInput(_)), "{err}");
+        assert_eq!(
+            std::fs::read_dir(linked_rocket.path())
+                .expect("dir")
+                .count(),
+            0
+        );
+        assert!(factory().recover(other.path()).is_err());
     }
 
     #[test]
@@ -608,13 +991,15 @@ mod tests {
 
     /// Builds the staged state of a transaction that crashed after `after` ops.
     fn crashed_after(root: &Path, after: usize) {
+        let id = "crash".to_string();
         let mut tx = FsFileTx {
             root: root.to_path_buf(),
-            id: "crash".to_string(),
+            id: id.clone(),
             ops: Vec::new(),
             hook: FaultHook::default(),
+            rollback_hook: FaultHook::default(),
         };
-        std::fs::create_dir_all(staging_dir(root, "crash")).expect("dir");
+        std::fs::create_dir_all(staging_dir(root, &id)).expect("dir");
         tx.stage_put("a.yml", b"A2").expect("put");
         tx.stage_put("dir/b.yml", b"B2").expect("put");
         tx.stage_put("new/c.yml", b"C").expect("put");
@@ -637,8 +1022,24 @@ mod tests {
         assert_eq!(read(dir.path(), "new/c.yml"), "C");
         assert_eq!(read(dir.path(), "d.yml"), "D");
         assert!(!dir.path().join("gone.yml").exists());
-        assert!(!dir.path().join(".rocket/apply-journal.json").exists());
-        assert!(!dir.path().join(".rocket/staging").exists());
+        no_leftovers(dir.path());
+    }
+
+    #[test]
+    fn recovery_reapplies_a_done_put_whose_staged_file_is_still_there() {
+        let dir = tempdir().expect("tempdir");
+        seed(dir.path());
+        crashed_after(dir.path(), 1);
+        // Put the first op's staged file back, as if its replace had not reached the disk.
+        std::fs::rename(
+            dir.path().join("a.yml"),
+            staged_path(dir.path(), "crash", "a.yml"),
+        )
+        .expect("undo the replace");
+        write(dir.path(), "a.yml", "A1");
+        std::fs::remove_file(backup_path(dir.path(), "crash", "a.yml")).expect("no backup");
+        factory().recover(dir.path()).expect("recover");
+        assert_eq!(read(dir.path(), "a.yml"), "A2");
     }
 
     #[test]
@@ -655,7 +1056,7 @@ mod tests {
             "{outcome:?}"
         );
         assert_eq!(snapshot(dir.path()), before);
-        assert!(!dir.path().join(".rocket/apply-journal.json").exists());
+        no_leftovers(dir.path());
     }
 
     #[test]

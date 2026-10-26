@@ -106,9 +106,9 @@ mod tests {
     #[test]
     fn saving_writes_the_gitignore_first() {
         let dir = tempdir().expect("tempdir");
-        FsOpenApiLocalRepo
-            .save(dir.path(), &sample())
-            .expect("save");
+        // A folder at the file's path makes the write fail after the gitignore step.
+        std::fs::create_dir_all(dir.path().join(".rocket/openapi-local.json")).expect("dir");
+        assert!(FsOpenApiLocalRepo.save(dir.path(), &sample()).is_err());
         let ignore =
             std::fs::read_to_string(dir.path().join(".rocket/.gitignore")).expect("ignore");
         assert!(
