@@ -21,51 +21,85 @@ use rocket_collection::openapi_source::{OpenApiSource, SourceOperation, SyncStat
 use rocket_collection::{request_filename_for, CollectionVariable, Request};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-/// Applies the selection. Rules run in order: rename links, plan, items, variables, skips,
-/// finalize.
-pub fn build_apply(inputs: &ApplyInputs) -> ImportResult<ApplyOutput> {
-    let pi = &inputs.plan_inputs;
-    let had_baseline = pi.baseline.is_some();
-    let mut baseline = pi.baseline.cloned().unwrap_or_else(|| OpenApiBaseline {
-        version: BASELINE_FILE_VERSION,
-        converter_version: CONVERTER_VERSION,
-        base_url: pi.current_base_url.unwrap_or_default().to_string(),
-        operations: Vec::new(),
-    });
-    let mut source = pi.source.clone();
-    let mut stale = Vec::new();
-    link_renames(inputs, &mut source, &mut baseline, &mut stale);
+/// The plan after rename links, with the state the links produced.
+struct LinkedPlan {
+    plan: SyncPlan,
+    source: OpenApiSource,
+    baseline: Option<OpenApiBaseline>,
+    stale: Vec<String>,
+}
 
+fn plan_linked(pi: &SyncInputs, links: &[(String, String)]) -> LinkedPlan {
+    let mut source = pi.source.clone();
+    let mut baseline = pi.baseline.cloned();
+    let mut stale = Vec::new();
+    link_renames(pi, links, &mut source, baseline.as_mut(), &mut stale);
     let plan = build_sync_plan(&SyncInputs {
         source: &source,
-        baseline: had_baseline.then_some(&baseline),
+        baseline: baseline.as_ref(),
         incoming: pi.incoming,
         current: pi.current,
         current_base_url: pi.current_base_url,
         existing_variables: pi.existing_variables,
         skips: pi.skips,
     });
+    LinkedPlan {
+        plan,
+        source,
+        baseline,
+        stale,
+    }
+}
 
-    let mut ap = Applier::new(inputs, source, baseline, had_baseline, stale);
-    ap.apply_items(&plan)?;
-    ap.apply_variables(&plan)?;
-    ap.apply_skips(&plan);
-    Ok(ap.finish(&plan))
+/// The plan `build_apply` works from once the rename links are applied. Callers compute the
+/// digests they show or approve on this plan, so both sides agree. A link that is refused
+/// is left out here and reported as stale by `build_apply`.
+pub fn plan_with_links(
+    inputs: &SyncInputs,
+    links: &[(String, String)],
+) -> ImportResult<SyncPlan> {
+    Ok(plan_linked(inputs, links).plan)
+}
+
+/// Applies the selection. Rules run in order: rename links, plan, items, variables, skips,
+/// finalize.
+pub fn build_apply(inputs: &ApplyInputs) -> ImportResult<ApplyOutput> {
+    let pi = &inputs.plan_inputs;
+    let linked = plan_linked(pi, &inputs.selection.rename_links);
+    let had_baseline = linked.baseline.is_some();
+    // A new baseline records the spec's base URL like a fresh import. It never records the
+    // user's value, or a customized URL would later look untouched.
+    let baseline = linked.baseline.unwrap_or_else(|| OpenApiBaseline {
+        version: BASELINE_FILE_VERSION,
+        converter_version: CONVERTER_VERSION,
+        base_url: pi
+            .incoming
+            .doc()
+            .servers
+            .first()
+            .cloned()
+            .unwrap_or_default(),
+        operations: Vec::new(),
+    });
+    let mut ap = Applier::new(inputs, linked.source, baseline, had_baseline, linked.stale);
+    ap.apply_items(&linked.plan)?;
+    ap.apply_variables(&linked.plan)?;
+    ap.apply_skips(&linked.plan);
+    Ok(ap.finish(&linked.plan))
 }
 
 // Rule 1: re-point linked keys in the source and the baseline.
 fn link_renames(
-    inputs: &ApplyInputs,
+    pi: &SyncInputs,
+    links: &[(String, String)],
     source: &mut OpenApiSource,
-    baseline: &mut OpenApiBaseline,
+    mut baseline: Option<&mut OpenApiBaseline>,
     stale: &mut Vec<String>,
 ) {
-    let links = &inputs.selection.rename_links;
     if links.is_empty() {
         return;
     }
-    let incoming: HashSet<&str> = inputs
-        .plan_inputs
+    let incoming: HashSet<&str> = pi
         .incoming
         .doc()
         .operations
@@ -79,11 +113,16 @@ fn link_renames(
         .map(|(i, o)| (o.key.clone(), i))
         .collect();
     let mut base_at: HashMap<String, usize> = baseline
-        .operations
-        .iter()
-        .enumerate()
-        .map(|(i, o)| (o.key.clone(), i))
-        .collect();
+        .as_ref()
+        .map(|b| {
+            b.operations
+                .iter()
+                .enumerate()
+                .map(|(i, o)| (o.key.clone(), i))
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut orphans: HashSet<usize> = HashSet::new();
     for (old, new) in links {
         let valid = src_at.contains_key(old)
             && !incoming.contains(old.as_str())
@@ -96,10 +135,21 @@ fn link_renames(
         source.operations[at].key = new.clone();
         src_at.remove(old);
         src_at.insert(new.clone(), at);
-        if let Some(b) = base_at.remove(old) {
-            baseline.operations[b].key = new.clone();
-            base_at.insert(new.clone(), b);
+        // An entry already under the new key has no request; drop it so no key repeats.
+        if let Some(orphan) = base_at.remove(new) {
+            orphans.insert(orphan);
         }
+        if let (Some(b), Some(i)) = (baseline.as_deref_mut(), base_at.remove(old)) {
+            b.operations[i].key = new.clone();
+            base_at.insert(new.clone(), i);
+        }
+    }
+    if let (Some(b), false) = (baseline, orphans.is_empty()) {
+        let mut at = 0;
+        b.operations.retain(|_| {
+            at += 1;
+            !orphans.contains(&(at - 1))
+        });
     }
 }
 

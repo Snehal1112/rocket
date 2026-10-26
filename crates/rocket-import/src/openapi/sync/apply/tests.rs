@@ -7,7 +7,7 @@ use super::super::plan::{
     build_sync_plan, item_digest, CurrentRequest, SyncInputs, SyncItem, SyncPlan,
 };
 use super::super::spec::ParsedSpec;
-use super::build_apply;
+use super::{build_apply, plan_with_links};
 use crate::converter::openapi::{baseline_hash, convert_operation, CONVERTER_VERSION};
 use crate::error::ImportResult;
 use rocket_collection::openapi_baseline::{
@@ -35,6 +35,7 @@ struct O {
     tag: String,
     body: Option<&'static str>,
     secured: bool,
+    query: Option<&'static str>,
 }
 
 fn o(id: &str, path: &str, summary: &str) -> O {
@@ -46,6 +47,7 @@ fn o(id: &str, path: &str, summary: &str) -> O {
         tag: "Pets".to_string(),
         body: None,
         secured: false,
+        query: None,
     }
 }
 
@@ -63,6 +65,11 @@ fn spec_text(base: &str, ops: &[O]) -> String {
             inner["requestBody"] = serde_json::json!({
                 "content": { "application/json": { "example": example } }
             });
+        }
+        if let Some(name) = op.query {
+            inner["parameters"] = serde_json::json!([
+                { "name": name, "in": "query", "schema": { "type": "string" }, "example": "1" }
+            ]);
         }
         if op.secured {
             inner["security"] = serde_json::json!([{ "auth": [] }]);
@@ -456,28 +463,32 @@ fn changed_item_merges_and_advances_the_baseline() {
 
 #[test]
 fn choice_spec_applies_a_conflict_resolution() {
+    // The user changed a query value that the new spec removes: a real conflict.
     let mut old = pets();
-    old[0].body = Some(r#"{"limit":1}"#);
+    old[0].query = Some("limit");
     let mut w = world(&old);
-    w.current[0].request.body.as_mut().expect("body").content = Some("plain text".to_string());
-    let next = pets();
-    let spec = parsed(BASE, &next);
+    w.current[0].request.query_params[0].value = "9".to_string();
+    let spec = parsed(BASE, &pets());
     let plan = plan_of(&w, &spec);
     let SyncItem::Changed { merge, .. } = &plan.items[0] else {
         panic!("not changed");
     };
-    let fields: Vec<String> = merge
+    let conflict = merge
         .changes
         .iter()
-        .filter(|c| c.outcome != FieldOutcome::TakeSpec)
-        .map(|c| c.field.clone())
-        .collect();
-    assert!(!fields.is_empty(), "{:?}", merge.changes);
+        .find(|c| c.outcome == FieldOutcome::Conflict)
+        .unwrap_or_else(|| panic!("no conflict: {:?}", merge.changes));
+    assert_eq!(conflict.field, "query:limit");
+    // With no choice the user's value stays.
+    let kept = run(&w, &spec, &approve(&plan, &["listPets"]));
+    assert_eq!(put_request(&kept, "Pets/List-pets.yml").query_params.len(), 1);
+
     let mut sel = approve(&plan, &["listPets"]);
-    sel.items[0].choices = fields.iter().map(|f| (f.clone(), Choice::Spec)).collect();
+    sel.items[0]
+        .choices
+        .insert(conflict.field.clone(), Choice::Spec);
     let out = run(&w, &spec, &sel);
-    let req = put_request(&out, "Pets/List-pets.yml");
-    assert!(req.body.is_none());
+    assert!(put_request(&out, "Pets/List-pets.yml").query_params.is_empty());
 }
 
 #[test]
@@ -662,31 +673,6 @@ fn converter_version_is_unchanged() {
     assert_eq!(out.baseline.converter_version, CONVERTER_VERSION + 7);
 }
 
-/// The world as the apply sees it after a rename link.
-fn relinked(w: &W, old: &str, new: &str) -> W {
-    let mut copy = W {
-        source: w.source.clone(),
-        baseline: w.baseline.clone(),
-        current: w.current.clone(),
-        existing: w.existing.clone(),
-        settings: w.settings.clone(),
-        vars: w.vars.clone(),
-        base_url: w.base_url.clone(),
-        skips: w.skips.clone(),
-    };
-    for op in &mut copy.source.operations {
-        if op.key == old {
-            op.key = new.to_string();
-        }
-    }
-    for op in &mut copy.baseline.operations {
-        if op.key == old {
-            op.key = new.to_string();
-        }
-    }
-    copy
-}
-
 #[test]
 fn rename_link_merges_as_changed_and_keeps_user_edits() {
     let mut w = world(&pets());
@@ -695,11 +681,10 @@ fn rename_link_merges_as_changed_and_keeps_user_edits() {
     next[0].id = "listAllPets".to_string();
     next[0].summary = "List all pets".to_string();
     let spec = parsed(BASE, &next);
-    let linked = relinked(&w, "listPets", "listAllPets");
-    let plan = plan_of(&linked, &spec);
+    let links = vec![("listPets".to_string(), "listAllPets".to_string())];
+    let plan = plan_with_links(&sync_inputs(&w, &spec, true), &links).expect("plan");
     let mut sel = approve(&plan, &["listAllPets"]);
-    sel.rename_links
-        .push(("listPets".to_string(), "listAllPets".to_string()));
+    sel.rename_links = links;
     let out = run(&w, &spec, &sel);
     let req = put_request(&out, "Pets/List-pets.yml");
     assert!(req.headers.iter().any(|h| h.key == "X-Mine"));
@@ -746,6 +731,56 @@ fn base_url_is_updated_only_when_untouched() {
     sel.variables = vec!["baseUrl".to_string()];
     let out = run(&touched, &spec, &sel);
     assert!(settings_of(&out).is_none());
+    // The baseline moves to the spec value even though the user's value is kept.
+    assert_eq!(out.baseline.base_url, "https://v2.example.com");
+}
+
+#[test]
+fn new_baseline_never_records_a_customized_base_url() {
+    let mut w = world(&pets());
+    w.set_base_url("https://mine.example.com");
+    let mut next = pets();
+    next.push(o("findPet", "/pets/find", "Find pet"));
+    let spec = parsed(BASE, &next);
+    let plan = build_sync_plan(&sync_inputs(&w, &spec, false));
+    let sel = approve(&plan, &["findPet"]);
+    let first = run_with(&w, &spec, &sel, &MemoryRenderer::default(), false).expect("applies");
+    assert_eq!(first.baseline.base_url, BASE);
+
+    // The next sync sees a new spec URL and must keep the user's value.
+    w.baseline = first.baseline;
+    w.source = first.source;
+    let spec2 = parsed("https://v3.example.com", &next);
+    let plan2 = plan_of(&w, &spec2);
+    let mut sel2 = approve(&plan2, &[]);
+    sel2.variables = vec!["baseUrl".to_string()];
+    let second = run(&w, &spec2, &sel2);
+    assert!(settings_of(&second).is_none());
+}
+
+#[test]
+fn orphan_baseline_entry_under_the_new_key_is_dropped() {
+    let mut w = world(&pets());
+    let mut orphan = w.baseline.operations[0].clone();
+    orphan.key = "listAllPets".to_string();
+    w.baseline.operations.push(orphan);
+    let mut next = pets();
+    next[0].id = "listAllPets".to_string();
+    next[0].summary = "List all pets".to_string();
+    let spec = parsed(BASE, &next);
+    let links = vec![("listPets".to_string(), "listAllPets".to_string())];
+    let plan = plan_with_links(&sync_inputs(&w, &spec, true), &links).expect("plan");
+    let mut sel = approve(&plan, &["listAllPets"]);
+    sel.rename_links = links;
+    let out = run(&w, &spec, &sel);
+    let count = out
+        .baseline
+        .operations
+        .iter()
+        .filter(|b| b.key == "listAllPets")
+        .count();
+    assert_eq!(count, 1);
+    assert!(out.baseline.operations.iter().all(|b| b.key != "listPets"));
 }
 
 #[test]

@@ -9,7 +9,7 @@ pub(crate) mod plan;
 pub(crate) mod rename;
 pub(crate) mod spec;
 
-pub use apply::build_apply;
+pub use apply::{build_apply, plan_with_links};
 pub use apply_types::{
     AppliedItem, AppliedKind, ApplyInputs, ApplyOutput, ApplyReport, ApprovedItem, FileChange,
     FileChangeKind, RequestRenderer, Selection, SkipRequest,

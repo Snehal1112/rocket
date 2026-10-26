@@ -180,6 +180,12 @@ Plan 6, task 2. Code is in `openapi/sync/{apply,apply_types,apply_paths,spec}.rs
 - Changed: `merge_item_indexed` with the user's choices, source `baseline_hash` and `request_path` updated, the baseline entry replaced by the spec's request (carried name, uid of the current request). A request that fails `can_rewrite` goes to `not_rewritable` and stays.
 - Removed: deleted only when `edited == Some(false)`; otherwise detached (source and baseline entries dropped, file kept).
 - Variables: `baseUrl` changes only when `VariableChange.baseline` equals the current value; `AddSecurity` adds a secret empty variable once.
+- `plan_with_links(&SyncInputs, links) -> ImportResult<SyncPlan>` is the plan `build_apply` works from once rename links are applied. Compute shown and approved digests on it, so both sides agree.
+- `RequestRenderer` contract (four methods): `render(request_path, request)`, `render_settings(settings)`, `render_folder(folder_path)` and `can_rewrite(request_path, request)`. Request paths are extensionless; the file is `request_filename_for(path)`.
+- `existing_paths` must list every file of the collection, `folder.yml` files included. A folder with no listed file counts as gone and is created again with a `folder.yml`.
+- A new baseline (none existed) records the spec's first server URL, never the user's current `baseUrl`.
+- A variable change the user did not select does not block finalize. It stays in the plan's `variable_changes` until it is selected (the baseline does not move for it).
+- A generated name whose path fails the transaction rules falls back to `unnamed` (with the usual unique suffix); the apply never fails on a hostile name.
 - Finalize when `remaining == 0` and nothing is stale: `spec_sha256 = pending_sha256`, pending cleared, status `Unchanged`. `converter_version` is never changed.
 
 ### Importing from a file or a link

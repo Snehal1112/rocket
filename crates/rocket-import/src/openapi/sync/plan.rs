@@ -351,6 +351,15 @@ pub(crate) fn merge_item_indexed(
     merge_core(baseline_request, source_op, current, incoming, choices).0
 }
 
+/// A fixed text for an outcome, so a digest never depends on a `Debug` format.
+fn outcome_tag(outcome: FieldOutcome) -> &'static str {
+    match outcome {
+        FieldOutcome::TakeSpec => "take_spec",
+        FieldOutcome::KeepYours => "keep_yours",
+        FieldOutcome::Conflict => "conflict",
+    }
+}
+
 /// A hex SHA-256 that changes with anything the user was shown about an item: the key, the
 /// kind, the fingerprint and every change (field, outcome, yours, spec). It also covers the
 /// request identity, the removal state and the merged result, so an edit made after the plan
@@ -370,7 +379,7 @@ pub fn item_digest(item: &SyncItem) -> String {
                 .map(|c| {
                     serde_json::json!([
                         c.field,
-                        format!("{:?}", c.outcome),
+                        outcome_tag(c.outcome),
                         c.baseline,
                         c.yours,
                         c.spec

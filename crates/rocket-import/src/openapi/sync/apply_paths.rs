@@ -76,12 +76,17 @@ impl PathAlloc {
             } else {
                 PORT_RESERVED
             };
-            let (segment, _) = unique_segment(&mut HashSet::new(), name, reserved);
-            let candidate = if dir.is_empty() {
-                segment
-            } else {
-                format!("{dir}/{segment}")
+            let join = |segment: &str| {
+                if dir.is_empty() {
+                    segment.to_string()
+                } else {
+                    format!("{dir}/{segment}")
+                }
             };
+            let (segment, _) = segment_or_default(&mut HashSet::new(), name, reserved, &|s| {
+                check(&format!("{}/{FOLDER_FILE}", join(s))).is_ok()
+            });
+            let candidate = join(&segment);
             let key = fold_name(&candidate);
             dir = match self.dirs.get(&key) {
                 Some(actual) => actual.clone(),
@@ -106,15 +111,35 @@ impl PathAlloc {
     /// make it unique (1 when none was needed).
     pub(super) fn request(&mut self, dir: &str, name: &str) -> ImportResult<(String, u32)> {
         let used = self.stems.entry(fold_name(dir)).or_default();
-        let (slug, k) = unique_segment(used, name, REQUEST_RESERVED);
-        let path = if dir.is_empty() {
-            slug
-        } else {
-            format!("{dir}/{slug}")
+        let join = |slug: &str| {
+            if dir.is_empty() {
+                slug.to_string()
+            } else {
+                format!("{dir}/{slug}")
+            }
         };
+        let (slug, k) = segment_or_default(used, name, REQUEST_RESERVED, &|s| {
+            check(&request_filename_for(&join(s))).is_ok()
+        });
+        let path = join(&slug);
         check(&request_filename_for(&path))?;
         Ok((path, k))
     }
+}
+
+/// A unique segment for `name`. When the path built from it fails `ok`, the safe default
+/// `unnamed` (with the usual unique suffix) is used instead of the name.
+pub(super) fn segment_or_default(
+    used: &mut HashSet<String>,
+    name: &str,
+    reserved: &[&str],
+    ok: &dyn Fn(&str) -> bool,
+) -> (String, u32) {
+    let (segment, n) = unique_segment(used, name, reserved);
+    if ok(&segment) {
+        return (segment, n);
+    }
+    unique_segment(used, "unnamed", reserved)
 }
 
 /// Checks a path with the same rules the file transaction uses.
@@ -169,6 +194,18 @@ mod tests {
         assert_eq!(k, 2);
         let (second, _) = a.request("Pets", "LIST PETS").expect("path");
         assert_ne!(first.to_lowercase(), second.to_lowercase());
+    }
+
+    #[test]
+    fn a_segment_that_fails_the_check_falls_back_to_unnamed() {
+        let mut used = HashSet::new();
+        let reject = |s: &str| !s.starts_with("bad");
+        let (first, _) = segment_or_default(&mut used, "bad", &[], &reject);
+        assert_eq!(first, "unnamed");
+        let (second, _) = segment_or_default(&mut used, "bad", &[], &reject);
+        assert_eq!(second, "unnamed-2");
+        let (ok, _) = segment_or_default(&mut used, "fine", &[], &reject);
+        assert_eq!(ok, "fine");
     }
 
     #[test]
