@@ -216,6 +216,17 @@ Plan 3 of the OpenAPI series. Code is in `openapi/entry.rs`; both methods return
 - Token (Plan 4, task 3): a blank token counts as none. With a token and a GitHub link the fetch uses the contents API and a bearer; with a token and any other link it returns `SpecUnavailable` ("Tokens work with GitHub links only.") before any fetch. The import never stores the token. The Tauri command saves it with `OpenApiSyncService::set_token` after a successful import; if that fails the import still succeeds with a warning. The token never reaches a file, a warning or an error text.
 - `GroupBy::parse` accepts exactly `tags` and `paths`.
 
+### Remote references
+
+Plan 5b, task 1. Code is in `openapi/bundle.rs`. The reader follows only `#/` pointers, so `bundle_spec(fetcher, text, location, token, previous)` (async) inlines the files a spec refers to by URL into one text before parsing.
+
+- Each referenced file lands under the root key `x-rocket-remote` as `"0"`, `"1"` ... (first encounter, breadth first). `URL#/a/b` becomes `#/x-rocket-remote/<i>/a/b`; a `#/a/b` inside file `i` becomes the same prefix. `URL` or `URL#` points at the whole file. A spec with no followable reference comes back as the same text, byte for byte.
+- Relative references resolve against the main spec's raw address (`fetch_target(location, false).url`) and each file's own address, using the `url` crate. `inline_refs` (pure) only knows absolute addresses; `bundle_spec` handles the main spec's relative ones.
+- Not followed, with one note each (file name or host, never a query): non-https, a user name or password, a query string, an address `redirect_target_allowed` refuses, a fragment that is not a `/` pointer. No local path is ever read.
+- Limits: 20 files, depth 3, 25 MB in total with the main text. One note per limit; `Bundle.incomplete` is true for a failed or unusable file and for a limit. A file is fetched once however often it is referenced.
+- Token: only to a file whose `parse_spec_url` is a GitHub location in the same owner and repo as the main one (through `fetch_target(.., true)`); every other file is a plain request.
+- `bundle_spec` always fetches fresh bodies and records ETag and Last-Modified in `Bundle.refs` (`RemoteRefState`, defined in `rocket-collection`). `refs_unchanged` sends those validators and is true only if every file answers 304.
+
 ### Fixture Files
 
 Integration tests live in `tests/integration_test.rs` and use `tests/fixtures/my-api/`:

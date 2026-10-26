@@ -13,6 +13,7 @@ pub use importer::{
 };
 pub use converter::openapi::baseline_hash;
 pub use openapi::{
+    bundle_spec, find_remote_refs, inline_refs, refs_unchanged, Bundle, RemoteRefState,
     build_apply, item_digest, plan_with_links, AppliedItem, AppliedKind, ApplyInputs, ApplyOutput, ApplyReport,
     ApprovedItem, FileChange, FileChangeKind, ParsedSpec, RequestRenderer, Selection, SkipRequest,
     VariableApproval, variable_digest,

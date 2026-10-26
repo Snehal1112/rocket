@@ -131,6 +131,17 @@ pub trait OpenApiSourceRepository: Send + Sync {
     fn clear_pending(&self, collection_root: &Path) -> DomainResult<()>;
 }
 
+/// The validators of one file a spec refers to, kept so a check can ask "has it changed?"
+/// without downloading it. Persisted, so keys are snake_case with no renaming.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoteRefState {
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub etag: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_modified: Option<String>,
+}
+
 /// The place a spec is fetched from. Persisted, so keys are snake_case with no renaming.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
