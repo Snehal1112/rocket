@@ -182,9 +182,29 @@ async fn finish(
     }
 }
 
+/// The wait implied by the `x-ratelimit-reset` header (epoch seconds), held to the same
+/// bounds as a `Retry-After` value. `None` when the value is not a number.
+fn reset_wait_secs(reset: &str, now_epoch_secs: u64) -> Option<u64> {
+    let reset: u64 = reset.trim().parse().ok()?;
+    Some(rocket_collection::openapi_schedule::clamp_retry_after(
+        reset.saturating_sub(now_epoch_secs),
+    ))
+}
+
 fn rate_limited(response: &reqwest::Response) -> SpecFetchFailure {
+    let retry_after = header_text(response, RETRY_AFTER).and_then(|v| v.trim().parse().ok());
+    let from_reset = || {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?
+            .as_secs();
+        reset_wait_secs(
+            &header_text(response, HeaderName::from_static("x-ratelimit-reset"))?,
+            now,
+        )
+    };
     SpecFetchFailure::RateLimited {
-        retry_after_secs: header_text(response, RETRY_AFTER).and_then(|v| v.trim().parse().ok()),
+        retry_after_secs: retry_after.or_else(from_reset),
     }
 }
 
@@ -310,6 +330,46 @@ mod tests {
         );
         assert_eq!(get("/fb").await, SpecFetchFailure::Unauthorized);
         assert_eq!(get("/err").await, SpecFetchFailure::Status(500));
+    }
+
+    #[test]
+    fn a_reset_time_becomes_a_clamped_wait() {
+        assert_eq!(reset_wait_secs("1100", 1000), Some(100));
+        // A reset in the past or very near still waits one minute.
+        assert_eq!(reset_wait_secs("900", 1000), Some(60));
+        assert_eq!(reset_wait_secs("1010", 1000), Some(60));
+        // A far reset is held to 24 hours.
+        assert_eq!(reset_wait_secs("9999999", 1000), Some(86_400));
+        assert_eq!(reset_wait_secs("soon", 1000), None);
+    }
+
+    #[tokio::test]
+    async fn a_github_primary_limit_uses_the_reset_header() {
+        let server = MockServer::start().await;
+        let reset = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock")
+            .as_secs()
+            + 600;
+        Mock::given(method("GET"))
+            .and(path("/gh"))
+            .respond_with(
+                ResponseTemplate::new(403)
+                    .insert_header("x-ratelimit-remaining", "0")
+                    .insert_header("x-ratelimit-reset", reset.to_string().as_str()),
+            )
+            .mount(&server)
+            .await;
+        let err = fetcher()
+            .fetch(request(format!("{}/gh", server.uri())))
+            .await
+            .expect_err("limited");
+        match err {
+            SpecFetchFailure::RateLimited {
+                retry_after_secs: Some(secs),
+            } => assert!((590..=600).contains(&secs), "{secs}"),
+            other => panic!("{other:?}"),
+        }
     }
 
     #[tokio::test]

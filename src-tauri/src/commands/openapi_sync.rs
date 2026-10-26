@@ -544,13 +544,7 @@ fn report_dto(report: ApplyReport) -> ApplyReportDto {
 const UNKNOWN_INTERVAL: &str = "Unknown interval. Use off, every_5_minutes, every_15_minutes, every_30_minutes, hourly, daily, weekly or monthly.";
 
 fn interval_from_name(name: &str) -> Result<SyncInterval, String> {
-    match name {
-        "off" | "every_5_minutes" | "every_15_minutes" | "every_30_minutes" | "hourly"
-        | "daily" | "weekly" | "monthly" => {
-            SyncInterval::parse(name).ok_or_else(|| UNKNOWN_INTERVAL.to_string())
-        }
-        _ => Err(UNKNOWN_INTERVAL.to_string()),
-    }
+    SyncInterval::parse(name).ok_or_else(|| UNKNOWN_INTERVAL.to_string())
 }
 
 /// Clear sentences for the two ways an approval can be refused.

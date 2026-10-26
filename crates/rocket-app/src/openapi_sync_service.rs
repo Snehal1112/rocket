@@ -848,28 +848,32 @@ impl OpenApiSyncService {
 
     /// Removes the sync state of a collection: the source file, the local state, the spec
     /// copies, the baseline and the approval, and the stored token when `remove_token` is
-    /// set. Requests, folders and collection settings are never touched. It is refused with
-    /// `Conflict` while an apply holds the collection, and a collection without a source is
-    /// left alone.
+    /// set. Requests, folders and collection settings are never touched. A leftover
+    /// transaction is settled first. It is refused with `Conflict` while an apply holds the
+    /// collection. Orphaned state files are removed even when the source file is missing or
+    /// cannot be read, and a second call finds nothing to do.
     pub fn disconnect(&self, root: &Path, remove_token: bool) -> DomainResult<()> {
+        let deps = self
+            .apply_deps
+            .as_ref()
+            .ok_or_else(|| DomainError::Internal("Disconnecting is not set up.".to_string()))?;
         let lock = collection_lock(root);
         let _guard = lock.lock();
-        let Some(source) = self.sources.load(root)? else {
-            return Ok(());
-        };
-        // Taking the transaction first keeps out an apply that runs in another process.
-        let mut tx = match &self.apply_deps {
-            Some(deps) => Some(deps.tx.begin(root)?),
-            None => None,
-        };
-        let removed = self.remove_sync_state(root, &source, remove_token, tx.as_mut());
-        match (removed, tx) {
-            (Ok(()), Some(tx)) => tx.commit(),
-            (Ok(()), None) => self.delete_state_files(root),
-            (Err(e), tx) => {
-                if let Some(tx) = tx {
-                    tx.abort();
-                }
+        // A crash can leave a journal behind. A running apply is a conflict, not a wait.
+        if deps.tx.recover_if_idle(root)?.is_none() {
+            return Err(DomainError::Conflict(
+                "another sync apply is running on this collection".to_string(),
+            ));
+        }
+        // An unreadable source still lets its files go. Its token and approval cannot be
+        // found without the source id, so they stay.
+        let source = self.sources.load(root).ok().flatten();
+        let mut tx = deps.tx.begin(root)?;
+        let removed = self.remove_sync_state(root, source.as_ref(), remove_token, &mut tx);
+        match removed {
+            Ok(()) => tx.commit(),
+            Err(e) => {
+                tx.abort();
                 Err(e)
             }
         }
@@ -878,30 +882,20 @@ impl OpenApiSyncService {
     fn remove_sync_state(
         &self,
         root: &Path,
-        source: &OpenApiSource,
+        source: Option<&OpenApiSource>,
         remove_token: bool,
-        tx: Option<&mut Box<dyn rocket_collection::file_tx::CollectionFileTx>>,
+        tx: &mut Box<dyn rocket_collection::file_tx::CollectionFileTx>,
     ) -> DomainResult<()> {
-        if remove_token && !source.source_id.is_empty() {
-            self.secrets.delete(&source.source_id, TOKEN_KEY)?;
-        }
-        if let Some(store) = &self.consent {
-            store.revoke(root, &source.source_id)?;
-        }
-        if let Some(tx) = tx {
-            for name in rocket_collection::file_tx::OWNED_STATE_FILES {
-                tx.stage_delete(&format!(".rocket/{name}"))?;
+        if let Some(source) = source.filter(|s| !s.source_id.is_empty()) {
+            if remove_token {
+                self.secrets.delete(&source.source_id, TOKEN_KEY)?;
+            }
+            if let Some(store) = &self.consent {
+                store.revoke(root, &source.source_id)?;
             }
         }
-        Ok(())
-    }
-
-    /// Fallback for a service without apply deps: removes the files through the repositories.
-    fn delete_state_files(&self, root: &Path) -> DomainResult<()> {
-        self.sources.clear_pending(root)?;
-        self.sources.delete(root)?;
-        if let Some(deps) = &self.apply_deps {
-            deps.baselines.delete(root)?;
+        for name in rocket_collection::file_tx::OWNED_STATE_FILES {
+            tx.stage_delete(&format!(".rocket/{name}"))?;
         }
         Ok(())
     }

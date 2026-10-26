@@ -681,6 +681,20 @@ impl CollectionFileTxFactory for FsFileTxFactory {
     fn recover(&self, collection_root: &Path) -> DomainResult<RecoveryOutcome> {
         // Waits for a running transaction, so a staging journal is never taken for a leftover.
         let _root = RootGuard::acquire(collection_root);
+        self.recover_held(collection_root)
+    }
+
+    fn recover_if_idle(&self, collection_root: &Path) -> DomainResult<Option<RecoveryOutcome>> {
+        let Some(_root) = RootGuard::try_acquire(collection_root) else {
+            return Ok(None);
+        };
+        self.recover_held(collection_root).map(Some)
+    }
+}
+
+impl FsFileTxFactory {
+    /// The recovery itself. The caller holds the root guard.
+    fn recover_held(&self, collection_root: &Path) -> DomainResult<RecoveryOutcome> {
         let journal = match read_journal(collection_root) {
             Ok(journal) => journal,
             Err(e) => {

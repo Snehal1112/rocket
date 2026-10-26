@@ -392,6 +392,9 @@ pub async fn import_openapi_url(
     let approval = approver.grant_consent_for_link(&root, &link);
     if approval.is_err() {
         dto.warnings.push(CONSENT_NOT_SAVED.to_string());
+        if check_for_updates == Some(true) {
+            dto.warnings.push(CHECKS_NOT_ENABLED.to_string());
+        }
     } else if !enable_checks(&approver, &root, check_for_updates) {
         dto.warnings.push(CHECKS_NOT_ENABLED.to_string());
     }

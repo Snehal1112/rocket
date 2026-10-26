@@ -56,8 +56,9 @@ pub fn clamp_retry_after(secs: u64) -> u64 {
 pub fn backoff_secs(failures: u32, interval: SyncInterval, retry_after_secs: Option<u64>) -> u64 {
     let steps = failures.saturating_sub(1).min(16);
     let mut cap = BACKOFF_CAP_SECS;
+    // A short interval never retries faster than the ladder base.
     if let Some(secs) = interval.as_secs() {
-        cap = cap.min(secs);
+        cap = cap.min(secs.max(BACKOFF_BASE_SECS));
     }
     let ladder = BACKOFF_BASE_SECS.saturating_mul(1u64 << steps).min(cap);
     match retry_after_secs {
@@ -191,6 +192,24 @@ mod tests {
                 assert!(wait * 10 <= secs * 11, "{interval:?} {id} {wait}");
             }
         }
+    }
+
+    #[test]
+    fn a_failing_short_interval_waits_at_least_the_ladder_base() {
+        for interval in [SyncInterval::Min5, SyncInterval::Min15, SyncInterval::Min30] {
+            assert_eq!(backoff_secs(1, interval, None), 900, "{interval:?}");
+        }
+        // The ladder still doubles, up to the interval or 6 hours at most.
+        assert_eq!(backoff_secs(2, SyncInterval::Min30, None), 1800);
+        assert_eq!(backoff_secs(3, SyncInterval::Min30, None), 1800);
+        assert_eq!(backoff_secs(2, SyncInterval::Min5, None), 900);
+        assert_eq!(backoff_secs(9, SyncInterval::Hourly, None), 3600);
+        assert_eq!(backoff_secs(9, SyncInterval::Daily, None), 21_600);
+        let last = ago(0);
+        let mut p = plan(SyncInterval::Min5, Some(&last));
+        p.last_failed = true;
+        p.consecutive_failures = 1;
+        assert_eq!(next_check_at(&p), Some(now() + Duration::seconds(900)));
     }
 
     #[test]

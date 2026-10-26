@@ -2,7 +2,7 @@
 
 use super::*;
 use async_trait::async_trait;
-use rocket_collection::file_tx::{CollectionFileTxFactory, OWNED_STATE_FILES};
+use rocket_collection::file_tx::CollectionFileTxFactory;
 use rocket_collection::openapi_baseline::{OpenApiBaseline, OpenApiBaselineRepository};
 use rocket_collection::{CollectionRepository, InMemoryConsentStore, Request};
 use rocket_infra::{
@@ -183,7 +183,13 @@ impl World {
 fn disconnect_removes_only_sync_state() {
     let w = World::new();
     w.svc.disconnect(&w.root, false).expect("disconnect");
-    for name in OWNED_STATE_FILES {
+    for name in [
+        "openapi-source.yml",
+        "openapi-local.json",
+        "openapi-pending.spec",
+        "openapi-baseline.json",
+        "openapi-applied.spec",
+    ] {
         assert!(!w.rocket(name), "{name} should be gone");
     }
     assert!(!w.has_consent());
@@ -290,4 +296,73 @@ fn set_interval_takes_the_short_values_and_still_needs_consent() {
     w.store.revoke(&w.root, "src-1").expect("revoke");
     assert!(w.svc.set_interval(&w.root, SyncInterval::Min5).is_err());
     w.svc.set_interval(&w.root, SyncInterval::Off).expect("off");
+}
+
+#[test]
+fn folders_and_their_requests_are_untouched() {
+    let w = World::new();
+    let repo = FsCollectionRepo::new_standalone(w.ws.path().join("collections"));
+    repo.create_folder("c", "Users").expect("folder");
+    repo.save_request(
+        "c",
+        "Users/List.yml",
+        &Request::new("List", HttpMethod::Get, "http://two".to_string()),
+    )
+    .expect("request");
+    w.svc.disconnect(&w.root, true).expect("disconnect");
+    assert!(w.root.join("Users").is_dir());
+    assert!(w.root.join("Users/List.yml").exists());
+    assert!(w.root.join("Login.yml").exists());
+}
+
+#[test]
+fn a_leftover_journal_is_recovered_and_does_not_block_disconnect() {
+    let w = World::new();
+    std::fs::write(
+        w.root.join(".rocket/apply-journal.json"),
+        r#"{"version":1,"id":"old","phase":"staging","ops":[]}"#,
+    )
+    .expect("journal");
+    w.svc.disconnect(&w.root, false).expect("disconnect");
+    assert!(!w.rocket("openapi-source.yml"));
+    assert!(!w.rocket("apply-journal.json"));
+}
+
+#[test]
+fn a_source_file_that_cannot_be_parsed_does_not_block_disconnect() {
+    let w = World::new();
+    std::fs::write(w.root.join(".rocket/openapi-source.yml"), "version: [").expect("bad");
+    w.svc.disconnect(&w.root, false).expect("disconnect");
+    for name in [
+        "openapi-source.yml",
+        "openapi-local.json",
+        "openapi-pending.spec",
+        "openapi-baseline.json",
+    ] {
+        assert!(!w.rocket(name), "{name} should be gone");
+    }
+    assert!(w.rocket("other.json"));
+}
+
+#[test]
+fn orphaned_state_files_are_removed_when_the_source_is_gone() {
+    let w = World::new();
+    std::fs::remove_file(w.root.join(".rocket/openapi-source.yml")).expect("remove");
+    w.svc.disconnect(&w.root, false).expect("disconnect");
+    assert!(!w.rocket("openapi-local.json"));
+    assert!(!w.rocket("openapi-pending.spec"));
+    assert!(!w.rocket("openapi-baseline.json"));
+    assert!(w.rocket("other.json"));
+}
+
+#[test]
+fn a_service_without_apply_deps_refuses_to_disconnect() {
+    let w = World::new();
+    let svc = OpenApiSyncService::new(
+        Arc::new(NoFetch),
+        Box::new(FsOpenApiSourceRepo),
+        Arc::clone(&w.secrets) as Arc<dyn SecretStore>,
+    );
+    assert!(svc.disconnect(&w.root, false).is_err());
+    assert!(w.rocket("openapi-source.yml"));
 }

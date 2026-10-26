@@ -89,6 +89,11 @@ pub trait CollectionFileTxFactory: Send + Sync {
     fn begin(&self, collection_root: &Path) -> DomainResult<Box<dyn CollectionFileTx>>;
     /// Finishes or undoes a transaction that a crash left behind.
     fn recover(&self, collection_root: &Path) -> DomainResult<RecoveryOutcome>;
+    /// Like `recover`, but gives up with `None` when a transaction is running on the
+    /// collection, instead of waiting for it. The default waits like `recover`.
+    fn recover_if_idle(&self, collection_root: &Path) -> DomainResult<Option<RecoveryOutcome>> {
+        self.recover(collection_root).map(Some)
+    }
     /// Every file of the collection as a path relative to its root, with `/` separators.
     /// The `.rocket` and `.git` folders are left out. The default refuses, so a factory that
     /// cannot list files never lets an apply pick names blindly.
