@@ -95,6 +95,8 @@ These are `pub` in `lib.rs` but are serialization-layer details — callers outs
 
 **Flow files (`fs_flow_repo.rs`).** `FsFlowRepo::list_entries` reports an unparseable file as a corrupt entry. `FsFlowRepo::save` refuses to overwrite an unparseable file ("Delete the broken file first"), which stops a new flow from taking over a broken file's slug.
 
+**File transaction (`fs_file_tx.rs`).** `FsFileTxFactory` implements `CollectionFileTxFactory`. Staged files go to `.rocket/staging/<id>/new`, and `.rocket/apply-journal.json` (phase `staging` or `committing`, ops with `backup` and `done`) is rewritten with `atomic_write`. Commit backs up, replaces or deletes each file in order and rolls back from `staging/<id>/backup` on any error. `recover` discards a `staging` journal and rolls forward a `committing` one (rolling back if that fails); each op is re-checked on disk, so recovery is idempotent. `begin` is a `Conflict` while a journal exists, so callers run `recover` first. Paths are relative with `/`; under `.rocket` only the four OpenAPI state files are allowed. The fault hook for tests is `#[cfg(test)]`. `FsOpenApiLocalRepo` keeps git-ignored skips in `.rocket/openapi-local.json`.
+
 ## Testing
 
 All repository types have unit tests using `tempfile::TempDir` for ephemeral filesystem fixtures. `ReqwestExecutor` OAuth2 tests use `wiremock` to mock the token endpoint. Network tests that require live HTTP are marked `#[ignore]`.

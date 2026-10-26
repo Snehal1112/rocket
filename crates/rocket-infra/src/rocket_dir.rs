@@ -8,7 +8,13 @@ use crate::atomic_write;
 
 const GITIGNORE_FILE: &str = ".gitignore";
 /// Files in the folder that are local state and must not be committed.
-const IGNORED_NAMES: [&str; 2] = ["openapi-baseline.json", "openapi-pending.spec"];
+const IGNORED_NAMES: [&str; 5] = [
+    "openapi-baseline.json",
+    "openapi-pending.spec",
+    "openapi-local.json",
+    "apply-journal.json",
+    "staging/",
+];
 
 /// Makes sure `<collection>/.rocket/.gitignore` lists the local state files. A missing file is
 /// created. An existing one only gets the missing lines appended, and the user's lines stay.

@@ -3,7 +3,9 @@ pub mod contract;
 pub mod folder;
 pub mod folder_settings;
 pub mod graphql_request;
+pub mod file_tx;
 pub mod openapi_baseline;
+pub mod openapi_local;
 pub mod openapi_source;
 pub mod grpc_request;
 pub mod repository;
@@ -32,6 +34,8 @@ pub use request::{
 pub use openapi_baseline::{
     BaselineOperation, OpenApiBaseline, OpenApiBaselineRepository, BASELINE_FILE_VERSION,
 };
+pub use file_tx::{CollectionFileTx, CollectionFileTxFactory, RecoveryOutcome};
+pub use openapi_local::{OpenApiLocalRepository, OpenApiLocalState, LOCAL_STATE_FILE_VERSION};
 pub use request_kind::RequestKind;
 pub use request_summary::RequestSummary;
 pub use script_file::{normalize_script_name, ScriptFileItem, SCRIPT_TEMPLATE};
