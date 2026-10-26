@@ -47,6 +47,8 @@ pub struct Bundle {
     /// or an unusable file is deterministic and does not set it. A 304 on a fresh fetch is
     /// treated like a failure because the body is missing.
     pub fetch_failed: bool,
+    /// The wait a rate-limited file asked for, in seconds, if any file did.
+    pub retry_after_secs: Option<u64>,
 }
 
 /// What one `$ref` string points at.
@@ -61,7 +63,7 @@ enum Target {
 
 fn label_of(url: &Url) -> String {
     url.path_segments()
-        .and_then(|segments| segments.filter(|s| !s.is_empty()).next_back())
+        .and_then(|mut segments| segments.rfind(|s| !s.is_empty()))
         .map(str::to_string)
         .or_else(|| url.host_str().map(str::to_string))
         .unwrap_or_else(|| "a file".to_string())
@@ -335,7 +337,7 @@ fn inline_with_base(
     main: &mut Yaml,
     main_base: Option<&Url>,
     main_url: Option<&str>,
-    files: &[(String, Yaml)],
+    files: Vec<(String, Yaml)>,
 ) {
     if files.is_empty() || !main.is_mapping() {
         return;
@@ -345,11 +347,10 @@ fn inline_with_base(
         index.entry(canonical(url)).or_insert(i);
     }
     let mut root = serde_yaml::Mapping::new();
-    for (i, (url, value)) in files.iter().enumerate() {
-        let mut copy = value.clone();
-        let base = Url::parse(url).ok();
-        rewrite(&mut copy, base.as_ref(), Some(i), &index, main_url);
-        root.insert(Yaml::String(i.to_string()), copy);
+    for (i, (url, mut value)) in files.into_iter().enumerate() {
+        let base = Url::parse(&url).ok();
+        rewrite(&mut value, base.as_ref(), Some(i), &index, main_url);
+        root.insert(Yaml::String(i.to_string()), value);
     }
     // The main document is rewritten before the files are attached to it.
     rewrite(main, main_base, None, &index, main_url);
@@ -362,7 +363,7 @@ fn inline_with_base(
 /// `$ref` values that point at them. The URLs in `files` are absolute. Relative references in
 /// the main document need an address, so use `bundle_spec` for those.
 pub fn inline_refs(main: &mut Yaml, files: &[(String, Yaml)]) {
-    inline_with_base(main, None, None, files);
+    inline_with_base(main, None, None, files.to_vec());
 }
 
 /// The address relative references in the main spec resolve against.
@@ -414,20 +415,53 @@ fn file_label(url: &str) -> String {
         .unwrap_or_else(|_| "a file".to_string())
 }
 
-fn failure_text(failure: &SpecFetchFailure, token_sent: bool) -> String {
+/// True for a GitHub file in another repository than the main spec's. It never gets the token.
+fn in_other_repository(file_url: &str, location: &SpecLocation) -> bool {
+    match (location, parse_spec_url(file_url)) {
+        (
+            SpecLocation::Github { owner, repo, .. },
+            Ok(SpecLocation::Github {
+                owner: o, repo: r, ..
+            }),
+        ) => !(o.eq_ignore_ascii_case(owner) && r.eq_ignore_ascii_case(repo)),
+        _ => false,
+    }
+}
+
+fn failure_text(failure: &SpecFetchFailure, token_sent: bool, other_repository: bool) -> String {
     match failure {
         // The message of a network error may hold a redirect address.
         SpecFetchFailure::Network(_) => "The file could not be fetched.".to_string(),
+        SpecFetchFailure::NotFound | SpecFetchFailure::Unauthorized if other_repository => {
+            "The file was not found, or it needs a sign-in. \
+             Rocket sends the token only to files in the spec's own repository."
+                .to_string()
+        }
         other => fetch_failure_message(other, token_sent),
     }
 }
 
 /// The message of a failed check of one referenced file. It names the file by its label and
 /// never quotes a network error, which can hold a redirect address.
-pub fn ref_failure_message(label: &str, failure: &SpecFetchFailure) -> String {
+pub fn ref_failure_message(
+    file_url: &str,
+    location: &SpecLocation,
+    failure: &SpecFetchFailure,
+) -> String {
     format!(
-        "A file the spec refers to could not be loaded: {label}. {}",
-        failure_text(failure, false)
+        "A file the spec refers to could not be loaded: {}. {}",
+        file_label(file_url),
+        failure_text(failure, false, in_other_repository(file_url, location))
+    )
+}
+
+/// The message for files that loaded last time and are missing from a new bundle. It names
+/// them by label only.
+pub fn lost_refs_message(file_urls: &[&str]) -> String {
+    let labels: Vec<String> = file_urls.iter().map(|u| file_label(u)).collect();
+    format!(
+        "A file the spec refers to could not be loaded: {}.",
+        labels.join(", ")
     )
 }
 
@@ -518,6 +552,7 @@ async fn bundle_with_limit(
         notes: Vec::new(),
         incomplete: false,
         fetch_failed: false,
+        retry_after_secs: None,
     };
     // One budget for the main text and every file, so many files cannot add up past it. Its
     // node limit grows with the bytes accepted so far (`node_limit` of their total).
@@ -607,9 +642,15 @@ async fn bundle_with_limit(
             Err(failure) => {
                 bundle.incomplete = true;
                 bundle.fetch_failed = true;
+                if let SpecFetchFailure::RateLimited {
+                    retry_after_secs: Some(secs),
+                } = &failure
+                {
+                    bundle.retry_after_secs = Some(bundle.retry_after_secs.unwrap_or(0).max(*secs));
+                }
                 bundle.notes.push(format!(
                     "The file {label} could not be loaded. {}",
-                    failure_text(&failure, token_sent)
+                    failure_text(&failure, token_sent, in_other_repository(&url, location))
                 ));
                 continue;
             }
@@ -675,7 +716,7 @@ async fn bundle_with_limit(
     if files.is_empty() {
         return Ok(bundle);
     }
-    inline_with_base(&mut main, main_base.as_ref(), main_url.as_deref(), &files);
+    inline_with_base(&mut main, main_base.as_ref(), main_url.as_deref(), files);
     let text = serde_yaml::to_string(&main).map_err(|_| {
         ImportError::SpecUnavailable(
             "The spec could not be combined with the files it refers to.".to_string(),
@@ -709,8 +750,8 @@ pub async fn refs_unchanged(
         .map_err(|(_, failure)| failure)
 }
 
-/// The same as `refs_unchanged`, but a failure also names the file by its label (a file name
-/// or host, never a query or a path).
+/// The same as `refs_unchanged`, but a failure also carries the address of the file.
+/// Turn it into text with `ref_failure_message`, which shows the label only.
 pub async fn refs_unchanged_labeled(
     fetcher: &dyn SpecFetcher,
     location: &SpecLocation,
@@ -727,7 +768,7 @@ pub async fn refs_unchanged_labeled(
         match fetcher
             .fetch(request)
             .await
-            .map_err(|f| (file_label(&state.url), f))?
+            .map_err(|f| (state.url.clone(), f))?
         {
             SpecFetchOutcome::NotModified => {}
             SpecFetchOutcome::Fetched { .. } => return Ok(false),

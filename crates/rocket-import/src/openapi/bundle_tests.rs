@@ -974,3 +974,34 @@ async fn a_large_bundle_without_aliases_loads_and_the_reader_accepts_it() {
     let names: Vec<&str> = get_a.parameters.iter().map(|p| p.name.as_str()).collect();
     assert_eq!(names, ["p0", "p1", "p2"]);
 }
+
+#[tokio::test]
+async fn a_missing_file_in_another_repository_does_not_ask_for_a_token() {
+    let fetcher = FakeFetcher::default();
+    let other = "https://raw.githubusercontent.com/other/repo/main/d.yaml";
+    let same = format!("{RAW_DIR}/e.yaml");
+    let text = spec_with(&[
+        &format!("{other}#/parameters/p"),
+        &format!("{same}#/parameters/p"),
+    ]);
+    let bundle = bundle_spec(&fetcher, &text, &location(), None, &[])
+        .await
+        .expect("bundle");
+    assert_eq!(bundle.notes.len(), 2, "{:?}", bundle.notes);
+    let foreign = bundle
+        .notes
+        .iter()
+        .find(|n| n.contains("d.yaml"))
+        .expect("note");
+    assert!(
+        foreign.contains("sends the token only to files in the spec's own repository"),
+        "{foreign}"
+    );
+    assert!(!foreign.contains("add an access token"), "{foreign}");
+    let own = bundle
+        .notes
+        .iter()
+        .find(|n| n.contains("e.yaml"))
+        .expect("note");
+    assert!(own.contains("add an access token"), "{own}");
+}

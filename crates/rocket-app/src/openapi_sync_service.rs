@@ -20,8 +20,8 @@ use rocket_http::spec_fetch::{
     SpecFetchFailure, SpecFetchOutcome, SpecFetchRequest, SpecFetcher, DEFAULT_MAX_SPEC_BYTES,
 };
 use rocket_import::{
-    bundle_spec, check_spec_text, fetch_failure_message, fetch_target, ref_failure_message,
-    refs_unchanged_labeled, Bundle,
+    bundle_spec, check_spec_text, fetch_failure_message, fetch_target, lost_refs_message,
+    ref_failure_message, refs_unchanged_labeled, Bundle,
 };
 use rocket_shared::error::{DomainError, DomainResult};
 use sha2::{Digest, Sha256};
@@ -398,9 +398,11 @@ impl OpenApiSyncService {
                     _ => None,
                 };
                 let message = match failure {
-                    _ if ref_label.is_some() => {
-                        ref_failure_message(ref_label.as_deref().unwrap_or("a file"), &failure)
-                    }
+                    _ if ref_label.is_some() => ref_failure_message(
+                        ref_label.as_deref().unwrap_or_default(),
+                        &source.location,
+                        &failure,
+                    ),
                     SpecFetchFailure::NotFound | SpecFetchFailure::Unauthorized
                         if keychain_failed =>
                     {
@@ -472,14 +474,25 @@ impl OpenApiSyncService {
                 );
             }
         };
-        // A file that could not be fetched keeps everything as it was.
-        if bundle.fetch_failed {
-            let mut message = "A file the spec refers to could not be loaded.".to_string();
-            for note in &bundle.notes {
-                message.push(' ');
-                message.push_str(note);
+        // A file that loaded last time and is lost now keeps everything as it was. A file that
+        // never loaded (a private repository, say) only keeps the incomplete flag, so it is
+        // tried again at the next check.
+        if bundle.incomplete {
+            let lost: Vec<&str> = source
+                .remote_refs
+                .iter()
+                .filter(|p| !bundle.refs.iter().any(|n| n.url == p.url))
+                .map(|p| p.url.as_str())
+                .collect();
+            if !lost.is_empty() {
+                return self.fail(
+                    collection_root,
+                    &now,
+                    "ref_unavailable",
+                    lost_refs_message(&lost),
+                    bundle.retry_after_secs,
+                );
             }
-            return self.fail(collection_root, &now, "ref_unavailable", message, None);
         }
 
         let text = bundle.text.into_bytes();
@@ -1013,7 +1026,7 @@ mod tests {
         match out {
             CheckOutcome::Failed { message, .. } => {
                 assert!(
-                    message.starts_with("A file the spec refers to could not be loaded."),
+                    message.starts_with("A file the spec refers to could not be loaded: defs.yaml"),
                     "{message}"
                 );
             }
@@ -1241,6 +1254,111 @@ mod tests {
                 code: "network".into()
             })
         );
+    }
+
+    fn never_loaded_source(main: &[u8]) -> OpenApiSource {
+        let mut src = source(https_main());
+        src.remote_refs_incomplete = true;
+        src.spec_sha256 = sha256_hex(main);
+        src
+    }
+
+    #[tokio::test]
+    async fn a_file_that_never_loaded_does_not_fail_an_unchanged_check() {
+        let main = ref_to_defs();
+        let f = Fixture::new(never_loaded_source(&main));
+        f.fetcher.push(Ok(SpecFetchOutcome::NotModified));
+        f.fetcher.push(fetched(main.clone(), "\"m2\""));
+        f.fetcher.push(Err(SpecFetchFailure::NotFound));
+        let out = f.svc.check(f.root()).await.expect("check");
+        assert_eq!(out, CheckOutcome::Unchanged);
+        let s = f.load();
+        assert!(s.remote_refs_incomplete);
+        assert!(s.remote_refs.is_empty());
+        assert_eq!(f.local().consecutive_failures, 0);
+    }
+
+    #[tokio::test]
+    async fn a_file_that_never_loaded_does_not_fail_a_changed_check() {
+        let f = Fixture::new(never_loaded_source(&ref_to_defs()));
+        let mut v: serde_json::Value = serde_json::from_slice(&ref_to_defs()).expect("json");
+        v["info"]["title"] = serde_json::json!("Other title");
+        let main = serde_json::to_vec(&v).expect("json");
+        f.fetcher.push(Ok(SpecFetchOutcome::NotModified));
+        f.fetcher.push(fetched(main.clone(), "\"m2\""));
+        f.fetcher.push(Err(SpecFetchFailure::NotFound));
+        let out = f.svc.check(f.root()).await.expect("check");
+        assert_eq!(
+            out,
+            CheckOutcome::Changed {
+                spec_sha256: sha256_hex(&main)
+            }
+        );
+        assert!(f.load().remote_refs_incomplete);
+        assert_eq!(f.pending(), Some(main));
+    }
+
+    #[tokio::test]
+    async fn a_loaded_file_that_now_answers_with_html_fails_the_check() {
+        let f = Fixture::new(with_ref_source(https_main(), DEFS));
+        let before = f.source_bytes();
+        f.fetcher.push(fetched(ref_to_defs(), "\"m2\""));
+        f.fetcher
+            .push(fetched(b"<html>oops</html>".to_vec(), "\"r2\""));
+        let out = f.svc.check(f.root()).await.expect("check");
+        match out {
+            CheckOutcome::Failed { message, .. } => {
+                assert!(message.contains("defs.yaml"), "{message}")
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(f.source_bytes(), before);
+        assert_eq!(f.pending(), None);
+        assert_eq!(
+            f.local().last_status,
+            Some(SyncStatus::Failed {
+                code: "ref_unavailable".into()
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn a_loaded_file_lost_to_the_size_limit_fails_the_check() {
+        let f = Fixture::new(with_ref_source(https_main(), DEFS));
+        let before = f.source_bytes();
+        f.fetcher.push(fetched(ref_to_defs(), "\"m2\""));
+        f.fetcher.push(Err(SpecFetchFailure::TooLarge));
+        let out = f.svc.check(f.root()).await.expect("check");
+        assert!(matches!(out, CheckOutcome::Failed { .. }), "{out:?}");
+        assert_eq!(f.source_bytes(), before);
+        assert_eq!(f.pending(), None);
+    }
+
+    #[tokio::test]
+    async fn a_rate_limited_lost_file_keeps_the_retry_after() {
+        let f = Fixture::new(with_ref_source(https_main(), DEFS));
+        f.fetcher.push(fetched(ref_to_defs(), "\"m2\""));
+        f.fetcher.push(Err(SpecFetchFailure::RateLimited {
+            retry_after_secs: Some(90),
+        }));
+        let out = f.svc.check(f.root()).await.expect("check");
+        match out {
+            CheckOutcome::Failed {
+                retry_after_secs, ..
+            } => assert_eq!(retry_after_secs, Some(90)),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_file_the_spec_no_longer_refers_to_does_not_fail() {
+        let f = Fixture::new(with_ref_source(https_main(), DEFS));
+        f.fetcher.push(fetched(changed("a"), "\"m2\""));
+        let out = f.svc.check(f.root()).await.expect("check");
+        assert!(matches!(out, CheckOutcome::Changed { .. }), "{out:?}");
+        let s = f.load();
+        assert!(s.remote_refs.is_empty());
+        assert!(!s.remote_refs_incomplete);
     }
 
     #[tokio::test]
