@@ -22,7 +22,7 @@ Rules for every plan:
 | ID | Plan | Needs |
 |---|---|---|
 | P4 | `plan-04-check-and-token.md`: sync state in the source file, `OpenApiSyncService` (conditional fetch, pending copy, token in the keychain), import with a token. Done on branch openapi-import (a26a3384..71594576), final review clean | P2, P3 |
-| P5 | `plan-05-diff-and-merge.md`: baseline snapshot of converted requests (written at import), per-request three-way merge, sync plan (New, Changed, Removed, rename hints, skips, cautious mode). Written, waiting for review | P1, P2, P4 |
+| P5 | `plan-05-diff-and-merge.md`: baseline snapshot of converted requests (written at import), per-request three-way merge, sync plan (New, Changed, Removed, rename hints, skips, cautious mode). Done on branch openapi-sync-diff (92d797e1..12bacf9f), final review clean after one fix wave, not yet merged to main | P1, P2, P4 |
 | P6 | Apply approved changes with a staging area and recovery journal | P5 |
 | P7 | Scheduler: supervisor, intervals, jitter, backoff, launch catch-up, notice | P4 |
 | P8 | Spec sync tab: list and detail | P5, P6 |
@@ -48,3 +48,15 @@ Rules for every plan:
 - Ruling (user): keep a copy of the last applied spec at `<collection>/.rocket/openapi-applied.spec`. The converter is deterministic, so the per-field baseline is rebuilt by converting that copy. Collections imported before this have no copy; their first sync only knows whether a request was edited, and treats an edited request as the user's (nothing is overwritten).
 - Ruling (user): the spec copies (`openapi-applied.spec`, `openapi-pending.spec`) live in `.rocket/` and are git-ignored there through a `.rocket/.gitignore` that the code writes. A fresh clone has no copies, so its first check fetches the spec and treats it as the new baseline question described above.
 - Ruling (user delegated, designer's call): "possibly renamed" pairing is in the first version as a **hint only**. P5 detects candidates and returns them in the diff; P8 shows them; P9 adds a "Link as rename" action that re-points the stored operation key to the new one so the user's edits stay and the request is merged as Changed. Nothing is ever paired automatically. Rules: pair only when exactly one Removed and one New candidate match on each side, by (a) same operationId with a new method or path, (b) same method and same path template with a new operationId, or (c) same method and summary with a new path. Ambiguous matches are not offered.
+
+## Carry-forward from the Plan 5 final review (for Plan 6)
+
+- `OpenApiDoc` and `parse_openapi` are `pub(crate)`, so `rocket-app` and `src-tauri` cannot build `SyncInputs`. Plan 6 adds a public entry point, for example `build_sync_plan_from_text(spec_text, ...)`.
+- To apply a user's choice, call `merge_item(baseline, source_op, current, incoming, choices)`. Never call `merge_request(current, current, ...)` directly: it overwrites user work on cautious items. `merge_item` scans the baseline linearly; build the key map once before applying thousands of items (add `merge_item_with` or a batch form).
+- Apply must update, for each applied key, the source `baseline_hash` and the baseline snapshot; for each created request, write a source entry (key, uid, request_path, baseline_hash) and a snapshot entry in the same step (a key that is in the spec but not in the source is always New); update the source `request_path` for a moved request. Skipped items move nothing.
+- `Removed.edited == None` means treat as edited: keep and detach. A removal is deletable only when `edited == Some(false)`.
+- New items need unique-name suffixing at write time, and the snapshot is taken as saved.
+- Decide what `converter_version` the baseline gets after a partial apply: keeping the old one is safe but noisy, bumping it is safe for the three-way merge but trusts older snapshots.
+- Skips are keyed by operation key and fingerprint; the store, `CurrentRequest` loading, `existing_variables` and `current_base_url` are Plan 6 work. A skip recorded before the duplicate-name fix would show again (safe direction).
+- Small: `VariableChange.baseline` holds the raw baseline base URL; normalize an empty string to `None` (a spec with no servers that later adds one would otherwise look edited). A real summary that ends in ` (n)` and then drops it is reported as no name change (rare, documented). `AddSecurity` repeats for a variable the user deleted. Label converter-version changes in the UI ("rules updated").
+- Carried from Plan 4: before applying, verify `sha256(load_pending()) == pending_sha256`; on a 304 with a missing pending file, refetch without validators.
