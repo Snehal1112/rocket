@@ -40,7 +40,17 @@ describe('SpecSyncDetail', () => {
 
   it('says a removed item of unknown edit state is kept', () => {
     render(<SpecSyncDetail {...props({ selectedId: 'removed:DELETE /pets' })} />);
-    expect(screen.getByText('Treated as edited, will be kept')).toBeInTheDocument();
+    expect(screen.getByText('Treated as edited, will be kept.')).toBeInTheDocument();
+  });
+
+  it('says an unedited removed request will be deleted when it can be rewritten', () => {
+    const plan = makePlan({
+      items: [{ ...makePlan().items[0], edited: false } as never],
+    });
+    render(<SpecSyncDetail {...props({ plan, selectedId: 'removed:DELETE /pets' })} />);
+    expect(
+      screen.getByText('You did not edit it, so it will be deleted if Rocket can rewrite it.'),
+    ).toBeInTheDocument();
   });
 
   it('shows the cautious warning', () => {

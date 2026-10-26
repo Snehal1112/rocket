@@ -3,8 +3,10 @@ import { type ReactNode, useCallback, useMemo, useState } from 'react';
 import { EmptyState } from '@/components/ui/empty-state';
 import { StateBlock } from '@/components/ui/state-block';
 import {
+  isApplying,
   openApiSyncKeys,
   useApplySync,
+  useIsApplying,
   useOpenApiSyncEvents,
   useOpenApiSyncPlan,
   useOpenApiSyncStatus,
@@ -49,6 +51,7 @@ export function SpecSyncTab({ collection }: SpecSyncTabProps) {
   const [checking, setChecking] = useState(false);
   const queryClient = useQueryClient();
   const apply = useApplySync(collection);
+  const applyingAnywhere = useIsApplying(collection);
 
   // The first entry is selected by default, and again when the chosen one is gone.
   const planData = plan.data;
@@ -80,25 +83,32 @@ export function SpecSyncTab({ collection }: SpecSyncTabProps) {
   const onSettledOk = useCallback((r: OpenApiApplyReport) => setReport(r), []);
   const confirmApply = () => {
     setConfirmOpen(false);
-    apply.mutate(sel.selection, { onSuccess: onSettledOk });
+    apply.mutate(sel.selection, {
+      onSuccess: (r) => {
+        // The links are used up once they are written, so the next apply must not resend them.
+        sel.clearLinks();
+        onSettledOk(r);
+      },
+    });
   };
   const skipSelected = () => {
     if (!planData) return;
     const keys = approvedItems.map((i) => i.key);
-    if (keys.length === 0) return;
-    // Only the skips go out. Other approvals wait for the Apply button.
+    if (keys.length === 0 || isApplying(collection)) return;
+    // Only the skips go out, with no links. Other approvals wait for the Apply button.
     const selection = buildSelection(planData, {
       approved: new Set(),
       choices: new Map(),
       skips: new Set(keys),
       variables: new Set(),
-      links,
+      links: [],
     });
     sel.skip(keys);
     apply.mutate(selection, { onSuccess: onSettledOk, onError: () => sel.unskip(keys) });
   };
   const checkAgain = async () => {
     setChecking(true);
+    apply.reset();
     try {
       await Promise.all([
         queryClient.refetchQueries({ queryKey: openApiSyncKeys.statusAll(collection) }),
@@ -185,7 +195,7 @@ export function SpecSyncTab({ collection }: SpecSyncTabProps) {
           filteredCount={matchedKeys.length + matchedVariables.length}
           selectedCount={approved.size + variables.size}
           itemSelectedCount={approvedItems.length}
-          busy={apply.isPending}
+          busy={apply.isPending || applyingAnywhere || plan.isPlaceholderData}
           onSelectAll={selectAll}
           onSelectNone={selectNone}
           onSkip={skipSelected}
@@ -223,7 +233,7 @@ export function SpecSyncTab({ collection }: SpecSyncTabProps) {
           </div>
         </div>
         <ApplyConfirmDialog
-          open={confirmOpen}
+          open={confirmOpen && approvedItems.length + variables.size > 0}
           onOpenChange={setConfirmOpen}
           items={approvedItems}
           variableCount={variables.size}

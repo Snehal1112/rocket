@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as tauriApi from '@/lib/tauri-api';
@@ -53,7 +53,7 @@ describe('SpecSyncTab', () => {
     renderWithQuery(<SpecSyncTab collection='c' />);
     expect(await screen.findByText('Folder: pets / read')).toBeInTheDocument();
     await userEvent.setup().click(screen.getByText('Delete pet'));
-    expect(screen.getByText('Treated as edited, will be kept')).toBeInTheDocument();
+    expect(screen.getByText('Treated as edited, will be kept.')).toBeInTheDocument();
     expect(tauriApi.getOpenApiSyncPlan).toHaveBeenCalledWith('c', []);
   });
 
@@ -141,7 +141,7 @@ describe('SpecSyncTab actions', () => {
     const user = userEvent.setup();
     await screen.findByText('Add pet');
     await user.click(screen.getByRole('checkbox', { name: 'Select Add pet' }));
-    await user.click(screen.getByRole('button', { name: 'Skip selected' }));
+    await user.click(screen.getByRole('button', { name: /^Skip selected/ }));
     await waitFor(() =>
       expect(tauriApi.applyOpenApiSync).toHaveBeenCalledWith('skip1', {
         items: [],
@@ -168,7 +168,7 @@ describe('SpecSyncTab actions', () => {
     await user.click(screen.getByRole('button', { name: 'Apply' }));
     expect(screen.getByText('1 new request will be added.')).toBeInTheDocument();
     expect(
-      screen.getByText('1 removed request will be deleted, you did not edit it.'),
+      screen.getByText('1 removed request will be deleted if Rocket can rewrite it, you did not edit it.'),
     ).toBeInTheDocument();
     await user.dblClick(screen.getByRole('button', { name: 'Apply now' }));
     expect(await screen.findByText('1 applied: 0 created, 1 updated.')).toBeInTheDocument();
@@ -254,5 +254,117 @@ describe('SpecSyncTab actions', () => {
       expect(vi.mocked(tauriApi.getOpenApiSyncStatus).mock.calls.length).toBeGreaterThan(statusCalls),
     );
     expect(vi.mocked(tauriApi.getOpenApiSyncPlan).mock.calls.length).toBeGreaterThan(planCalls);
+  });
+
+  it('sends renameLinks once, then not again, and a skip never sends them', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
+    const linked = makePlan({
+      items: [{ ...changedItem, key: 'GET /pets', name: 'List pets' } as OpenApiSyncItem],
+    });
+    const unlinked = makePlan({
+      items: [
+        { ...newItem },
+        { ...removedItem, key: 'GET /animals', possiblyRenamedTo: undefined } as OpenApiSyncItem,
+        { ...changedItem },
+      ],
+    });
+    vi.mocked(tauriApi.getOpenApiSyncPlan).mockImplementation(async (_c, links = []) =>
+      links.length > 0 ? linked : unlinked,
+    );
+    vi.mocked(tauriApi.applyOpenApiSync).mockResolvedValue(report);
+    renderWithQuery(<SpecSyncTab collection='links2' />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Link as rename' }));
+    await screen.findByText('Changed (1)');
+    // A skip with a link in place carries no links.
+    await user.click(await screen.findByRole('checkbox', { name: 'Select List pets' }));
+    await user.click(screen.getByRole('button', { name: /^Skip selected/ }));
+    await waitFor(() => expect(tauriApi.applyOpenApiSync).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(tauriApi.applyOpenApiSync).mock.calls[0]?.[1].renameLinks).toEqual([]);
+    await user.click((await screen.findAllByRole('button', { name: 'Close' }))[0] as HTMLElement);
+    // An apply sends the link, and the next selection does not.
+    await user.click(await screen.findByRole('checkbox', { name: 'Select List pets' }));
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    await user.click(screen.getByRole('button', { name: 'Apply now' }));
+    await waitFor(() => expect(tauriApi.applyOpenApiSync).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(tauriApi.applyOpenApiSync).mock.calls[1]?.[1].renameLinks).toEqual([
+      ['GET /animals', 'GET /pets'],
+    ]);
+    await user.click((await screen.findAllByRole('button', { name: 'Close' }))[0] as HTMLElement);
+    await waitFor(() =>
+      expect(tauriApi.getOpenApiSyncPlan).toHaveBeenLastCalledWith('links2', []),
+    );
+  });
+
+  it('keeps the list on screen while a linked plan loads', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
+    vi.mocked(tauriApi.getOpenApiSyncPlan).mockImplementation((_c, links = []) =>
+      links.length > 0 ? new Promise(() => undefined) : Promise.resolve(makePlan()),
+    );
+    renderWithQuery(<SpecSyncTab collection='keep1' />);
+    const link = await screen.findByRole('button', { name: 'Link as rename' });
+    await userEvent.setup().click(link);
+    expect(screen.queryByText('Loading the plan...')).toBeNull();
+    expect(screen.getByRole('checkbox', { name: 'Select List pets' })).toBeInTheDocument();
+    // Apply waits for the real plan.
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled();
+  });
+
+  it('does not mark rows as skipped when another apply is already running', async () => {
+    mockSync();
+    let finish: (v: OpenApiApplyReport) => void = () => undefined;
+    vi.mocked(tauriApi.applyOpenApiSync).mockReturnValue(
+      new Promise<OpenApiApplyReport>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    renderWithQuery(
+      <>
+        <SpecSyncTab collection='busy1' />
+        <SpecSyncTab collection='busy1' />
+      </>,
+    );
+    const user = userEvent.setup();
+    await screen.findAllByText('Add pet');
+    for (const box of screen.getAllByRole('checkbox', { name: 'Select Add pet' })) {
+      await user.click(box);
+    }
+    await user.click(screen.getAllByRole('button', { name: 'Apply' })[0] as HTMLElement);
+    await user.click(screen.getByRole('button', { name: 'Apply now' }));
+    // The other tab sees the apply and can neither apply nor skip.
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Apply' })[1]).toBeDisabled());
+    expect(screen.getAllByRole('button', { name: /^Skip selected/ })[1]).toBeDisabled();
+    await act(async () => finish(report));
+    await user.click((await screen.findAllByRole('button', { name: 'Close' }))[0] as HTMLElement);
+    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Apply' })[1]).toBeEnabled());
+    expect(screen.queryByText('Skipped')).toBeNull();
+  });
+
+  it('keeps a selection made outside the filter when Select all runs on a filter', async () => {
+    mockSync();
+    renderWithQuery(<SpecSyncTab collection='keep2' />);
+    const user = userEvent.setup();
+    await screen.findByText('Add pet');
+    await user.click(screen.getByRole('checkbox', { name: 'Select Add pet' }));
+    await user.type(screen.getByRole('searchbox', { name: 'Search changes' }), 'List');
+    await user.click(screen.getByRole('button', { name: 'Select all (1)' }));
+    expect(screen.getByText('2 selected')).toBeInTheDocument();
+  });
+
+  it('closes the confirm dialog when the plan changes under it', async () => {
+    mockSync();
+    renderWithQuery(<SpecSyncTab collection='conf1' />);
+    const user = userEvent.setup();
+    await screen.findByText('Add pet');
+    await user.click(screen.getByRole('checkbox', { name: 'Select Add pet' }));
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    expect(screen.getByRole('button', { name: 'Apply now' })).toBeInTheDocument();
+    vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(
+      makePlan({ items: [{ ...changedItem, digest: 'zz' } as OpenApiSyncItem] }),
+    );
+    const onChecked = vi.mocked(tauriApi.onOpenApiSyncChecked).mock.calls[0]?.[0];
+    await act(async () => onChecked?.({ collection: 'conf1' } as never));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Apply now' })).toBeNull());
+    expect(screen.getByText('0 selected')).toBeInTheDocument();
   });
 });

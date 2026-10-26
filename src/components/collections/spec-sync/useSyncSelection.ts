@@ -59,10 +59,14 @@ export function useSyncSelection(
 ) {
   const [state, setState] = useState<State>(emptyState);
   const signature = useMemo(() => (plan ? planSignature(plan) : ''), [plan]);
-  const [seen, setSeen] = useState(signature);
-  if (seen !== signature) {
-    setSeen(signature);
+  const linksKey = JSON.stringify(links);
+  const [seen, setSeen] = useState({ signature, linksKey });
+  if (seen.signature !== signature) {
+    setSeen({ signature, linksKey });
     setState(emptyState());
+    // A new plan under the same links means the links were used up, so they must not be
+    // sent again. A plan that changed because a link was added keeps them.
+    if (links.length > 0 && seen.linksKey === linksKey) setLinks([]);
   }
 
   const toggle = useCallback((key: string) => {
@@ -124,6 +128,8 @@ export function useSyncSelection(
     [setLinks],
   );
 
+  const clearLinks = useCallback(() => setLinks([]), [setLinks]);
+
   const reset = useCallback(() => setState(emptyState()), []);
 
   const selection: OpenApiSelection = useMemo(
@@ -146,6 +152,7 @@ export function useSyncSelection(
     links,
     linkRename,
     unlink,
+    clearLinks,
     reset,
     selection,
   };

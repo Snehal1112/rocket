@@ -48,10 +48,10 @@ export function ApplyConfirmDialog({
             <li>{`${plural(changed, 'changed request', 'changed requests')} will be updated.`}</li>
           )}
           {deleted > 0 && (
-            <li>{`${plural(deleted, 'removed request', 'removed requests')} will be deleted, you did not edit ${deleted === 1 ? 'it' : 'them'}.`}</li>
+            <li>{`${plural(deleted, 'removed request', 'removed requests')} will be deleted if Rocket can rewrite ${deleted === 1 ? 'it' : 'them'}, you did not edit ${deleted === 1 ? 'it' : 'them'}.`}</li>
           )}
           {kept > 0 && (
-            <li>{`${plural(kept, 'removed request', 'removed requests')} will be kept, you edited ${kept === 1 ? 'it' : 'them'} or it cannot be known.`}</li>
+            <li>{`${plural(kept, 'removed request', 'removed requests')} ${kept === 1 ? 'stays' : 'stay'} in your collection but ${kept === 1 ? 'is' : 'are'} no longer tracked, you edited ${kept === 1 ? 'it' : 'them'} or it cannot be known.`}</li>
           )}
           {variableCount > 0 && (
             <li>{`${plural(variableCount, 'variable change', 'variable changes')} will be applied.`}</li>
@@ -59,7 +59,12 @@ export function ApplyConfirmDialog({
         </ul>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={onConfirm}>Apply now</AlertDialogAction>
+          <AlertDialogAction
+            onClick={onConfirm}
+            disabled={items.length === 0 && variableCount === 0}
+          >
+            Apply now
+          </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

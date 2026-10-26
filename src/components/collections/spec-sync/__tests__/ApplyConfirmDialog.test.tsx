@@ -32,10 +32,14 @@ describe('ApplyConfirmDialog', () => {
   it('says which removed requests are deleted and which are kept', () => {
     renderDialog([removed('a', false), removed('b', false), removed('c', true), removed('d', null)]);
     expect(
-      screen.getByText('2 removed requests will be deleted, you did not edit them.'),
+      screen.getByText(
+        '2 removed requests will be deleted if Rocket can rewrite them, you did not edit them.',
+      ),
     ).toBeInTheDocument();
     expect(
-      screen.getByText('2 removed requests will be kept, you edited them or it cannot be known.'),
+      screen.getByText(
+        '2 removed requests stay in your collection but are no longer tracked, you edited them or it cannot be known.',
+      ),
     ).toBeInTheDocument();
   });
 
@@ -44,6 +48,11 @@ describe('ApplyConfirmDialog', () => {
     expect(screen.queryByText(/changed request/)).toBeNull();
     expect(screen.queryByText(/removed request/)).toBeNull();
     expect(screen.queryByText(/variable/)).toBeNull();
+  });
+
+  it('disables Apply now when nothing is selected', () => {
+    renderDialog([], 0);
+    expect(screen.getByRole('button', { name: 'Apply now' })).toBeDisabled();
   });
 
   it('confirms through the Apply now button', async () => {

@@ -106,4 +106,23 @@ describe('useSyncSelection', () => {
     expect(result.current.approved.size).toBe(0);
     expect(result.current.links).toEqual([['a', 'b']]);
   });
+
+  it('keeps the links when the plan changed because of them, then clears them on the next change', () => {
+    const { result, rerender } = setup();
+    act(() => result.current.linkRename('a', 'b'));
+    // The linked plan arrives.
+    rerender({ p: makePlan({ items: [{ ...changedItem, digest: 'linked' }] }) });
+    expect(result.current.links).toEqual([['a', 'b']]);
+    // A later plan with new digests and the same links means the link was used up.
+    rerender({ p: makePlan({ items: [{ ...changedItem, digest: 'later' }] }) });
+    expect(result.current.links).toEqual([]);
+  });
+
+  it('clearLinks drops every link', () => {
+    const { result } = setup();
+    act(() => result.current.linkRename('a', 'b'));
+    act(() => result.current.clearLinks());
+    expect(result.current.links).toEqual([]);
+    expect(result.current.selection.renameLinks).toEqual([]);
+  });
 });

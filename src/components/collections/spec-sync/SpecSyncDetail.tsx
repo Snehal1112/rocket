@@ -202,9 +202,11 @@ export function SpecSyncDetail({
                 <p className='text-muted-foreground'>
                   The spec no longer has <span className='font-mono'>{entry.item.key}</span>.
                 </p>
-                {entry.item.edited === null && <p>Treated as edited, will be kept</p>}
+                {entry.item.edited === null && <p>Treated as edited, will be kept.</p>}
                 {entry.item.edited === true && <p>You edited it, so it will be kept.</p>}
-                {entry.item.edited === false && <p>You did not edit it.</p>}
+                {entry.item.edited === false && (
+                  <p>You did not edit it, so it will be deleted if Rocket can rewrite it.</p>
+                )}
                 <p className='break-all text-xs text-muted-foreground'>{entry.item.requestPath}</p>
               </div>
             )}

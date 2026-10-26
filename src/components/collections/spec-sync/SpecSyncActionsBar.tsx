@@ -57,7 +57,7 @@ export function SpecSyncActionsBar({
           onClick={onSkip}
           disabled={busy || itemSelectedCount === 0}
         >
-          Skip selected
+          Skip selected ({itemSelectedCount})
         </Button>
         <Button size='sm' onClick={onApply} disabled={busy || selectedCount === 0}>
           Apply

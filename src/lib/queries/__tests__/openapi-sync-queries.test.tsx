@@ -10,6 +10,7 @@ import {
   useCheckNow,
   useClearToken,
   useGrantConsent,
+  useIsApplying,
   useOpenApiSyncEvents,
   useOpenApiSyncPlan,
   useOpenApiSyncStatus,
@@ -137,6 +138,49 @@ describe('openapi sync queries', () => {
     rerender({ links: [['a', 'b']] });
     await waitFor(() => expect(tauriApi.getOpenApiSyncPlan).toHaveBeenCalledTimes(2));
     expect(tauriApi.getOpenApiSyncPlan).toHaveBeenLastCalledWith('A', [['a', 'b']]);
+  });
+
+  it('keeps the previous plan as placeholder data while a new link set loads', async () => {
+    const { result, rerender } = renderHook(
+      ({ links }: { links: Array<[string, string]> }) => useOpenApiSyncPlan('A', true, links),
+      { wrapper, initialProps: { links: [] as Array<[string, string]> } },
+    );
+    await waitFor(() => expect(result.current.data).toBeDefined());
+    const first = result.current.data;
+    vi.mocked(tauriApi.getOpenApiSyncPlan).mockReturnValue(new Promise(() => undefined));
+    rerender({ links: [['a', 'b']] });
+    expect(result.current.data).toBe(first);
+    expect(result.current.isPlaceholderData).toBe(true);
+  });
+
+  it('does not show the plan of another collection as placeholder data', async () => {
+    const { result, rerender } = renderHook(
+      ({ c }: { c: string }) => useOpenApiSyncPlan(c, true),
+      { wrapper, initialProps: { c: 'A' } },
+    );
+    await waitFor(() => expect(result.current.data).toBeDefined());
+    vi.mocked(tauriApi.getOpenApiSyncPlan).mockReturnValue(new Promise(() => undefined));
+    rerender({ c: 'B' });
+    expect(result.current.data).toBeUndefined();
+  });
+
+  it('useIsApplying follows an apply running in any component', async () => {
+    let finish: (v: unknown) => void = () => undefined;
+    vi.mocked(tauriApi.applyOpenApiSync).mockReset();
+    vi.mocked(tauriApi.applyOpenApiSync).mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }) as never,
+    );
+    const watcher = renderHook(() => useIsApplying('W'), { wrapper });
+    const other = renderHook(() => useIsApplying('X'), { wrapper });
+    const runner = renderHook(() => useApplySync('W'), { wrapper });
+    expect(watcher.result.current).toBe(false);
+    runner.result.current.mutate({ items: [], skips: [], variables: [], renameLinks: [] });
+    await waitFor(() => expect(watcher.result.current).toBe(true));
+    expect(other.result.current).toBe(false);
+    finish({});
+    await waitFor(() => expect(watcher.result.current).toBe(false));
   });
 
   describe('mutations', () => {

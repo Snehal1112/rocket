@@ -29,7 +29,7 @@ describe('SpecSyncActionsBar', () => {
 
   it('disables Skip and Apply without a selection and shows the selected count', () => {
     render(<SpecSyncActionsBar {...props()} />);
-    expect(screen.getByRole('button', { name: 'Skip selected' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^Skip selected/ })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled();
     expect(screen.getByText('0 selected')).toBeInTheDocument();
   });
@@ -39,7 +39,7 @@ describe('SpecSyncActionsBar', () => {
     render(<SpecSyncActionsBar {...p} />);
     const user = userEvent.setup();
     expect(screen.getByText('2 selected')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Skip selected' }));
+    await user.click(screen.getByRole('button', { name: /^Skip selected/ }));
     await user.click(screen.getByRole('button', { name: 'Apply' }));
     await user.click(screen.getByRole('button', { name: 'Select none' }));
     expect(p.onSkip).toHaveBeenCalled();
@@ -47,9 +47,14 @@ describe('SpecSyncActionsBar', () => {
     expect(p.onSelectNone).toHaveBeenCalled();
   });
 
+  it('shows the number of requests the Skip button acts on', () => {
+    render(<SpecSyncActionsBar {...props({ selectedCount: 5, itemSelectedCount: 3 })} />);
+    expect(screen.getByRole('button', { name: 'Skip selected (3)' })).toBeInTheDocument();
+  });
+
   it('cannot skip variables, only requests', () => {
     render(<SpecSyncActionsBar {...props({ selectedCount: 1, itemSelectedCount: 0 })} />);
-    expect(screen.getByRole('button', { name: 'Skip selected' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^Skip selected/ })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Apply' })).toBeEnabled();
   });
 
@@ -57,7 +62,7 @@ describe('SpecSyncActionsBar', () => {
     render(
       <SpecSyncActionsBar {...props({ selectedCount: 2, itemSelectedCount: 2, busy: true })} />,
     );
-    expect(screen.getByRole('button', { name: 'Skip selected' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^Skip selected/ })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled();
   });
 

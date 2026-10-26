@@ -1,5 +1,5 @@
 import { type QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import {
   applyOpenApiSync,
   checkOpenApiSyncNow,
@@ -72,6 +72,9 @@ export function useOpenApiSyncPlan(
   return useQuery({
     queryKey: openApiSyncKeys.plan(collection ?? '', links),
     queryFn: () => getOpenApiSyncPlan(collection ?? '', links),
+    // The old plan stays on screen while a new link set loads, for the same collection only.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[2] === (collection ?? '') ? previous : undefined,
     enabled: enabled && !!collection,
     staleTime: 0,
     retry: false,
@@ -134,6 +137,28 @@ export function useRevokeConsent(collection: string) {
 
 // One apply per collection at a time, shared by every component and surviving remounts.
 const applyingCollections = new Set<string>();
+const applyListeners = new Set<() => void>();
+
+function setApplying(collection: string, on: boolean): void {
+  if (on) applyingCollections.add(collection);
+  else applyingCollections.delete(collection);
+  for (const l of applyListeners) l();
+}
+
+function subscribeApplying(listener: () => void): () => void {
+  applyListeners.add(listener);
+  return () => applyListeners.delete(listener);
+}
+
+/** True while an apply runs for the collection, in any component. */
+export function isApplying(collection: string): boolean {
+  return applyingCollections.has(collection);
+}
+
+/** Re-renders when an apply starts or ends for the collection. */
+export function useIsApplying(collection: string): boolean {
+  return useSyncExternalStore(subscribeApplying, () => isApplying(collection));
+}
 
 /**
  * Applies a selection and refreshes status, plan and the collection tree. Only one apply
@@ -146,7 +171,7 @@ export function useApplySync(collection: string) {
       try {
         return await applyOpenApiSync(collection, selection);
       } finally {
-        applyingCollections.delete(collection);
+        setApplying(collection, false);
       }
     },
     onSettled: () => {
@@ -158,7 +183,7 @@ export function useApplySync(collection: string) {
   const guardedMutate = useCallback<typeof mutate>(
     (selection, options) => {
       if (applyingCollections.has(collection)) return;
-      applyingCollections.add(collection);
+      setApplying(collection, true);
       mutate(selection, options);
     },
     [collection, mutate],
@@ -166,7 +191,7 @@ export function useApplySync(collection: string) {
   const guardedMutateAsync = useCallback<typeof mutateAsync>(
     (selection, options) => {
       if (applyingCollections.has(collection)) return Promise.resolve(undefined as never);
-      applyingCollections.add(collection);
+      setApplying(collection, true);
       return mutateAsync(selection, options);
     },
     [collection, mutateAsync],
