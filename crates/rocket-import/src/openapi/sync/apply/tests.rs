@@ -1,10 +1,10 @@
 use super::super::apply_types::{
     AppliedKind, ApplyInputs, ApplyOutput, ApprovedItem, FileChangeKind, RequestRenderer,
-    Selection, SkipRequest,
+    Selection, SkipRequest, VariableApproval,
 };
 use super::super::merge::{Choice, FieldOutcome};
 use super::super::plan::{
-    build_sync_plan, item_digest, CurrentRequest, SyncInputs, SyncItem, SyncPlan,
+    build_sync_plan, item_digest, variable_digest, CurrentRequest, SyncInputs, SyncItem, SyncPlan,
 };
 use super::super::spec::ParsedSpec;
 use super::{build_apply, plan_with_links};
@@ -263,6 +263,17 @@ fn approve(plan: &SyncPlan, keys: &[&str]) -> Selection {
             .collect(),
         ..Selection::default()
     }
+}
+
+fn approve_vars(plan: &SyncPlan, names: &[&str]) -> Vec<VariableApproval> {
+    names
+        .iter()
+        .filter_map(|n| plan.variable_changes.iter().find(|c| c.name == *n))
+        .map(|c| VariableApproval {
+            name: c.name.clone(),
+            digest: variable_digest(c),
+        })
+        .collect()
 }
 
 fn put_bytes<'a>(out: &'a ApplyOutput, rel: &str) -> Option<&'a Vec<u8>> {
@@ -718,7 +729,7 @@ fn base_url_is_updated_only_when_untouched() {
     let spec = parsed("https://v2.example.com", &pets());
     let plan = plan_of(&w, &spec);
     let mut sel = approve(&plan, &[]);
-    sel.variables = vec!["baseUrl".to_string()];
+    sel.variables = approve_vars(&plan, &["baseUrl"]);
     let out = run(&w, &spec, &sel);
     let settings = settings_of(&out).expect("settings staged");
     assert_eq!(settings.variables[0].value, "https://v2.example.com");
@@ -728,7 +739,7 @@ fn base_url_is_updated_only_when_untouched() {
     touched.set_base_url("https://mine.example.com");
     let plan = plan_of(&touched, &spec);
     let mut sel = approve(&plan, &[]);
-    sel.variables = vec!["baseUrl".to_string()];
+    sel.variables = approve_vars(&plan, &["baseUrl"]);
     let out = run(&touched, &spec, &sel);
     assert!(settings_of(&out).is_none());
     // The baseline moves to the spec value even though the user's value is kept.
@@ -753,7 +764,7 @@ fn new_baseline_never_records_a_customized_base_url() {
     let spec2 = parsed("https://v3.example.com", &next);
     let plan2 = plan_of(&w, &spec2);
     let mut sel2 = approve(&plan2, &[]);
-    sel2.variables = vec!["baseUrl".to_string()];
+    sel2.variables = approve_vars(&plan2, &["baseUrl"]);
     let second = run(&w, &spec2, &sel2);
     assert!(settings_of(&second).is_none());
 }
@@ -797,7 +808,8 @@ fn security_variable_is_added_once() {
         .collect();
     assert!(!names.is_empty());
     let mut sel = approve(&plan, &[]);
-    sel.variables = names.iter().chain(names.iter()).cloned().collect();
+    let twice: Vec<&str> = names.iter().chain(names.iter()).map(String::as_str).collect();
+    sel.variables = approve_vars(&plan, &twice);
     let out = run(&w, &spec, &sel);
     let settings = settings_of(&out).expect("settings staged");
     for name in &names {
@@ -824,4 +836,43 @@ fn apply_of_5000_items_is_linear() {
     let took = started.elapsed();
     assert_eq!(out.report.applied.len(), 5000);
     assert!(took.as_secs_f64() < 2.0, "took {took:?}");
+}
+
+#[test]
+fn a_spec_url_that_moves_after_the_review_is_stale() {
+    let w = world(&pets());
+    let reviewed = parsed("https://v2.example.com", &pets());
+    let plan = plan_of(&w, &reviewed);
+    let mut sel = approve(&plan, &[]);
+    sel.variables = approve_vars(&plan, &["baseUrl"]);
+    // The pending spec now holds another host.
+    let moved = parsed("https://evil.example.com", &pets());
+    let out = run(&w, &moved, &sel);
+    assert!(settings_of(&out).is_none());
+    assert_eq!(out.report.stale, vec!["baseUrl"]);
+    assert!(!out.finalized);
+    assert_eq!(out.baseline.base_url, w.baseline.base_url);
+}
+
+#[test]
+fn removed_unedited_with_an_unmodeled_key_is_detached() {
+    let w = world(&pets());
+    let spec = parsed(BASE, &pets()[..1]);
+    let mut r = MemoryRenderer::default();
+    r.blocked.insert("Pets/Get-pet".to_string());
+    let out = run_with(&w, &spec, &approve(&plan_of(&w, &spec), &[]), &r, true).expect("applies");
+    assert!(out.files.is_empty());
+    assert_eq!(out.report.detached, vec!["getPet"]);
+    assert!(out.report.deleted.is_empty());
+}
+
+#[test]
+fn a_yaml_only_request_is_detached_not_deleted() {
+    let mut w = world(&pets());
+    w.existing.remove("Pets/Get-pet.yml");
+    w.existing.insert("Pets/Get-pet.yaml".to_string());
+    let spec = parsed(BASE, &pets()[..1]);
+    let out = run(&w, &spec, &approve(&plan_of(&w, &spec), &[]));
+    assert!(out.files.is_empty());
+    assert_eq!(out.report.detached, vec!["getPet"]);
 }

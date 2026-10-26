@@ -8,7 +8,7 @@ use super::apply_types::{
 };
 use super::merge::Choice;
 use super::plan::{
-    build_sync_plan, item_digest, merge_item_indexed, CurrentRequest, SyncInputs, SyncItem,
+    build_sync_plan, item_digest, variable_digest, merge_item_indexed, CurrentRequest, SyncInputs, SyncItem,
     SyncPlan, VariableKind,
 };
 use crate::converter::openapi::{baseline_hash, CONVERTER_VERSION};
@@ -342,11 +342,12 @@ impl<'a> Applier<'a> {
             self.mark_stale(key);
             return;
         };
-        let rewritable = self
-            .inputs
-            .renderer
-            .can_rewrite(request_path, &cur.request)
-            .unwrap_or(false);
+        let rewritable = !self.yaml_only(request_path)
+            && self
+                .inputs
+                .renderer
+                .can_rewrite(request_path, &cur.request)
+                .unwrap_or(false);
         let base_req = self.trusted_request(key);
         let outcome = merge_item_indexed(
             base_req,
@@ -386,6 +387,14 @@ impl<'a> Applier<'a> {
         self.resolve(key);
     }
 
+    /// True when the request is stored as `.yaml` only. Writes and deletes target `.yml`, so
+    /// such a request is left alone.
+    fn yaml_only(&self, request_path: &str) -> bool {
+        let existing = self.inputs.existing_paths;
+        existing.contains(&format!("{request_path}.yaml"))
+            && !existing.contains(&format!("{request_path}.yml"))
+    }
+
     /// The baseline request for a key, only when the baseline can be trusted.
     fn trusted_request(&self, key: &str) -> Option<&Request> {
         if !self.trusted {
@@ -400,6 +409,7 @@ impl<'a> Applier<'a> {
     fn apply_removed(&mut self, item: &SyncItem) {
         let SyncItem::Removed {
             key,
+            uid,
             request_path,
             edited,
             ..
@@ -407,7 +417,16 @@ impl<'a> Applier<'a> {
         else {
             return;
         };
+        // Only an unedited request that Rocket can write back unchanged is deleted.
+        let rewritable = !self.yaml_only(request_path)
+            && self.cur_by_uid.get(uid.as_str()).is_some_and(|cur| {
+                self.inputs
+                    .renderer
+                    .can_rewrite(request_path, &cur.request)
+                    .unwrap_or(false)
+            });
         let deletable = *edited == Some(false)
+            && rewritable
             && self.stage(request_filename_for(request_path), FileChangeKind::Delete);
         if deletable {
             self.report.deleted.push(key.clone());
@@ -420,13 +439,19 @@ impl<'a> Applier<'a> {
 
     // Rule 6.
     fn apply_variables(&mut self, plan: &SyncPlan) -> ImportResult<()> {
-        let chosen: HashSet<&str> = self
-            .inputs
-            .selection
-            .variables
-            .iter()
-            .map(String::as_str)
-            .collect();
+        let mut chosen: HashSet<&str> = HashSet::new();
+        for approval in &self.inputs.selection.variables {
+            let Some(change) = plan.variable_changes.iter().find(|c| c.name == approval.name)
+            else {
+                continue;
+            };
+            if variable_digest(change) == approval.digest {
+                chosen.insert(approval.name.as_str());
+            } else {
+                // The spec or the collection changed since the review.
+                self.mark_stale(&approval.name);
+            }
+        }
         let mut settings = self.inputs.settings.clone();
         let mut changed = false;
         for change in plan

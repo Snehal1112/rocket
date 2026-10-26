@@ -12,13 +12,13 @@ pub(crate) mod spec;
 pub use apply::{build_apply, plan_with_links};
 pub use apply_types::{
     AppliedItem, AppliedKind, ApplyInputs, ApplyOutput, ApplyReport, ApprovedItem, FileChange,
-    FileChangeKind, RequestRenderer, Selection, SkipRequest,
+    FileChangeKind, RequestRenderer, Selection, SkipRequest, VariableApproval,
 };
 pub use merge::{
     merge_request, request_is_edited, Choice, FieldChange, FieldOutcome, MergeOutcome,
 };
 pub use plan::{
-    build_sync_plan, fingerprint, item_digest, merge_item, CurrentRequest, SyncInputs, SyncItem,
+    build_sync_plan, fingerprint, item_digest, merge_item, variable_digest, CurrentRequest, SyncInputs, SyncItem,
     SyncPlan, VariableChange, VariableKind,
 };
 pub use spec::ParsedSpec;

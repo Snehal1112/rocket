@@ -25,12 +25,19 @@ pub struct SkipRequest {
     pub fingerprint: String,
 }
 
+/// A variable change the user approved. `digest` is `variable_digest` of the change they saw.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VariableApproval {
+    pub name: String,
+    pub digest: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Selection {
     pub items: Vec<ApprovedItem>,
     pub skips: Vec<SkipRequest>,
-    /// Names of the variables to apply.
-    pub variables: Vec<String>,
+    /// The variable changes to apply, each with the digest of what the user saw.
+    pub variables: Vec<VariableApproval>,
     /// `(old key, new key)` pairs the user linked as renames.
     pub rename_links: Vec<(String, String)>,
 }

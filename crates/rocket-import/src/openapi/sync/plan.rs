@@ -411,6 +411,19 @@ pub fn item_digest(item: &SyncItem) -> String {
     format!("{:x}", Sha256::digest(canonical.to_string().as_bytes()))
 }
 
+/// A hex SHA-256 over what the user saw of a variable change: name, kind, baseline, their value
+/// and the spec value. A variable approval carries it, so a spec that moves after the review
+/// is not applied unseen.
+pub fn variable_digest(change: &VariableChange) -> String {
+    let kind = match change.kind {
+        VariableKind::BaseUrl => "base_url",
+        VariableKind::AddSecurity => "add_security",
+    };
+    let canonical =
+        serde_json::json!([change.name, kind, change.baseline, change.yours, change.spec]);
+    format!("{:x}", Sha256::digest(canonical.to_string().as_bytes()))
+}
+
 /// The shared path: returns the outcome and the incoming request after the name fix.
 fn merge_core(
     baseline: Option<&Request>,
