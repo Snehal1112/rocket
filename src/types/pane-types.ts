@@ -33,7 +33,7 @@ export interface RequestTab extends BaseTab {
   response: ResponseState | null;
 }
 
-export type CollectionSection = 'overview' | 'auth' | 'variables' | 'documentation';
+export type CollectionSection = 'overview' | 'auth' | 'variables' | 'documentation' | 'spec-sync';
 
 export interface CollectionTab extends BaseTab {
   tabType: 'collection';

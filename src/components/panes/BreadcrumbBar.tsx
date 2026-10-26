@@ -11,6 +11,7 @@ import {
   LayoutDashboard,
   List,
   Loader2,
+  RefreshCw,
   Variable,
 } from 'lucide-react';
 import type React from 'react';
@@ -94,6 +95,8 @@ function collectionSectionLabel(section: CollectionSection | undefined): string 
       return 'Variables';
     case 'documentation':
       return 'Documentation';
+    case 'spec-sync':
+      return 'Spec sync';
     default:
       return 'Overview';
   }
@@ -107,6 +110,8 @@ function collectionSectionIcon(section: CollectionSection): React.ReactNode {
       return <Variable className='h-3 w-3' />;
     case 'documentation':
       return <BookOpen className='h-3 w-3' />;
+    case 'spec-sync':
+      return <RefreshCw className='h-3 w-3' />;
     default:
       return <List className='h-3 w-3' />;
   }
@@ -291,7 +296,13 @@ function deriveSegments(
   }
 
   if (isCollectionTab(tab)) {
-    const ALL_SECTIONS: CollectionSection[] = ['overview', 'auth', 'variables', 'documentation'];
+    const ALL_SECTIONS: CollectionSection[] = [
+      'overview',
+      'auth',
+      'variables',
+      'documentation',
+      'spec-sync',
+    ];
     return [
       {
         label: tab.collectionName,

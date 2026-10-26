@@ -4,6 +4,8 @@ import { CollectionOverviewSkeleton } from '@/components/collections/CollectionO
 import { CollectionTrustBanner } from '@/components/collections/CollectionTrustBanner';
 import { CollectionTrustSection } from '@/components/collections/CollectionTrustSection';
 import { MarkdownEditor } from '@/components/collections/MarkdownEditor';
+import { SpecSyncNotice } from '@/components/collections/spec-sync/SpecSyncNotice';
+import { SpecSyncTab } from '@/components/collections/spec-sync/SpecSyncTab';
 import { TagsList } from '@/components/collections/TagsList';
 import { AuthEditor } from '@/components/request/AuthEditor';
 import { HeadersEditor } from '@/components/request/HeadersEditor';
@@ -29,6 +31,7 @@ import {
   useGlobalEnvironmentName,
   useProcessEnvVars,
 } from '@/lib/queries/environment-queries';
+import { useOpenApiSyncStatus } from '@/lib/queries/openapi-sync-queries';
 import {
   type Collection,
   type CollectionItem,
@@ -110,6 +113,7 @@ const TABS: { label: string; value: CollectionSection }[] = [
   { label: 'Authorization', value: 'auth' },
   { label: 'Variables', value: 'variables' },
   { label: 'Documentation', value: 'documentation' },
+  { label: 'Spec sync', value: 'spec-sync' },
 ];
 
 export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
@@ -123,6 +127,8 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   const { data: globalEnvName = null } = useGlobalEnvironmentName();
   const { data: globalEnv = null } = useGlobalEnvironment(globalEnvName);
   const { data: processEnvVars = {} } = useProcessEnvVars(collectionName);
+  // The Spec sync tab shows only for a collection that has a spec source.
+  const { data: specSyncStatus } = useOpenApiSyncStatus(collectionName);
 
   const [collection, setCollection] = useState<Collection | null>(null);
   const [loading, setLoading] = useState(true);
@@ -176,7 +182,13 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   // state before getCollection resolves, which would wipe a cached token.
   const [isLoaded, setIsLoaded] = useState(false);
   // Guard against stale section values from before the tab redesign.
-  const validSections: CollectionSection[] = ['overview', 'auth', 'variables', 'documentation'];
+  const validSections: CollectionSection[] = [
+    'overview',
+    'auth',
+    'variables',
+    'documentation',
+    'spec-sync',
+  ];
   const activeSection = validSections.includes(tab.activeSection as CollectionSection)
     ? (tab.activeSection ?? 'overview')
     : 'overview';
@@ -332,7 +344,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
 
         {/* Tab bar. */}
         <div className='flex items-center gap-0'>
-          {TABS.map((t) => (
+          {TABS.filter((t) => t.value !== 'spec-sync' || !!specSyncStatus).map((t) => (
             <button
               key={t.value}
               type='button'
@@ -376,6 +388,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
             >
               <div className='p-4 flex flex-col gap-4'>
                 <CollectionTrustBanner key={collectionName} collection={collectionName} />
+                <SpecSyncNotice key={collectionName} collection={collectionName} />
                 <MethodBreakdown items={items} />
 
                 <Card>
@@ -576,6 +589,11 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
               </div>
             </div>
           </ScrollArea>
+        )}
+
+        {/* Spec sync tab. */}
+        {activeSection === 'spec-sync' && (
+          <SpecSyncTab key={collectionName} collection={collectionName} />
         )}
 
         {/* Documentation tab. */}
