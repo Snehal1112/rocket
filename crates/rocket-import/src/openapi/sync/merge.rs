@@ -3,10 +3,12 @@
 //! `b` is the baseline (the request as last synced), `c` is the user's current request and `s` is
 //! the incoming request from the new spec. The user's value wins whenever both sides changed.
 
-use super::json_merge::{merge_json, took_spec};
+use super::json_merge::{merge_json, numbers_are_canonical, took_spec};
 use rocket_collection::Request;
 use rocket_shared::description::Description;
-use rocket_shared::types::{Auth, Body, BodyMode, FormDataEntry, Header, HttpMethod, PathParam};
+use rocket_shared::types::{
+    Auth, Body, BodyMode, FormDataEntry, FormDataType, Header, HttpMethod, PathParam,
+};
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 
@@ -245,13 +247,23 @@ pub(crate) trait Entry: Clone + PartialEq {
     fn is_enabled(&self) -> bool;
     fn set_enabled(&mut self, enabled: bool);
 
+    /// Further attributes merged as their own sub-fields, as (name, text) pairs.
+    fn extras(&self) -> Vec<(&'static str, String)> {
+        Vec::new()
+    }
+    fn set_extra(&mut self, _name: &str, _value: &str) {}
+
     fn show(&self) -> String {
-        let value = clip(self.value());
-        if self.is_enabled() {
-            value
-        } else {
-            format!("{value} (disabled)")
+        let mut text = clip(self.value());
+        for (name, value) in self.extras() {
+            if !value.is_empty() && value != "text" {
+                text.push_str(&format!(" [{name}: {value}]"));
+            }
         }
+        if !self.is_enabled() {
+            text.push_str(" (disabled)");
+        }
+        text
     }
 }
 
@@ -288,6 +300,38 @@ impl Entry for FormDataEntry {
     }
     fn set_enabled(&mut self, enabled: bool) {
         self.enabled = enabled;
+    }
+    fn extras(&self) -> Vec<(&'static str, String)> {
+        let kind = match self.entry_type {
+            FormDataType::Text => "text",
+            FormDataType::File => "file",
+        };
+        vec![
+            ("type", kind.to_string()),
+            (
+                "content type",
+                self.content_type.clone().unwrap_or_default(),
+            ),
+        ]
+    }
+    fn set_extra(&mut self, name: &str, value: &str) {
+        match name {
+            "type" => {
+                self.entry_type = if value == "file" {
+                    FormDataType::File
+                } else {
+                    FormDataType::Text
+                };
+            }
+            "content type" => {
+                self.content_type = if value.is_empty() {
+                    None
+                } else {
+                    Some(value.to_string())
+                };
+            }
+            _ => {}
+        }
     }
 }
 
@@ -438,17 +482,20 @@ pub(crate) fn merge_entries<T: Entry>(
 }
 
 fn attrs_differ<T: Entry>(a: &T, b: &T) -> bool {
-    a.value() != b.value() || a.is_enabled() != b.is_enabled()
+    a.value() != b.value() || a.is_enabled() != b.is_enabled() || a.extras() != b.extras()
 }
 
 fn apply_attrs<T: Entry>(target: &mut Option<T>, from: &T) {
     if let Some(t) = target.as_mut() {
         t.set_value(from.value());
         t.set_enabled(from.is_enabled());
+        for (name, value) in from.extras() {
+            t.set_extra(name, &value);
+        }
     }
 }
 
-/// Merge `value` and `enabled` of one entry present on all three sides, each by rule 1.
+/// Merge `value`, `enabled` and the extras of one entry present on all three sides, each by rule 1.
 fn merge_entry_attrs<T: Entry>(
     b: &T,
     c: &T,
@@ -477,6 +524,20 @@ fn merge_entry_attrs<T: Entry>(
         );
         if pick == Pick::Spec {
             target.set_enabled(s.is_enabled());
+        }
+        taken |= o == FieldOutcome::TakeSpec;
+    }
+    let (bx, cx, sx) = (b.extras(), c.extras(), s.extras());
+    for (i, (name, sv)) in sx.iter().enumerate() {
+        let (Some((_, bv)), Some((_, cv))) = (bx.get(i), cx.get(i)) else {
+            continue;
+        };
+        if sv == bv {
+            continue;
+        }
+        let (pick, o) = decide(bv, cv, sv, false, choice);
+        if pick == Pick::Spec {
+            target.set_extra(name, sv);
         }
         taken |= o == FieldOutcome::TakeSpec;
     }
@@ -521,7 +582,10 @@ fn merge_body(
         return c.clone();
     }
     if let (Some(bb), Some(cb), Some(sb)) = (b, c, s) {
-        if let (Some(bo), Some(co), Some(so)) = (json_object(bb), json_object(cb), json_object(sb))
+        // Rebuilding the text must not change the user's numbers, so odd ones skip the key merge.
+        let safe = cb.content.as_deref().is_some_and(numbers_are_canonical);
+        if let (true, Some(bo), Some(co), Some(so)) =
+            (safe, json_object(bb), json_object(cb), json_object(sb))
         {
             let result = merge_json(&bo, &co, &so, choices);
             let mut merged = cb.clone();
@@ -567,7 +631,7 @@ fn auth_name(auth: &Auth) -> &'static str {
     }
 }
 
-// Rule 5: auth. Only the type name is shown, so no secret reaches a change record.
+// Rule 5: auth, as refined in fix round 1. Only the type name is shown, so no secret reaches a change record.
 fn merge_auth(
     b: &Auth,
     c: &Auth,
@@ -578,11 +642,22 @@ fn merge_auth(
     if s == b {
         return c.clone();
     }
-    let same_type = std::mem::discriminant(c) == std::mem::discriminant(s);
-    let (mut pick, mut outcome) = if same_type {
-        (Pick::Yours, FieldOutcome::KeepYours)
-    } else {
+    let (bt, ct, st) = (
+        std::mem::discriminant(b),
+        std::mem::discriminant(c),
+        std::mem::discriminant(s),
+    );
+    // The user's auth is replaced by default only when the user did not touch the type.
+    let (mut pick, mut outcome) = if ct != bt {
+        if st == bt || st == ct {
+            (Pick::Yours, FieldOutcome::KeepYours)
+        } else {
+            (Pick::Yours, FieldOutcome::Conflict)
+        }
+    } else if st != bt || c == b {
         (Pick::Spec, FieldOutcome::TakeSpec)
+    } else {
+        (Pick::Yours, FieldOutcome::KeepYours)
     };
     match choices.get("auth") {
         Some(Choice::Spec) => {
@@ -883,6 +958,161 @@ mod tests {
         assert_eq!(got, vec![form("a", "2"), form("mine", "m"), form("b", "3")]);
     }
 
+    fn file_form(key: &str, value: &str) -> FormDataEntry {
+        let mut f = form(key, value);
+        f.entry_type = FormDataType::File;
+        f
+    }
+
+    #[test]
+    fn form_type_change_by_the_spec_is_listed_and_taken_if_untouched() {
+        let mut b = base();
+        b.body = form_body(vec![form("avatar", "x")]);
+        let c = b.clone();
+        let mut s = base();
+        s.body = form_body(vec![file_form("avatar", "x")]);
+        let out = run(&b, &c, &s);
+        assert_eq!(change(&out, "form:avatar").outcome, FieldOutcome::TakeSpec);
+        let got = out.merged.body.expect("body").form_data.expect("form");
+        assert_eq!(got, vec![file_form("avatar", "x")]);
+    }
+
+    #[test]
+    fn form_type_the_user_changed_is_kept() {
+        let mut b = base();
+        b.body = form_body(vec![form("avatar", "x")]);
+        let mut c = base();
+        c.body = form_body(vec![file_form("avatar", "x")]);
+        let mut s = base();
+        let mut spec_entry = form("avatar", "x");
+        spec_entry.content_type = Some("image/png".into());
+        s.body = form_body(vec![spec_entry.clone()]);
+        let out = run(&b, &c, &s);
+        let got = out.merged.body.expect("body").form_data.expect("form");
+        assert_eq!(got[0].entry_type, FormDataType::File);
+        assert_eq!(got[0].content_type.as_deref(), Some("image/png"));
+    }
+
+    #[test]
+    fn form_type_conflict_goes_to_the_user() {
+        let mut b = base();
+        b.body = form_body(vec![form("avatar", "x")]);
+        let mut c = base();
+        c.body = form_body(vec![file_form("avatar", "x")]);
+        let mut s = base();
+        s.body = form_body(vec![form("avatar", "y")]);
+        let out = run(&b, &c, &s);
+        let got = out.merged.body.expect("body").form_data.expect("form");
+        assert_eq!(got[0].entry_type, FormDataType::File);
+        assert_eq!(got[0].value, "y");
+    }
+
+    #[test]
+    fn header_removed_by_the_spec_under_another_case_is_a_conflict_when_the_user_changed_it() {
+        let mut b = base();
+        b.headers.push(Header::new("Accept", "a"));
+        let mut c = base();
+        c.headers.push(Header::new("ACCEPT", "mine"));
+        let s = base();
+        let out = run(&b, &c, &s);
+        assert_eq!(out.merged.headers, vec![Header::new("ACCEPT", "mine")]);
+        assert_eq!(
+            change(&out, "header:Accept").outcome,
+            FieldOutcome::Conflict
+        );
+    }
+
+    #[test]
+    fn enabled_only_user_change_against_a_spec_removal_is_a_conflict() {
+        let mut b = base();
+        b.query_params.push(q("limit", "10", true));
+        let mut c = base();
+        c.query_params.push(q("limit", "10", false));
+        let s = base();
+        let out = run(&b, &c, &s);
+        assert_eq!(out.merged.query_params, vec![q("limit", "10", false)]);
+        assert_eq!(change(&out, "query:limit").outcome, FieldOutcome::Conflict);
+    }
+
+    // JSON numbers and key paths.
+
+    fn merged_text(out: &MergeOutcome) -> String {
+        out.merged
+            .body
+            .as_ref()
+            .and_then(|b| b.content.clone())
+            .expect("content")
+    }
+
+    #[test]
+    fn numbers_the_user_wrote_are_never_rewritten() {
+        let cases = [
+            "123456789012345678901234567890",
+            "1.50",
+            "1e3",
+            "1E+3",
+            "0.10",
+        ];
+        for num in cases {
+            let user = format!("{{\"n\": {num}, \"x\": 1}}");
+            let mut b = base();
+            b.body = json_body(r#"{"n":1,"x":1}"#);
+            let mut c = base();
+            c.body = json_body(&user);
+            let mut s = base();
+            s.body = json_body(r#"{"n":1,"x":2}"#);
+            let out = run(&b, &c, &s);
+            assert_eq!(merged_text(&out), user, "case {num}");
+            let ch = change(&out, "body");
+            assert_eq!(ch.outcome, FieldOutcome::KeepYours, "case {num}");
+        }
+    }
+
+    #[test]
+    fn unsafe_numbers_in_an_untouched_body_take_the_spec_whole() {
+        let mut b = base();
+        b.body = json_body(r#"{"n": 1.50, "x": 1}"#);
+        let c = b.clone();
+        let mut s = base();
+        s.body = json_body(r#"{"n": 1.50, "x": 2}"#);
+        let out = run(&b, &c, &s);
+        assert_eq!(out.merged.body, s.body);
+        assert_eq!(change(&out, "body").outcome, FieldOutcome::TakeSpec);
+    }
+
+    #[test]
+    fn ordinary_numbers_still_use_the_key_path_merge() {
+        let mut b = base();
+        b.body = json_body(r#"{"a":1,"b":1}"#);
+        let mut c = base();
+        c.body = json_body(r#"{"a":-5,"f":0.5,"g":1.0,"s":"1.50 \" 1e3","b":1}"#);
+        let mut s = base();
+        s.body = json_body(r#"{"a":1,"b":2}"#);
+        let out = run(&b, &c, &s);
+        assert_eq!(change(&out, "body:$.b").outcome, FieldOutcome::TakeSpec);
+        assert_eq!(
+            parsed(out),
+            serde_json::json!({"a":-5,"f":0.5,"g":1.0,"s":"1.50 \" 1e3","b":2})
+        );
+    }
+
+    #[test]
+    fn json_key_paths_with_special_characters_are_quoted() {
+        let mut b = base();
+        b.body = json_body(r#"{"a.b":1,"a":{"b":1},"q\"x":1}"#);
+        let c = b.clone();
+        let mut s = base();
+        s.body = json_body(r#"{"a.b":2,"a":{"b":3},"q\"x":4}"#);
+        let out = run(&b, &c, &s);
+        assert!(has_change(&out, r#"body:$["a.b"]"#));
+        assert!(has_change(&out, "body:$.a.b"));
+        assert!(has_change(&out, r#"body:$["q\"x"]"#));
+        assert_eq!(
+            parsed(out),
+            serde_json::json!({"a.b":2,"a":{"b":3},"q\"x":4})
+        );
+    }
+
     // JSON.
 
     #[test]
@@ -994,19 +1224,32 @@ mod tests {
 
     #[test]
     fn nesting_deeper_than_64_levels_does_not_overflow() {
-        for depth in [100usize, 200] {
-            let mut b = base();
-            b.body = json_body(&nest(depth, "1"));
-            let c = b.clone();
-            let mut s = base();
-            s.body = json_body(&nest(depth, "2"));
-            let out = run(&b, &c, &s);
-            assert!(out
-                .changes
-                .iter()
-                .any(|c| c.outcome == FieldOutcome::TakeSpec));
-            assert!(out.merged.body.is_some());
-        }
+        // 200 levels: serde_json refuses to parse it, so the whole body is taken.
+        let mut b = base();
+        b.body = json_body(&nest(200, "1"));
+        let c = b.clone();
+        let mut s = base();
+        s.body = json_body(&nest(200, "2"));
+        let out = run(&b, &c, &s);
+        assert_eq!(out.merged.body, s.body);
+        assert_eq!(change(&out, "body").outcome, FieldOutcome::TakeSpec);
+
+        // 100 levels: parsed, and the levels past 64 are one leaf.
+        let mut b = base();
+        b.body = json_body(&nest(100, "1"));
+        let c = b.clone();
+        let mut s = base();
+        s.body = json_body(&nest(100, "2"));
+        let out = run(&b, &c, &s);
+        assert_eq!(
+            out.changes.len(),
+            1,
+            "one leaf change expected: {:?}",
+            out.changes
+        );
+        assert_eq!(out.changes[0].outcome, FieldOutcome::TakeSpec);
+        let expect: serde_json::Value = serde_json::from_str(&nest(100, "2")).expect("json");
+        assert_eq!(parsed(out), expect);
     }
 
     #[test]
@@ -1032,6 +1275,10 @@ mod tests {
         let out = run(&b, &c, &s);
         assert!(start.elapsed().as_secs() < 5);
         assert_eq!(change(&out, "body:$.a").outcome, FieldOutcome::TakeSpec);
+        let v = parsed(out);
+        let items = v["a"].as_array().expect("array");
+        assert_eq!(items.len(), 100_000);
+        assert_eq!(items[99_999], serde_json::json!(2));
     }
 
     // Auth.
@@ -1046,6 +1293,100 @@ mod tests {
         let mut s = base();
         s.auth = bearer("{{other}}");
         let out = run(&b, &c, &s);
+        assert_eq!(out.merged.auth, c.auth);
+        assert_eq!(change(&out, "auth").outcome, FieldOutcome::KeepYours);
+    }
+
+    #[test]
+    fn user_switched_to_inherit_and_spec_changed_only_the_value_keeps_inherit() {
+        let mut b = base();
+        b.auth = Auth::Bearer {
+            token: "{{a}}".into(),
+        };
+        let mut c = base();
+        c.auth = Auth::Inherit;
+        let mut s = base();
+        s.auth = Auth::Bearer {
+            token: "{{b}}".into(),
+        };
+        let out = run(&b, &c, &s);
+        assert_eq!(out.merged.auth, Auth::Inherit);
+        assert_eq!(change(&out, "auth").outcome, FieldOutcome::KeepYours);
+    }
+
+    #[test]
+    fn user_switched_type_and_spec_switched_to_a_third_type_is_a_conflict() {
+        let mut b = base();
+        b.auth = Auth::Bearer {
+            token: "{{a}}".into(),
+        };
+        let mut c = base();
+        c.auth = Auth::Basic {
+            username: "u".into(),
+            password: "secret-pw".into(),
+        };
+        let mut s = base();
+        s.auth = Auth::ApiKey {
+            key: "k".into(),
+            value: "v".into(),
+            placement: "header".into(),
+        };
+        let out = run(&b, &c, &s);
+        assert_eq!(out.merged.auth, c.auth);
+        let ch = change(&out, "auth");
+        assert_eq!(ch.outcome, FieldOutcome::Conflict);
+        assert!(!ch.yours.as_deref().unwrap_or("").contains("secret-pw"));
+        let out = merge_request(&b, &c, &s, &choice("auth", Choice::Spec));
+        assert_eq!(out.merged.auth, s.auth);
+    }
+
+    #[test]
+    fn user_kept_the_type_and_spec_changed_the_type_takes_the_spec() {
+        let mut b = base();
+        b.auth = Auth::Bearer {
+            token: "{{a}}".into(),
+        };
+        let mut c = base();
+        c.auth = Auth::Bearer {
+            token: "mine".into(),
+        };
+        let mut s = base();
+        s.auth = Auth::Inherit;
+        let out = run(&b, &c, &s);
+        assert_eq!(out.merged.auth, Auth::Inherit);
+        assert_eq!(change(&out, "auth").outcome, FieldOutcome::TakeSpec);
+    }
+
+    #[test]
+    fn same_type_untouched_by_the_user_takes_the_specs_values() {
+        let api = |k: &str| Auth::ApiKey {
+            key: k.into(),
+            value: "{{v}}".into(),
+            placement: "header".into(),
+        };
+        let mut b = base();
+        b.auth = api("X-Old");
+        let c = b.clone();
+        let mut s = base();
+        s.auth = api("X-New");
+        let out = run(&b, &c, &s);
+        assert_eq!(out.merged.auth, api("X-New"));
+        assert_eq!(change(&out, "auth").outcome, FieldOutcome::TakeSpec);
+    }
+
+    #[test]
+    fn auth_choice_yours_keeps_the_users_auth() {
+        let mut b = base();
+        b.auth = Auth::Bearer {
+            token: "{{a}}".into(),
+        };
+        let mut c = base();
+        c.auth = Auth::Bearer {
+            token: "mine".into(),
+        };
+        let mut s = base();
+        s.auth = Auth::Inherit;
+        let out = merge_request(&b, &c, &s, &choice("auth", Choice::Yours));
         assert_eq!(out.merged.auth, c.auth);
     }
 

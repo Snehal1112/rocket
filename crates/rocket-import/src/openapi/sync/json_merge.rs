@@ -52,7 +52,7 @@ fn walk(
         if sv == bv {
             continue;
         }
-        let key_path = format!("{path}.{key}");
+        let key_path = child_path(path, key);
         if depth < MAX_JSON_DEPTH {
             if let (Some(Value::Object(bo)), Some(Value::Object(co)), Some(Value::Object(so))) =
                 (bv, cv, sv)
@@ -85,6 +85,51 @@ fn walk(
         }
     }
     out
+}
+
+/// The path of `key` under `path`. A key with `.`, `[`, `]` or `"` is written as `["key"]`, with
+/// `"` escaped, so `{"a.b":1}` and `{"a":{"b":1}}` get different paths.
+fn child_path(path: &str, key: &str) -> String {
+    if key.contains(['.', '[', ']', '"']) {
+        format!("{path}[\"{}\"]", key.replace('"', "\\\""))
+    } else {
+        format!("{path}.{key}")
+    }
+}
+
+/// True when every number token in `text` (outside string literals) is exactly what serde_json
+/// would print for its value. Without that, rebuilding the text would change the user's numbers,
+/// for example `1.50`, `1e3` or an integer too big for a float.
+pub(crate) fn numbers_are_canonical(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' => {
+                i += 1;
+                while i < bytes.len() && bytes[i] != b'"' {
+                    // A backslash escapes the next byte, so skip both.
+                    i += if bytes[i] == b'\\' { 2 } else { 1 };
+                }
+                i += 1;
+            }
+            b'-' | b'0'..=b'9' => {
+                let start = i;
+                while i < bytes.len()
+                    && matches!(bytes[i], b'0'..=b'9' | b'+' | b'-' | b'.' | b'e' | b'E')
+                {
+                    i += 1;
+                }
+                let token = &text[start..i];
+                match serde_json::from_str::<Value>(token) {
+                    Ok(Value::Number(n)) if n.to_string() == token => {}
+                    _ => return false,
+                }
+            }
+            _ => i += 1,
+        }
+    }
+    true
 }
 
 /// True when any change took the spec's value, so the body text must be rebuilt.
