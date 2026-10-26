@@ -155,6 +155,19 @@ The check service (`OpenApiSyncService` in `rocket-app`, Plan 4 task 2) keeps th
 
 Baseline snapshot (Plan 5, task 1): `<collection>/.rocket/openapi-baseline.json` (`FsOpenApiBaselineRepo`, JSON, snake_case struct keys, `atomic_write`) holds `version`, `converter_version` (`converter::openapi::CONVERTER_VERSION`, bump it on any change to `convert_operation` output), `base_url` (`servers[0]`) and one `{key, request}` per imported operation, with the request exactly as saved (name suffix included). `ImportedOperation.baseline` carries it. A corrupt file or one with a higher `version` is an error. A link import writes it after the source file; a failed write is a warning ("The review will be cautious until the next sync."), and a file import writes none. `rocket_infra::ensure_gitignore` keeps `<collection>/.rocket/.gitignore` listing `openapi-baseline.json` and `openapi-pending.spec`. It only appends missing lines, and the baseline `save` and `save_pending` both call it. The file never holds a token.
 
+### Sync plan
+
+Plan 5, task 3. Code is in `openapi/sync/{plan,rename}.rs`. `build_sync_plan(&SyncInputs) -> SyncPlan` is pure: it writes nothing and does no I/O.
+
+- Inputs: the source record, the baseline (optional), the incoming `OpenApiDoc`, the collection's `CurrentRequest` list (`uid`, `request_path`, `request`), the current `baseUrl` value, the existing variable names, and `skips` (operation key to the fingerprint it was skipped at).
+- Output: `SyncPlan { items, variable_changes, skipped_hidden, deleted_by_user, cautious, warnings }`. `SyncItem` is `New`, `Changed` (with a `MergeOutcome`) or `Removed` (with `edited: Option<bool>`). Order: New and Changed in the incoming document order, then Removed in source order.
+- Identity is the stored operation key plus the request `uid`, never the path. A key whose request is gone goes to `deleted_by_user` and is not recreated, even when the spec removed it too.
+- Normal mode needs a baseline with the running `CONVERTER_VERSION` that holds the key: `merge_request(baseline, current, incoming)`, and a Changed item only when `changes` is not empty. `Removed.edited = Some(request_is_edited(..))`.
+- Cautious mode (no baseline, another converter version, or the key missing from the baseline) works per request. If `baseline_hash(current)` equals the stored `baseline_hash`, the request counts as untouched and the spec's differences are `TakeSpec`, except `name` and `description`, which the hash does not cover and so stay `KeepYours`. Otherwise `merged` is the current request and every change is `KeepYours`. `MergeOutcome.cautious` is true and `Removed.edited` is `None`; the apply step must treat `None` as edited. A user's `Choice::Spec` is applied later with `merge_request(current, current, incoming, choices)`.
+- `fingerprint(request)` is a SHA-256 over the `baseline_hash` fields plus name and description. A Changed or New item carries the fingerprint of the spec's request; a Removed item uses the fixed text `removed`. A skip hides an item only when the fingerprints are equal.
+- Rename hints are a hint only. A Removed and a New item pair when they are the single candidate on both sides by (method, URL) or by (method, name). Any ambiguity, by either rule, gives no hint. Hash-map grouping keeps it linear.
+- Variables: `baseUrl` follows the scalar rule (listed when the spec differs from the baseline and from the user's value; with no baseline the user's value is the baseline), and `AddSecurity` lists scheme variables not in `existing_variables`.
+
 ### Importing from a file or a link
 
 Plan 3 of the OpenAPI series. Code is in `openapi/entry.rs`; both methods return `OpenApiImportResult { report, collection, source_url, source_id, warnings }` (`source_id` is `None` for a file import).
