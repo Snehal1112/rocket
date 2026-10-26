@@ -6,7 +6,7 @@ import type { OpenApiSyncPlan } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { groupItems, itemId, renameHint, variableId, variableLabel } from './specSyncView';
 
-/** A group shows at most this many rows. The detail pane still reaches every entry. */
+/** A group shows at most this many rows. Rows past the cap are not shown yet. */
 export const MAX_ROWS_PER_GROUP = 500;
 
 interface SpecSyncListProps {

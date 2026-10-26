@@ -7,6 +7,7 @@ import {
 } from '@/lib/auto-save';
 import { clearFlowClipboard } from '@/lib/flow-clipboard';
 import { flowKeys } from '@/lib/queries/flow-queries';
+import { openApiSyncKeys } from '@/lib/queries/openapi-sync-queries';
 import { clearSavedRequestPreviewCache } from '@/lib/saved-request-preview';
 import {
   closeWorkspace,
@@ -123,6 +124,8 @@ export function clearWorkspaceScopedCaches(qc: QueryClient): void {
       q.queryKey[0] === 'environments' && q.queryKey[1] !== 'global' && q.queryKey[1] !== 'process',
   });
   qc.removeQueries({ queryKey: flowKeys.all });
+  // Spec sync status and plans are keyed by collection name.
+  qc.removeQueries({ queryKey: openApiSyncKeys.all });
   qc.removeQueries({ queryKey: ['assistant', 'reference-tree'] });
   // Flow node previews of saved requests, keyed by collection name and path.
   clearSavedRequestPreviewCache();

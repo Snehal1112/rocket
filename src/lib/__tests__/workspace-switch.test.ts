@@ -45,6 +45,8 @@ describe('clearWorkspaceScopedCaches', () => {
     qc.setQueryData(['environments', 'api'], []);
     qc.setQueryData(['flows', 'api'], []);
     qc.setQueryData(['assistant', 'reference-tree', 'api'], {});
+    qc.setQueryData(['openapi-sync', 'status', 'api'], {});
+    qc.setQueryData(['openapi-sync', 'plan', 'api'], {});
     qc.setQueryData(['environments', 'global', 'list'], []);
 
     clearWorkspaceScopedCaches(qc);
@@ -52,6 +54,8 @@ describe('clearWorkspaceScopedCaches', () => {
     expect(qc.getQueryData(['environments', 'api'])).toBeUndefined();
     expect(qc.getQueryData(['flows', 'api'])).toBeUndefined();
     expect(qc.getQueryData(['assistant', 'reference-tree', 'api'])).toBeUndefined();
+    expect(qc.getQueryData(['openapi-sync', 'status', 'api'])).toBeUndefined();
+    expect(qc.getQueryData(['openapi-sync', 'plan', 'api'])).toBeUndefined();
     expect(qc.getQueryData(['environments', 'global', 'list'])).toEqual([]);
   });
 });

@@ -16,6 +16,8 @@ export function useOpenApiSyncStatus(collection: string | null | undefined) {
     enabled: !!collection,
     // A background check changes the answer, so it is never trusted for long.
     staleTime: 0,
+    // An unreadable state file is a result to show, not a hiccup to retry.
+    retry: false,
   });
 }
 
@@ -42,6 +44,7 @@ export function useOpenApiSyncPlan(collection: string | null | undefined, enable
     queryFn: () => getOpenApiSyncPlan(collection ?? ''),
     enabled: enabled && !!collection,
     staleTime: 0,
+    retry: false,
   });
 }
 
