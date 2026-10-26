@@ -281,6 +281,16 @@ impl OpenApiSyncService {
     /// What an apply would do with the pending spec, with the digests an approval carries. It
     /// takes the collection lock like `apply` and writes nothing, not even a recovery.
     pub fn plan(&self, collection: &str) -> DomainResult<PlanView> {
+        self.plan_linked(collection, &[])
+    }
+
+    /// Like `plan`, with the rename links the user chose. The digests match what `apply`
+    /// checks when it gets the same links.
+    pub fn plan_linked(
+        &self,
+        collection: &str,
+        links: &[(String, String)],
+    ) -> DomainResult<PlanView> {
         let deps = self.deps()?;
         let pinned = deps.collections.pinned();
         let repo: &dyn CollectionRepository =
@@ -294,14 +304,14 @@ impl OpenApiSyncService {
         let loaded = self.load_for_apply(deps, repo, collection, &root)?;
         let prepared = loaded.prepare()?;
         let inputs = loaded.sync_inputs(&prepared, &loaded.local.skips);
-        let plan =
-            plan_with_links(&inputs, &[]).map_err(|e| DomainError::InvalidInput(e.to_string()))?;
+        let plan = plan_with_links(&inputs, links)
+            .map_err(|e| DomainError::InvalidInput(e.to_string()))?;
         // A plan without the skips tells which items the user's skips hid.
         let hidden: HashSet<String> = if plan.skipped_hidden == 0 {
             HashSet::new()
         } else {
             let none = BTreeMap::new();
-            let full = plan_with_links(&loaded.sync_inputs(&prepared, &none), &[])
+            let full = plan_with_links(&loaded.sync_inputs(&prepared, &none), links)
                 .map_err(|e| DomainError::InvalidInput(e.to_string()))?;
             full.items.iter().map(|i| i.key().to_string()).collect()
         };
@@ -338,6 +348,15 @@ impl OpenApiSyncService {
             plan,
             unchanged,
         })
+    }
+
+    /// The folder of a collection by name, resolved in the pinned active workspace.
+    pub fn root_of(&self, collection: &str) -> DomainResult<std::path::PathBuf> {
+        let deps = self.deps()?;
+        let pinned = deps.collections.pinned();
+        let repo: &dyn CollectionRepository =
+            pinned.as_deref().unwrap_or(deps.collections.as_ref());
+        repo.collection_root_path(collection)
     }
 
     /// The sync state of a collection by name, resolved in the pinned active workspace.

@@ -60,6 +60,8 @@ pub struct SyncStatusView {
     pub has_token: bool,
     /// Whether this machine approved checks for the source's current location.
     pub consent: ConsentState,
+    /// A short safe sentence about the last failed check, if there is one.
+    pub last_message: Option<String>,
 }
 
 /// A collection whose background check is due.
@@ -120,6 +122,27 @@ fn failure_code(failure: &SpecFetchFailure) -> &'static str {
         SpecFetchFailure::BlockedRedirect => "blocked_redirect",
         SpecFetchFailure::Status(_) => "status",
         SpecFetchFailure::Network(_) => "network",
+    }
+}
+
+/// A fixed sentence per failure code for the stored status. It is never built from the
+/// network, a URL or a token, so it is safe to keep and show.
+fn safe_message(code: &str) -> &'static str {
+    match code {
+        "not_found" => "The file was not found, or it needs a sign-in.",
+        "unauthorized" => "The server refused access to the file.",
+        "rate_limited" => "The server asked to slow down. The check will try again later.",
+        "too_large" => "The file is larger than the size limit.",
+        "not_https" => "The link must use https.",
+        "too_many_redirects" => "The link redirected too many times.",
+        "blocked_redirect" => "The link redirected somewhere that is not allowed.",
+        "status" => "The server answered with an error.",
+        "network" => "The server could not be reached.",
+        "not_a_spec" => "The file is not a supported OpenAPI spec.",
+        "ref_unavailable" => "A file the spec refers to could not be loaded.",
+        "location_changed" => "The spec link changed since you approved it.",
+        "consent_required" => "Approve this spec link on this machine before it is checked.",
+        _ => "The check failed.",
     }
 }
 
@@ -230,7 +253,27 @@ impl OpenApiSyncService {
     pub fn grant_consent_for_link(&self, root: &Path, link: &str) -> DomainResult<()> {
         let location =
             parse_spec_url(link).map_err(|e| DomainError::InvalidInput(e.to_string()))?;
-        self.grant_consent(root, &location.display_url())
+        let lock = collection_lock(root);
+        let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+        let source = self.load(root)?;
+        // The typed link must be the source's location itself, not just look like it.
+        if source.location != location {
+            return Err(DomainError::Conflict(
+                "The spec link changed. Check the link and approve it again.".to_string(),
+            ));
+        }
+        self.grant_key(root, &source.source_id, &location_key(&source.location))
+    }
+
+    /// Withdraws the approval of this collection folder on this machine.
+    pub fn revoke_consent(&self, root: &Path) -> DomainResult<()> {
+        let lock = collection_lock(root);
+        let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+        let source = self.load(root)?;
+        let store = self.consent.as_ref().ok_or_else(|| {
+            DomainError::Internal("The sync approvals are not set up.".to_string())
+        })?;
+        store.revoke(root, &source.source_id)
     }
 
     fn grant_key(&self, root: &Path, source_id: &str, key: &str) -> DomainResult<()> {
@@ -355,6 +398,7 @@ impl OpenApiSyncService {
         local.last_status = Some(SyncStatus::Failed {
             code: code.to_string(),
         });
+        local.last_message = Some(safe_message(code).to_string());
         local.consecutive_failures = local.consecutive_failures.saturating_add(1);
         local.not_before = retry_after_secs.map(|secs| {
             let secs = i64::try_from(clamp_retry_after(secs)).unwrap_or(0);
@@ -379,6 +423,7 @@ impl OpenApiSyncService {
         let mut local = locals.load(root)?.unwrap_or_default();
         local.last_checked_at = Some(now.to_rfc3339());
         local.last_status = Some(status);
+        local.last_message = None;
         local.consecutive_failures = 0;
         local.not_before = None;
         locals.save(root, &local)
@@ -416,6 +461,8 @@ impl OpenApiSyncService {
             Ok(source) => source,
             Err(refusal) => return Ok(refusal),
         };
+        let approved_key = location_key(&source.location);
+        let approved_id = source.source_id.clone();
         let read = match source.location {
             SpecLocation::Github { .. } => self.read_token(collection_root, &source),
             SpecLocation::Https { .. } => TokenRead::None,
@@ -509,6 +556,18 @@ impl OpenApiSyncService {
         let lock = collection_lock(collection_root);
         let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         let mut source = self.load(collection_root)?;
+        // A source file rewritten during the fetch is not the one that was approved, so
+        // nothing from this fetch is saved.
+        if location_key(&source.location) != approved_key || source.source_id != approved_id {
+            return self.fail(
+                collection_root,
+                &now,
+                "location_changed",
+                "The spec link changed since you approved it. Approve the new link to check it."
+                    .to_string(),
+                None,
+            );
+        }
 
         let (body, etag, last_modified) = match result {
             // Rule 8: a fetch failure changes nothing but the check record.
@@ -682,6 +741,11 @@ impl OpenApiSyncService {
             has_pending: source.pending_sha256.is_some(),
             has_token: self.stored_token(collection_root, &source).is_some(),
             consent,
+            last_message: if matches!(local.last_status, Some(SyncStatus::Failed { .. })) {
+                local.last_message.clone()
+            } else {
+                None
+            },
         })
     }
 
@@ -2014,6 +2078,29 @@ mod tests {
         assert_eq!(l.consecutive_failures, 0);
         assert_eq!(l.not_before, None);
         assert_eq!(l.last_status, Some(SyncStatus::Unchanged));
+    }
+
+    #[tokio::test]
+    async fn a_failed_check_stores_a_safe_message_and_a_success_clears_it() {
+        let f = Fixture::new(source(github()));
+        f.secrets.set("src-1", "token", TOKEN).expect("token");
+        f.fetcher.push(Err(SpecFetchFailure::Network(
+            "failed https://api.github.com/x?ref=main token=ghp_leak".into(),
+        )));
+        f.svc.check(f.root()).await.expect("check");
+        let message = f.local().last_message.expect("a message");
+        assert!(!message.is_empty());
+        for bad in ["ghp_", "?ref", "https://", TOKEN, "leak"] {
+            assert!(!message.contains(bad), "{message}");
+        }
+        assert_eq!(
+            f.svc.status(f.root()).expect("status").last_message,
+            Some(message)
+        );
+        f.fetcher.push(Ok(SpecFetchOutcome::NotModified));
+        f.svc.check(f.root()).await.expect("check");
+        assert_eq!(f.local().last_message, None);
+        assert_eq!(f.svc.status(f.root()).expect("status").last_message, None);
     }
 
     #[tokio::test]

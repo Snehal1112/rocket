@@ -33,6 +33,10 @@ pub struct OpenApiLocalState {
     /// arrives with a copied or committed folder names another folder, so it stays off here.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub opt_in_root: Option<String>,
+    /// A short, safe sentence about the last failed check. It holds no URL, query or token.
+    /// A success clears it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_message: Option<String>,
 }
 
 fn is_zero(n: &u32) -> bool {
@@ -50,6 +54,7 @@ impl Default for OpenApiLocalState {
             consecutive_failures: 0,
             not_before: None,
             opt_in_root: None,
+            last_message: None,
         }
     }
 }

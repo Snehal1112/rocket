@@ -1,15 +1,21 @@
-//! Read-only commands for the Spec sync tab: the sync status of a collection and the plan of its
-//! pending spec. Nothing here writes a file.
+//! Commands for the Spec sync tab: the status and the plan (read-only), and the actions: check
+//! now, interval, token, consent and apply. Each runs on a blocking task.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use rocket_app::{OpenApiSyncService, PlanView, SyncStatusView};
+use std::collections::BTreeMap;
+
+use rocket_app::{CheckOutcome, OpenApiSyncService, PlanView, SyncStatusView};
 use rocket_collection::openapi_source::{SyncInterval, SyncStatus};
+use rocket_collection::ConsentState;
 use rocket_http::SpecFetcher;
-use rocket_import::{FieldChange, FieldOutcome, SyncItem, VariableChange, VariableKind};
+use rocket_import::{
+    AppliedKind, ApplyReport, ApprovedItem, Choice, FieldChange, FieldOutcome, Selection,
+    SkipRequest, SyncItem, VariableApproval, VariableChange, VariableKind,
+};
 use rocket_shared::error::DomainError;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use super::import::make_sync_service;
@@ -33,6 +39,10 @@ pub struct SyncStatusDto {
     pub last_status: Option<LastStatusDto>,
     pub has_pending: bool,
     pub has_token: bool,
+    /// `granted`, `missing` or `locationChanged`.
+    pub consent: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_message: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -155,6 +165,12 @@ fn status_dto(view: SyncStatusView) -> SyncStatusDto {
         }),
         has_pending: view.has_pending,
         has_token: view.has_token,
+        consent: match view.consent {
+            ConsentState::Granted => "granted",
+            ConsentState::Missing => "missing",
+            ConsentState::LocationChanged => "locationChanged",
+        },
+        last_message: view.last_message,
     }
 }
 
@@ -318,15 +334,359 @@ pub async fn openapi_sync_status(
 #[tauri::command]
 pub async fn openapi_sync_plan(
     collection: String,
+    links: Option<Vec<[String; 2]>>,
     workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
     fetcher: State<'_, Arc<dyn SpecFetcher>>,
 ) -> Result<SyncPlanDto, String> {
     run_blocking(
         Arc::clone(workspace_path.inner()),
         Arc::clone(fetcher.inner()),
-        move |service| service.plan(&collection).map(plan_dto),
+        move |service| {
+            let links = links_from_dto(links.unwrap_or_default());
+            service.plan_linked(&collection, &links).map(plan_dto)
+        },
     )
     .await
+}
+
+/// The result of a check, for the tab.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckOutcomeDto {
+    /// `unchanged`, `changed` or `failed`.
+    pub state: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_after_secs: Option<u64>,
+}
+
+fn check_outcome_dto(outcome: CheckOutcome) -> CheckOutcomeDto {
+    match outcome {
+        CheckOutcome::Unchanged => CheckOutcomeDto {
+            state: "unchanged",
+            code: None,
+            message: None,
+            retry_after_secs: None,
+        },
+        CheckOutcome::Changed { .. } => CheckOutcomeDto {
+            state: "changed",
+            code: None,
+            message: None,
+            retry_after_secs: None,
+        },
+        CheckOutcome::Failed {
+            code,
+            message,
+            retry_after_secs,
+        } => CheckOutcomeDto {
+            state: "failed",
+            code: Some(code),
+            message: Some(message),
+            retry_after_secs,
+        },
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApprovedItemDto {
+    pub key: String,
+    pub digest: String,
+    /// Field name to `spec` or `yours`.
+    #[serde(default)]
+    pub choices: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkipDto {
+    pub key: String,
+    pub fingerprint: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VariableApprovalDto {
+    pub name: String,
+    pub digest: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectionDto {
+    #[serde(default)]
+    pub items: Vec<ApprovedItemDto>,
+    #[serde(default)]
+    pub skips: Vec<SkipDto>,
+    #[serde(default)]
+    pub variables: Vec<VariableApprovalDto>,
+    /// `[oldKey, newKey]` pairs, in the order the user linked them.
+    #[serde(default)]
+    pub rename_links: Vec<[String; 2]>,
+}
+
+fn links_from_dto(links: Vec<[String; 2]>) -> Vec<(String, String)> {
+    links.into_iter().map(|[old, new]| (old, new)).collect()
+}
+
+fn choice_from_text(field: &str, text: &str) -> Result<Choice, String> {
+    match text {
+        "spec" => Ok(Choice::Spec),
+        "yours" => Ok(Choice::Yours),
+        other => Err(format!(
+            "Unknown choice \"{other}\" for the field \"{field}\". Use \"spec\" or \"yours\"."
+        )),
+    }
+}
+
+fn selection_from_dto(dto: SelectionDto) -> Result<Selection, String> {
+    let mut items = Vec::with_capacity(dto.items.len());
+    for item in dto.items {
+        let mut choices = BTreeMap::new();
+        for (field, text) in &item.choices {
+            choices.insert(field.clone(), choice_from_text(field, text)?);
+        }
+        items.push(ApprovedItem {
+            key: item.key,
+            digest: item.digest,
+            choices,
+        });
+    }
+    Ok(Selection {
+        items,
+        skips: dto
+            .skips
+            .into_iter()
+            .map(|s| SkipRequest {
+                key: s.key,
+                fingerprint: s.fingerprint,
+            })
+            .collect(),
+        variables: dto
+            .variables
+            .into_iter()
+            .map(|v| VariableApproval {
+                name: v.name,
+                digest: v.digest,
+            })
+            .collect(),
+        rename_links: links_from_dto(dto.rename_links),
+    })
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppliedItemDto {
+    pub key: String,
+    /// `created` or `updated`.
+    pub kind: &'static str,
+    pub request_path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyReportDto {
+    pub applied: Vec<AppliedItemDto>,
+    pub stale: Vec<String>,
+    pub not_rewritable: Vec<String>,
+    pub deleted: Vec<String>,
+    pub detached: Vec<String>,
+    pub skipped: usize,
+    pub remaining: usize,
+}
+
+fn report_dto(report: ApplyReport) -> ApplyReportDto {
+    ApplyReportDto {
+        applied: report
+            .applied
+            .into_iter()
+            .map(|a| AppliedItemDto {
+                key: a.key,
+                kind: match a.kind {
+                    AppliedKind::Created => "created",
+                    AppliedKind::Updated => "updated",
+                },
+                request_path: a.request_path,
+            })
+            .collect(),
+        stale: report.stale,
+        not_rewritable: report.not_rewritable,
+        deleted: report.deleted,
+        detached: report.detached,
+        skipped: report.skipped,
+        remaining: report.remaining,
+    }
+}
+
+fn interval_from_name(name: &str) -> Result<SyncInterval, String> {
+    match name {
+        "off" => Ok(SyncInterval::Off),
+        "hourly" => Ok(SyncInterval::Hourly),
+        "daily" => Ok(SyncInterval::Daily),
+        "weekly" => Ok(SyncInterval::Weekly),
+        "monthly" => Ok(SyncInterval::Monthly),
+        other => Err(format!(
+            "Unknown interval \"{other}\". Use off, hourly, daily, weekly or monthly."
+        )),
+    }
+}
+
+/// Clear sentences for the two ways an approval can be refused.
+fn grant_error_text(error: DomainError) -> String {
+    match error {
+        DomainError::Conflict(_) => {
+            "The spec link changed since it was shown. Check the link and approve it again."
+                .to_string()
+        }
+        DomainError::InvalidInput(_) => {
+            "This spec location cannot be approved because its link is ambiguous.".to_string()
+        }
+        other => other.to_string(),
+    }
+}
+
+/// Checks the spec of a collection now. A collection that is not approved on this machine
+/// answers `failed` with the code `consent_required`.
+#[tauri::command]
+pub async fn openapi_sync_check_now(
+    collection: String,
+    workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
+    fetcher: State<'_, Arc<dyn SpecFetcher>>,
+) -> Result<CheckOutcomeDto, String> {
+    let root = run_blocking(
+        Arc::clone(workspace_path.inner()),
+        Arc::clone(fetcher.inner()),
+        move |service| service.root_of(&collection),
+    )
+    .await?;
+    let service = make_sync_service(
+        Arc::clone(workspace_path.inner()),
+        Arc::clone(fetcher.inner()),
+    );
+    service
+        .check(&root)
+        .await
+        .map(check_outcome_dto)
+        .map_err(|e| e.to_string())
+}
+
+/// Sets how often this machine checks the spec. Anything but `off` needs an approval.
+#[tauri::command]
+pub async fn openapi_sync_set_interval(
+    collection: String,
+    interval: String,
+    workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
+    fetcher: State<'_, Arc<dyn SpecFetcher>>,
+) -> Result<(), String> {
+    let interval = interval_from_name(&interval)?;
+    run_blocking(
+        Arc::clone(workspace_path.inner()),
+        Arc::clone(fetcher.inner()),
+        move |service| {
+            let root = service.root_of(&collection)?;
+            service.set_interval(&root, interval)
+        },
+    )
+    .await
+}
+
+/// Stores the access token of a GitHub source in the keychain.
+#[tauri::command]
+pub async fn openapi_sync_set_token(
+    collection: String,
+    token: String,
+    workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
+    fetcher: State<'_, Arc<dyn SpecFetcher>>,
+) -> Result<(), String> {
+    run_blocking(
+        Arc::clone(workspace_path.inner()),
+        Arc::clone(fetcher.inner()),
+        move |service| {
+            let root = service.root_of(&collection)?;
+            service.set_token(&root, &token)
+        },
+    )
+    .await
+}
+
+/// Removes the stored access token of a GitHub source.
+#[tauri::command]
+pub async fn openapi_sync_clear_token(
+    collection: String,
+    workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
+    fetcher: State<'_, Arc<dyn SpecFetcher>>,
+) -> Result<(), String> {
+    run_blocking(
+        Arc::clone(workspace_path.inner()),
+        Arc::clone(fetcher.inner()),
+        move |service| {
+            let root = service.root_of(&collection)?;
+            service.clear_token(&root)
+        },
+    )
+    .await
+}
+
+/// Approves the spec location the UI showed (`location`, the display text). It refuses when
+/// the source file shows another location now.
+#[tauri::command]
+pub async fn openapi_sync_grant_consent(
+    collection: String,
+    location: String,
+    workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
+    fetcher: State<'_, Arc<dyn SpecFetcher>>,
+) -> Result<(), String> {
+    let workspace_path = Arc::clone(workspace_path.inner());
+    let fetcher = Arc::clone(fetcher.inner());
+    let result = tokio::task::spawn_blocking(move || {
+        let service = make_sync_service(workspace_path, fetcher);
+        let root = service.root_of(&collection)?;
+        service.grant_consent(&root, &location)
+    })
+    .await
+    .map_err(|e| format!("the sync task failed: {e}"))?;
+    result.map_err(grant_error_text)
+}
+
+/// Withdraws the approval of this collection on this machine.
+#[tauri::command]
+pub async fn openapi_sync_revoke_consent(
+    collection: String,
+    workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
+    fetcher: State<'_, Arc<dyn SpecFetcher>>,
+) -> Result<(), String> {
+    run_blocking(
+        Arc::clone(workspace_path.inner()),
+        Arc::clone(fetcher.inner()),
+        move |service| {
+            let root = service.root_of(&collection)?;
+            service.revoke_consent(&root)
+        },
+    )
+    .await
+}
+
+/// Applies the approved items of the pending spec. A selection with only skips records them.
+#[tauri::command]
+pub async fn openapi_sync_apply(
+    collection: String,
+    selection: SelectionDto,
+    workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
+    fetcher: State<'_, Arc<dyn SpecFetcher>>,
+) -> Result<ApplyReportDto, String> {
+    let selection = selection_from_dto(selection)?;
+    let service = make_sync_service(
+        Arc::clone(workspace_path.inner()),
+        Arc::clone(fetcher.inner()),
+    );
+    service
+        .apply(&collection, &selection)
+        .await
+        .map(report_dto)
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -426,6 +786,7 @@ mod tests {
             has_pending: false,
             has_token: true,
             consent: rocket_collection::ConsentState::Granted,
+            last_message: Some("The server could not be reached.".to_string()),
         });
         let json = serde_json::to_value(dto).expect("json");
         assert_eq!(
@@ -434,6 +795,8 @@ mod tests {
         );
         assert_eq!(json["interval"], "weekly");
         assert_eq!(json["hasToken"], true);
+        assert_eq!(json["consent"], "granted");
+        assert_eq!(json["lastMessage"], "The server could not be reached.");
         assert_eq!(json["lastCheckedAt"], "2026-10-26T10:00:00+00:00");
     }
 
@@ -455,6 +818,132 @@ mod tests {
             .as_object()
             .expect("object")
             .contains_key("edited"));
+    }
+
+    #[test]
+    fn a_selection_maps_choices_and_keeps_the_link_order() {
+        let dto: SelectionDto = serde_json::from_value(json!({
+            "items": [{"key": "a", "digest": "d1", "choices": {"summary": "yours", "url": "spec"}}],
+            "skips": [{"key": "b", "fingerprint": "fp"}],
+            "variables": [{"name": "baseUrl", "digest": "vd"}],
+            "renameLinks": [["z", "y"], ["a", "b"]],
+        }))
+        .expect("dto");
+        let selection = selection_from_dto(dto).expect("selection");
+        assert_eq!(selection.items[0].choices["summary"], Choice::Yours);
+        assert_eq!(selection.items[0].choices["url"], Choice::Spec);
+        assert_eq!(selection.skips[0].fingerprint, "fp");
+        assert_eq!(selection.variables[0].name, "baseUrl");
+        assert_eq!(
+            selection.rename_links,
+            vec![
+                ("z".to_string(), "y".to_string()),
+                ("a".to_string(), "b".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn a_selection_with_only_skips_parses_and_an_empty_one_too() {
+        let dto: SelectionDto =
+            serde_json::from_value(json!({"skips": [{"key": "b", "fingerprint": "fp"}]}))
+                .expect("dto");
+        let selection = selection_from_dto(dto).expect("selection");
+        assert!(selection.items.is_empty());
+        assert_eq!(selection.skips.len(), 1);
+        let empty: SelectionDto = serde_json::from_value(json!({})).expect("dto");
+        assert!(selection_from_dto(empty)
+            .expect("selection")
+            .items
+            .is_empty());
+    }
+
+    #[test]
+    fn an_unknown_choice_is_refused_with_a_clear_error() {
+        let dto: SelectionDto = serde_json::from_value(json!({
+            "items": [{"key": "a", "digest": "d", "choices": {"summary": "mine"}}]
+        }))
+        .expect("dto");
+        let err = selection_from_dto(dto).expect_err("refused");
+        assert!(err.contains("\"mine\"") && err.contains("summary"), "{err}");
+        assert!(err.contains("spec") && err.contains("yours"), "{err}");
+    }
+
+    #[test]
+    fn an_apply_report_maps_every_list() {
+        let report = ApplyReport {
+            applied: vec![
+                rocket_import::AppliedItem {
+                    key: "a".to_string(),
+                    kind: AppliedKind::Created,
+                    request_path: "pets/a".to_string(),
+                },
+                rocket_import::AppliedItem {
+                    key: "b".to_string(),
+                    kind: AppliedKind::Updated,
+                    request_path: "pets/b".to_string(),
+                },
+            ],
+            stale: vec!["s".to_string()],
+            not_rewritable: vec!["n".to_string()],
+            deleted: vec!["d".to_string()],
+            detached: vec!["t".to_string()],
+            skipped: 2,
+            remaining: 3,
+        };
+        let json = serde_json::to_value(report_dto(report)).expect("json");
+        assert_eq!(
+            json,
+            json!({
+                "applied": [
+                    {"key": "a", "kind": "created", "requestPath": "pets/a"},
+                    {"key": "b", "kind": "updated", "requestPath": "pets/b"},
+                ],
+                "stale": ["s"],
+                "notRewritable": ["n"],
+                "deleted": ["d"],
+                "detached": ["t"],
+                "skipped": 2,
+                "remaining": 3,
+            })
+        );
+    }
+
+    #[test]
+    fn a_check_outcome_maps_to_its_state() {
+        let failed = check_outcome_dto(CheckOutcome::Failed {
+            code: "rate_limited".to_string(),
+            message: "Slow down.".to_string(),
+            retry_after_secs: Some(60),
+        });
+        let json = serde_json::to_value(failed).expect("json");
+        assert_eq!(
+            json,
+            json!({"state": "failed", "code": "rate_limited", "message": "Slow down.",
+                "retryAfterSecs": 60})
+        );
+        let changed = check_outcome_dto(CheckOutcome::Changed {
+            spec_sha256: "x".to_string(),
+        });
+        assert_eq!(
+            serde_json::to_value(changed).expect("json"),
+            json!({"state": "changed"})
+        );
+    }
+
+    #[test]
+    fn intervals_parse_and_unknown_names_are_refused() {
+        assert_eq!(interval_from_name("weekly"), Ok(SyncInterval::Weekly));
+        assert_eq!(interval_from_name("off"), Ok(SyncInterval::Off));
+        assert!(interval_from_name("yearly").is_err());
+    }
+
+    #[test]
+    fn grant_errors_become_clear_sentences() {
+        let changed = grant_error_text(DomainError::Conflict("x".to_string()));
+        assert!(changed.contains("changed"), "{changed}");
+        let ambiguous = grant_error_text(DomainError::InvalidInput("x".to_string()));
+        assert!(ambiguous.contains("ambiguous"), "{ambiguous}");
     }
 
     #[test]

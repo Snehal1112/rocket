@@ -128,3 +128,95 @@ async fn status_of_an_unreadable_source_file_is_an_error() {
     let err = w.svc.status_of(&w.name).expect_err("unreadable");
     assert!(!matches!(err, DomainError::NotFound(_)), "got {err:?}");
 }
+
+/// The first spec with `getInventory` renamed to `listInventory` on the same path.
+fn v_renamed() -> String {
+    spec(json!({
+        "/pets": {"get": op("listPets", "pets", json!({}))},
+        "/pets/{id}": {"get": op("getPet", "pets", json!({"parameters": [
+            {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}]}))},
+        "/inventory": {"get": op("listInventory", "store", json!({}))},
+    }))
+}
+
+fn rename_link() -> Vec<(String, String)> {
+    vec![("getInventory".to_string(), "listInventory".to_string())]
+}
+
+#[tokio::test]
+async fn a_plan_with_links_has_the_digests_that_apply_checks() {
+    let w = world().await;
+    w.check_with(v_renamed()).await;
+    let plain = w.svc.plan(&w.name).expect("plan");
+    assert!(plain
+        .plan
+        .items
+        .iter()
+        .any(|i| matches!(i, SyncItem::New { key, .. } if key == "listInventory")));
+    let linked = w.svc.plan_linked(&w.name, &rename_link()).expect("plan");
+    assert!(linked
+        .plan
+        .items
+        .iter()
+        .any(|i| matches!(i, SyncItem::Changed { key, .. } if key == "listInventory")));
+    // Approve the plan's own digests with the same links: nothing is stale.
+    let items = linked
+        .plan
+        .items
+        .iter()
+        .zip(&linked.item_digests)
+        .map(|(i, digest)| ApprovedItem {
+            key: i.key().to_string(),
+            digest: digest.clone(),
+            choices: match i {
+                SyncItem::Changed { merge, .. } => merge
+                    .changes
+                    .iter()
+                    .map(|c| (c.field.clone(), Choice::Spec))
+                    .collect(),
+                _ => BTreeMap::new(),
+            },
+        })
+        .collect();
+    let selection = Selection {
+        items,
+        rename_links: rename_link(),
+        ..Selection::default()
+    };
+    let report = w.svc.apply(&w.name, &selection).await.expect("apply");
+    assert!(report.stale.is_empty(), "{:?}", report.stale);
+    assert!(report.applied.iter().any(|a| a.key == "listInventory"));
+}
+
+#[tokio::test]
+async fn a_plan_with_a_refused_link_is_the_plan_without_it() {
+    let w = world().await;
+    w.check_with(v_renamed()).await;
+    let bad = vec![("nope".to_string(), "listInventory".to_string())];
+    let linked = w.svc.plan_linked(&w.name, &bad).expect("plan");
+    let plain = w.svc.plan(&w.name).expect("plan");
+    assert_eq!(linked.item_digests, plain.item_digests);
+}
+
+#[tokio::test]
+async fn apply_with_only_skips_records_them() {
+    let w = world().await;
+    w.check_with(v2()).await;
+    let plan = w.svc.plan(&w.name).expect("plan");
+    let item = plan.plan.items.first().expect("item");
+    let selection = Selection {
+        skips: vec![SkipRequest {
+            key: item.key().to_string(),
+            fingerprint: item.fingerprint().to_string(),
+        }],
+        ..Selection::default()
+    };
+    let report = w.svc.apply(&w.name, &selection).await.expect("apply");
+    assert_eq!(report.skipped, 1);
+    assert!(w
+        .svc
+        .local_state(&w.name)
+        .expect("local")
+        .skips
+        .contains_key(item.key()));
+}

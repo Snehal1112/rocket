@@ -257,6 +257,20 @@ async fn revoking_consent_stops_the_next_check() {
     w.assert_untouched();
 }
 
+#[tokio::test]
+async fn revoke_consent_stops_checks_and_the_interval() {
+    let w = World::new();
+    w.svc.grant_current(w.root()).expect("grant");
+    w.svc.revoke_consent(w.root()).expect("revoke");
+    assert_eq!(
+        w.svc.consent_state(w.root()).expect("state"),
+        ConsentState::Missing
+    );
+    let outcome = w.svc.check(w.root()).await.expect("check");
+    assert_eq!(failed_code(outcome), "consent_required");
+    w.assert_untouched();
+}
+
 /// A factory whose recovery rewrites the source file, like a journal replay would.
 struct RewritingTx {
     inner: rocket_infra::FsFileTxFactory,
@@ -466,4 +480,97 @@ fn with_consent_set_interval_and_set_token_work_and_keep_the_approval() {
         w.svc.consent_state(w.root()).expect("state"),
         ConsentState::Granted
     );
+}
+
+/// Answers with a valid spec, but first rewrites the source file, like an editor or a
+/// git operation could while the fetch is in flight.
+struct RewriteOnFetch {
+    root: std::path::PathBuf,
+    rewritten: OpenApiSource,
+}
+
+#[async_trait]
+impl SpecFetcher for RewriteOnFetch {
+    async fn fetch(&self, _: SpecFetchRequest) -> Result<SpecFetchOutcome, SpecFetchFailure> {
+        FsOpenApiSourceRepo
+            .save(&self.root, &self.rewritten)
+            .expect("rewrite");
+        let path = format!(
+            "{}/../rocket-import/tests/fixtures/openapi/orders-3.0.json",
+            env!("CARGO_MANIFEST_DIR")
+        );
+        Ok(SpecFetchOutcome::Fetched {
+            body: std::fs::read(path).expect("fixture"),
+            etag: Some("\"new\"".into()),
+            last_modified: None,
+            final_url: "https://x".into(),
+        })
+    }
+}
+
+#[tokio::test]
+async fn a_source_rewritten_during_the_fetch_saves_nothing_and_fails() {
+    let mut other_id = source(github("r"));
+    other_id.source_id = "src-2".into();
+    for rewritten in [source(github("attacker-repo")), other_id] {
+        let w = World::new();
+        w.svc.grant_current(w.root()).expect("grant");
+        let svc = OpenApiSyncService::new(
+            Arc::new(RewriteOnFetch {
+                root: w.root().to_path_buf(),
+                rewritten: rewritten.clone(),
+            }),
+            Box::new(FsOpenApiSourceRepo),
+            Arc::clone(&w.secrets) as Arc<dyn SecretStore>,
+        )
+        .with_local(Box::new(FsOpenApiLocalRepo))
+        .with_consent(Arc::clone(&w.store) as Arc<dyn OpenApiConsentStore>);
+        let outcome = svc.check(w.root()).await.expect("check");
+        assert_eq!(failed_code(outcome), "location_changed");
+        let on_disk = FsOpenApiSourceRepo
+            .load(w.root())
+            .expect("load")
+            .expect("source");
+        // The rewritten file is untouched: no etag, refs or pending copy were saved.
+        assert_eq!(on_disk, rewritten);
+        assert!(FsOpenApiSourceRepo
+            .load_pending(w.root())
+            .expect("pending")
+            .is_none());
+        let local = FsOpenApiLocalRepo
+            .load(w.root())
+            .expect("load")
+            .expect("local");
+        assert_eq!(
+            local.last_status,
+            Some(SyncStatus::Failed {
+                code: "location_changed".into()
+            })
+        );
+    }
+}
+
+#[test]
+fn a_link_that_does_not_round_trip_through_display_text_can_still_be_granted() {
+    let w = World::new();
+    let loc = gh("o", "r", "feature/x", "api.json");
+    FsOpenApiSourceRepo
+        .save(w.root(), &source(loc.clone()))
+        .expect("seed");
+    let link = "https://api.github.com/repos/o/r/contents/api.json?ref=feature/x";
+    assert_eq!(rocket_import::parse_spec_url(link).expect("parse"), loc);
+    w.svc
+        .grant_consent_for_link(w.root(), link)
+        .expect("grant by structure");
+    assert_eq!(
+        w.svc.consent_state(w.root()).expect("state"),
+        ConsentState::Granted
+    );
+    // A link for another ref is still refused.
+    let other = "https://api.github.com/repos/o/r/contents/api.json?ref=feature/y";
+    let w2 = World::new();
+    FsOpenApiSourceRepo
+        .save(w2.root(), &source(loc))
+        .expect("seed");
+    assert!(w2.svc.grant_consent_for_link(w2.root(), other).is_err());
 }
