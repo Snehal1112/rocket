@@ -742,7 +742,14 @@ mod tests {
         while let Some(at) = rest.find("#[cfg(test)]") {
             out.push_str(&rest[..at]);
             let after = &rest[at + "#[cfg(test)]".len()..];
-            let trimmed = after.trim_start();
+            let mut trimmed = after.trim_start();
+            // A `#[path = "..."]` attribute may sit between the cfg and the `mod`.
+            while trimmed.starts_with("#[") {
+                match trimmed.find(']') {
+                    Some(close) => trimmed = trimmed[close + 1..].trim_start(),
+                    None => break,
+                }
+            }
             let is_mod = trimmed.starts_with("mod ") || trimmed.starts_with("pub(crate) mod ");
             if !is_mod {
                 rest = after;
