@@ -34,8 +34,12 @@ pub struct LastStatusDto {
 #[serde(rename_all = "camelCase")]
 pub struct SyncStatusDto {
     pub location: String,
-    /// `off`, `hourly`, `daily`, `weekly` or `monthly`.
+    /// `off`, `every_5_minutes`, `every_15_minutes`, `every_30_minutes`, `hourly`, `daily`,
+    /// `weekly` or `monthly`.
     pub interval: &'static str,
+    /// True when the stored interval was not understood. `interval` is `off` then.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub interval_unknown: bool,
     pub last_checked_at: Option<String>,
     pub last_status: Option<LastStatusDto>,
     pub has_pending: bool,
@@ -140,6 +144,9 @@ pub struct SyncPlanDto {
 fn interval_name(interval: SyncInterval) -> &'static str {
     match interval {
         SyncInterval::Off => "off",
+        SyncInterval::Min5 => "every_5_minutes",
+        SyncInterval::Min15 => "every_15_minutes",
+        SyncInterval::Min30 => "every_30_minutes",
         SyncInterval::Hourly => "hourly",
         SyncInterval::Daily => "daily",
         SyncInterval::Weekly => "weekly",
@@ -151,6 +158,7 @@ fn status_dto(view: SyncStatusView) -> SyncStatusDto {
     SyncStatusDto {
         location: view.location,
         interval: interval_name(view.interval),
+        interval_unknown: view.interval_unknown,
         last_checked_at: view.last_checked_at,
         last_status: view.last_status.map(|s| match s {
             SyncStatus::Unchanged => LastStatusDto {
@@ -533,16 +541,15 @@ fn report_dto(report: ApplyReport) -> ApplyReportDto {
     }
 }
 
+const UNKNOWN_INTERVAL: &str = "Unknown interval. Use off, every_5_minutes, every_15_minutes, every_30_minutes, hourly, daily, weekly or monthly.";
+
 fn interval_from_name(name: &str) -> Result<SyncInterval, String> {
     match name {
-        "off" => Ok(SyncInterval::Off),
-        "hourly" => Ok(SyncInterval::Hourly),
-        "daily" => Ok(SyncInterval::Daily),
-        "weekly" => Ok(SyncInterval::Weekly),
-        "monthly" => Ok(SyncInterval::Monthly),
-        other => Err(format!(
-            "Unknown interval \"{other}\". Use off, hourly, daily, weekly or monthly."
-        )),
+        "off" | "every_5_minutes" | "every_15_minutes" | "every_30_minutes" | "hourly"
+        | "daily" | "weekly" | "monthly" => {
+            SyncInterval::parse(name).ok_or_else(|| UNKNOWN_INTERVAL.to_string())
+        }
+        _ => Err(UNKNOWN_INTERVAL.to_string()),
     }
 }
 
@@ -629,6 +636,40 @@ pub async fn openapi_sync_set_interval(
         },
     )
     .await
+}
+
+/// Fixed sentences for a failed disconnect, so no path or error text reaches the UI.
+fn disconnect_error(error: DomainError) -> String {
+    match error {
+        DomainError::Conflict(_) => {
+            "An apply is running on this collection. Try again when it finishes.".to_string()
+        }
+        _ => "The sync settings could not be removed. Try again.".to_string(),
+    }
+}
+
+/// Removes the sync state of a collection. Requests and folders stay. `removeToken` also
+/// deletes the stored access token.
+#[tauri::command]
+pub async fn openapi_sync_disconnect(
+    collection: String,
+    remove_token: Option<bool>,
+    workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
+    fetcher: State<'_, Arc<dyn SpecFetcher>>,
+) -> Result<(), String> {
+    let remove_token = remove_token.unwrap_or(false);
+    let result = tokio::task::spawn_blocking({
+        let workspace_path = Arc::clone(workspace_path.inner());
+        let fetcher = Arc::clone(fetcher.inner());
+        move || {
+            let service = make_sync_service(workspace_path, fetcher);
+            let root = service.root_of(&collection)?;
+            service.disconnect(&root, remove_token)
+        }
+    })
+    .await
+    .map_err(|_| TASK_FAILED.to_string())?;
+    result.map_err(disconnect_error)
 }
 
 /// Stores the access token of a GitHub source in the keychain.
@@ -830,6 +871,7 @@ mod tests {
             has_token: Some(true),
             consent: rocket_collection::ConsentState::Granted,
             last_message: Some("The server could not be reached.".to_string()),
+            interval_unknown: false,
         });
         let json = serde_json::to_value(dto).expect("json");
         assert_eq!(
@@ -1011,6 +1053,7 @@ mod tests {
             has_token,
             consent: ConsentState::Granted,
             last_message: None,
+            interval_unknown: false,
         };
         let json = serde_json::to_value(status_dto(view(None))).expect("json");
         assert!(json.get("hasToken").is_none());
@@ -1081,10 +1124,12 @@ mod tests {
                 has_token: None,
                 consent: state,
                 last_message: None,
+                interval_unknown: false,
             });
             let json = serde_json::to_value(dto).expect("json");
             assert_eq!(json["consent"], name);
             assert!(json.get("lastMessage").is_none());
+            assert!(json.get("intervalUnknown").is_none());
         }
     }
 
@@ -1093,6 +1138,44 @@ mod tests {
         assert_eq!(interval_from_name("weekly"), Ok(SyncInterval::Weekly));
         assert_eq!(interval_from_name("off"), Ok(SyncInterval::Off));
         assert!(interval_from_name("yearly").is_err());
+        for (name, interval) in [
+            ("every_5_minutes", SyncInterval::Min5),
+            ("every_15_minutes", SyncInterval::Min15),
+            ("every_30_minutes", SyncInterval::Min30),
+        ] {
+            assert_eq!(interval_from_name(name), Ok(interval));
+            assert_eq!(interval_name(interval), name);
+        }
+        let error = interval_from_name("every_2_hours").expect_err("unknown");
+        assert!(error.contains("every_5_minutes"), "{error}");
+        assert!(!error.contains("every_2_hours"), "{error}");
+    }
+
+    #[test]
+    fn an_unknown_stored_interval_is_flagged_in_the_dto() {
+        let dto = status_dto(SyncStatusView {
+            location: "https://example.com/spec.json".to_string(),
+            interval: SyncInterval::Off,
+            last_checked_at: None,
+            last_status: None,
+            has_pending: false,
+            has_token: None,
+            consent: ConsentState::Granted,
+            last_message: None,
+            interval_unknown: true,
+        });
+        let json = serde_json::to_value(dto).expect("json");
+        assert_eq!(json["interval"], "off");
+        assert_eq!(json["intervalUnknown"], true);
+    }
+
+    #[test]
+    fn disconnect_errors_are_fixed_sentences() {
+        let busy = disconnect_error(DomainError::Conflict("path /x/y".to_string()));
+        assert!(busy.contains("apply is running"), "{busy}");
+        let other = disconnect_error(DomainError::Internal("secret /home/u".to_string()));
+        assert!(!other.contains("/home"), "{other}");
+        assert!(!other.contains("secret"), "{other}");
     }
 
     #[test]

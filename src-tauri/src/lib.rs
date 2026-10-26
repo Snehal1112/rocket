@@ -1179,6 +1179,7 @@ pub fn run() {
             commands::openapi_sync::openapi_sync_clear_token,
             commands::openapi_sync::openapi_sync_grant_consent,
             commands::openapi_sync::openapi_sync_revoke_consent,
+            commands::openapi_sync::openapi_sync_disconnect,
             commands::openapi_sync::openapi_sync_apply,
             commands::contract::attach_contract,
             commands::contract::update_contract,

@@ -64,6 +64,8 @@ pub struct SyncStatusView {
     pub consent: ConsentState,
     /// A short safe sentence about the last failed check, if there is one.
     pub last_message: Option<String>,
+    /// True when the stored interval name was not understood. The interval then reads as off.
+    pub interval_unknown: bool,
 }
 
 /// A collection whose background check is due.
@@ -737,6 +739,7 @@ impl OpenApiSyncService {
             } else {
                 None
             },
+            interval_unknown: local.interval_unknown,
         })
     }
 
@@ -841,6 +844,66 @@ impl OpenApiSyncService {
         // The legacy opt-in is ignored from now on, so it is no longer written.
         local.opt_in_root = None;
         locals.save(collection_root, &local)
+    }
+
+    /// Removes the sync state of a collection: the source file, the local state, the spec
+    /// copies, the baseline and the approval, and the stored token when `remove_token` is
+    /// set. Requests, folders and collection settings are never touched. It is refused with
+    /// `Conflict` while an apply holds the collection, and a collection without a source is
+    /// left alone.
+    pub fn disconnect(&self, root: &Path, remove_token: bool) -> DomainResult<()> {
+        let lock = collection_lock(root);
+        let _guard = lock.lock();
+        let Some(source) = self.sources.load(root)? else {
+            return Ok(());
+        };
+        // Taking the transaction first keeps out an apply that runs in another process.
+        let mut tx = match &self.apply_deps {
+            Some(deps) => Some(deps.tx.begin(root)?),
+            None => None,
+        };
+        let removed = self.remove_sync_state(root, &source, remove_token, tx.as_mut());
+        match (removed, tx) {
+            (Ok(()), Some(tx)) => tx.commit(),
+            (Ok(()), None) => self.delete_state_files(root),
+            (Err(e), tx) => {
+                if let Some(tx) = tx {
+                    tx.abort();
+                }
+                Err(e)
+            }
+        }
+    }
+
+    fn remove_sync_state(
+        &self,
+        root: &Path,
+        source: &OpenApiSource,
+        remove_token: bool,
+        tx: Option<&mut Box<dyn rocket_collection::file_tx::CollectionFileTx>>,
+    ) -> DomainResult<()> {
+        if remove_token && !source.source_id.is_empty() {
+            self.secrets.delete(&source.source_id, TOKEN_KEY)?;
+        }
+        if let Some(store) = &self.consent {
+            store.revoke(root, &source.source_id)?;
+        }
+        if let Some(tx) = tx {
+            for name in rocket_collection::file_tx::OWNED_STATE_FILES {
+                tx.stage_delete(&format!(".rocket/{name}"))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Fallback for a service without apply deps: removes the files through the repositories.
+    fn delete_state_files(&self, root: &Path) -> DomainResult<()> {
+        self.sources.clear_pending(root)?;
+        self.sources.delete(root)?;
+        if let Some(deps) = &self.apply_deps {
+            deps.baselines.delete(root)?;
+        }
+        Ok(())
     }
 
     pub fn set_token(&self, collection_root: &Path, token: &str) -> DomainResult<()> {
@@ -2274,3 +2337,7 @@ mod tests {
 #[cfg(test)]
 #[path = "openapi_sync_consent_tests.rs"]
 mod consent_tests;
+
+#[cfg(test)]
+#[path = "openapi_sync_disconnect_tests.rs"]
+mod disconnect_tests;

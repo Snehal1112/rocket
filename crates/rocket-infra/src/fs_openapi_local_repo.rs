@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use rocket_collection::openapi_local::{
     OpenApiLocalRepository, OpenApiLocalState, LOCAL_STATE_FILE_VERSION,
 };
+use rocket_collection::openapi_source::SyncInterval;
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
@@ -38,8 +39,13 @@ impl OpenApiLocalRepository for FsOpenApiLocalRepo {
                 "{LOCAL_FILE} was written by a newer version of Rocket (it reads up to version {LOCAL_STATE_FILE_VERSION})"
             )));
         }
-        let state: OpenApiLocalState = serde_json::from_value(value)
+        let unknown_interval = value
+            .get("sync_interval")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|name| SyncInterval::parse(name).is_none());
+        let mut state: OpenApiLocalState = serde_json::from_value(value)
             .map_err(|e| DomainError::Internal(format!("{LOCAL_FILE} cannot be parsed: {e}")))?;
+        state.interval_unknown = unknown_interval;
         Ok(Some(state))
     }
 
@@ -77,6 +83,31 @@ mod tests {
             FsOpenApiLocalRepo.load(dir.path()).expect("load"),
             Some(sample())
         );
+    }
+
+    #[test]
+    fn an_unknown_interval_loads_as_off_and_is_flagged() {
+        let dir = tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join(".rocket")).expect("dir");
+        let path = dir.path().join(".rocket/openapi-local.json");
+        std::fs::write(&path, r#"{"version":1,"sync_interval":"every_2_hours"}"#).expect("write");
+        let state = FsOpenApiLocalRepo
+            .load(dir.path())
+            .expect("load")
+            .expect("some");
+        assert_eq!(state.sync_interval, SyncInterval::Off);
+        assert!(state.interval_unknown);
+        std::fs::write(&path, r#"{"version":1,"sync_interval":"every_5_minutes"}"#).expect("write");
+        let state = FsOpenApiLocalRepo
+            .load(dir.path())
+            .expect("load")
+            .expect("some");
+        assert_eq!(state.sync_interval, SyncInterval::Min5);
+        assert!(!state.interval_unknown);
+        // The flag is never written back.
+        FsOpenApiLocalRepo.save(dir.path(), &state).expect("save");
+        let text = std::fs::read_to_string(&path).expect("read");
+        assert!(!text.contains("interval_unknown"), "{text}");
     }
 
     #[test]

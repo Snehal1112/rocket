@@ -182,6 +182,9 @@ fn token_arg(token: Option<String>) -> Option<String> {
         .filter(|t| !t.is_empty())
 }
 
+/// Shown when the user asked for update checks and they could not be turned on.
+const CHECKS_NOT_ENABLED: &str =
+    "Update checks could not be turned on. You can turn them on in the Spec sync settings.";
 const CONSENT_NOT_SAVED: &str =
     "The link could not be approved on this machine, so it will not be checked until you approve it.";
 
@@ -331,6 +334,22 @@ pub async fn import_openapi_file(
         .map_err(|e| e.to_string())
 }
 
+/// Turns on checks every 5 minutes when the user asked for them. It runs only after the
+/// source is saved and the link is approved, and a failure leaves checks off. It returns
+/// false when checks were asked for and could not be turned on.
+fn enable_checks(
+    service: &OpenApiSyncService,
+    root: &std::path::Path,
+    check_for_updates: Option<bool>,
+) -> bool {
+    if check_for_updates != Some(true) {
+        return true;
+    }
+    service
+        .set_interval(root, rocket_collection::openapi_source::SyncInterval::Min5)
+        .is_ok()
+}
+
 /// Import an OpenAPI or Swagger spec from a link as a new collection.
 #[tauri::command]
 pub async fn import_openapi_url(
@@ -338,6 +357,7 @@ pub async fn import_openapi_url(
     group_by: String,
     token: Option<String>,
     target_workspace_id: String,
+    check_for_updates: Option<bool>,
     workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
     fetcher: State<'_, Arc<dyn SpecFetcher>>,
 ) -> Result<OpenApiImportDto, String> {
@@ -362,15 +382,18 @@ pub async fn import_openapi_url(
         .map_err(|e| e.to_string())?;
     // The user typed this link on this machine, so it is approved for the new collection.
     let root = base.join("collections").join(&dto.collection);
-    let approval = OpenApiSyncService::new(
+    let approver = OpenApiSyncService::new(
         Arc::clone(fetcher.inner()),
         Box::new(FsOpenApiSourceRepo),
         Arc::new(KeyringSecretStore::new_openapi_sync()),
     )
-    .with_consent(openapi_consent_store())
-    .grant_consent_for_link(&root, &link);
+    .with_local(Box::new(FsOpenApiLocalRepo))
+    .with_consent(openapi_consent_store());
+    let approval = approver.grant_consent_for_link(&root, &link);
     if approval.is_err() {
         dto.warnings.push(CONSENT_NOT_SAVED.to_string());
+    } else if !enable_checks(&approver, &root, check_for_updates) {
+        dto.warnings.push(CHECKS_NOT_ENABLED.to_string());
     }
     if let Some(token) = token.as_deref() {
         let secrets: Arc<dyn SecretStore> = Arc::new(KeyringSecretStore::new_openapi_sync());
@@ -427,6 +450,102 @@ mod tests {
             token_arg(Some(" abc ".to_string())),
             Some("abc".to_string())
         );
+    }
+
+    mod check_for_updates {
+        use super::super::*;
+        use async_trait::async_trait;
+        use rocket_collection::openapi_local::OpenApiLocalRepository;
+        use rocket_collection::openapi_source::{
+            OpenApiSource, OpenApiSourceRepository, SpecLocation, SyncInterval,
+        };
+        use rocket_collection::InMemoryConsentStore;
+        use rocket_http::spec_fetch::{SpecFetchFailure, SpecFetchOutcome, SpecFetchRequest};
+
+        struct NoFetch;
+
+        #[async_trait]
+        impl SpecFetcher for NoFetch {
+            async fn fetch(
+                &self,
+                _: SpecFetchRequest,
+            ) -> Result<SpecFetchOutcome, SpecFetchFailure> {
+                Ok(SpecFetchOutcome::NotModified)
+            }
+        }
+
+        const LINK: &str = "https://example.com/spec.json";
+
+        fn service() -> OpenApiSyncService {
+            OpenApiSyncService::new(
+                Arc::new(NoFetch),
+                Box::new(FsOpenApiSourceRepo),
+                Arc::new(KeyringSecretStore::new_openapi_sync()),
+            )
+            .with_local(Box::new(FsOpenApiLocalRepo))
+            .with_consent(Arc::new(InMemoryConsentStore::new()))
+        }
+
+        fn seed(root: &std::path::Path) {
+            let source = OpenApiSource {
+                version: 1,
+                location: SpecLocation::Https { url: LINK.into() },
+                group_by: "tags".into(),
+                spec_sha256: String::new(),
+                etag: None,
+                last_modified: None,
+                operations: Vec::new(),
+                source_id: "src-1".into(),
+                sync_interval: SyncInterval::Off,
+                last_checked_at: None,
+                last_status: None,
+                pending_sha256: None,
+                remote_refs: Vec::new(),
+                remote_refs_incomplete: false,
+            };
+            FsOpenApiSourceRepo.save(root, &source).expect("source");
+        }
+
+        fn interval(root: &std::path::Path) -> SyncInterval {
+            FsOpenApiLocalRepo
+                .load(root)
+                .expect("load")
+                .map(|l| l.sync_interval)
+                .unwrap_or_default()
+        }
+
+        #[test]
+        fn true_turns_on_five_minutes_after_the_source_is_saved() {
+            let dir = tempfile::tempdir().expect("dir");
+            seed(dir.path());
+            let svc = service();
+            assert!(svc.grant_consent_for_link(dir.path(), LINK).is_ok());
+            assert!(enable_checks(&svc, dir.path(), Some(true)));
+            assert_eq!(interval(dir.path()), SyncInterval::Min5);
+        }
+
+        #[test]
+        fn false_and_none_leave_checks_off() {
+            let dir = tempfile::tempdir().expect("dir");
+            seed(dir.path());
+            let svc = service();
+            assert!(svc.grant_consent_for_link(dir.path(), LINK).is_ok());
+            assert!(enable_checks(&svc, dir.path(), Some(false)));
+            assert!(enable_checks(&svc, dir.path(), None));
+            assert_eq!(interval(dir.path()), SyncInterval::Off);
+        }
+
+        #[test]
+        fn a_missing_source_or_consent_leaves_checks_off() {
+            let dir = tempfile::tempdir().expect("dir");
+            let svc = service();
+            assert!(!enable_checks(&svc, dir.path(), Some(true)));
+            assert_eq!(interval(dir.path()), SyncInterval::Off);
+            // A saved source without consent is refused too.
+            seed(dir.path());
+            assert!(!enable_checks(&svc, dir.path(), Some(true)));
+            assert_eq!(interval(dir.path()), SyncInterval::Off);
+        }
     }
 
     #[test]

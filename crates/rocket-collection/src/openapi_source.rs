@@ -57,16 +57,29 @@ impl OpenApiSource {
     }
 }
 
-/// How often a collection checks its spec. Persisted as snake_case names.
+/// How often a collection checks its spec. Persisted as snake_case names. A name this build
+/// does not know reads as `Off`, so a newer file never breaks status or the scheduler.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case", from = "String")]
 pub enum SyncInterval {
     #[default]
     Off,
+    #[serde(rename = "every_5_minutes")]
+    Min5,
+    #[serde(rename = "every_15_minutes")]
+    Min15,
+    #[serde(rename = "every_30_minutes")]
+    Min30,
     Hourly,
     Daily,
     Weekly,
     Monthly,
+}
+
+impl From<String> for SyncInterval {
+    fn from(text: String) -> Self {
+        SyncInterval::parse(&text).unwrap_or(SyncInterval::Off)
+    }
 }
 
 impl SyncInterval {
@@ -78,6 +91,9 @@ impl SyncInterval {
     pub fn as_secs(self) -> Option<u64> {
         match self {
             SyncInterval::Off => None,
+            SyncInterval::Min5 => Some(300),
+            SyncInterval::Min15 => Some(900),
+            SyncInterval::Min30 => Some(1800),
             SyncInterval::Hourly => Some(3600),
             SyncInterval::Daily => Some(86_400),
             SyncInterval::Weekly => Some(604_800),
@@ -89,6 +105,9 @@ impl SyncInterval {
     pub fn parse(text: &str) -> Option<SyncInterval> {
         match text {
             "off" => Some(SyncInterval::Off),
+            "every_5_minutes" => Some(SyncInterval::Min5),
+            "every_15_minutes" => Some(SyncInterval::Min15),
+            "every_30_minutes" => Some(SyncInterval::Min30),
             "hourly" => Some(SyncInterval::Hourly),
             "daily" => Some(SyncInterval::Daily),
             "weekly" => Some(SyncInterval::Weekly),
@@ -214,6 +233,36 @@ mod tests {
         assert!(!out.contains("sync_interval"), "{out}");
         assert!(!out.contains("last_checked_at"), "{out}");
         assert!(!out.contains("last_status"), "{out}");
+    }
+
+    #[test]
+    fn short_intervals_have_their_names_and_lengths() {
+        for (name, interval, secs) in [
+            ("every_5_minutes", SyncInterval::Min5, 300),
+            ("every_15_minutes", SyncInterval::Min15, 900),
+            ("every_30_minutes", SyncInterval::Min30, 1800),
+        ] {
+            assert_eq!(SyncInterval::parse(name), Some(interval));
+            assert_eq!(interval.as_secs(), Some(secs));
+            let json = serde_json::to_string(&interval).expect("write");
+            assert_eq!(json, format!("\"{name}\""));
+            assert_eq!(
+                serde_json::from_str::<SyncInterval>(&json).expect("read"),
+                interval
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_interval_reads_as_off_without_an_error() {
+        let read: SyncInterval = serde_json::from_str("\"every_2_hours\"").expect("read");
+        assert_eq!(read, SyncInterval::Off);
+        assert_eq!(SyncInterval::parse("every_2_hours"), None);
+        let old: SyncInterval = serde_json::from_str("\"hourly\"").expect("read");
+        assert_eq!(old, SyncInterval::Hourly);
+        let yaml = "version: 1\nlocation:\n  kind: https\n  url: https://example.com/a.json\nsync_interval: every_2_hours\n";
+        let source: OpenApiSource = serde_yaml::from_str(yaml).expect("parse");
+        assert_eq!(source.sync_interval, SyncInterval::Off);
     }
 
     #[test]

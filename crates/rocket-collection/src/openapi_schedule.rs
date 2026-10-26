@@ -176,6 +176,24 @@ mod tests {
     }
 
     #[test]
+    fn short_intervals_wait_their_length_plus_a_small_jitter() {
+        for (interval, secs) in [
+            (SyncInterval::Min5, 300i64),
+            (SyncInterval::Min15, 900),
+            (SyncInterval::Min30, 1800),
+        ] {
+            for id in ["a", "b", "src-1", "0b9f-1", "zz"] {
+                let last = ago(0);
+                let mut p = plan(interval, Some(&last));
+                p.source_id = id;
+                let wait = (next_check_at(&p).expect("due") - now()).num_seconds();
+                assert!(wait >= secs, "{interval:?} {wait}");
+                assert!(wait * 10 <= secs * 11, "{interval:?} {id} {wait}");
+            }
+        }
+    }
+
+    #[test]
     fn failure_follows_the_backoff_ladder() {
         let d = SyncInterval::Monthly;
         let ladder: Vec<u64> = (1..=7).map(|n| backoff_secs(n, d, None)).collect();

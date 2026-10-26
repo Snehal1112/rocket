@@ -37,6 +37,10 @@ pub struct OpenApiLocalState {
     /// A success clears it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_message: Option<String>,
+    /// True when the stored interval name was not understood and reads as off. Set by the
+    /// repository on load and never written.
+    #[serde(skip)]
+    pub interval_unknown: bool,
 }
 
 fn is_zero(n: &u32) -> bool {
@@ -55,6 +59,7 @@ impl Default for OpenApiLocalState {
             not_before: None,
             opt_in_root: None,
             last_message: None,
+            interval_unknown: false,
         }
     }
 }

@@ -5,11 +5,12 @@ use rocket_shared::error::{DomainError, DomainResult};
 use std::path::Path;
 
 /// Files under `.rocket` that this feature owns and a transaction may touch.
-pub const OWNED_STATE_FILES: [&str; 4] = [
+pub const OWNED_STATE_FILES: [&str; 5] = [
     "openapi-source.yml",
     "openapi-baseline.json",
     "openapi-pending.spec",
     "openapi-local.json",
+    "openapi-applied.spec",
 ];
 
 /// Names that Windows treats as devices, with or without an extension.
