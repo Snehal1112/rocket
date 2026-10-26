@@ -14,7 +14,7 @@ pub(crate) use model::{
 pub(crate) use reader::parse_openapi;
 pub use source_record::source_record;
 pub use bundle::{
-    bundle_spec, find_remote_refs, inline_refs, lost_refs_message, ref_failure_message, refs_unchanged,
+    bundle_spec, find_remote_refs, inline_refs, lost_refs_message, ref_failure_message, whole_bundle_failed_message, refs_unchanged,
     refs_unchanged_labeled, Bundle, RemoteRefState,
 };
 pub use source_url::{fetch_target, parse_spec_url, FetchTarget};

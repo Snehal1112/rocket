@@ -1005,3 +1005,28 @@ async fn a_missing_file_in_another_repository_does_not_ask_for_a_token() {
         .expect("note");
     assert!(own.contains("add an access token"), "{own}");
 }
+
+#[tokio::test]
+async fn unloaded_lists_a_failing_file_and_a_limit_skipped_file() {
+    let fetcher = FakeFetcher::default();
+    let urls: Vec<String> = (0..22)
+        .map(|i| format!("https://example.com/f{i}.yaml"))
+        .collect();
+    for u in urls.iter().skip(1) {
+        fetcher.serve(u, "parameters:\n  p: { name: p, in: query }\n");
+    }
+    let refs: Vec<String> = urls.iter().map(|u| format!("{u}#/parameters/p")).collect();
+    let refs: Vec<&str> = refs.iter().map(String::as_str).collect();
+    let bundle = bundle_spec(&fetcher, &spec_with(&refs), &location(), None, &[])
+        .await
+        .expect("bundle");
+    assert!(bundle.incomplete);
+    // f0 answers 404 (missing), f20 is past the 20 file limit.
+    assert!(bundle.unloaded.contains(&urls[0]), "{:?}", bundle.unloaded);
+    assert!(bundle.unloaded.contains(&urls[20]), "{:?}", bundle.unloaded);
+    assert!(!bundle.unloaded.contains(&urls[1]));
+    let mut dedup = bundle.unloaded.clone();
+    dedup.sort();
+    dedup.dedup();
+    assert_eq!(dedup.len(), bundle.unloaded.len());
+}

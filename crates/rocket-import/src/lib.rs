@@ -13,7 +13,7 @@ pub use importer::{
 };
 pub use converter::openapi::baseline_hash;
 pub use openapi::{
-    bundle_spec, find_remote_refs, inline_refs, lost_refs_message, ref_failure_message, refs_unchanged,
+    bundle_spec, find_remote_refs, inline_refs, lost_refs_message, ref_failure_message, whole_bundle_failed_message, refs_unchanged,
     refs_unchanged_labeled, Bundle, RemoteRefState,
     build_apply, item_digest, plan_with_links, AppliedItem, AppliedKind, ApplyInputs, ApplyOutput, ApplyReport,
     ApprovedItem, FileChange, FileChangeKind, ParsedSpec, RequestRenderer, Selection, SkipRequest,

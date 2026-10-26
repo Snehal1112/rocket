@@ -49,6 +49,13 @@ pub struct Bundle {
     pub fetch_failed: bool,
     /// The wait a rate-limited file asked for, in seconds, if any file did.
     pub retry_after_secs: Option<u64>,
+    /// Canonical addresses of files the bundler met but did not inline (a failed fetch, an
+    /// unusable body, a limit). A file the spec no longer refers to is never met, so it is
+    /// never listed. Without duplicates.
+    pub unloaded: Vec<String>,
+    /// True when the whole bundle step failed (the main text is too complex, or the files
+    /// grow too large combined), so every file of an earlier bundle counts as lost.
+    pub whole_failed: bool,
 }
 
 /// What one `$ref` string points at.
@@ -465,6 +472,11 @@ pub fn lost_refs_message(file_urls: &[&str]) -> String {
     )
 }
 
+/// The message when a whole bundle failed and files of an earlier bundle are lost with it.
+pub fn whole_bundle_failed_message() -> String {
+    "The files the spec refers to could not be combined with it.".to_string()
+}
+
 struct Queued {
     url: String,
     depth: usize,
@@ -477,6 +489,15 @@ struct LimitNotes {
     count: bool,
     size: bool,
     yaml: bool,
+    /// The addresses already listed in `Bundle.unloaded`.
+    listed: HashSet<String>,
+}
+
+/// Lists a met file that was not inlined, once.
+fn mark_unloaded(bundle: &mut Bundle, noted: &mut LimitNotes, url: &str) {
+    if noted.listed.insert(url.to_string()) {
+        bundle.unloaded.push(url.to_string());
+    }
 }
 
 fn enqueue(
@@ -499,6 +520,7 @@ fn enqueue(
                 ));
             }
             bundle.incomplete = true;
+            mark_unloaded(bundle, noted, &url);
         } else if seen.len() >= MAX_FILES {
             if !noted.count {
                 noted.count = true;
@@ -507,6 +529,7 @@ fn enqueue(
                 ));
             }
             bundle.incomplete = true;
+            mark_unloaded(bundle, noted, &url);
         } else {
             seen.insert(url.clone());
             queue.push(Queued { url, depth });
@@ -553,6 +576,8 @@ async fn bundle_with_limit(
         incomplete: false,
         fetch_failed: false,
         retry_after_secs: None,
+        unloaded: Vec::new(),
+        whole_failed: false,
     };
     // One budget for the main text and every file, so many files cannot add up past it. Its
     // node limit grows with the bytes accepted so far (`node_limit` of their total).
@@ -563,6 +588,7 @@ async fn bundle_with_limit(
         Err(ParseFail::Invalid) => return Ok(bundle),
         Err(ParseFail::TooComplex) => {
             bundle.incomplete = true;
+            bundle.whole_failed = true;
             bundle
                 .notes
                 .push("The spec is too large or too complex to follow its references.".to_string());
@@ -596,6 +622,7 @@ async fn bundle_with_limit(
         let label = file_label(&url);
         if yaml_spent {
             bundle.incomplete = true;
+            mark_unloaded(&mut bundle, &mut noted, &url);
             if !noted.yaml {
                 noted.yaml = true;
                 bundle.notes.push(
@@ -607,6 +634,7 @@ async fn bundle_with_limit(
         }
         if total >= max_total {
             bundle.incomplete = true;
+            mark_unloaded(&mut bundle, &mut noted, &url);
             if !noted.size {
                 noted.size = true;
                 bundle.notes.push(SIZE_NOTE.to_string());
@@ -625,6 +653,7 @@ async fn bundle_with_limit(
             Ok(SpecFetchOutcome::NotModified) => {
                 bundle.incomplete = true;
                 bundle.fetch_failed = true;
+                mark_unloaded(&mut bundle, &mut noted, &url);
                 bundle.notes.push(format!(
                     "The file {label} could not be loaded: the server sent no content."
                 ));
@@ -632,6 +661,7 @@ async fn bundle_with_limit(
             }
             Err(SpecFetchFailure::TooLarge) => {
                 bundle.incomplete = true;
+                mark_unloaded(&mut bundle, &mut noted, &url);
                 total = max_total;
                 if !noted.size {
                     noted.size = true;
@@ -642,6 +672,7 @@ async fn bundle_with_limit(
             Err(failure) => {
                 bundle.incomplete = true;
                 bundle.fetch_failed = true;
+                mark_unloaded(&mut bundle, &mut noted, &url);
                 if let SpecFetchFailure::RateLimited {
                     retry_after_secs: Some(secs),
                 } = &failure
@@ -657,6 +688,7 @@ async fn bundle_with_limit(
         };
         if total + body.len() > max_total {
             bundle.incomplete = true;
+            mark_unloaded(&mut bundle, &mut noted, &url);
             total = max_total;
             if !noted.size {
                 noted.size = true;
@@ -669,6 +701,7 @@ async fn bundle_with_limit(
         yaml_budget.set_max_nodes(node_limit(total));
         let Ok(text) = String::from_utf8(body) else {
             bundle.incomplete = true;
+            mark_unloaded(&mut bundle, &mut noted, &url);
             bundle.notes.push(format!(
                 "The file {label} could not be loaded: it is not text."
             ));
@@ -678,6 +711,7 @@ async fn bundle_with_limit(
             Ok(value) => value,
             Err(failure) => {
                 bundle.incomplete = true;
+                mark_unloaded(&mut bundle, &mut noted, &url);
                 bundle.notes.push(match failure {
                     ParseFail::Invalid => format!(
                         "The file {label} could not be loaded: it is not a YAML or JSON mapping."
@@ -726,6 +760,7 @@ async fn bundle_with_limit(
     if text.len() > max_total {
         bundle.refs.clear();
         bundle.incomplete = true;
+        bundle.whole_failed = true;
         bundle.notes.push(
             "The referenced files grow too large when combined, so none of them were used."
                 .to_string(),

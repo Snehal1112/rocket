@@ -21,7 +21,7 @@ use rocket_http::spec_fetch::{
 };
 use rocket_import::{
     bundle_spec, check_spec_text, fetch_failure_message, fetch_target, lost_refs_message,
-    ref_failure_message, refs_unchanged_labeled, Bundle,
+    ref_failure_message, refs_unchanged_labeled, whole_bundle_failed_message, Bundle,
 };
 use rocket_shared::error::{DomainError, DomainResult};
 use sha2::{Digest, Sha256};
@@ -474,22 +474,27 @@ impl OpenApiSyncService {
                 );
             }
         };
-        // A file that loaded last time and is lost now keeps everything as it was. A file that
-        // never loaded (a private repository, say) only keeps the incomplete flag, so it is
-        // tried again at the next check.
+        // A file that loaded last time and was met but not loaded now keeps everything as it
+        // was. A file the spec dropped is never met, so it is never lost. A file that never
+        // loaded only keeps the incomplete flag, so it is tried again at the next check.
         if bundle.incomplete {
             let lost: Vec<&str> = source
                 .remote_refs
                 .iter()
-                .filter(|p| !bundle.refs.iter().any(|n| n.url == p.url))
+                .filter(|p| bundle.whole_failed || bundle.unloaded.iter().any(|u| *u == p.url))
                 .map(|p| p.url.as_str())
                 .collect();
             if !lost.is_empty() {
+                let message = if bundle.whole_failed {
+                    whole_bundle_failed_message()
+                } else {
+                    lost_refs_message(&lost)
+                };
                 return self.fail(
                     collection_root,
                     &now,
                     "ref_unavailable",
-                    lost_refs_message(&lost),
+                    message,
                     bundle.retry_after_secs,
                 );
             }
@@ -1348,6 +1353,23 @@ mod tests {
             } => assert_eq!(retry_after_secs, Some(90)),
             other => panic!("{other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn a_dropped_file_and_a_new_failing_file_do_not_trap_the_check() {
+        let f = Fixture::new(with_ref_source(https_main(), DEFS));
+        // The spec drops the stored file and refers to a new one that answers 404.
+        f.fetcher.push(fetched(
+            with_refs(&["https://example.com/new.yaml#/parameters/p"]),
+            "\"m2\"",
+        ));
+        f.fetcher.push(Err(SpecFetchFailure::NotFound));
+        let out = f.svc.check(f.root()).await.expect("check");
+        assert!(matches!(out, CheckOutcome::Changed { .. }), "{out:?}");
+        let s = f.load();
+        assert!(s.remote_refs.is_empty());
+        assert!(s.remote_refs_incomplete);
+        assert_eq!(f.local().consecutive_failures, 0);
     }
 
     #[tokio::test]
