@@ -19,7 +19,7 @@ import {
   useSetToken,
 } from '@/lib/queries/openapi-sync-queries';
 import type { OpenApiSyncInterval, OpenApiSyncStatus } from '@/lib/tauri-api';
-import { intervalLabel } from './specSyncView';
+import { intervalLabel, isGithubLocation } from './specSyncView';
 import { syncErrorMessage } from './syncErrors';
 
 const INTERVALS: OpenApiSyncInterval[] = ['off', 'hourly', 'daily', 'weekly', 'monthly'];
@@ -31,6 +31,7 @@ interface SpecSyncSettingsProps {
 
 function SettingsBody({ collection, status }: SpecSyncSettingsProps) {
   const granted = status.consent === 'granted';
+  const github = isGithubLocation(status.location);
   // The token flag is only requested while this section is mounted.
   const tokenStatus = useOpenApiSyncStatus(collection, true);
   const hasToken = tokenStatus.data?.hasToken === true;
@@ -82,51 +83,71 @@ function SettingsBody({ collection, status }: SpecSyncSettingsProps) {
           </SelectContent>
         </Select>
         {!granted && (
-          <p className='text-xs text-muted-foreground'>Approve the spec link to set an interval.</p>
+          <p className='text-xs text-muted-foreground'>
+            Approve the spec link to set an interval. The stored interval and token come back when
+            the link is approved again.
+          </p>
         )}
-        {intervalError && <p className='text-xs text-destructive'>{intervalError}</p>}
+        {intervalError && (
+          <p role='alert' className='text-xs text-destructive'>
+            {intervalError}
+          </p>
+        )}
       </div>
 
-      <div className='flex flex-col gap-1.5'>
-        <Label htmlFor='spec-sync-token'>Access token</Label>
-        <p className='text-xs text-muted-foreground'>
-          Tokens work with GitHub links only. The token is kept in the keychain and never shown.
-        </p>
-        {hasToken && (
+      {github ? (
+        <div className='flex flex-col gap-1.5'>
+          <Label htmlFor='spec-sync-token'>Access token</Label>
+          <p className='text-xs text-muted-foreground'>
+            Tokens work with GitHub links only. The token is kept in the keychain and never shown.
+          </p>
+          {hasToken && (
+            <div className='flex items-center gap-2'>
+              <SavedPill persistent>A token is stored</SavedPill>
+              <Button
+                size='sm'
+                variant='outline'
+                className='h-7'
+                onClick={() => clearToken.mutate()}
+                disabled={clearToken.isPending}
+              >
+                Clear
+              </Button>
+            </div>
+          )}
           <div className='flex items-center gap-2'>
-            <SavedPill persistent>A token is stored</SavedPill>
+            <Input
+              id='spec-sync-token'
+              type='password'
+              autoComplete='new-password'
+              aria-describedby={tokenError ? 'spec-sync-token-error' : undefined}
+              value={token}
+              onChange={(e) => setTokenText(e.target.value)}
+              placeholder={hasToken ? 'Paste a new token to replace it' : 'Paste the token'}
+              className='h-8 max-w-sm text-sm'
+            />
             <Button
               size='sm'
-              variant='outline'
-              className='h-7'
-              onClick={() => clearToken.mutate()}
-              disabled={clearToken.isPending}
+              onClick={saveToken}
+              disabled={token.trim() === '' || setToken.isPending}
             >
-              Clear
+              Save token
             </Button>
           </div>
-        )}
-        <div className='flex items-center gap-2'>
-          <Input
-            id='spec-sync-token'
-            type='password'
-            autoComplete='off'
-            value={token}
-            onChange={(e) => setTokenText(e.target.value)}
-            placeholder={hasToken ? 'Paste a new token to replace it' : 'Paste the token'}
-            className='h-8 max-w-sm text-sm'
-          />
-          <Button
-            size='sm'
-            onClick={saveToken}
-            disabled={token.trim() === '' || setToken.isPending}
-          >
-            Save token
-          </Button>
+          {tokenError && (
+            <p id='spec-sync-token-error' role='alert' className='text-xs text-destructive'>
+              {tokenError}
+            </p>
+          )}
+          {clearError && (
+            <p role='alert' className='text-xs text-destructive'>
+              {clearError}
+            </p>
+          )}
         </div>
-        {tokenError && <p className='text-xs text-destructive'>{tokenError}</p>}
-        {clearError && <p className='text-xs text-destructive'>{clearError}</p>}
-      </div>
+      ) : (
+        <p className='text-xs text-muted-foreground'>Tokens work with GitHub links only.</p>
+      )}
 
       {granted && (
         <div className='flex flex-col gap-1.5'>
@@ -140,7 +161,11 @@ function SettingsBody({ collection, status }: SpecSyncSettingsProps) {
               Stop trusting this link
             </Button>
           </div>
-          {revokeError && <p className='text-xs text-destructive'>{revokeError}</p>}
+          {revokeError && (
+            <p role='alert' className='text-xs text-destructive'>
+              {revokeError}
+            </p>
+          )}
         </div>
       )}
     </>

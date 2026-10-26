@@ -1,4 +1,5 @@
-import { screen } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as tauriApi from '@/lib/tauri-api';
@@ -49,11 +50,47 @@ describe('SpecSyncConsentBanner', () => {
     expect(tauriApi.grantOpenApiSyncConsent).toHaveBeenCalledWith('c', LOCATION);
   });
 
-  it('shows a clear sentence when the link cannot be approved', async () => {
+  it('does not approve a link that changed after it was shown without a second click', async () => {
+    vi.mocked(tauriApi.grantOpenApiSyncConsent).mockResolvedValue(undefined);
+    const client = new QueryClient();
+    const ui = (location: string) => (
+      <QueryClientProvider client={client}>
+        <SpecSyncConsentBanner collection='c' location={location} consent='missing' />
+      </QueryClientProvider>
+    );
+    const { rerender } = render(ui('https://a.example.com/spec.json'));
+    rerender(ui('https://evil.example.com/spec.json'));
+    expect(screen.getByText('The link changed. Review it.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull();
+    expect(tauriApi.grantOpenApiSyncConsent).not.toHaveBeenCalled();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Review the new link' }));
+    expect(tauriApi.grantOpenApiSyncConsent).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Approve' }));
+    expect(tauriApi.grantOpenApiSyncConsent).toHaveBeenCalledWith('c', 'https://evil.example.com/spec.json');
+  });
+
+  it('shows the slash sentence only for a GitHub link', async () => {
     vi.mocked(tauriApi.grantOpenApiSyncConsent).mockRejectedValue(
       'This spec location cannot be approved because its link is ambiguous.',
     );
     renderWithQuery(<SpecSyncConsentBanner collection='c' location={LOCATION} consent='missing' />);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Approve' }));
+    await screen.findByText(/cannot be approved because it is ambiguous/);
+    expect(screen.queryByText(/branch name with a slash/)).toBeNull();
+  });
+
+  it('shows a clear sentence when the link cannot be approved', async () => {
+    vi.mocked(tauriApi.grantOpenApiSyncConsent).mockRejectedValue(
+      'This spec location cannot be approved because its link is ambiguous.',
+    );
+    renderWithQuery(
+      <SpecSyncConsentBanner
+        collection='c'
+        location='https://github.com/acme/orders/blob/feat/x/spec.yaml'
+        consent='missing'
+      />,
+    );
     await userEvent.setup().click(screen.getByRole('button', { name: 'Approve' }));
     expect(
       await screen.findByText(/cannot be approved because it is ambiguous/),

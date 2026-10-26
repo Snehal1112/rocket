@@ -79,6 +79,7 @@ describe('SpecSyncTab', () => {
     await screen.findByText('Folder: pets / read');
     expect(screen.getByRole('button', { name: 'Check now' })).toBeEnabled();
     expect(screen.queryByText('Trust this spec link')).toBeNull();
+    expect(screen.queryByText(/not fetched on this machine/)).toBeNull();
   });
 
   it('asks for approval first, keeps Check now off and leaves apply and skip alone', async () => {
@@ -90,6 +91,11 @@ describe('SpecSyncTab', () => {
     expect(await screen.findByText('Trust this spec link')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Check now' })).toBeDisabled();
     await screen.findByText('Folder: pets / read');
+    expect(
+      screen.getByText(
+        'This pending spec came with the collection files. It was not fetched on this machine.',
+      ),
+    ).toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole('checkbox', { name: 'Select Add pet' }));
     expect(screen.getByRole('button', { name: /^Apply/ })).toBeEnabled();
   });

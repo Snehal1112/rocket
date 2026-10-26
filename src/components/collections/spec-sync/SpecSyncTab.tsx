@@ -196,6 +196,11 @@ export function SpecSyncTab({ collection }: SpecSyncTabProps) {
   } else {
     body = (
       <div className='flex min-h-0 flex-1 flex-col'>
+        {s.consent !== 'granted' && (
+          <p className='px-4 pt-2 text-xs text-muted-foreground'>
+            This pending spec came with the collection files. It was not fetched on this machine.
+          </p>
+        )}
         <SpecSyncActionsBar
           query={query}
           onQueryChange={setQuery}
@@ -256,7 +261,12 @@ export function SpecSyncTab({ collection }: SpecSyncTabProps) {
     <div className='flex h-full flex-col overflow-hidden'>
       <SpecSyncHeader collection={collection} status={s} />
       {s.consent !== 'granted' && (
-        <SpecSyncConsentBanner collection={collection} location={s.location} consent={s.consent} />
+        <SpecSyncConsentBanner
+          key={collection}
+          collection={collection}
+          location={s.location}
+          consent={s.consent}
+        />
       )}
       <SpecSyncSettings collection={collection} status={s} />
       <div className='flex min-h-0 flex-1 flex-col'>{body}</div>

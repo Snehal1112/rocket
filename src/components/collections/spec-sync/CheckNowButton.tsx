@@ -1,5 +1,5 @@
 import { RefreshCw } from 'lucide-react';
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useCheckNow } from '@/lib/queries/openapi-sync-queries';
@@ -28,6 +28,11 @@ export function CheckNowButton({ collection, consent }: CheckNowButtonProps) {
   // A ref closes the gap before the pending state renders on a fast double click.
   const busy = useRef(false);
   const granted = consent === 'granted';
+  const { reset } = check;
+  // An outcome belongs to an approved link, so it goes when the approval does.
+  useEffect(() => {
+    if (consent !== 'granted') reset();
+  }, [consent, reset]);
   const run = () => {
     if (busy.current) return;
     busy.current = true;
@@ -46,7 +51,7 @@ export function CheckNowButton({ collection, consent }: CheckNowButtonProps) {
       <TooltipProvider>
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className='inline-flex'>
+            <span className='inline-flex' tabIndex={granted ? undefined : 0}>
               <Button
                 size='sm'
                 variant='outline'

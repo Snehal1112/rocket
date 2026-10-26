@@ -107,6 +107,8 @@ export function useSetToken(collection: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (token: string) => setOpenApiSyncToken(collection, token),
+    // The cache drops the mutation as soon as it settles, so the token does not linger.
+    gcTime: 0,
     onSettled: () => invalidateSync(queryClient, collection),
   });
 }

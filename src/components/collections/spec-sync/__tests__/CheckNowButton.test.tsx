@@ -1,4 +1,5 @@
-import { screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as tauriApi from '@/lib/tauri-api';
@@ -33,6 +34,31 @@ describe('CheckNowButton', () => {
     await waitFor(() => expect(screen.getByText('No changes in the spec.')).toBeInTheDocument());
     expect(tauriApi.checkOpenApiSyncNow).toHaveBeenCalledTimes(1);
     expect(tauriApi.checkOpenApiSyncNow).toHaveBeenCalledWith('c');
+  });
+
+  it('clears the outcome line once approval is gone', async () => {
+    vi.mocked(tauriApi.checkOpenApiSyncNow).mockResolvedValue({ state: 'changed' });
+    const client = new QueryClient();
+    const ui = (consent: 'granted' | 'missing') => (
+      <QueryClientProvider client={client}>
+        <CheckNowButton collection='c' consent={consent} />
+      </QueryClientProvider>
+    );
+    const { rerender } = render(ui('granted'));
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Check now' }));
+    await screen.findByText('A new version of the spec was found.');
+    rerender(ui('missing'));
+    await waitFor(() =>
+      expect(screen.queryByText('A new version of the spec was found.')).toBeNull(),
+    );
+  });
+
+  it('lets the disabled button be reached by keyboard', () => {
+    renderWithQuery(<CheckNowButton collection='c' consent='missing' />);
+    expect(screen.getByRole('button', { name: 'Check now' }).parentElement).toHaveAttribute(
+      'tabindex',
+      '0',
+    );
   });
 
   it('says a new version was found', async () => {

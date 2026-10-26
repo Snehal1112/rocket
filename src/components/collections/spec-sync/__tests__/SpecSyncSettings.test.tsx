@@ -1,10 +1,13 @@
-import { screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as tauriApi from '@/lib/tauri-api';
 import { renderWithQuery } from '@/test/trust-fixtures';
 import { SpecSyncSettings } from '../SpecSyncSettings';
 import { makeStatus } from './fixtures';
+
+const GH = 'https://github.com/acme/orders/blob/main/openapi.yaml';
 
 vi.mock('@/lib/tauri-api', async () => {
   const actual = await vi.importActual<typeof tauriApi>('@/lib/tauri-api');
@@ -64,7 +67,7 @@ describe('SpecSyncSettings', () => {
 
   it('keeps the token field write-only, empty and cleared after save', async () => {
     vi.mocked(tauriApi.setOpenApiSyncToken).mockResolvedValue(undefined);
-    renderWithQuery(<SpecSyncSettings collection='s4' status={makeStatus()} />);
+    renderWithQuery(<SpecSyncSettings collection='s4' status={makeStatus({ location: GH })} />);
     const user = await open();
     const input = await screen.findByLabelText('Access token');
     expect(input).toHaveAttribute('type', 'password');
@@ -78,7 +81,10 @@ describe('SpecSyncSettings', () => {
   it('shows the consent sentence when saving without approval', async () => {
     vi.mocked(tauriApi.setOpenApiSyncToken).mockRejectedValue('consent_required: no grant');
     renderWithQuery(
-      <SpecSyncSettings collection='s5' status={makeStatus({ consent: 'missing' })} />,
+      <SpecSyncSettings
+        collection='s5'
+        status={makeStatus({ consent: 'missing', location: GH })}
+      />,
     );
     const user = await open();
     await user.type(await screen.findByLabelText('Access token'), 'tok');
@@ -93,7 +99,7 @@ describe('SpecSyncSettings', () => {
   it('shows that a token is stored and clears it', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus({ hasToken: true }));
     vi.mocked(tauriApi.clearOpenApiSyncToken).mockResolvedValue(undefined);
-    renderWithQuery(<SpecSyncSettings collection='s6' status={makeStatus()} />);
+    renderWithQuery(<SpecSyncSettings collection='s6' status={makeStatus({ location: GH })} />);
     const user = await open();
     expect(await screen.findByText('A token is stored')).toBeInTheDocument();
     expect(screen.getByLabelText('Access token')).toHaveValue('');
@@ -107,5 +113,57 @@ describe('SpecSyncSettings', () => {
     const user = await open();
     await user.click(screen.getByRole('button', { name: 'Stop trusting this link' }));
     expect(tauriApi.revokeOpenApiSyncConsent).toHaveBeenCalledWith('s7');
+  });
+
+  it('leaves no token in the mutation cache after the save settles', async () => {
+    vi.mocked(tauriApi.setOpenApiSyncToken).mockResolvedValue(undefined);
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <SpecSyncSettings collection='s8' status={makeStatus({ location: GH })} />
+      </QueryClientProvider>,
+    );
+    const user = await open();
+    await user.type(await screen.findByLabelText('Access token'), 'ghp_secret');
+    await user.click(screen.getByRole('button', { name: 'Save token' }));
+    await waitFor(() => expect(tauriApi.setOpenApiSyncToken).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByLabelText('Access token')).toHaveValue(''));
+    await waitFor(() =>
+      expect(JSON.stringify(queryClient.getMutationCache().getAll().map((m) => m.state))).not.toContain(
+        'ghp_secret',
+      ),
+    );
+  });
+
+  it('hides Clear when no token is stored', async () => {
+    renderWithQuery(<SpecSyncSettings collection='s9' status={makeStatus({ location: GH })} />);
+    await open();
+    await screen.findByLabelText('Access token');
+    expect(screen.queryByRole('button', { name: 'Clear' })).toBeNull();
+    expect(screen.queryByText('A token is stored')).toBeNull();
+  });
+
+  it('hides the token field for a link that is not on GitHub', async () => {
+    renderWithQuery(<SpecSyncSettings collection='s10' status={makeStatus()} />);
+    await open();
+    expect(screen.getByText('Tokens work with GitHub links only.')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Access token')).toBeNull();
+  });
+
+  it('uses new-password autocomplete on the token field', async () => {
+    renderWithQuery(<SpecSyncSettings collection='s11' status={makeStatus({ location: GH })} />);
+    await open();
+    expect(await screen.findByLabelText('Access token')).toHaveAttribute('autocomplete', 'new-password');
+  });
+
+  it('hides Stop trusting after approval is gone and says the settings come back', async () => {
+    renderWithQuery(
+      <SpecSyncSettings collection='s12' status={makeStatus({ consent: 'missing' })} />,
+    );
+    await open();
+    expect(screen.queryByRole('button', { name: 'Stop trusting this link' })).toBeNull();
+    expect(
+      screen.getByText(/stored interval and token come back when the link is approved again/),
+    ).toBeInTheDocument();
   });
 });

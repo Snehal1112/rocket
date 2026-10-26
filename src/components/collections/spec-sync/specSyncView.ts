@@ -111,6 +111,16 @@ export function intervalLabel(interval: OpenApiSyncInterval): string {
   return INTERVAL_LABEL[interval];
 }
 
+/** True for a GitHub file link, the only kind that takes a token. */
+export function isGithubLocation(location: string): boolean {
+  try {
+    const url = new URL(location);
+    return url.protocol === 'https:' && url.host === 'github.com';
+  } catch {
+    return false;
+  }
+}
+
 /** A link with a query or hash is split into a short form and the full text. */
 export function splitLocation(location: string): { short: string; full: string | null } {
   try {
