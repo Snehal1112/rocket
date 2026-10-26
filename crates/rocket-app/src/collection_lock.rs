@@ -23,3 +23,19 @@ pub(crate) fn collection_lock(root: &Path) -> Arc<std::sync::Mutex<()>> {
         .unwrap_or_else(|e| e.into_inner());
     Arc::clone(map.entry(key).or_default())
 }
+
+/// Runs `f` while holding the lock of `collection`, found through `repo`. When the repository
+/// has no root for it (a test double, or a missing collection) `f` runs without the lock and
+/// reports its own error. `f` must not take the lock again and must not await.
+pub(crate) fn with_collection_lock<T>(
+    repo: &dyn rocket_collection::CollectionRepository,
+    collection: &str,
+    f: impl FnOnce() -> T,
+) -> T {
+    let Ok(root) = repo.collection_root_path(collection) else {
+        return f();
+    };
+    let lock = collection_lock(&root);
+    let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+    f()
+}

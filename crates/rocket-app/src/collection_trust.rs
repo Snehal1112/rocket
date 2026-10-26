@@ -5,6 +5,7 @@
 //! user allowed on this computer. Consumers call `effective_capabilities` and never read
 //! the raw request fields.
 
+use crate::collection_lock::with_collection_lock;
 use std::sync::Arc;
 
 use rocket_collection::settings::SandboxMode;
@@ -127,17 +128,20 @@ impl CollectionTrustService {
         self.store.put(&identity, grant)?;
         match capability {
             Capability::DeveloperMode | Capability::AgentRun => {
-                let mut settings = self.repo.get_settings(collection)?;
-                if capability == Capability::DeveloperMode {
-                    settings.sandbox_mode = if enabled {
-                        SandboxMode::Developer
+                // The read-modify-write shares the lock with editor saves and the sync apply.
+                with_collection_lock(self.repo.as_ref(), collection, || {
+                    let mut settings = self.repo.get_settings(collection)?;
+                    if capability == Capability::DeveloperMode {
+                        settings.sandbox_mode = if enabled {
+                            SandboxMode::Developer
+                        } else {
+                            SandboxMode::Safe
+                        };
                     } else {
-                        SandboxMode::Safe
-                    };
-                } else {
-                    settings.agent_autonomy_enabled = enabled;
-                }
-                self.repo.save_settings(collection, &settings)?;
+                        settings.agent_autonomy_enabled = enabled;
+                    }
+                    self.repo.save_settings(collection, &settings)
+                })?;
                 self.publish_settings_saved(collection);
             }
             _ => {}
@@ -153,9 +157,11 @@ impl CollectionTrustService {
         let mut grant = self.current_grant(&identity);
         grant.context_roots = normalized.clone();
         self.store.put(&identity, grant)?;
-        let mut settings = self.repo.get_settings(collection)?;
-        settings.script_context_roots = normalized;
-        self.repo.save_settings(collection, &settings)?;
+        with_collection_lock(self.repo.as_ref(), collection, || {
+            let mut settings = self.repo.get_settings(collection)?;
+            settings.script_context_roots = normalized;
+            self.repo.save_settings(collection, &settings)
+        })?;
         self.publish_settings_saved(collection);
         self.publish_trust_changed(collection);
         Ok(())

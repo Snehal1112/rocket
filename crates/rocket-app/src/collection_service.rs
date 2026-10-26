@@ -1,4 +1,4 @@
-use crate::collection_lock::collection_lock;
+use crate::collection_lock::{collection_lock, with_collection_lock};
 use crate::flow_references::FlowReferenceUpdater;
 use rocket_audit::{
     actor::AuditActor,
@@ -58,12 +58,7 @@ impl CollectionService {
     /// calls only `*_unlocked` helpers inside. When the root is unknown (the repository has no
     /// path, or the collection is missing) `f` runs without the lock and reports its own error.
     fn locked<T>(&self, collection: &str, f: impl FnOnce() -> T) -> T {
-        let Ok(root) = self.repo.collection_root_path(collection) else {
-            return f();
-        };
-        let lock = collection_lock(&root);
-        let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
-        f()
+        with_collection_lock(self.repo.as_ref(), collection, f)
     }
 
     /// Like `locked` for a move between two collections. Both locks are taken in path order,

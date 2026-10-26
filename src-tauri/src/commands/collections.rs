@@ -112,7 +112,7 @@ pub fn get_graphql_request(
 }
 
 /// Saves a GraphQL request. The contract audit hook is HTTP-only, so it does not run here.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_graphql_request(
     collection: String,
     path: String,
@@ -130,7 +130,7 @@ pub fn create_collection(
     svc.create(&name)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_collection(
     name: String,
     svc: State<'_, CollectionService>,
@@ -138,7 +138,7 @@ pub fn delete_collection(
     svc.delete(&name)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn rename_collection(
     old_name: String,
     new_name: String,
@@ -157,7 +157,7 @@ pub fn get_grpc_request(
 }
 
 /// Saves a gRPC request. The contract audit hook is HTTP-only, so it does not run here.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_grpc_request(
     collection: String,
     path: String,
@@ -176,7 +176,7 @@ pub fn get_websocket_request(
     svc.get_websocket_request(&collection, &path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_websocket_request(
     collection: String,
     path: String,
@@ -186,7 +186,7 @@ pub fn save_websocket_request(
     svc.save_websocket_request(&collection, &path, &request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_request(
     collection: String,
     path: String,
@@ -196,7 +196,7 @@ pub fn create_request(
     svc.create_request(&collection, &path, &request)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn duplicate_request(
     collection: String,
     path: String,
@@ -205,7 +205,7 @@ pub fn duplicate_request(
     svc.duplicate_request(&collection, &path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_request(
     collection: String,
     path: String,
@@ -253,7 +253,7 @@ pub fn save_request(
     Ok(saved)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn rename_request(
     collection: String,
     old_path: String,
@@ -263,7 +263,7 @@ pub fn rename_request(
     svc.rename_request(&collection, &old_path, &new_name)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_request(
     collection: String,
     path: String,
@@ -272,7 +272,7 @@ pub fn delete_request(
     svc.delete_request(&collection, &path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_folder(
     collection: String,
     path: String,
@@ -281,7 +281,7 @@ pub fn create_folder(
     svc.create_folder(&collection, &path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_folder(
     collection: String,
     path: String,
@@ -290,7 +290,7 @@ pub fn delete_folder(
     svc.delete_folder(&collection, &path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_script_file(
     collection: String,
     folder_path: String,
@@ -309,7 +309,7 @@ pub fn read_script_file(
     svc.read_script_file(&collection, &path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_script_file(
     collection: String,
     path: String,
@@ -319,7 +319,7 @@ pub fn save_script_file(
     svc.save_script_file(&collection, &path, &content)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn rename_script_file(
     collection: String,
     path: String,
@@ -329,7 +329,7 @@ pub fn rename_script_file(
     svc.rename_script_file(&collection, &path, &new_name)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_script_file(
     collection: String,
     path: String,
@@ -338,7 +338,7 @@ pub fn delete_script_file(
     svc.delete_script_file(&collection, &path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn move_item(
     src_collection: String,
     src_path: String,
@@ -349,7 +349,7 @@ pub fn move_item(
     svc.move_item(&src_collection, &src_path, &dst_collection, &dst_path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn reorder_items(
     collection: String,
     folder_path: String,
@@ -367,7 +367,7 @@ pub fn get_collection_settings(
     svc.get_settings(&name)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_collection_settings(
     collection: String,
     settings: rocket_collection::CollectionSettings,
@@ -542,7 +542,7 @@ pub fn get_folder_variables(
     svc.get_folder_variables(&collection, &folder_path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_folder_variables(
     collection: String,
     folder_path: String,
@@ -581,7 +581,7 @@ pub fn get_folder_settings(
         .map(FolderSettingsDto::from)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_folder_settings(
     collection: String,
     folder_path: String,
@@ -601,7 +601,7 @@ pub fn get_request_variables(
     svc.get_request_variables(&collection, &request_path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_request_variables(
     collection: String,
     request_path: String,
@@ -620,7 +620,7 @@ pub fn list_request_examples(
     svc.list_request_examples(&collection, &request_path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn add_request_example(
     collection: String,
     request_path: String,
@@ -630,7 +630,7 @@ pub fn add_request_example(
     svc.add_request_example(&collection, &request_path, example)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn rename_request_example(
     collection: String,
     request_path: String,
@@ -641,7 +641,7 @@ pub fn rename_request_example(
     svc.rename_request_example(&collection, &request_path, &old_name, &new_name)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn delete_request_example(
     collection: String,
     request_path: String,
@@ -651,7 +651,7 @@ pub fn delete_request_example(
     svc.delete_request_example(&collection, &request_path, &name)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn update_request_docs(
     collection: String,
     path: String,

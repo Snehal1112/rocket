@@ -1578,6 +1578,13 @@ impl RequestExecutionService {
         merge_runtime_vars(var_ctx, result);
     }
 
+    /// Runs a collection file read-modify-write under the collection lock shared with editor
+    /// saves and the sync apply. The root comes from the repository of this send. The closure
+    /// never awaits and never calls another locked method.
+    fn locked_write<T>(&self, collection: &str, f: impl FnOnce() -> T) -> T {
+        crate::collection_lock::with_collection_lock(&*self.send_collection_repo(), collection, f)
+    }
+
     /// Read-modify-write helper for a single collection variable.
     ///
     /// Shared by script-side-effect application (`rok.setCollectionVar`) and
@@ -1588,10 +1595,12 @@ impl RequestExecutionService {
         key: &str,
         value: &str,
     ) -> DomainResult<()> {
-        let mut settings = self.send_collection_repo().get_settings(collection)?;
-        upsert_variable(&mut settings.variables, key, value);
-        self.send_collection_repo()
-            .save_settings(collection, &settings)?;
+        self.locked_write(collection, || {
+            let mut settings = self.send_collection_repo().get_settings(collection)?;
+            upsert_variable(&mut settings.variables, key, value);
+            self.send_collection_repo()
+                .save_settings(collection, &settings)
+        })?;
         self.events.publish(DomainEvent::CollectionVariableWritten {
             collection: collection.to_string(),
             key: key.to_string(),
@@ -1607,12 +1616,18 @@ impl RequestExecutionService {
 
     /// Removes a collection variable and publishes the same events as a write.
     fn apply_collection_var_delete(&self, collection: &str, key: &str) -> DomainResult<()> {
-        let mut settings = self.send_collection_repo().get_settings(collection)?;
-        if !remove_variable(&mut settings.variables, key) {
+        let removed = self.locked_write(collection, || {
+            let mut settings = self.send_collection_repo().get_settings(collection)?;
+            if !remove_variable(&mut settings.variables, key) {
+                return Ok(false);
+            }
+            self.send_collection_repo()
+                .save_settings(collection, &settings)?;
+            Ok::<bool, DomainError>(true)
+        })?;
+        if !removed {
             return Ok(());
         }
-        self.send_collection_repo()
-            .save_settings(collection, &settings)?;
         self.events.publish(DomainEvent::CollectionVariableWritten {
             collection: collection.to_string(),
             key: key.to_string(),
@@ -1779,11 +1794,9 @@ impl RequestExecutionService {
         let url = ctx.request.url.clone();
         if let Ok(scope) = rocket_http::UrlScope::parse(&url) {
             let now = chrono::Utc::now();
-            let found = script_cookies::ScriptCookies::new(
-                self.cookie_repo.as_ref(),
-                &self.cookie_lock,
-            )
-            .find(&scope, now);
+            let found =
+                script_cookies::ScriptCookies::new(self.cookie_repo.as_ref(), &self.cookie_lock)
+                    .find(&scope, now);
             match found {
                 Ok(list) => {
                     let entries = list.iter().map(|c| rocket_http::to_entry(c, now)).collect();
@@ -1981,40 +1994,46 @@ impl RequestExecutionService {
                             .parent()
                             .and_then(|p| p.to_str())
                             .unwrap_or("");
-                        match self
-                            .send_collection_repo()
-                            .get_folder_variables(col, folder_path)
-                        {
-                            Ok(mut vars) => {
-                                upsert_variable(&mut vars, var_name, &str_val);
-                                if let Err(e) = self.send_collection_repo().save_folder_variables(
-                                    col,
-                                    folder_path,
-                                    vars,
-                                ) {
-                                    tracing::warn!(error = %e, variable = %var_name, "failed to persist folder var from action");
-                                }
-                            }
-                            Err(e) => {
+                        let result = self.locked_write(col, || {
+                            let mut vars = self
+                                .send_collection_repo()
+                                .get_folder_variables(col, folder_path)
+                                .map_err(|e| (true, e))?;
+                            upsert_variable(&mut vars, var_name, &str_val);
+                            self.send_collection_repo()
+                                .save_folder_variables(col, folder_path, vars)
+                                .map_err(|e| (false, e))
+                        });
+                        match result {
+                            Ok(()) => {}
+                            Err((true, e)) => {
                                 tracing::warn!(error = %e, variable = %var_name, "failed to read folder vars for action")
+                            }
+                            Err((false, e)) => {
+                                tracing::warn!(error = %e, variable = %var_name, "failed to persist folder var from action");
                             }
                         }
                     }
                 }
                 "request" => {
                     if let (Some(col), Some(path)) = (collection, request_path) {
-                        match self.send_collection_repo().get_request_variables(col, path) {
-                            Ok(mut vars) => {
-                                upsert_variable(&mut vars, var_name, &str_val);
-                                if let Err(e) = self
-                                    .send_collection_repo()
-                                    .save_request_variables(col, path, vars)
-                                {
-                                    tracing::warn!(error = %e, variable = %var_name, "failed to persist request var from action");
-                                }
-                            }
-                            Err(e) => {
+                        let result = self.locked_write(col, || {
+                            let mut vars = self
+                                .send_collection_repo()
+                                .get_request_variables(col, path)
+                                .map_err(|e| (true, e))?;
+                            upsert_variable(&mut vars, var_name, &str_val);
+                            self.send_collection_repo()
+                                .save_request_variables(col, path, vars)
+                                .map_err(|e| (false, e))
+                        });
+                        match result {
+                            Ok(()) => {}
+                            Err((true, e)) => {
                                 tracing::warn!(error = %e, variable = %var_name, "failed to read request vars for action")
+                            }
+                            Err((false, e)) => {
+                                tracing::warn!(error = %e, variable = %var_name, "failed to persist request var from action");
                             }
                         }
                     }
@@ -6776,6 +6795,7 @@ mod tests {
         settings: Mutex<CollectionSettings>,
         saved_settings: Mutex<Vec<CollectionSettings>>,
         saved_scoped_vars: Mutex<Vec<(String, Vec<CollectionVariable>)>>,
+        root: Mutex<Option<std::path::PathBuf>>,
     }
 
     impl RecordingCollectionRepo {
@@ -6784,6 +6804,7 @@ mod tests {
                 settings: Mutex::new(settings),
                 saved_settings: Mutex::new(vec![]),
                 saved_scoped_vars: Mutex::new(vec![]),
+                root: Mutex::new(None),
             })
         }
         fn saved_scoped_vars(&self, scope: &str) -> Vec<Vec<CollectionVariable>> {
@@ -6849,6 +6870,13 @@ mod tests {
         ) -> DomainResult<rocket_collection::CollectionIdentity> {
             Ok(crate::test_doubles::test_identity(n))
         }
+        fn collection_root_path(&self, _: &str) -> DomainResult<std::path::PathBuf> {
+            self.root
+                .lock()
+                .expect("lock")
+                .clone()
+                .ok_or_else(|| DomainError::Internal("no root".into()))
+        }
         fn get_settings(&self, _: &str) -> DomainResult<CollectionSettings> {
             Ok(self.settings.lock().expect("lock").clone())
         }
@@ -6909,6 +6937,9 @@ mod tests {
 
     struct SharedCollectionRepo(Arc<RecordingCollectionRepo>);
     impl CollectionRepository for SharedCollectionRepo {
+        fn collection_root_path(&self, n: &str) -> DomainResult<std::path::PathBuf> {
+            self.0.collection_root_path(n)
+        }
         fn list(&self) -> DomainResult<Vec<CollectionSummary>> {
             self.0.list()
         }
@@ -7089,6 +7120,47 @@ mod tests {
         )
         .with_script_engine(engine)
         .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all())
+    }
+
+    #[test]
+    fn a_script_variable_write_waits_for_the_collection_lock() {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let col_repo = RecordingCollectionRepo::with_settings(CollectionSettings::default());
+        *col_repo.root.lock().expect("lock") = Some(dir.path().to_path_buf());
+        let svc = Arc::new(build_svc_with_script(
+            Box::new(MockEnvRepo::empty()),
+            Box::new(SharedCollectionRepo(Arc::clone(&col_repo))),
+            Box::new(MockScriptEngine::returning_post_response(
+                ScriptResult::default(),
+            )),
+        ));
+        // An apply holds the lock, so the script write must wait and then land.
+        let lock = crate::collection_lock::collection_lock(dir.path());
+        let guard = lock.lock().expect("apply lock");
+        let (tx, rx) = std::sync::mpsc::channel();
+        let writer = {
+            let svc = Arc::clone(&svc);
+            std::thread::spawn(move || {
+                svc.apply_collection_var_write("my-api", "K", "v")
+                    .expect("write");
+                tx.send(()).expect("done");
+            })
+        };
+        assert!(
+            rx.recv_timeout(std::time::Duration::from_millis(300))
+                .is_err(),
+            "the write must wait for the lock"
+        );
+        assert!(col_repo.last_saved_settings().is_none());
+        drop(guard);
+        rx.recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the write finishes");
+        writer.join().expect("join");
+        let saved = col_repo.last_saved_settings().expect("saved");
+        assert!(saved
+            .variables
+            .iter()
+            .any(|v| v.key == "K" && v.value == "v"));
     }
 
     #[tokio::test]

@@ -145,7 +145,7 @@ pub fn get_collection_trust(
 
 /// Turns one capability on or off for a collection on this computer. This is the only
 /// write path for capabilities. `save_collection_settings` ignores them.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_collection_capability(
     collection: String,
     capability: CapabilityDto,
@@ -157,7 +157,7 @@ pub fn set_collection_capability(
 }
 
 /// Writes the extra script folders to the collection file and approves exactly those.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_collection_context_roots(
     collection: String,
     roots: Vec<String>,

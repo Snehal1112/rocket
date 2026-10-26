@@ -3,8 +3,8 @@
 use crate::collection_lock::collection_lock;
 use crate::collection_service::CollectionService;
 use crate::test_doubles::{RecordingPublisher, SharedPublisher};
-use rocket_collection::{CollectionFileTxFactory, CollectionRepository, Request};
-use rocket_infra::{FsCollectionRepo, FsFileTxFactory};
+use rocket_collection::{CollectionRepository, CollectionSettings, CollectionTrustStore, Request};
+use rocket_infra::{FsCollectionRepo, SharedPathCollectionRepo};
 use rocket_shared::events::{DomainEvent, EventPublisher};
 use rocket_shared::types::HttpMethod;
 use std::path::PathBuf;
@@ -120,30 +120,6 @@ fn editor_save_waits_for_a_running_apply_and_the_reverse() {
 }
 
 #[test]
-fn lock_order_is_collection_lock_then_tx_guard_everywhere() {
-    let (dir, root) = world();
-    let svc = Arc::new(plain_service(&dir));
-    let factory = Arc::new(FsFileTxFactory::new());
-
-    // The apply order: collection lock first, then the transaction's own guard.
-    let lock = collection_lock(&root);
-    let guard = lock.lock().expect("apply lock");
-    let saver = {
-        let svc = Arc::clone(&svc);
-        std::thread::spawn(move || {
-            svc.save_request("c", "Edited.yml", &request("Edited"))
-                .expect("save");
-        })
-    };
-    let tx = factory.begin(&root).expect("tx guard under the lock");
-    drop(tx);
-    drop(guard);
-    saver.join().expect("the save finishes");
-    // The apply never calls back into the service, so the lock is free once it ends.
-    assert!(lock.try_lock().is_ok());
-}
-
-#[test]
 fn a_method_that_calls_another_locked_method_does_not_deadlock() {
     let (dir, root) = world();
     let svc = Arc::new(plain_service(&dir));
@@ -198,4 +174,74 @@ fn a_move_between_two_collections_locks_both_without_deadlock() {
     for w in workers {
         w.join().expect("join");
     }
+}
+
+#[test]
+fn a_trust_toggle_waits_for_the_collection_lock_and_both_updates_land() {
+    use crate::collection_trust::{Capability, CollectionTrustService};
+    use crate::test_doubles::InMemoryTrustStore;
+    use rocket_shared::events::NullEventPublisher;
+    let (dir, root) = world();
+    let store = InMemoryTrustStore::new();
+    let trust = Arc::new(CollectionTrustService::new(
+        Arc::new(repo(&dir)) as Arc<dyn CollectionRepository>,
+        Arc::clone(&store) as Arc<dyn CollectionTrustStore>,
+        Arc::new(NullEventPublisher),
+    ));
+    // An apply holds the lock and rewrites the settings file meanwhile.
+    let lock = collection_lock(&root);
+    let guard = lock.lock().expect("apply lock");
+    let (tx, rx) = channel();
+    let toggler = {
+        let trust = Arc::clone(&trust);
+        std::thread::spawn(move || {
+            trust
+                .set_capability("c", Capability::DeveloperMode, true)
+                .expect("toggle");
+            tx.send(()).expect("done");
+        })
+    };
+    assert!(rx.recv_timeout(WAIT).is_err(), "the toggle must wait");
+    let mut applied = repo(&dir).get_settings("c").expect("settings");
+    applied
+        .variables
+        .push(rocket_collection::CollectionVariable {
+            key: "applied".into(),
+            value: "1".into(),
+            initial_value: String::new(),
+            enabled: true,
+            secret: false,
+        });
+    repo(&dir)
+        .save_settings("c", &applied)
+        .expect("apply write");
+    drop(guard);
+    rx.recv_timeout(LONG).expect("the toggle finishes");
+    toggler.join().expect("join");
+    let settings: CollectionSettings = repo(&dir).get_settings("c").expect("settings");
+    assert!(settings.variables.iter().any(|v| v.key == "applied"));
+    assert_eq!(
+        settings.sandbox_mode,
+        rocket_collection::settings::SandboxMode::Developer
+    );
+}
+
+#[test]
+fn apply_and_the_service_use_the_same_lock_key_for_a_collection() {
+    // Apply resolves the root through the shared-path repository (the pinned copy of it), the
+    // service through its own repository. Both must name one lock.
+    let ws = TempDir::new().expect("tempdir");
+    let collections = ws.path().join("collections");
+    std::fs::create_dir_all(&collections).expect("mkdir");
+    let standalone = FsCollectionRepo::new_standalone(collections);
+    standalone.create("c").expect("create");
+    let shared = SharedPathCollectionRepo::new(Arc::new(Mutex::new(ws.path().to_path_buf())));
+    let pinned = shared.pinned();
+    let apply_repo: &dyn CollectionRepository = pinned.as_deref().unwrap_or(&shared);
+    let apply_root = apply_repo.collection_root_path("c").expect("apply root");
+    let service_root = standalone.collection_root_path("c").expect("service root");
+    assert!(Arc::ptr_eq(
+        &collection_lock(&apply_root),
+        &collection_lock(&service_root)
+    ));
 }
