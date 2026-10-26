@@ -125,3 +125,25 @@ export function syncErrorMessage(err: unknown): string {
 export function isPendingChangedError(err: unknown): boolean {
   return syncErrorMessage(err).includes('pending spec changed');
 }
+
+/** What a field takes when the user has not chosen: conflicts keep the user's value. */
+export function defaultChoice(outcome: OpenApiFieldChange['outcome']): 'spec' | 'yours' {
+  return outcome === 'takeSpec' ? 'spec' : 'yours';
+}
+
+/** Keeps the items whose name or key contains the query. An empty query keeps all. */
+export function filterItems(items: OpenApiSyncItem[], query: string): OpenApiSyncItem[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return items;
+  return items.filter((i) => i.name.toLowerCase().includes(q) || i.key.toLowerCase().includes(q));
+}
+
+/** Keeps the variable changes whose label contains the query. */
+export function filterVariables(
+  changes: OpenApiVariableChange[],
+  query: string,
+): OpenApiVariableChange[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return changes;
+  return changes.filter((c) => variableLabel(c).toLowerCase().includes(q));
+}

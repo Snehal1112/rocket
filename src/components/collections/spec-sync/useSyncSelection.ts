@@ -1,0 +1,152 @@
+import { type Dispatch, type SetStateAction, useCallback, useMemo, useState } from 'react';
+import type { OpenApiSelection, OpenApiSyncPlan } from '@/lib/tauri-api';
+import { buildSelection } from './buildSelection';
+
+type Links = Array<[string, string]>;
+type Choice = 'spec' | 'yours';
+type Choices = Map<string, Record<string, Choice>>;
+
+interface State {
+  approved: Set<string>;
+  skips: Set<string>;
+  variables: Set<string>;
+  choices: Choices;
+}
+
+const emptyState = (): State => ({
+  approved: new Set(),
+  skips: new Set(),
+  variables: new Set(),
+  choices: new Map(),
+});
+
+const EMPTY_PLAN: OpenApiSyncPlan = {
+  pending: false,
+  items: [],
+  variableChanges: [],
+  unchanged: [],
+  skippedHidden: 0,
+  deletedByUser: [],
+  cautious: false,
+  warnings: [],
+};
+
+/** A string that changes whenever the set of item or variable digests changes. */
+function planSignature(plan: OpenApiSyncPlan): string {
+  const items = plan.items.map((i) => `${i.kind}\u0000${i.key}\u0000${i.digest}`);
+  const vars = plan.variableChanges.map((v) => `v\u0000${v.name}\u0000${v.digest}`);
+  return [...items, ...vars].join('\u0001');
+}
+
+function withKeys(set: Set<string>, keys: Iterable<string>, on: boolean): Set<string> {
+  const next = new Set(set);
+  for (const k of keys) {
+    if (on) next.add(k);
+    else next.delete(k);
+  }
+  return next;
+}
+
+/**
+ * The selection of one Spec sync tab. It lives in the tab, not in a store. The rename links
+ * are owned by the caller because they are part of the plan query key. A plan with a new
+ * digest set clears the selection, so an approval never outlives the item it was made for.
+ */
+export function useSyncSelection(
+  plan: OpenApiSyncPlan | undefined,
+  links: Links,
+  setLinks: Dispatch<SetStateAction<Links>>,
+) {
+  const [state, setState] = useState<State>(emptyState);
+  const signature = useMemo(() => (plan ? planSignature(plan) : ''), [plan]);
+  const [seen, setSeen] = useState(signature);
+  if (seen !== signature) {
+    setSeen(signature);
+    setState(emptyState());
+  }
+
+  const toggle = useCallback((key: string) => {
+    setState((s) => {
+      const on = !s.approved.has(key);
+      return {
+        ...s,
+        approved: withKeys(s.approved, [key], on),
+        skips: on ? withKeys(s.skips, [key], false) : s.skips,
+      };
+    });
+  }, []);
+
+  const setMany = useCallback((keys: string[], on: boolean) => {
+    setState((s) => ({
+      ...s,
+      approved: withKeys(s.approved, keys, on),
+      skips: on ? withKeys(s.skips, keys, false) : s.skips,
+    }));
+  }, []);
+
+  const skip = useCallback((keys: string[]) => {
+    setState((s) => ({
+      ...s,
+      approved: withKeys(s.approved, keys, false),
+      skips: withKeys(s.skips, keys, true),
+    }));
+  }, []);
+
+  const unskip = useCallback((keys: string[]) => {
+    setState((s) => ({ ...s, skips: withKeys(s.skips, keys, false) }));
+  }, []);
+
+  const toggleVariable = useCallback((name: string) => {
+    setState((s) => ({ ...s, variables: withKeys(s.variables, [name], !s.variables.has(name)) }));
+  }, []);
+
+  const setManyVariables = useCallback((names: string[], on: boolean) => {
+    setState((s) => ({ ...s, variables: withKeys(s.variables, names, on) }));
+  }, []);
+
+  const setChoice = useCallback((key: string, field: string, choice: Choice) => {
+    setState((s) => {
+      const choices = new Map(s.choices);
+      choices.set(key, { ...choices.get(key), [field]: choice });
+      return { ...s, choices };
+    });
+  }, []);
+
+  const linkRename = useCallback(
+    (oldKey: string, newKey: string) => {
+      setLinks((prev) => (prev.some(([o]) => o === oldKey) ? prev : [...prev, [oldKey, newKey]]));
+    },
+    [setLinks],
+  );
+
+  const unlink = useCallback(
+    (oldKey: string) => setLinks((prev) => prev.filter(([o]) => o !== oldKey)),
+    [setLinks],
+  );
+
+  const reset = useCallback(() => setState(emptyState()), []);
+
+  const selection: OpenApiSelection = useMemo(
+    () => buildSelection(plan ?? EMPTY_PLAN, { ...state, links }),
+    [plan, state, links],
+  );
+
+  return {
+    approved: state.approved,
+    toggle,
+    setMany,
+    choices: state.choices,
+    setChoice,
+    skips: state.skips,
+    skip,
+    unskip,
+    variables: state.variables,
+    toggleVariable,
+    setManyVariables,
+    links,
+    linkRename,
+    unlink,
+    reset,
+    selection,
+  };
+}

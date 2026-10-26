@@ -1,10 +1,19 @@
-import { memo, useMemo } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { CollapsibleSection } from '@/components/ui/collapsible-section';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { OpenApiSyncPlan } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
-import { groupItems, itemId, renameHint, variableId, variableLabel } from './specSyncView';
+import {
+  filterItems,
+  filterVariables,
+  groupItems,
+  itemId,
+  renameHint,
+  variableId,
+  variableLabel,
+} from './specSyncView';
 
 /** A group shows at most this many rows. Rows past the cap are not shown yet. */
 export const MAX_ROWS_PER_GROUP = 500;
@@ -13,65 +22,125 @@ interface SpecSyncListProps {
   plan: OpenApiSyncPlan;
   selectedId: string | null;
   onSelect: (id: string) => void;
+  /** The search text. A non-empty query lifts the row cap for the matches. */
+  query: string;
+  approved: Set<string>;
+  skips: Set<string>;
+  variables: Set<string>;
+  onToggle: (key: string) => void;
+  onToggleVariable: (name: string) => void;
 }
 
 interface RowProps {
   id: string;
+  toggleKey: string;
+  isVariable: boolean;
   label: string;
   hint: string | null;
   selected: boolean;
+  checked: boolean;
+  skipped: boolean;
   onSelect: (id: string) => void;
+  onToggle: (key: string) => void;
+  onToggleVariable: (name: string) => void;
 }
 
-const Row = memo(function Row({ id, label, hint, selected, onSelect }: RowProps) {
+const Row = memo(function Row({
+  id,
+  toggleKey,
+  isVariable,
+  label,
+  hint,
+  selected,
+  checked,
+  skipped,
+  onSelect,
+  onToggle,
+  onToggleVariable,
+}: RowProps) {
   return (
-    <Button
-      variant='ghost'
-      aria-pressed={selected}
-      onClick={() => onSelect(id)}
-      className={cn(
-        'h-auto w-full flex-col items-start gap-0 whitespace-normal px-2 py-1.5 text-left',
-        selected && 'bg-accent',
-      )}
-    >
-      <span className='break-all text-sm'>{label}</span>
-      {hint && <span className='text-xs font-normal text-muted-foreground'>{hint}</span>}
-    </Button>
+    <div className={cn('flex items-start gap-1 rounded-md pl-2', selected && 'bg-accent')}>
+      <Checkbox
+        aria-label={`Select ${label}`}
+        checked={checked}
+        onCheckedChange={() => (isVariable ? onToggleVariable(toggleKey) : onToggle(toggleKey))}
+        className='mt-2.5'
+      />
+      <Button
+        variant='ghost'
+        aria-pressed={selected}
+        onClick={() => onSelect(id)}
+        className='h-auto min-w-0 flex-1 flex-col items-start gap-0 whitespace-normal px-2 py-1.5 text-left'
+      >
+        <span className='break-all text-sm'>{label}</span>
+        {hint && <span className='text-xs font-normal text-muted-foreground'>{hint}</span>}
+        {skipped && <span className='text-xs font-normal text-muted-foreground'>Skipped</span>}
+      </Button>
+    </div>
   );
 });
 
 interface RowData {
   id: string;
+  toggleKey: string;
   label: string;
   hint: string | null;
 }
 
 /** The grouped list of pending changes. Each group collapses. */
-export function SpecSyncList({ plan, selectedId, onSelect }: SpecSyncListProps) {
-  // The rows depend on the plan only, so a selection change does not rebuild them.
+export function SpecSyncList({
+  plan,
+  selectedId,
+  onSelect,
+  query,
+  approved,
+  skips,
+  variables,
+  onToggle,
+  onToggleVariable,
+}: SpecSyncListProps) {
+  // Extra pages of rows per group, added by Show more. A query shows every match instead.
+  const [pages, setPages] = useState<Record<string, number>>({});
+  const searching = query.trim().length > 0;
+
+  // The rows depend on the plan, the query and the pages only, so a checkbox toggle does not
+  // rebuild them.
   const groups = useMemo(
     () =>
-      groupItems(plan.items).map((g) => ({
-        kind: g.kind,
-        label: g.label,
-        total: g.items.length,
-        rows: g.items.slice(0, MAX_ROWS_PER_GROUP).map(
-          (item): RowData => ({
-            id: itemId(item),
-            label: item.name,
-            hint: renameHint(item),
-          }),
-        ),
-      })),
-    [plan.items],
+      groupItems(filterItems(plan.items, query)).map((g) => {
+        const cap = searching ? g.items.length : MAX_ROWS_PER_GROUP * (1 + (pages[g.kind] ?? 0));
+        return {
+          kind: g.kind,
+          label: g.label,
+          total: g.items.length,
+          rows: g.items.slice(0, cap).map(
+            (item): RowData => ({
+              id: itemId(item),
+              toggleKey: item.key,
+              label: item.name,
+              hint: renameHint(item),
+            }),
+          ),
+        };
+      }),
+    [plan.items, query, searching, pages],
   );
   const variableRows = useMemo(
     () =>
-      plan.variableChanges.map(
-        (c): RowData => ({ id: variableId(c), label: variableLabel(c), hint: null }),
+      filterVariables(plan.variableChanges, query).map(
+        (c): RowData => ({
+          id: variableId(c),
+          toggleKey: c.name,
+          label: variableLabel(c),
+          hint: null,
+        }),
       ),
-    [plan.variableChanges],
+    [plan.variableChanges, query],
   );
+  const unchanged = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q ? plan.unchanged.filter((u) => u.name.toLowerCase().includes(q)) : plan.unchanged;
+  }, [plan.unchanged, query]);
 
   return (
     <ScrollArea className='h-full'>
@@ -90,16 +159,34 @@ export function SpecSyncList({ plan, selectedId, onSelect }: SpecSyncListProps) 
                   <Row
                     key={r.id}
                     id={r.id}
+                    toggleKey={r.toggleKey}
+                    isVariable={false}
                     label={r.label}
                     hint={r.hint}
                     selected={selectedId === r.id}
+                    checked={approved.has(r.toggleKey)}
+                    skipped={skips.has(r.toggleKey)}
                     onSelect={onSelect}
+                    onToggle={onToggle}
+                    onToggleVariable={onToggleVariable}
                   />
                 ))}
                 {group.total > group.rows.length && (
-                  <p className='px-2 py-1 text-xs text-muted-foreground'>
-                    {group.total - group.rows.length} more not shown
-                  </p>
+                  <div className='flex items-center gap-2 px-2 py-1'>
+                    <p className='text-xs text-muted-foreground'>
+                      {group.total - group.rows.length} more not shown
+                    </p>
+                    <Button
+                      variant='outline'
+                      size='sm'
+                      className='h-6 px-2 text-xs'
+                      onClick={() =>
+                        setPages((p) => ({ ...p, [group.kind]: (p[group.kind] ?? 0) + 1 }))
+                      }
+                    >
+                      Show more
+                    </Button>
+                  </div>
                 )}
               </div>
             )}
@@ -112,30 +199,36 @@ export function SpecSyncList({ plan, selectedId, onSelect }: SpecSyncListProps) 
                 <Row
                   key={r.id}
                   id={r.id}
+                  toggleKey={r.toggleKey}
+                  isVariable
                   label={r.label}
                   hint={r.hint}
                   selected={selectedId === r.id}
+                  checked={variables.has(r.toggleKey)}
+                  skipped={false}
                   onSelect={onSelect}
+                  onToggle={onToggle}
+                  onToggleVariable={onToggleVariable}
                 />
               ))}
             </div>
           </CollapsibleSection>
         )}
-        {plan.unchanged.length > 0 && (
+        {unchanged.length > 0 && (
           <CollapsibleSection
-            title={`Stays as you have it (${plan.unchanged.length})`}
+            title={`Stays as you have it (${unchanged.length})`}
             summary='The spec did not change these.'
           >
             <ul className='flex flex-col gap-0.5 text-sm'>
-              {plan.unchanged.slice(0, MAX_ROWS_PER_GROUP).map((u) => (
+              {unchanged.slice(0, MAX_ROWS_PER_GROUP).map((u) => (
                 <li key={u.key} className='break-all'>
                   {u.name}
                 </li>
               ))}
             </ul>
-            {plan.unchanged.length > MAX_ROWS_PER_GROUP && (
+            {unchanged.length > MAX_ROWS_PER_GROUP && (
               <p className='text-xs text-muted-foreground'>
-                {plan.unchanged.length - MAX_ROWS_PER_GROUP} more not shown
+                {unchanged.length - MAX_ROWS_PER_GROUP} more not shown
               </p>
             )}
           </CollapsibleSection>
