@@ -28,7 +28,7 @@ Rules for every plan:
 | P7 | `plan-07-scheduler.md`: interval and timing move to the local state, pure next-check rule with jitter and stored backoff, supervisor with launch catch-up and an event, start/restart/stop in the app. Done on branch openapi-sync-schedule (266ebc2c..2d096a2f), final review clean after one fix wave, not yet merged to main. Manual check in a built app pending | P4, P6 |
 | P8 | `plan-08-spec-sync-tab.md`: read-only status and plan commands (service `plan`, DTOs), TS api and query hook, the Spec sync tab and the overview notice. 1 commands; 2 TS api and hook; 3 tab. Done on branch openapi-remote-refs (fde81213..fd7156ea), final review mergeable after one fix, not yet merged to main | P5, P6, P7 |
 | P9 | `plan-09-actions-backend.md`: machine-local consent record (closes the token and opt-in gap), action commands (Check now, interval, token, consent, skip, apply, rename links), shared save lock, apply event, lazy token read. 1 consent store and gated check; 2 action commands; 3 shared lock, event, lazy token. Done on branch openapi-remote-refs (cfad11ae..7270220b), final review clean after one fix wave, not yet merged to main | P7, P8 |
-| P10 | Spec sync tab actions UI: checkboxes with paging and search, skip, apply with result, Link as rename, Check now, interval, token field, consent prompt, notice | P8, P9 |
+| P10 | `plan-10-actions-ui.md`: Spec sync tab actions UI. 1 api wrappers, mutations, selection builder, error mapping; 2 selection, skip, Link as rename, apply with confirm and result; 3 header actions, interval, token, consent banner | P8, P9 |
 
 ## Decisions log
 
