@@ -21,7 +21,7 @@ Rules for every plan:
 
 | ID | Plan | Needs |
 |---|---|---|
-| P4 | Conditional fetch with ETag and body hash, token in the keychain, sync settings (interval, last check) | P2 |
+| P4 | `plan-04-check-and-token.md`: sync state in the source file, `OpenApiSyncService` (conditional fetch, pending copy, token in the keychain), import with a token. Written, waiting for review | P2, P3 |
 | P5 | Three-way diff and per-field merge engine (pure) | P1, P2 |
 | P6 | Apply approved changes with a staging area and recovery journal | P5 |
 | P7 | Scheduler: supervisor, intervals, jitter, backoff, launch catch-up, notice | P4 |
