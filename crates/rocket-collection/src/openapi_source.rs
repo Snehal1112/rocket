@@ -26,6 +26,97 @@ pub struct OpenApiSource {
     pub last_modified: Option<String>,
     #[serde(default)]
     pub operations: Vec<SourceOperation>,
+    /// Stable id of this source, used to key the keychain token. Empty in files from Plan 2.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub source_id: String,
+    #[serde(default, skip_serializing_if = "SyncInterval::is_off")]
+    pub sync_interval: SyncInterval,
+    /// RFC 3339 UTC time of the last check.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_checked_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_status: Option<SyncStatus>,
+    /// Hex SHA-256 of the newer spec kept in the pending copy, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_sha256: Option<String>,
+}
+
+impl OpenApiSource {
+    /// A fresh random id for a new source.
+    pub fn new_source_id() -> String {
+        uuid::Uuid::new_v4().to_string()
+    }
+}
+
+/// How often a collection checks its spec. Persisted as snake_case names.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncInterval {
+    #[default]
+    Off,
+    Hourly,
+    Daily,
+    Weekly,
+    Monthly,
+}
+
+impl SyncInterval {
+    fn is_off(&self) -> bool {
+        matches!(self, SyncInterval::Off)
+    }
+
+    /// The interval in seconds, or `None` when checks are off.
+    pub fn as_secs(self) -> Option<u64> {
+        match self {
+            SyncInterval::Off => None,
+            SyncInterval::Hourly => Some(3600),
+            SyncInterval::Daily => Some(86_400),
+            SyncInterval::Weekly => Some(604_800),
+            SyncInterval::Monthly => Some(2_592_000),
+        }
+    }
+
+    /// Reads the snake_case name. Anything else is `None`.
+    pub fn parse(text: &str) -> Option<SyncInterval> {
+        match text {
+            "off" => Some(SyncInterval::Off),
+            "hourly" => Some(SyncInterval::Hourly),
+            "daily" => Some(SyncInterval::Daily),
+            "weekly" => Some(SyncInterval::Weekly),
+            "monthly" => Some(SyncInterval::Monthly),
+            _ => None,
+        }
+    }
+
+    /// True when a check should run now. An unreadable or future last check counts as due.
+    pub fn is_due(self, last_checked_at: Option<&str>, now: chrono::DateTime<chrono::Utc>) -> bool {
+        let Some(secs) = self.as_secs() else {
+            return false;
+        };
+        let Some(last) = last_checked_at else {
+            return true;
+        };
+        let Ok(last) = chrono::DateTime::parse_from_rfc3339(last) else {
+            return true;
+        };
+        let elapsed = now.signed_duration_since(last.with_timezone(&chrono::Utc));
+        let Ok(secs) = i64::try_from(secs) else {
+            return true;
+        };
+        elapsed.num_seconds() < 0 || elapsed.num_seconds() >= secs
+    }
+}
+
+/// The result of the last check. Persisted, tagged by `state`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum SyncStatus {
+    Unchanged,
+    Changed,
+    /// `code` is a short machine word such as `not_found`, `rate_limited` or `not_a_spec`.
+    Failed {
+        code: String,
+    },
 }
 
 /// One imported request and the spec operation it came from.
@@ -48,6 +139,12 @@ pub trait OpenApiSourceRepository: Send + Sync {
     fn save(&self, collection_root: &Path, source: &OpenApiSource) -> DomainResult<()>;
     /// Removes the file. A missing file is not an error.
     fn delete(&self, collection_root: &Path) -> DomainResult<()>;
+    /// Keeps a newer spec next to the source file until the user applies or drops it.
+    fn save_pending(&self, collection_root: &Path, spec: &[u8]) -> DomainResult<()>;
+    /// `Ok(None)` when there is no pending copy.
+    fn load_pending(&self, collection_root: &Path) -> DomainResult<Option<Vec<u8>>>;
+    /// Removes the pending copy. A missing file is not an error.
+    fn clear_pending(&self, collection_root: &Path) -> DomainResult<()>;
 }
 
 /// The place a spec is fetched from. Persisted, so keys are snake_case with no renaming.
@@ -87,5 +184,72 @@ impl SpecLocation {
             }
             SpecLocation::Https { .. } => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{DateTime, Duration, Utc};
+
+    fn now() -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339("2026-10-26T12:00:00Z")
+            .expect("date")
+            .with_timezone(&Utc)
+    }
+
+    fn ago(d: Duration) -> String {
+        (now() - d).to_rfc3339()
+    }
+
+    #[test]
+    fn old_source_file_loads_with_defaults() {
+        let yaml = "version: 1\nlocation:\n  kind: https\n  url: https://example.com/a.json\ngroup_by: tags\nspec_sha256: ab\noperations: []\n";
+        let source: OpenApiSource = serde_yaml::from_str(yaml).expect("parse");
+        assert_eq!(source.source_id, "");
+        assert_eq!(source.sync_interval, SyncInterval::Off);
+        assert_eq!(source.last_checked_at, None);
+        assert_eq!(source.last_status, None);
+        assert_eq!(source.pending_sha256, None);
+    }
+
+    #[test]
+    fn interval_seconds() {
+        assert_eq!(SyncInterval::Off.as_secs(), None);
+        assert_eq!(SyncInterval::Hourly.as_secs(), Some(3600));
+        assert_eq!(SyncInterval::Daily.as_secs(), Some(86400));
+        assert_eq!(SyncInterval::Weekly.as_secs(), Some(604800));
+        assert_eq!(SyncInterval::Monthly.as_secs(), Some(2_592_000));
+        assert_eq!(SyncInterval::parse("daily"), Some(SyncInterval::Daily));
+        assert_eq!(SyncInterval::parse("Daily"), None);
+        assert_eq!(SyncInterval::parse(""), None);
+    }
+
+    #[test]
+    fn is_due_follows_the_interval() {
+        let n = now();
+        assert!(!SyncInterval::Off.is_due(None, n));
+        assert!(!SyncInterval::Off.is_due(Some(&ago(Duration::days(900))), n));
+        assert!(SyncInterval::Hourly.is_due(None, n));
+        assert!(!SyncInterval::Hourly.is_due(Some(&ago(Duration::minutes(59))), n));
+        assert!(SyncInterval::Hourly.is_due(Some(&ago(Duration::minutes(60))), n));
+        assert!(!SyncInterval::Monthly.is_due(Some(&ago(Duration::days(29))), n));
+        assert!(SyncInterval::Monthly.is_due(Some(&ago(Duration::days(30))), n));
+    }
+
+    #[test]
+    fn is_due_when_the_last_check_is_unreadable_or_in_the_future() {
+        let n = now();
+        assert!(SyncInterval::Daily.is_due(Some("not a date"), n));
+        let future = (n + Duration::hours(1)).to_rfc3339();
+        assert!(SyncInterval::Daily.is_due(Some(&future), n));
+    }
+
+    #[test]
+    fn new_source_ids_are_unique() {
+        assert_ne!(
+            OpenApiSource::new_source_id(),
+            OpenApiSource::new_source_id()
+        );
     }
 }

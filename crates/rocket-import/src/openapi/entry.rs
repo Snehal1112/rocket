@@ -278,6 +278,15 @@ mod tests {
         fn delete(&self, _root: &Path) -> DomainResult<()> {
             Ok(())
         }
+        fn save_pending(&self, _root: &Path, _spec: &[u8]) -> DomainResult<()> {
+            Err(DomainError::Internal("disk full".to_string()))
+        }
+        fn load_pending(&self, _root: &Path) -> DomainResult<Option<Vec<u8>>> {
+            Ok(None)
+        }
+        fn clear_pending(&self, _root: &Path) -> DomainResult<()> {
+            Ok(())
+        }
     }
 
     fn collection_count(ws: &Path) -> usize {

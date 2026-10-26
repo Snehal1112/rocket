@@ -16,6 +16,12 @@ pub struct FsOpenApiSourceRepo;
 const SOURCE_DIR: &str = ".rocket";
 const SOURCE_FILE: &str = "openapi-source.yml";
 
+const PENDING_FILE: &str = "openapi-pending.spec";
+
+fn pending_path(collection_root: &Path) -> PathBuf {
+    collection_root.join(SOURCE_DIR).join(PENDING_FILE)
+}
+
 fn source_path(collection_root: &Path) -> PathBuf {
     collection_root.join(SOURCE_DIR).join(SOURCE_FILE)
 }
@@ -63,12 +69,39 @@ impl OpenApiSourceRepository for FsOpenApiSourceRepo {
             ))),
         }
     }
+
+    fn save_pending(&self, collection_root: &Path, spec: &[u8]) -> DomainResult<()> {
+        atomic_write(&pending_path(collection_root), spec)?;
+        Ok(())
+    }
+
+    fn load_pending(&self, collection_root: &Path) -> DomainResult<Option<Vec<u8>>> {
+        match std::fs::read(pending_path(collection_root)) {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(DomainError::Internal(format!(
+                "{PENDING_FILE} could not be read: {e}"
+            ))),
+        }
+    }
+
+    fn clear_pending(&self, collection_root: &Path) -> DomainResult<()> {
+        match std::fs::remove_file(pending_path(collection_root)) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(DomainError::Internal(format!(
+                "{PENDING_FILE} could not be removed: {e}"
+            ))),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rocket_collection::openapi_source::{SourceOperation, SpecLocation, SOURCE_FILE_VERSION};
+    use rocket_collection::openapi_source::{
+        SourceOperation, SpecLocation, SyncInterval, SyncStatus, SOURCE_FILE_VERSION,
+    };
     use rocket_collection::CollectionRepository;
     use tempfile::tempdir;
 
@@ -86,6 +119,13 @@ mod tests {
                 request_path: "Orders/List-orders".to_string(),
                 baseline_hash: "cd".repeat(32),
             }],
+            source_id: "id-1".to_string(),
+            sync_interval: SyncInterval::Daily,
+            last_checked_at: Some("2026-10-26T12:00:00+00:00".to_string()),
+            last_status: Some(SyncStatus::Failed {
+                code: "not_found".to_string(),
+            }),
+            pending_sha256: Some("ef".repeat(32)),
         }
     }
 
@@ -194,6 +234,64 @@ mod tests {
         FsOpenApiSourceRepo
             .save(&root, &sample(github()))
             .expect("save source");
+
+        let collection = repo
+            .get_strict("Orders")
+            .expect("strict load must not fail");
+        assert_eq!(collection.request_count(), 1);
+    }
+
+    #[test]
+    fn sync_fields_round_trip_with_snake_case_keys() {
+        let dir = tempdir().expect("tempdir");
+        let source = sample(github());
+        FsOpenApiSourceRepo.save(dir.path(), &source).expect("save");
+        let text = std::fs::read_to_string(dir.path().join(".rocket/openapi-source.yml"))
+            .expect("file should exist");
+        assert!(text.contains("sync_interval:"), "{text}");
+        assert!(text.contains("last_checked_at:"), "{text}");
+        assert!(!text.to_lowercase().contains("token"), "{text}");
+        assert_eq!(
+            FsOpenApiSourceRepo.load(dir.path()).expect("load"),
+            Some(source)
+        );
+    }
+
+    #[test]
+    fn pending_copy_round_trips_and_clears() {
+        let dir = tempdir().expect("tempdir");
+        let repo = FsOpenApiSourceRepo;
+        assert_eq!(repo.load_pending(dir.path()).expect("load"), None);
+        repo.save_pending(dir.path(), b"openapi: 3.0.0")
+            .expect("save");
+        assert_eq!(
+            repo.load_pending(dir.path()).expect("load"),
+            Some(b"openapi: 3.0.0".to_vec())
+        );
+        repo.clear_pending(dir.path()).expect("clear");
+        assert_eq!(repo.load_pending(dir.path()).expect("load"), None);
+        repo.clear_pending(dir.path()).expect("missing is fine");
+    }
+
+    #[test]
+    fn pending_copy_does_not_break_the_collection_loader() {
+        let base = tempdir().expect("tempdir");
+        let repo = crate::FsCollectionRepo::new_standalone(base.path().to_path_buf());
+        repo.create("Orders").expect("create");
+        let request = rocket_collection::Request::new(
+            "List orders",
+            rocket_shared::types::HttpMethod::Get,
+            "{{baseUrl}}/orders",
+        );
+        repo.save_request("Orders", "list-orders", &request)
+            .expect("save request");
+        let root = repo.collection_root_path("Orders").expect("root");
+        FsOpenApiSourceRepo
+            .save(&root, &sample(github()))
+            .expect("save source");
+        FsOpenApiSourceRepo
+            .save_pending(&root, b"openapi: 3.0.0")
+            .expect("save pending");
 
         let collection = repo
             .get_strict("Orders")

@@ -3,7 +3,7 @@
 use crate::importer::OpenApiImportOutcome;
 use crate::openapi::GroupBy;
 use rocket_collection::openapi_source::{
-    OpenApiSource, SourceOperation, SpecLocation, SOURCE_FILE_VERSION,
+    OpenApiSource, SourceOperation, SpecLocation, SyncInterval, SOURCE_FILE_VERSION,
 };
 use sha2::{Digest, Sha256};
 
@@ -34,6 +34,11 @@ pub fn source_record(
                 baseline_hash: op.baseline_hash.clone(),
             })
             .collect(),
+        source_id: OpenApiSource::new_source_id(),
+        sync_interval: SyncInterval::Off,
+        last_checked_at: None,
+        last_status: None,
+        pending_sha256: None,
     }
 }
 
@@ -107,5 +112,27 @@ mod tests {
         };
         let record = source_record(&location, GroupBy::Paths, b"x", None, None, &outcome);
         assert_eq!(record.group_by, "paths");
+    }
+
+    #[test]
+    fn record_gets_a_fresh_source_id_and_interval_off() {
+        let ws = TempDir::new().expect("tempdir");
+        let outcome = ImportService::new_with_workspace_path(ws.path())
+            .import_openapi_text(
+                &fixture("orders-3.0.json"),
+                "orders.json",
+                GroupBy::Tags,
+                "d",
+            )
+            .expect("import");
+        let location = SpecLocation::Https {
+            url: "https://example.com/orders.json".to_string(),
+        };
+        let a = source_record(&location, GroupBy::Tags, b"x", None, None, &outcome);
+        let b = source_record(&location, GroupBy::Tags, b"x", None, None, &outcome);
+        assert!(!a.source_id.is_empty());
+        assert_ne!(a.source_id, b.source_id);
+        assert_eq!(a.sync_interval, SyncInterval::Off);
+        assert_eq!(a.last_status, None);
     }
 }
