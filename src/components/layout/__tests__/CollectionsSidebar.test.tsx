@@ -456,7 +456,7 @@ describe('CollectionsSidebar delete dialog flow list', () => {
       },
       settings: { headers: [], variables: [], sandboxMode: 'safe' },
     });
-    vi.mocked(tauriApi.listFlows).mockReset().mockResolvedValue(['Login']);
+    vi.mocked(tauriApi.listFlows).mockReset().mockResolvedValue([{ name: 'Login' }]);
     vi.mocked(tauriApi.flowsUsingRequest).mockReset().mockResolvedValue([]);
     vi.mocked(tauriApi.deleteRequest).mockReset().mockResolvedValue(undefined);
     useWorkspaceStore.setState({ activeWorkspaceId: 'ws1' });
