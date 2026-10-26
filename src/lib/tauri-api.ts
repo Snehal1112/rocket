@@ -1890,6 +1890,7 @@ export interface OpenApiImportResult {
   report: ImportReport;
   collection: string;
   sourceUrl: string | null;
+  sourceId: string | null;
   warnings: string[];
 }
 
@@ -1911,6 +1912,103 @@ export const importOpenApiUrl = (
     targetWorkspaceId,
     ...(token === undefined ? {} : { token }),
   });
+
+// ============================================================
+// OpenAPI spec sync
+// ============================================================
+
+export type OpenApiSyncInterval = 'off' | 'hourly' | 'daily' | 'weekly' | 'monthly';
+
+export interface OpenApiLastStatus {
+  state: 'unchanged' | 'changed' | 'failed';
+  code?: string;
+}
+
+export interface OpenApiSyncStatus {
+  location: string;
+  interval: OpenApiSyncInterval;
+  lastCheckedAt: string | null;
+  lastStatus: OpenApiLastStatus | null;
+  hasPending: boolean;
+  hasToken: boolean;
+}
+
+export interface OpenApiFieldChange {
+  field: string;
+  outcome: 'takeSpec' | 'keepYours' | 'conflict';
+  baseline?: string;
+  yours?: string;
+  spec?: string;
+}
+
+export interface OpenApiVariableChange {
+  name: string;
+  kind: 'baseUrl' | 'addSecurity';
+  digest: string;
+  baseline?: string;
+  yours?: string;
+  spec?: string;
+}
+
+export type OpenApiSyncItem =
+  | {
+      kind: 'new';
+      key: string;
+      name: string;
+      digest: string;
+      fingerprint: string;
+      folder: string[];
+      possiblyRenamedFrom?: string;
+    }
+  | {
+      kind: 'changed';
+      key: string;
+      name: string;
+      digest: string;
+      fingerprint: string;
+      requestPath: string;
+      cautious: boolean;
+      changes: OpenApiFieldChange[];
+    }
+  | {
+      kind: 'removed';
+      key: string;
+      name: string;
+      digest: string;
+      fingerprint: string;
+      requestPath: string;
+      /** Null when it cannot be known, which the apply treats as edited. */
+      edited: boolean | null;
+      possiblyRenamedTo?: string;
+    };
+
+export interface OpenApiUnchanged {
+  key: string;
+  name: string;
+  requestPath?: string;
+}
+
+export interface OpenApiSyncPlan {
+  pending: boolean;
+  items: OpenApiSyncItem[];
+  variableChanges: OpenApiVariableChange[];
+  unchanged: OpenApiUnchanged[];
+  skippedHidden: number;
+  deletedByUser: string[];
+  cautious: boolean;
+  warnings: string[];
+}
+
+export const getOpenApiSyncStatus = (collection: string) =>
+  invoke<OpenApiSyncStatus | null>('openapi_sync_status', { collection });
+
+export const getOpenApiSyncPlan = (collection: string) =>
+  invoke<OpenApiSyncPlan>('openapi_sync_plan', { collection });
+
+export const onOpenApiSyncChecked = (
+  handler: (event: { collection: string; status: string }) => void,
+): Promise<UnlistenFn> =>
+  listen<{ collection: string; status: string }>('openapi-sync-checked', (e) => handler(e.payload));
 
 // ============================================================
 // UI state persistence
