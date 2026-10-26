@@ -605,7 +605,7 @@ async fn alias_growth_gives_back_the_original_text_with_a_note() {
     let body = format!("a: &a [{}]\nb: [{aliases}]\n", items.join(", "));
     fetcher.serve("https://example.com/bomb.yaml", &body);
     let text = spec_with(&["https://example.com/bomb.yaml#/a"]);
-    let bundle = bundle_with_limit(&fetcher, &text, &location(), None, 200_000, MAX_YAML_NODES)
+    let bundle = bundle_with_limit(&fetcher, &text, &location(), None, 200_000, MAX_YAML_NODES, MAX_YAML_BYTES)
         .await
         .expect("bundle");
     assert_eq!(bundle.text, text);
@@ -626,7 +626,7 @@ async fn a_flat_alias_bomb_in_a_file_is_refused_quickly() {
     fetcher.serve("https://example.com/bomb.yaml", &alias_bomb(5000));
     let text = spec_with(&["https://example.com/bomb.yaml#/a"]);
     let started = std::time::Instant::now();
-    let bundle = bundle_with_limit(&fetcher, &text, &location(), None, MAX_TOTAL_BYTES, 100_000)
+    let bundle = bundle_with_limit(&fetcher, &text, &location(), None, MAX_TOTAL_BYTES, 100_000, MAX_YAML_BYTES)
         .await
         .expect("bundle");
     assert!(started.elapsed() < std::time::Duration::from_secs(2));
@@ -637,6 +637,119 @@ async fn a_flat_alias_bomb_in_a_file_is_refused_quickly() {
 }
 
 #[tokio::test]
+async fn a_big_string_aliased_many_times_is_refused_by_bytes() {
+    let fetcher = FakeFetcher::default();
+    let big = "x".repeat(100 * 1024);
+    let aliases = vec!["*a"; 2000].join(", ");
+    fetcher.serve(
+        "https://example.com/s.yaml",
+        &format!("a: &a '{big}'\nb: [{aliases}]\n"),
+    );
+    let text = spec_with(&["https://example.com/s.yaml#/a"]);
+    let started = std::time::Instant::now();
+    // Well under the node limit; only the byte limit (10 MB here) stops it.
+    let bundle = bundle_with_limit(
+        &fetcher,
+        &text,
+        &location(),
+        None,
+        MAX_TOTAL_BYTES,
+        MAX_YAML_NODES,
+        10 * 1024 * 1024,
+    )
+    .await
+    .expect("bundle");
+    assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    assert!(bundle.incomplete);
+    assert_eq!(bundle.notes.len(), 1, "{:?}", bundle.notes);
+    assert!(bundle.notes[0].contains("too complex"));
+}
+
+#[tokio::test]
+async fn a_big_aliased_mapping_key_is_refused_by_bytes() {
+    let fetcher = FakeFetcher::default();
+    let big = "k".repeat(100 * 1024);
+    let entries: Vec<String> = (0..2000).map(|_| "*a : 1".to_string()).collect();
+    fetcher.serve(
+        "https://example.com/k.yaml",
+        &format!("a: &a '{big}'\nb: {{ {} }}\n", entries.join(", ")),
+    );
+    let text = spec_with(&["https://example.com/k.yaml#/a"]);
+    let bundle = bundle_with_limit(
+        &fetcher,
+        &text,
+        &location(),
+        None,
+        MAX_TOTAL_BYTES,
+        MAX_YAML_NODES,
+        10 * 1024 * 1024,
+    )
+    .await
+    .expect("bundle");
+    assert!(bundle.incomplete);
+    assert_eq!(bundle.notes.len(), 1, "{:?}", bundle.notes);
+}
+
+#[tokio::test]
+async fn the_budget_is_shared_by_all_files() {
+    let fetcher = FakeFetcher::default();
+    let body = |n: usize| format!("a: [{}]\n", vec!["1"; n].join(", "));
+    for i in 0..3 {
+        fetcher.serve(&format!("https://example.com/f{i}.yaml"), &body(400));
+    }
+    let text = spec_with(&[
+        "https://example.com/f0.yaml#/a",
+        "https://example.com/f1.yaml#/a",
+        "https://example.com/f2.yaml#/a",
+    ]);
+    // Each file is about 402 nodes; 900 in total admits the first two at most.
+    let bundle = bundle_with_limit(
+        &fetcher,
+        &text,
+        &location(),
+        None,
+        MAX_TOTAL_BYTES,
+        900,
+        MAX_YAML_BYTES,
+    )
+    .await
+    .expect("bundle");
+    assert_eq!(bundle.refs.len(), 2, "{:?}", bundle.notes);
+    assert!(bundle.incomplete);
+    assert_eq!(bundle.notes.len(), 1, "{:?}", bundle.notes);
+}
+
+#[tokio::test]
+async fn a_file_over_the_shared_budget_and_the_files_after_it_get_notes() {
+    let fetcher = FakeFetcher::default();
+    let body = |n: usize| format!("a: [{}]\n", vec!["1"; n].join(", "));
+    for i in 0..3 {
+        fetcher.serve(&format!("https://example.com/f{i}.yaml"), &body(400));
+    }
+    let text = spec_with(&[
+        "https://example.com/f0.yaml#/a",
+        "https://example.com/f1.yaml#/a",
+        "https://example.com/f2.yaml#/a",
+    ]);
+    let bundle = bundle_with_limit(
+        &fetcher,
+        &text,
+        &location(),
+        None,
+        MAX_TOTAL_BYTES,
+        500,
+        MAX_YAML_BYTES,
+    )
+    .await
+    .expect("bundle");
+    // The first loads, the second pushes the budget over, the third is not even fetched.
+    assert_eq!(bundle.refs.len(), 1);
+    assert_eq!(fetcher.requests().len(), 2);
+    assert_eq!(bundle.notes.len(), 2, "{:?}", bundle.notes);
+    assert!(bundle.notes[1].contains("remaining files"));
+}
+
+#[tokio::test]
 async fn a_file_with_a_few_aliases_still_loads() {
     let fetcher = FakeFetcher::default();
     fetcher.serve(
@@ -644,7 +757,7 @@ async fn a_file_with_a_few_aliases_still_loads() {
         "base: &b { name: p, in: query }\np: *b\nq: *b\n",
     );
     let text = spec_with(&["https://example.com/d.yaml#/p"]);
-    let bundle = bundle_with_limit(&fetcher, &text, &location(), None, MAX_TOTAL_BYTES, 100_000)
+    let bundle = bundle_with_limit(&fetcher, &text, &location(), None, MAX_TOTAL_BYTES, 100_000, MAX_YAML_BYTES)
         .await
         .expect("bundle");
     assert!(!bundle.incomplete && bundle.notes.is_empty(), "{:?}", bundle.notes);
@@ -660,7 +773,7 @@ async fn a_main_text_alias_bomb_returns_the_original_text() {
         spec_with(&["https://example.com/d.yaml#/a"]),
         alias_bomb(5000).replace('\n', "\n  ")
     );
-    let bundle = bundle_with_limit(&fetcher, &text, &location(), None, MAX_TOTAL_BYTES, 100_000)
+    let bundle = bundle_with_limit(&fetcher, &text, &location(), None, MAX_TOTAL_BYTES, 100_000, MAX_YAML_BYTES)
         .await
         .expect("bundle");
     assert_eq!(bundle.text, text);

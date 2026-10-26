@@ -13,12 +13,8 @@ use rocket_http::spec_fetch::{
     redirect_target_allowed, SpecFetchFailure, SpecFetchOutcome, SpecFetchRequest, SpecFetcher,
     DEFAULT_MAX_SPEC_BYTES,
 };
-use serde::de::{
-    DeserializeSeed, Deserializer, EnumAccess, IgnoredAny, MapAccess, SeqAccess, VariantAccess,
-    Visitor,
-};
+use crate::openapi::yaml_budget::{BudgetFail, YamlBudget};
 use serde_yaml::Value as Yaml;
-use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use url::Url;
 
@@ -31,8 +27,11 @@ const MAX_DEPTH: usize = 3;
 /// Most bytes for the main spec plus all files.
 const MAX_TOTAL_BYTES: usize = DEFAULT_MAX_SPEC_BYTES;
 
-/// Most YAML nodes one text may yield, counting an alias every time it is replayed.
-const MAX_YAML_NODES: usize = 1_000_000;
+/// Most YAML nodes the main text and all referenced files may yield together, counting an
+/// alias every time it is replayed.
+const MAX_YAML_NODES: usize = 2_000_000;
+/// Most string bytes the main text and all referenced files may yield together.
+const MAX_YAML_BYTES: usize = MAX_TOTAL_BYTES;
 
 const SIZE_NOTE: &str = "The referenced files together are larger than the 25 MB limit.";
 
@@ -228,122 +227,13 @@ enum ParseFail {
     TooComplex,
 }
 
-/// Counts every node a YAML text yields, so an alias bomb is refused before any value is built.
-struct NodeBudget<'a> {
-    count: &'a Cell<usize>,
-    max: usize,
-}
-
-impl NodeBudget<'_> {
-    fn tick<E: serde::de::Error>(&self) -> Result<(), E> {
-        let next = self.count.get() + 1;
-        self.count.set(next);
-        if next > self.max {
-            Err(E::custom("too many nodes"))
-        } else {
-            Ok(())
-        }
-    }
-
-    fn again(&self) -> NodeBudget<'_> {
-        NodeBudget {
-            count: self.count,
-            max: self.max,
-        }
-    }
-}
-
-impl<'de> DeserializeSeed<'de> for NodeBudget<'_> {
-    type Value = ();
-
-    fn deserialize<D: Deserializer<'de>>(self, deserializer: D) -> Result<(), D::Error> {
-        deserializer.deserialize_any(self)
-    }
-}
-
-impl<'de> Visitor<'de> for NodeBudget<'_> {
-    type Value = ();
-
-    fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("any YAML value")
-    }
-
-    fn visit_bool<E: serde::de::Error>(self, _: bool) -> Result<(), E> {
-        self.tick()
-    }
-
-    fn visit_i64<E: serde::de::Error>(self, _: i64) -> Result<(), E> {
-        self.tick()
-    }
-
-    fn visit_u64<E: serde::de::Error>(self, _: u64) -> Result<(), E> {
-        self.tick()
-    }
-
-    fn visit_f64<E: serde::de::Error>(self, _: f64) -> Result<(), E> {
-        self.tick()
-    }
-
-    fn visit_str<E: serde::de::Error>(self, _: &str) -> Result<(), E> {
-        self.tick()
-    }
-
-    fn visit_unit<E: serde::de::Error>(self) -> Result<(), E> {
-        self.tick()
-    }
-
-    fn visit_none<E: serde::de::Error>(self) -> Result<(), E> {
-        self.tick()
-    }
-
-    fn visit_some<D: Deserializer<'de>>(self, deserializer: D) -> Result<(), D::Error> {
-        self.tick()?;
-        deserializer.deserialize_any(self)
-    }
-
-    fn visit_newtype_struct<D: Deserializer<'de>>(self, deserializer: D) -> Result<(), D::Error> {
-        self.tick()?;
-        deserializer.deserialize_any(self)
-    }
-
-    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<(), A::Error> {
-        self.tick()?;
-        while seq.next_element_seed(self.again())?.is_some() {}
-        Ok(())
-    }
-
-    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<(), A::Error> {
-        self.tick()?;
-        while map.next_key_seed(self.again())?.is_some() {
-            map.next_value_seed(self.again())?;
-        }
-        Ok(())
-    }
-
-    fn visit_enum<A: EnumAccess<'de>>(self, data: A) -> Result<(), A::Error> {
-        self.tick()?;
-        let (_, variant) = data.variant::<IgnoredAny>()?;
-        variant.newtype_variant_seed(self.again())
-    }
-}
-
-/// Reads a YAML text into a mapping after checking it stays within the node budget.
-fn parse_yaml_mapping(text: &str, max_nodes: usize) -> Result<Yaml, ParseFail> {
+/// Reads a YAML text into a mapping after checking it fits the shared budget.
+fn parse_yaml_mapping(text: &str, budget: &YamlBudget) -> Result<Yaml, ParseFail> {
     let text = text.trim_start_matches('\u{feff}');
-    let count = Cell::new(0);
-    let budget = NodeBudget {
-        count: &count,
-        max: max_nodes,
-    };
-    if budget
-        .deserialize(serde_yaml::Deserializer::from_str(text))
-        .is_err()
-    {
-        return Err(if count.get() > max_nodes {
-            ParseFail::TooComplex
-        } else {
-            ParseFail::Invalid
-        });
+    match budget.check(text) {
+        Ok(()) => {}
+        Err(BudgetFail::Exceeded) => return Err(ParseFail::TooComplex),
+        Err(BudgetFail::Invalid) => return Err(ParseFail::Invalid),
     }
     serde_yaml::from_str::<Yaml>(text)
         .ok()
@@ -353,7 +243,7 @@ fn parse_yaml_mapping(text: &str, max_nodes: usize) -> Result<Yaml, ParseFail> {
 
 /// Parses a referenced file. A body that starts with `{` (after a BOM and spaces) is read as
 /// JSON, which has no alias syntax to blow up; anything else is read as YAML.
-fn parse_file_mapping(text: &str, max_nodes: usize) -> Result<Yaml, ParseFail> {
+fn parse_file_mapping(text: &str, budget: &YamlBudget) -> Result<Yaml, ParseFail> {
     let trimmed = text.trim_start_matches('\u{feff}').trim_start();
     if trimmed.starts_with('{') {
         let json: serde_json::Value =
@@ -363,14 +253,15 @@ fn parse_file_mapping(text: &str, max_nodes: usize) -> Result<Yaml, ParseFail> {
             .filter(|v| v.is_mapping())
             .ok_or(ParseFail::Invalid);
     }
-    parse_yaml_mapping(trimmed, max_nodes)
+    parse_yaml_mapping(trimmed, budget)
 }
 
 /// The absolute, fragment-free, deduplicated URLs the main text refers to, in first-encounter
 /// order. Skipped references are not listed. A relative reference needs `base`. At most one
 /// more than the file limit is returned.
 pub fn find_remote_refs(main_text: &str, base: Option<&str>) -> Vec<String> {
-    let Ok(root) = parse_yaml_mapping(main_text, MAX_YAML_NODES) else {
+    let budget = YamlBudget::new(MAX_YAML_NODES, MAX_YAML_BYTES);
+    let Ok(root) = parse_yaml_mapping(main_text, &budget) else {
         return Vec::new();
     };
     let base = base.and_then(|b| Url::parse(b).ok());
@@ -540,6 +431,7 @@ struct LimitNotes {
     depth: bool,
     count: bool,
     size: bool,
+    yaml: bool,
 }
 
 fn enqueue(
@@ -595,6 +487,7 @@ pub async fn bundle_spec(
         token,
         MAX_TOTAL_BYTES,
         MAX_YAML_NODES,
+        MAX_YAML_BYTES,
     )
     .await
 }
@@ -606,6 +499,7 @@ async fn bundle_with_limit(
     token: Option<&str>,
     max_total: usize,
     max_nodes: usize,
+    max_bytes: usize,
 ) -> ImportResult<Bundle> {
     let mut bundle = Bundle {
         text: main_text.to_string(),
@@ -613,7 +507,10 @@ async fn bundle_with_limit(
         notes: Vec::new(),
         incomplete: false,
     };
-    let mut main = match parse_yaml_mapping(main_text, max_nodes) {
+    // One budget for the main text and every file, so many files cannot add up past it.
+    let yaml_budget = YamlBudget::new(max_nodes, max_bytes);
+    let mut yaml_spent = false;
+    let mut main = match parse_yaml_mapping(main_text, &yaml_budget) {
         Ok(main) => main,
         Err(ParseFail::Invalid) => return Ok(bundle),
         Err(ParseFail::TooComplex) => {
@@ -656,6 +553,17 @@ async fn bundle_with_limit(
         let (url, depth) = (queue[next].url.clone(), queue[next].depth);
         next += 1;
         let label = file_label(&url);
+        if yaml_spent {
+            bundle.incomplete = true;
+            if !noted.yaml {
+                noted.yaml = true;
+                bundle.notes.push(
+                    "The remaining files were not loaded because the spec is too large."
+                        .to_string(),
+                );
+            }
+            continue;
+        }
         if total >= max_total {
             bundle.incomplete = true;
             if !noted.size {
@@ -715,7 +623,7 @@ async fn bundle_with_limit(
             ));
             continue;
         };
-        let value = match parse_file_mapping(&text, max_nodes) {
+        let value = match parse_file_mapping(&text, &yaml_budget) {
             Ok(value) => value,
             Err(failure) => {
                 bundle.incomplete = true;
@@ -724,6 +632,7 @@ async fn bundle_with_limit(
                         "The file {label} could not be loaded: it is not a YAML or JSON mapping."
                     ),
                     ParseFail::TooComplex => {
+                        yaml_spent = true;
                         format!("The file {label} is too large or too complex to load.")
                     }
                 });

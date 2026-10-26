@@ -5,6 +5,7 @@ use crate::openapi::model::{
     OpenApiDoc, Operation, ParamLocation, Parameter, RequestBodySpec, SecurityScheme,
     SecuritySchemeKind,
 };
+use crate::openapi::yaml_budget::{BudgetFail, YamlBudget, MAX_YAML_BYTES, READER_MAX_NODES};
 use rocket_shared::types::HttpMethod;
 use serde_json::Value as Json;
 use serde_yaml::Value as Yaml;
@@ -33,6 +34,13 @@ const METHODS: [(&str, HttpMethod); 8] = [
 ///
 /// The document is walked as YAML so paths and operations keep their document order.
 pub fn parse_openapi(text: &str) -> ImportResult<OpenApiDoc> {
+    // Aliases can expand a small text to billions of nodes, so count before building a value.
+    let budget = YamlBudget::new(READER_MAX_NODES, MAX_YAML_BYTES);
+    if budget.check(text) == Err(BudgetFail::Exceeded) {
+        return Err(ImportError::NotAnOpenApiSpec(
+            "the file is too large or too complex to read".into(),
+        ));
+    }
     let root: Yaml = serde_yaml::from_str(text).map_err(|e| {
         ImportError::NotAnOpenApiSpec(format!("the text is not valid JSON or YAML: {e}"))
     })?;
@@ -574,6 +582,20 @@ paths:
         assert_eq!(doc.operations[0].parameters.len(), 1);
         assert_eq!(doc.operations[0].parameters[0].name, "ok");
         assert_eq!(doc.warnings.len(), 1);
+    }
+
+    #[test]
+    fn an_alias_bomb_is_refused_quickly() {
+        let items: Vec<String> = (0..5000).map(|i| i.to_string()).collect();
+        let aliases = vec!["*a"; 5000].join(", ");
+        let text = format!(
+            "openapi: 3.0.3\nx-a: &a [{}]\nx-b: [{aliases}]\n",
+            items.join(", ")
+        );
+        let started = std::time::Instant::now();
+        let err = parse_openapi(&text).expect_err("bomb");
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        assert!(matches!(err, ImportError::NotAnOpenApiSpec(m) if m.contains("too complex")));
     }
 
     #[test]

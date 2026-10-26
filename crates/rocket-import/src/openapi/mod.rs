@@ -5,6 +5,7 @@ pub(crate) mod model;
 pub(crate) mod reader;
 pub(crate) mod source_record;
 pub(crate) mod source_url;
+pub(crate) mod yaml_budget;
 
 pub use layout::GroupBy;
 pub(crate) use model::{
