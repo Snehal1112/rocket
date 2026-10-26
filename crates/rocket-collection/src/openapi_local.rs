@@ -29,6 +29,10 @@ pub struct OpenApiLocalState {
     /// RFC 3339 UTC time before which no check runs, from a `Retry-After` answer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub not_before: Option<String>,
+    /// The canonical collection folder where the user turned the interval on. A state that
+    /// arrives with a copied or committed folder names another folder, so it stays off here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opt_in_root: Option<String>,
 }
 
 fn is_zero(n: &u32) -> bool {
@@ -45,6 +49,7 @@ impl Default for OpenApiLocalState {
             last_status: None,
             consecutive_failures: 0,
             not_before: None,
+            opt_in_root: None,
         }
     }
 }

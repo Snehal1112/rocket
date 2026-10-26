@@ -89,6 +89,22 @@ pub(crate) fn collection_lock(root: &Path) -> Arc<std::sync::Mutex<()>> {
     Arc::clone(map.entry(key).or_default())
 }
 
+/// The collection folder as stored in `opt_in_root`: canonical, else as given.
+pub(crate) fn canonical_root_string(root: &Path) -> String {
+    std::fs::canonicalize(root)
+        .unwrap_or_else(|_| root.to_path_buf())
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// The interval that counts on this machine: Off unless it was turned on for this folder.
+fn effective_interval(local: &OpenApiLocalState, root: &Path) -> SyncInterval {
+    match local.opt_in_root.as_deref() {
+        Some(opted) if opted == canonical_root_string(root) => local.sync_interval,
+        _ => SyncInterval::Off,
+    }
+}
+
 pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
@@ -420,7 +436,7 @@ impl OpenApiSyncService {
         };
         Ok(SyncStatusView {
             location: source.location.display_url(),
-            interval: local.sync_interval,
+            interval: effective_interval(&local, collection_root),
             last_checked_at,
             last_status,
             has_pending: source.pending_sha256.is_some(),
@@ -465,7 +481,9 @@ impl OpenApiSyncService {
                     continue;
                 }
             };
-            if local.sync_interval == SyncInterval::Off {
+            // Off, or turned on in another folder (a copied or committed state): not listed.
+            let interval = effective_interval(&local, &root);
+            if interval == SyncInterval::Off {
                 continue;
             }
             let source = match self.sources.load(&root) {
@@ -477,7 +495,7 @@ impl OpenApiSyncService {
                 }
             };
             let plan = SchedulePlan {
-                interval: local.sync_interval,
+                interval,
                 source_id: &source.source_id,
                 last_checked_at: local.last_checked_at.as_deref(),
                 last_failed: matches!(local.last_status, Some(SyncStatus::Failed { .. })),
@@ -496,7 +514,11 @@ impl OpenApiSyncService {
             }
         }
         if skipped > 0 || !unreadable.is_empty() {
-            tracing::debug!(skipped, unreadable = unreadable.len(), "sync targets with problems");
+            tracing::debug!(
+                skipped,
+                unreadable = unreadable.len(),
+                "sync targets with problems"
+            );
         }
         due.extend(unreadable);
         due.sort_by_key(|(at, _)| *at);
@@ -512,6 +534,10 @@ impl OpenApiSyncService {
         let locals = self.local_repo()?;
         let mut local = locals.load(collection_root)?.unwrap_or_default();
         local.sync_interval = interval;
+        local.opt_in_root = match interval {
+            SyncInterval::Off => None,
+            _ => Some(canonical_root_string(collection_root)),
+        };
         locals.save(collection_root, &local)
     }
 

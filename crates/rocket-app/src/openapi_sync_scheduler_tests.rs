@@ -249,6 +249,7 @@ impl World {
                 sync_interval: interval,
                 last_checked_at: last.map(|t| t.to_rfc3339()),
                 last_status: last.map(|_| SyncStatus::Unchanged),
+                opt_in_root: Some(crate::openapi_sync_service::canonical_root_string(&root)),
                 ..OpenApiLocalState::default()
             };
             FsOpenApiLocalRepo.save(&root, &local).expect("local");
@@ -380,6 +381,53 @@ fn a_collection_without_local_state_is_not_listed() {
     // The source file says hourly, yet there is no local state.
     w.seed("plain", None, None);
     assert!(w.service().due_targets(t0()).is_empty());
+}
+
+#[test]
+fn a_local_state_without_an_opt_in_root_is_not_listed() {
+    let w = World::new(Answer::Same, &[]);
+    let root = w.seed("moved", Some(SyncInterval::Hourly), Some(ago(3 * 3600)));
+    assert_eq!(names(&w.service().due_targets(t0())), vec!["moved"]);
+    let mut local = w.local("moved");
+    local.opt_in_root = None;
+    FsOpenApiLocalRepo.save(&root, &local).expect("save");
+    assert!(w.service().due_targets(t0()).is_empty());
+    assert_eq!(
+        w.service().status(&root).expect("status").interval,
+        SyncInterval::Off
+    );
+}
+
+#[test]
+fn a_local_state_opted_in_for_another_folder_is_not_listed() {
+    let w = World::new(Answer::Same, &[]);
+    let root = w.seed("copied", Some(SyncInterval::Hourly), Some(ago(3 * 3600)));
+    let mut local = w.local("copied");
+    local.opt_in_root = Some("/somewhere/else/copied".to_string());
+    FsOpenApiLocalRepo.save(&root, &local).expect("save");
+    assert!(w.service().due_targets(t0()).is_empty());
+    assert_eq!(
+        w.service().status(&root).expect("status").interval,
+        SyncInterval::Off
+    );
+}
+
+#[test]
+fn set_interval_opts_in_and_off_clears_it() {
+    let w = World::new(Answer::Same, &[]);
+    let root = w.seed("mine", None, None);
+    let svc = w.service();
+    svc.set_interval(&root, SyncInterval::Hourly).expect("on");
+    let canonical = crate::openapi_sync_service::canonical_root_string(&root);
+    assert_eq!(w.local("mine").opt_in_root, Some(canonical));
+    assert_eq!(names(&svc.due_targets(t0())), vec!["mine"]);
+    assert_eq!(
+        svc.status(&root).expect("status").interval,
+        SyncInterval::Hourly
+    );
+    svc.set_interval(&root, SyncInterval::Off).expect("off");
+    assert_eq!(w.local("mine").opt_in_root, None);
+    assert!(svc.due_targets(t0()).is_empty());
 }
 
 #[test]

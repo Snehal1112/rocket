@@ -465,7 +465,23 @@ async fn apply_keeps_the_timing_fields() {
     let before = w.svc.local_state(&w.name).expect("local");
     assert_eq!(before.consecutive_failures, 2);
     assert_eq!(before.sync_interval, SyncInterval::Daily);
+    assert!(before.opt_in_root.is_some());
     assert!(before.last_checked_at.is_some());
+    // A partial apply keeps the failure counters and the status.
+    let plan = w.plan();
+    let first = plan.items[0].key().to_string();
+    w.svc
+        .apply(&w.name, &w.approve(&plan, &[first.as_str()]))
+        .await
+        .expect("partial apply");
+    let mid = w.svc.local_state(&w.name).expect("local");
+    assert_eq!(mid.sync_interval, SyncInterval::Daily);
+    assert_eq!(mid.opt_in_root, before.opt_in_root);
+    assert_eq!(mid.last_checked_at, before.last_checked_at);
+    assert_eq!(mid.consecutive_failures, 2);
+    assert_eq!(mid.not_before, before.not_before);
+    assert_eq!(mid.last_status, before.last_status);
+    // A finalized apply resets the failure state and sets the status.
     let plan = w.plan();
     w.svc
         .apply(&w.name, &w.approve(&plan, &[]))
@@ -473,9 +489,10 @@ async fn apply_keeps_the_timing_fields() {
         .expect("apply");
     let after = w.svc.local_state(&w.name).expect("local");
     assert_eq!(after.sync_interval, SyncInterval::Daily);
+    assert_eq!(after.opt_in_root, before.opt_in_root);
     assert_eq!(after.last_checked_at, before.last_checked_at);
-    assert_eq!(after.consecutive_failures, before.consecutive_failures);
-    assert_eq!(after.not_before, before.not_before);
+    assert_eq!(after.consecutive_failures, 0);
+    assert_eq!(after.not_before, None);
     assert_eq!(after.last_status, Some(SyncStatus::Unchanged));
 }
 
