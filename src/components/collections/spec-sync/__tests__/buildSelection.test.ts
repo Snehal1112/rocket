@@ -108,4 +108,27 @@ describe('buildSelection', () => {
     state.approved = new Set(['GET /c', 'GET /a']);
     expect(buildSelection(plan, state).items.map((i) => i.key)).toEqual(['GET /a', 'GET /c']);
   });
+
+  it('drops choices for fields that are not in the current changes', () => {
+    const state = empty();
+    state.approved = new Set(['GET /b', 'GET /a']);
+    state.choices = new Map<string, Record<string, 'spec' | 'yours'>>([
+      ['GET /b', { url: 'spec', gone: 'yours' }],
+      ['GET /a', { url: 'spec' }],
+    ]);
+    const out = buildSelection(plan, state);
+    expect(out.items).toEqual([
+      { key: 'GET /a', digest: 'dA', choices: {} },
+      { key: 'GET /b', digest: 'dB', choices: { url: 'spec' } },
+    ]);
+  });
+
+  it('never sends an item as both approved and skipped, the skip wins', () => {
+    const state = empty();
+    state.approved = new Set(['GET /a']);
+    state.skips = new Set(['GET /a']);
+    const out = buildSelection(plan, state);
+    expect(out.items).toEqual([]);
+    expect(out.skips).toEqual([{ key: 'GET /a', fingerprint: 'fA' }]);
+  });
 });

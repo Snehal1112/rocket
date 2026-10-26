@@ -228,6 +228,40 @@ describe('openapi sync queries', () => {
     });
   });
 
+  it('two apply calls from separate hook instances run the command once', async () => {
+    let finish: (v: unknown) => void = () => undefined;
+    vi.mocked(tauriApi.applyOpenApiSync).mockReset();
+    vi.mocked(tauriApi.applyOpenApiSync).mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }) as never,
+    );
+    const first = renderHook(() => useApplySync('G'), { wrapper });
+    const second = renderHook(() => useApplySync('G'), { wrapper });
+    const selection = { items: [], skips: [], variables: [], renameLinks: [] };
+    const onSettled = vi.fn();
+    first.result.current.mutate(selection);
+    second.result.current.mutate(selection, { onSettled });
+    await waitFor(() => expect(tauriApi.applyOpenApiSync).toHaveBeenCalledTimes(1));
+    expect(second.result.current.isPending).toBe(false);
+    finish({
+      applied: [],
+      stale: [],
+      notRewritable: [],
+      deleted: [],
+      detached: [],
+      skipped: 0,
+      remaining: 0,
+    });
+    await waitFor(() => expect(first.result.current.isSuccess).toBe(true));
+    expect(onSettled).not.toHaveBeenCalled();
+    expect(tauriApi.applyOpenApiSync).toHaveBeenCalledTimes(1);
+    // The guard is released afterwards.
+    vi.mocked(tauriApi.applyOpenApiSync).mockResolvedValue({} as never);
+    await second.result.current.mutateAsync(selection);
+    expect(tauriApi.applyOpenApiSync).toHaveBeenCalledTimes(2);
+  });
+
   it('the applied event refreshes status, plan and the tree for the named collection only', async () => {
     const spy = vi.spyOn(client, 'invalidateQueries');
     renderHook(() => useOpenApiSyncEvents(), { wrapper });

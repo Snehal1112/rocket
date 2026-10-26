@@ -8,6 +8,20 @@ export interface SelectionState {
   links: Array<[string, string]>;
 }
 
+/** Keeps only the choices for fields that are in the item's current changes. */
+function currentChoices(
+  item: OpenApiSyncPlan['items'][number],
+  chosen: Record<string, 'spec' | 'yours'> | undefined,
+): Record<string, 'spec' | 'yours'> {
+  const out: Record<string, 'spec' | 'yours'> = {};
+  if (!chosen || item.kind !== 'changed') return out;
+  for (const change of item.changes) {
+    const choice = chosen[change.field];
+    if (choice) out[change.field] = choice;
+  }
+  return out;
+}
+
 /**
  * Builds the apply selection from the user's choices. Digests and fingerprints come from the
  * plan items untouched, and a key that is not in the plan is dropped.
@@ -16,15 +30,15 @@ export function buildSelection(plan: OpenApiSyncPlan, state: SelectionState): Op
   const items: OpenApiSelection['items'] = [];
   const skips: OpenApiSelection['skips'] = [];
   for (const item of plan.items) {
-    if (state.approved.has(item.key)) {
+    // A skip wins over an approval, so an item is never sent as both.
+    if (state.skips.has(item.key)) {
+      skips.push({ key: item.key, fingerprint: item.fingerprint });
+    } else if (state.approved.has(item.key)) {
       items.push({
         key: item.key,
         digest: item.digest,
-        choices: { ...state.choices.get(item.key) },
+        choices: currentChoices(item, state.choices.get(item.key)),
       });
-    }
-    if (state.skips.has(item.key)) {
-      skips.push({ key: item.key, fingerprint: item.fingerprint });
     }
   }
   const variables = plan.variableChanges

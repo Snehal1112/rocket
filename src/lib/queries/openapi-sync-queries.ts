@@ -1,5 +1,5 @@
 import { type QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect } from 'react';
 import {
   applyOpenApiSync,
   checkOpenApiSyncNow,
@@ -132,21 +132,21 @@ export function useRevokeConsent(collection: string) {
   });
 }
 
+// One apply per collection at a time, shared by every component and surviving remounts.
+const applyingCollections = new Set<string>();
+
 /**
  * Applies a selection and refreshes status, plan and the collection tree. Only one apply
- * runs at a time, a call while one is in flight is rejected.
+ * runs at a time per collection, a call while one is in flight is a silent no-op.
  */
 export function useApplySync(collection: string) {
   const queryClient = useQueryClient();
-  const inFlight = useRef(false);
-  return useMutation<OpenApiApplyReport, unknown, OpenApiSelection>({
+  const mutation = useMutation<OpenApiApplyReport, unknown, OpenApiSelection>({
     mutationFn: async (selection) => {
-      if (inFlight.current) throw new Error('An apply is already running.');
-      inFlight.current = true;
       try {
         return await applyOpenApiSync(collection, selection);
       } finally {
-        inFlight.current = false;
+        applyingCollections.delete(collection);
       }
     },
     onSettled: () => {
@@ -154,6 +154,24 @@ export function useApplySync(collection: string) {
       void queryClient.invalidateQueries({ queryKey: collectionKeys.all });
     },
   });
+  const { mutate, mutateAsync } = mutation;
+  const guardedMutate = useCallback<typeof mutate>(
+    (selection, options) => {
+      if (applyingCollections.has(collection)) return;
+      applyingCollections.add(collection);
+      mutate(selection, options);
+    },
+    [collection, mutate],
+  );
+  const guardedMutateAsync = useCallback<typeof mutateAsync>(
+    (selection, options) => {
+      if (applyingCollections.has(collection)) return Promise.resolve(undefined as never);
+      applyingCollections.add(collection);
+      return mutateAsync(selection, options);
+    },
+    [collection, mutateAsync],
+  );
+  return { ...mutation, mutate: guardedMutate, mutateAsync: guardedMutateAsync };
 }
 
 /**
