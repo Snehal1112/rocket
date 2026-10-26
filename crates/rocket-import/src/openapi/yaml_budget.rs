@@ -14,7 +14,7 @@ use std::cell::Cell;
 /// Most string bytes (keys and values, replays included) one budget accepts.
 pub(crate) const MAX_YAML_BYTES: usize = 25 * 1024 * 1024;
 /// Nodes allowed per input byte. A text without aliases has fewer nodes than bytes.
-const NODES_PER_BYTE: usize = 4;
+const NODES_PER_BYTE: usize = 2;
 /// Fewest nodes any budget allows, so small texts are never refused.
 const MIN_NODES: usize = 1_000_000;
 /// Most nodes any budget allows, however large the input.
@@ -261,7 +261,7 @@ mod tests {
     #[test]
     fn the_node_limit_scales_with_the_input() {
         assert_eq!(node_limit_for(0), 1_000_000);
-        assert_eq!(node_limit_for(1_000_000), 4_000_000);
+        assert_eq!(node_limit_for(1_000_000), 2_000_000);
         assert_eq!(node_limit_for(25 * 1024 * 1024), 20_000_000);
         assert_eq!(node_limit_for(usize::MAX), 20_000_000);
     }
