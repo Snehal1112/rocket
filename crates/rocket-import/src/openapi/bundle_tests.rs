@@ -138,6 +138,11 @@ async fn skips_query_userinfo_http_and_private_hosts_with_a_note() {
         "https://127.0.0.1/p.yaml",
         "https://localhost/l.yaml",
         "https://10.0.0.5/p2.yaml",
+        "https://2130706433/",
+        "https://good.com@evil.com/",
+        "https://[::1]/",
+        "https://0x7f.1/",
+        "https://localhost./x",
     ]);
     let found = find_remote_refs(&text, Some(&format!("{RAW_DIR}/openapi.yaml")));
     assert!(found.is_empty(), "{found:?}");
@@ -146,7 +151,8 @@ async fn skips_query_userinfo_http_and_private_hosts_with_a_note() {
         .expect("bundle");
     assert!(fetcher.requests().is_empty());
     assert_eq!(bundle.text, text);
-    assert_eq!(bundle.notes.len(), 7, "{:?}", bundle.notes);
+    // The two loopback spellings (2130706433 and 0x7f.1) share one note.
+    assert_eq!(bundle.notes.len(), 11, "{:?}", bundle.notes);
     for note in &bundle.notes {
         assert!(!note.contains("SECRET") && !note.contains("token"), "{note}");
         assert!(!note.contains("pw"), "{note}");
@@ -432,17 +438,23 @@ async fn limits_stop_the_fetching() {
     // 26 MB in total.
     let fetcher = FakeFetcher::default();
     let big = format!("a: '{}'\n", "x".repeat(9 * 1024 * 1024));
-    let urls: Vec<String> = (0..3)
+    let urls: Vec<String> = (0..4)
         .map(|i| format!("https://example.com/big{i}.yaml"))
         .collect();
     for u in &urls {
         fetcher.serve(u, &big);
     }
     let refs: Vec<&str> = urls.iter().map(String::as_str).collect();
-    let bundle = bundle_spec(&fetcher, &spec_with(&refs), &location(), None, &[])
+    let main_text = spec_with(&refs);
+    let bundle = bundle_spec(&fetcher, &main_text, &location(), None, &[])
         .await
         .expect("bundle");
-    assert!(fetcher.requests().len() < 4);
+    let requests = fetcher.requests();
+    assert_eq!(requests.len(), 3);
+    assert_eq!(
+        requests[2].max_bytes,
+        MAX_TOTAL_BYTES - (main_text.len() + 2 * big.len())
+    );
     assert!(bundle.incomplete);
     assert_eq!(bundle.notes.len(), 1, "{:?}", bundle.notes);
     assert_eq!(bundle.refs.len(), 2);
@@ -513,6 +525,149 @@ async fn a_failure_is_returned() {
         refs_unchanged(&fetcher, &location(), None, &previous).await,
         Err(SpecFetchFailure::Status(500))
     );
+}
+
+#[tokio::test]
+async fn lookalike_repositories_get_no_token_and_other_refs_of_the_repo_do() {
+    let fetcher = FakeFetcher::default();
+    let evil_a = "https://raw.githubusercontent.com/acme/orders-evil/main/a.yaml";
+    let evil_b = "https://raw.githubusercontent.com/evil/orders/main/b.yaml";
+    let dev = "https://raw.githubusercontent.com/acme/orders/dev/api/c.yaml";
+    let dev_api = "https://api.github.com/repos/acme/orders/contents/api/c.yaml?ref=dev";
+    fetcher
+        .serve(evil_a, "a: 1\n")
+        .serve(evil_b, "b: 1\n")
+        .serve(dev_api, "c: 1\n");
+    bundle_spec(
+        &fetcher,
+        &spec_with(&[evil_a, evil_b, dev]),
+        &location(),
+        Some("tok"),
+        &[],
+    )
+    .await
+    .expect("bundle");
+    let requests = fetcher.requests();
+    assert_eq!(requests.len(), 3);
+    assert_eq!(requests[0].url, evil_a);
+    assert_eq!(requests[0].bearer_token, None);
+    assert_eq!(requests[1].url, evil_b);
+    assert_eq!(requests[1].bearer_token, None);
+    assert_eq!(requests[2].url, dev_api);
+    assert_eq!(requests[2].bearer_token.as_deref(), Some("tok"));
+}
+
+#[tokio::test]
+async fn a_github_blob_link_to_another_repo_is_fetched_raw_without_token() {
+    let fetcher = FakeFetcher::default();
+    let raw = "https://raw.githubusercontent.com/other/repo/main/defs.yaml";
+    fetcher.serve(raw, "a: 1\n");
+    let blob = "https://github.com/other/repo/blob/main/defs.yaml";
+    bundle_spec(&fetcher, &spec_with(&[blob]), &location(), Some("tok"), &[])
+        .await
+        .expect("bundle");
+    let requests = fetcher.requests();
+    assert_eq!(requests[0].url, raw);
+    assert_eq!(requests[0].bearer_token, None);
+}
+
+#[tokio::test]
+async fn a_huge_spec_scans_fast_and_keeps_few_notes() {
+    let fetcher = FakeFetcher::default();
+    let started = std::time::Instant::now();
+    let owned: Vec<String> = (0..50_000)
+        .map(|i| format!("http://example.com/f{i}.yaml"))
+        .collect();
+    let refs: Vec<&str> = owned.iter().map(String::as_str).collect();
+    let bundle = bundle_spec(&fetcher, &spec_with(&refs), &location(), None, &[])
+        .await
+        .expect("bundle");
+    assert!(bundle.notes.len() <= 21, "{}", bundle.notes.len());
+    assert!(bundle.notes.last().is_some_and(|n| n.starts_with("and ")));
+
+    let owned: Vec<String> = (0..50_000)
+        .map(|i| format!("https://example.com/f{i}.yaml"))
+        .collect();
+    let refs: Vec<&str> = owned.iter().map(String::as_str).collect();
+    let bundle = bundle_spec(&fetcher, &spec_with(&refs), &location(), None, &[])
+        .await
+        .expect("bundle");
+    assert_eq!(fetcher.requests().len(), 20);
+    assert!(bundle.incomplete);
+    assert!(started.elapsed() < std::time::Duration::from_secs(2));
+}
+
+#[tokio::test]
+async fn alias_growth_gives_back_the_original_text_with_a_note() {
+    let fetcher = FakeFetcher::default();
+    let items: Vec<String> = (0..1000).map(|i| i.to_string()).collect();
+    let aliases = vec!["*a"; 1000].join(", ");
+    let body = format!("a: &a [{}]\nb: [{aliases}]\n", items.join(", "));
+    fetcher.serve("https://example.com/bomb.yaml", &body);
+    let text = spec_with(&["https://example.com/bomb.yaml#/a"]);
+    let bundle = bundle_with_limit(&fetcher, &text, &location(), None, 200_000)
+        .await
+        .expect("bundle");
+    assert_eq!(bundle.text, text);
+    assert!(bundle.incomplete);
+    assert!(bundle.refs.is_empty());
+    assert_eq!(bundle.notes.len(), 1, "{:?}", bundle.notes);
+}
+
+#[tokio::test]
+async fn a_json_file_is_read_without_aliases() {
+    let fetcher = FakeFetcher::default();
+    fetcher.serve(
+        "https://example.com/d.json",
+        "{\"p\": {\"name\": \"p\", \"in\": \"query\"}}",
+    );
+    let text = spec_with(&["https://example.com/d.json#/p"]);
+    let bundle = bundle_spec(&fetcher, &text, &location(), None, &[])
+        .await
+        .expect("bundle");
+    let doc = crate::openapi::parse_openapi(&bundle.text).expect("parse");
+    assert_eq!(doc.operations[0].parameters[0].name, "p");
+}
+
+#[tokio::test]
+async fn a_main_spec_with_the_root_key_is_left_alone() {
+    let fetcher = FakeFetcher::default();
+    let text = format!(
+        "{}x-rocket-remote: {{}}\n",
+        spec_with(&["https://example.com/d.yaml#/a"])
+    );
+    let bundle = bundle_spec(&fetcher, &text, &location(), None, &[])
+        .await
+        .expect("bundle");
+    assert_eq!(bundle.text, text);
+    assert_eq!(bundle.notes.len(), 1);
+    assert!(!bundle.incomplete);
+    assert!(fetcher.requests().is_empty());
+}
+
+#[tokio::test]
+async fn a_ref_back_to_the_main_spec_points_at_the_main_document() {
+    let fetcher = FakeFetcher::default();
+    let main_raw = format!("{RAW_DIR}/openapi.yaml");
+    fetcher.serve(
+        &format!("{RAW_DIR}/defs.yaml"),
+        &format!("p:\n  $ref: '{main_raw}#/components/parameters/q'\n"),
+    );
+    let text = format!(
+        "{}components:\n  parameters:\n    q: {{ name: q, in: query }}\n",
+        spec_with(&["defs.yaml#/p"])
+    );
+    let bundle = bundle_spec(&fetcher, &text, &location(), None, &[])
+        .await
+        .expect("bundle");
+    assert_eq!(fetcher.requests().len(), 1);
+    assert!(
+        bundle.text.contains("'#/components/parameters/q'"),
+        "{}",
+        bundle.text
+    );
+    let doc = crate::openapi::parse_openapi(&bundle.text).expect("parse");
+    assert_eq!(doc.operations[0].parameters[0].name, "q");
 }
 
 #[tokio::test]

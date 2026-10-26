@@ -113,23 +113,70 @@ fn classify(reference: &str, base: Option<&Url>) -> Target {
     }
 }
 
-/// The URLs and notes found in one document, each once and in first-encounter order.
-#[derive(Default)]
+/// Most skip notes kept for one document; the rest are counted in one closing line.
+const MAX_NOTES: usize = 20;
+
+/// The URLs and notes found in one document, each once and in first-encounter order. The
+/// scan stops once it has more URLs than the file limit allows, so a huge spec stays cheap.
 struct Scan {
     urls: Vec<String>,
+    url_set: HashSet<String>,
     notes: Vec<String>,
+    note_set: HashSet<String>,
+    extra_notes: usize,
+    /// The address of the main spec. A reference back to it needs no fetch.
+    exclude: Option<String>,
 }
 
 impl Scan {
+    fn new(exclude: Option<String>) -> Self {
+        Self {
+            urls: Vec::new(),
+            url_set: HashSet::new(),
+            notes: Vec::new(),
+            note_set: HashSet::new(),
+            extra_notes: 0,
+            exclude,
+        }
+    }
+
+    fn full(&self) -> bool {
+        self.urls.len() > MAX_FILES
+    }
+
     fn add(&mut self, target: Target) {
         match target {
             Target::Remote { url, .. } => {
-                if !self.urls.contains(&url) {
+                if self.exclude.as_deref() == Some(url.as_str()) {
+                    return;
+                }
+                if self.url_set.insert(url.clone()) {
                     self.urls.push(url);
                 }
             }
-            Target::Skip(note) => push_unique(&mut self.notes, note),
+            Target::Skip(note) => {
+                if self.note_set.contains(&note) {
+                    return;
+                }
+                if self.notes.len() < MAX_NOTES {
+                    self.note_set.insert(note.clone());
+                    self.notes.push(note);
+                } else {
+                    self.extra_notes += 1;
+                }
+            }
             Target::Local { .. } => {}
+        }
+    }
+
+    /// Adds the closing line for the notes that were not kept.
+    fn finish(&mut self) {
+        if self.extra_notes > 0 {
+            self.notes.push(format!(
+                "and {} more references were not followed.",
+                self.extra_notes
+            ));
+            self.extra_notes = 0;
         }
     }
 }
@@ -144,6 +191,9 @@ fn collect(value: &Yaml, base: Option<&Url>, scan: &mut Scan) {
     match value {
         Yaml::Mapping(map) => {
             for (key, child) in map {
+                if scan.full() {
+                    return;
+                }
                 match (key.as_str(), child.as_str()) {
                     (Some("$ref"), Some(reference)) => scan.add(classify(reference, base)),
                     _ => collect(child, base, scan),
@@ -152,6 +202,9 @@ fn collect(value: &Yaml, base: Option<&Url>, scan: &mut Scan) {
         }
         Yaml::Sequence(items) => {
             for item in items {
+                if scan.full() {
+                    return;
+                }
                 collect(item, base, scan);
             }
         }
@@ -165,14 +218,25 @@ fn parse_yaml_mapping(text: &str) -> Option<Yaml> {
         .filter(|v| v.is_mapping())
 }
 
+/// Parses a referenced file. A body that starts with `{` is read as JSON, which has no alias
+/// syntax to blow up; anything else is read as YAML.
+fn parse_file_mapping(text: &str) -> Option<Yaml> {
+    if text.trim_start().starts_with('{') {
+        let json: serde_json::Value = serde_json::from_str(text).ok()?;
+        return serde_yaml::to_value(&json).ok().filter(|v| v.is_mapping());
+    }
+    parse_yaml_mapping(text)
+}
+
 /// The absolute, fragment-free, deduplicated URLs the main text refers to, in first-encounter
-/// order. Skipped references are not listed. A relative reference needs `base`.
+/// order. Skipped references are not listed. A relative reference needs `base`. At most one
+/// more than the file limit is returned.
 pub fn find_remote_refs(main_text: &str, base: Option<&str>) -> Vec<String> {
     let Some(root) = parse_yaml_mapping(main_text) else {
         return Vec::new();
     };
     let base = base.and_then(|b| Url::parse(b).ok());
-    let mut scan = Scan::default();
+    let mut scan = Scan::new(None);
     collect(&root, base.as_ref(), &mut scan);
     scan.urls
 }
@@ -186,6 +250,7 @@ fn rewrite(
     base: Option<&Url>,
     owner: Option<usize>,
     index: &HashMap<String, usize>,
+    main_url: Option<&str>,
 ) {
     match value {
         Yaml::Mapping(map) => {
@@ -198,6 +263,10 @@ fn rewrite(
                             {
                                 owner.map(|i| pointer_into(i, &fragment))
                             }
+                            // A reference back to the main spec points at the main document.
+                            Target::Remote { url, fragment } if main_url == Some(url.as_str()) => {
+                                Some(format!("#{fragment}"))
+                            }
                             Target::Remote { url, fragment } => {
                                 index.get(&url).map(|&i| pointer_into(i, &fragment))
                             }
@@ -209,12 +278,12 @@ fn rewrite(
                         continue;
                     }
                 }
-                rewrite(child, base, owner, index);
+                rewrite(child, base, owner, index, main_url);
             }
         }
         Yaml::Sequence(items) => {
             for item in items {
-                rewrite(item, base, owner, index);
+                rewrite(item, base, owner, index, main_url);
             }
         }
         _ => {}
@@ -231,7 +300,12 @@ fn canonical(url: &str) -> String {
     }
 }
 
-fn inline_with_base(main: &mut Yaml, main_base: Option<&Url>, files: &[(String, Yaml)]) {
+fn inline_with_base(
+    main: &mut Yaml,
+    main_base: Option<&Url>,
+    main_url: Option<&str>,
+    files: &[(String, Yaml)],
+) {
     if files.is_empty() || !main.is_mapping() {
         return;
     }
@@ -243,11 +317,11 @@ fn inline_with_base(main: &mut Yaml, main_base: Option<&Url>, files: &[(String, 
     for (i, (url, value)) in files.iter().enumerate() {
         let mut copy = value.clone();
         let base = Url::parse(url).ok();
-        rewrite(&mut copy, base.as_ref(), Some(i), &index);
+        rewrite(&mut copy, base.as_ref(), Some(i), &index, main_url);
         root.insert(Yaml::String(i.to_string()), copy);
     }
     // The main document is rewritten before the files are attached to it.
-    rewrite(main, main_base, None, &index);
+    rewrite(main, main_base, None, &index, main_url);
     if let Yaml::Mapping(map) = main {
         map.insert(Yaml::String(ROOT_KEY.to_string()), Yaml::Mapping(root));
     }
@@ -257,7 +331,7 @@ fn inline_with_base(main: &mut Yaml, main_base: Option<&Url>, files: &[(String, 
 /// `$ref` values that point at them. The URLs in `files` are absolute. Relative references in
 /// the main document need an address, so use `bundle_spec` for those.
 pub fn inline_refs(main: &mut Yaml, files: &[(String, Yaml)]) {
-    inline_with_base(main, None, files);
+    inline_with_base(main, None, None, files);
 }
 
 /// The address relative references in the main spec resolve against.
@@ -273,23 +347,25 @@ fn request_for(
     token: Option<&str>,
     max_bytes: usize,
 ) -> SpecFetchRequest {
-    let same_repo = match (location, parse_spec_url(file_url)) {
+    // A GitHub file of another repository is fetched in its raw form, never with the token.
+    let (url, accept, bearer_token) = match (location, parse_spec_url(file_url)) {
         (SpecLocation::Github { owner, repo, .. }, Ok(file_location)) => {
             let same = matches!(
                 &file_location,
                 SpecLocation::Github { owner: o, repo: r, .. }
                     if o.eq_ignore_ascii_case(owner) && r.eq_ignore_ascii_case(repo)
             );
-            same.then_some(file_location)
+            if same {
+                let target = fetch_target(&file_location, token.is_some());
+                (target.url, target.accept, token.map(str::to_string))
+            } else {
+                (fetch_target(&file_location, false).url, None, None)
+            }
         }
-        _ => None,
-    };
-    let (url, accept, bearer_token) = match same_repo {
-        Some(file_location) => {
-            let target = fetch_target(&file_location, token.is_some());
-            (target.url, target.accept, token.map(str::to_string))
+        (_, Ok(file_location @ SpecLocation::Github { .. })) => {
+            (fetch_target(&file_location, false).url, None, None)
         }
-        None => (file_url.to_string(), None, None),
+        _ => (file_url.to_string(), None, None),
     };
     SpecFetchRequest {
         url,
@@ -374,6 +450,16 @@ pub async fn bundle_spec(
     token: Option<&str>,
     _previous: &[RemoteRefState],
 ) -> ImportResult<Bundle> {
+    bundle_with_limit(fetcher, main_text, location, token, MAX_TOTAL_BYTES).await
+}
+
+async fn bundle_with_limit(
+    fetcher: &dyn SpecFetcher,
+    main_text: &str,
+    location: &SpecLocation,
+    token: Option<&str>,
+    max_total: usize,
+) -> ImportResult<Bundle> {
     let mut bundle = Bundle {
         text: main_text.to_string(),
         refs: Vec::new(),
@@ -383,9 +469,17 @@ pub async fn bundle_spec(
     let Some(mut main) = parse_yaml_mapping(main_text) else {
         return Ok(bundle);
     };
+    if main.get(ROOT_KEY).is_some() {
+        bundle.notes.push(format!(
+            "The spec already has a {ROOT_KEY} key, so its references were not followed."
+        ));
+        return Ok(bundle);
+    }
     let main_base = Url::parse(&raw_address(location)).ok();
-    let mut scan = Scan::default();
+    let main_url = main_base.as_ref().map(|u| canonical(u.as_str()));
+    let mut scan = Scan::new(main_url.clone());
     collect(&main, main_base.as_ref(), &mut scan);
+    scan.finish();
     bundle.notes = scan.notes;
 
     let mut seen: HashSet<String> = HashSet::new();
@@ -407,7 +501,7 @@ pub async fn bundle_spec(
         let (url, depth) = (queue[next].url.clone(), queue[next].depth);
         next += 1;
         let label = file_label(&url);
-        if total >= MAX_TOTAL_BYTES {
+        if total >= max_total {
             bundle.incomplete = true;
             if !noted.size {
                 noted.size = true;
@@ -415,7 +509,7 @@ pub async fn bundle_spec(
             }
             continue;
         }
-        let request = request_for(&url, location, token, MAX_TOTAL_BYTES - total);
+        let request = request_for(&url, location, token, max_total - total);
         let token_sent = request.bearer_token.is_some();
         let (body, etag, last_modified) = match fetcher.fetch(request).await {
             Ok(SpecFetchOutcome::Fetched {
@@ -433,7 +527,7 @@ pub async fn bundle_spec(
             }
             Err(SpecFetchFailure::TooLarge) => {
                 bundle.incomplete = true;
-                total = MAX_TOTAL_BYTES;
+                total = max_total;
                 if !noted.size {
                     noted.size = true;
                     bundle.notes.push(SIZE_NOTE.to_string());
@@ -449,9 +543,9 @@ pub async fn bundle_spec(
                 continue;
             }
         };
-        if total + body.len() > MAX_TOTAL_BYTES {
+        if total + body.len() > max_total {
             bundle.incomplete = true;
-            total = MAX_TOTAL_BYTES;
+            total = max_total;
             if !noted.size {
                 noted.size = true;
                 bundle.notes.push(SIZE_NOTE.to_string());
@@ -466,7 +560,7 @@ pub async fn bundle_spec(
             ));
             continue;
         };
-        let Some(value) = parse_yaml_mapping(&text) else {
+        let Some(value) = parse_file_mapping(&text) else {
             bundle.incomplete = true;
             bundle.notes.push(format!(
                 "The file {label} could not be loaded: it is not a YAML or JSON mapping."
@@ -474,8 +568,9 @@ pub async fn bundle_spec(
             continue;
         };
         let file_base = Url::parse(&url).ok();
-        let mut child = Scan::default();
+        let mut child = Scan::new(main_url.clone());
         collect(&value, file_base.as_ref(), &mut child);
+        child.finish();
         for note in child.notes {
             push_unique(&mut bundle.notes, note);
         }
@@ -498,12 +593,23 @@ pub async fn bundle_spec(
     if files.is_empty() {
         return Ok(bundle);
     }
-    inline_with_base(&mut main, main_base.as_ref(), &files);
-    bundle.text = serde_yaml::to_string(&main).map_err(|_| {
+    inline_with_base(&mut main, main_base.as_ref(), main_url.as_deref(), &files);
+    let text = serde_yaml::to_string(&main).map_err(|_| {
         ImportError::SpecUnavailable(
             "The spec could not be combined with the files it refers to.".to_string(),
         )
     })?;
+    // Aliases in a small file can expand to a much larger document.
+    if text.len() > max_total {
+        bundle.refs.clear();
+        bundle.incomplete = true;
+        bundle.notes.push(
+            "The referenced files grow too large when combined, so none of them were used."
+                .to_string(),
+        );
+        return Ok(bundle);
+    }
+    bundle.text = text;
     Ok(bundle)
 }
 

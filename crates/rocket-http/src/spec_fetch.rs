@@ -132,7 +132,9 @@ pub fn redirect_target_allowed(to: &str) -> bool {
     if let Ok(ip) = bare.parse::<IpAddr>() {
         return !ip_is_local(ip);
     }
+    // A trailing dot is the same host, so `localhost.` must not slip through.
     let name = host.to_ascii_lowercase();
+    let name = name.trim_end_matches('.');
     name != "localhost" && !name.ends_with(".localhost")
 }
 
@@ -196,6 +198,8 @@ mod tests {
             "https://[::ffff:10.0.0.1]/",
             "https://localhost/x",
             "https://api.localhost/x",
+            "https://localhost./x",
+            "https://api.localhost./x",
             "ftp://example.com/x",
             "not a url",
         ] {
