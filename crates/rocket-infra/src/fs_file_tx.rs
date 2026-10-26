@@ -251,6 +251,17 @@ fn create_journal(root: &Path, journal: &Journal) -> DomainResult<()> {
     Ok(())
 }
 
+/// True when the journal file exists but is empty or is not a journal.
+fn journal_is_garbage(root: &Path) -> bool {
+    if guard(root, ".rocket/apply-journal.json").is_err() {
+        return false;
+    }
+    match std::fs::read_to_string(journal_path(root)) {
+        Ok(text) => text.trim().is_empty() || serde_json::from_str::<Journal>(&text).is_err(),
+        Err(_) => false,
+    }
+}
+
 fn read_journal(root: &Path) -> DomainResult<Option<Journal>> {
     guard(root, ".rocket/apply-journal.json")?;
     let text = match std::fs::read_to_string(journal_path(root)) {
@@ -486,7 +497,35 @@ impl FsFileTx {
     }
 
     /// Commits, applying at most `limit` ops when set (tests use this to simulate a crash).
+    /// Checks that the staging area is still ours before anything moves. Another process may
+    /// have run a recovery that discarded it. Nothing is cleaned up on failure, because the
+    /// files may belong to someone else now.
+    fn check_staging_intact(&self) -> DomainResult<()> {
+        let lost =
+            || DomainError::Conflict("the staging area was lost, nothing was changed".to_string());
+        match read_journal(&self.root) {
+            Ok(Some(j)) if j.id == self.id && j.phase == Phase::Staging => {}
+            Err(e) => {
+                // The journal cannot be read at all. Only this transaction's own staging
+                // folder is cleared.
+                remove_staging(&self.root, &self.id);
+                return Err(e);
+            }
+            _ => return Err(lost()),
+        }
+        let missing = self
+            .ops
+            .iter()
+            .filter(|o| o.is_put())
+            .any(|o| !staged_path(&self.root, &self.id, &o.path).is_file());
+        if missing {
+            return Err(lost());
+        }
+        Ok(())
+    }
+
     fn commit_inner(&mut self, limit: Option<usize>) -> DomainResult<()> {
+        self.check_staging_intact()?;
         let mut journal = self.journal(Phase::Committing);
         if let Err(e) = write_journal(&self.root, &journal) {
             // Nothing was applied yet.
@@ -639,7 +678,21 @@ impl CollectionFileTxFactory for FsFileTxFactory {
     fn recover(&self, collection_root: &Path) -> DomainResult<RecoveryOutcome> {
         // Waits for a running transaction, so a staging journal is never taken for a leftover.
         let _root = RootGuard::acquire(collection_root);
-        let Some(mut journal) = read_journal(collection_root)? else {
+        let journal = match read_journal(collection_root) {
+            Ok(journal) => journal,
+            Err(e) => {
+                // An empty or unreadable journal cannot be continued. It is dropped, so one
+                // bad file does not block every later sync call.
+                if !journal_is_garbage(collection_root) {
+                    return Err(e);
+                }
+                tracing::warn!("an unreadable apply journal was discarded");
+                let _ = std::fs::remove_file(journal_path(collection_root));
+                let _ = std::fs::remove_dir_all(staging_root(collection_root));
+                return Ok(RecoveryOutcome::Discarded);
+            }
+        };
+        let Some(mut journal) = journal else {
             return Ok(RecoveryOutcome::Nothing);
         };
         match journal.phase {
@@ -951,6 +1004,60 @@ mod tests {
     }
 
     #[test]
+    fn commit_refuses_when_the_journal_was_taken_over() {
+        let dir = tempdir().expect("tempdir");
+        write(dir.path(), "a.yml", "A1");
+        let mut tx = factory().begin(dir.path()).expect("begin");
+        tx.stage_put("a.yml", b"A2").expect("put");
+        // Another process recovered, discarded this staging area and began its own.
+        std::fs::remove_file(dir.path().join(".rocket/apply-journal.json")).expect("remove");
+        let other = Journal {
+            version: JOURNAL_VERSION,
+            id: "other".to_string(),
+            phase: Phase::Staging,
+            ops: Vec::new(),
+        };
+        create_journal(dir.path(), &other).expect("journal");
+        let err = tx.commit().expect_err("lost");
+        assert!(matches!(err, DomainError::Conflict(_)), "{err}");
+        assert_eq!(read(dir.path(), "a.yml"), "A1");
+        // The other transaction's journal is left alone.
+        assert!(dir.path().join(".rocket/apply-journal.json").exists());
+    }
+
+    #[test]
+    fn commit_refuses_when_a_staged_file_is_gone() {
+        let dir = tempdir().expect("tempdir");
+        write(dir.path(), "a.yml", "A1");
+        let mut tx = factory().begin(dir.path()).expect("begin");
+        tx.stage_put("a.yml", b"A2").expect("put");
+        let staging = dir.path().join(".rocket/staging");
+        std::fs::remove_dir_all(&staging).expect("remove");
+        let err = tx.commit().expect_err("lost");
+        assert!(matches!(err, DomainError::Conflict(_)), "{err}");
+        assert_eq!(read(dir.path(), "a.yml"), "A1");
+    }
+
+    #[test]
+    fn an_empty_or_unparseable_journal_is_discarded() {
+        for text in ["", "  \n", "{not json"] {
+            let dir = tempdir().expect("tempdir");
+            write(dir.path(), ".rocket/apply-journal.json", text);
+            std::fs::create_dir_all(dir.path().join(".rocket/staging/x")).expect("dir");
+            assert_eq!(
+                factory().recover(dir.path()).expect("recover"),
+                RecoveryOutcome::Discarded
+            );
+            assert!(!dir.path().join(".rocket/apply-journal.json").exists());
+            assert!(!dir.path().join(".rocket/staging").exists());
+            factory()
+                .begin(dir.path())
+                .expect("begin works again")
+                .abort();
+        }
+    }
+
+    #[test]
     fn begin_fails_when_a_journal_exists() {
         let dir = tempdir().expect("tempdir");
         let _open = factory().begin(dir.path()).expect("begin");
@@ -1072,6 +1179,7 @@ mod tests {
             hook: FaultHook::default(),
             rollback_hook: FaultHook::default(),
         };
+        create_journal(root, &tx.journal(Phase::Staging)).expect("journal");
         std::fs::create_dir_all(staging_dir(root, &id)).expect("dir");
         tx.stage_put("a.yml", b"A2").expect("put");
         tx.stage_put("dir/b.yml", b"B2").expect("put");
