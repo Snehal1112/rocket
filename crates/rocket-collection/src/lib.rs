@@ -5,6 +5,7 @@ pub mod folder_settings;
 pub mod graphql_request;
 pub mod file_tx;
 pub mod openapi_baseline;
+pub mod openapi_consent;
 pub mod openapi_local;
 pub mod openapi_schedule;
 pub mod openapi_source;
@@ -38,6 +39,9 @@ pub use openapi_baseline::{
 };
 pub use file_tx::{
     validate_rel_path, CollectionFileTx, CollectionFileTxFactory, RecoveryOutcome,
+};
+pub use openapi_consent::{
+    consent_root_key, ConsentState, InMemoryConsentStore, OpenApiConsent, OpenApiConsentStore,
 };
 pub use openapi_local::{OpenApiLocalRepository, OpenApiLocalState, LOCAL_STATE_FILE_VERSION};
 pub use openapi_schedule::{
