@@ -9,7 +9,7 @@ use rocket_collection::openapi_local::{OpenApiLocalRepository, OpenApiLocalState
 use rocket_collection::openapi_source::{
     OpenApiSource, OpenApiSourceRepository, SpecLocation, SyncInterval, SyncStatus,
 };
-use rocket_collection::CollectionRepository;
+use rocket_collection::{CollectionRepository, OpenApiConsentStore};
 use rocket_environment::SecretStore;
 use rocket_http::spec_fetch::{SpecFetchFailure, SpecFetchOutcome, SpecFetchRequest, SpecFetcher};
 use rocket_infra::{FsFileTxFactory, FsOpenApiLocalRepo, FsOpenApiSourceRepo};
@@ -184,6 +184,7 @@ struct World {
     fetcher: Arc<FakeFetcher>,
     tx: Arc<PickyTx>,
     now: Arc<Mutex<DateTime<Utc>>>,
+    consent: Arc<rocket_collection::InMemoryConsentStore>,
 }
 
 impl World {
@@ -197,6 +198,7 @@ impl World {
                 bad_tries: AtomicUsize::new(0),
             }),
             now: Arc::new(Mutex::new(t0())),
+            consent: Arc::new(rocket_collection::InMemoryConsentStore::new()),
         }
     }
 
@@ -251,10 +253,13 @@ impl World {
                 sync_interval: interval,
                 last_checked_at: last.map(|t| t.to_rfc3339()),
                 last_status: last.map(|_| SyncStatus::Unchanged),
-                opt_in_root: Some(crate::openapi_sync_service::canonical_root_string(&root)),
                 ..OpenApiLocalState::default()
             };
             FsOpenApiLocalRepo.save(&root, &local).expect("local");
+            // A collection with an interval was set up on this machine, so it has consent.
+            self.consent
+                .grant(&root, &source.source_id, &source.location.display_url())
+                .expect("consent");
         }
         root
     }
@@ -280,6 +285,7 @@ impl World {
             Arc::new(NoSecrets),
         )
         .with_local(Box::new(FsOpenApiLocalRepo))
+        .with_consent(Arc::clone(&self.consent) as Arc<dyn OpenApiConsentStore>)
         .with_apply(self.deps())
         .with_clock(self.clock())
     }
@@ -289,6 +295,7 @@ impl World {
         let tx = Arc::clone(&self.tx);
         let ws = self.ws.path().to_path_buf();
         let clock = self.clock();
+        let consent = Arc::clone(&self.consent);
         Arc::new(move || {
             let deps = ApplyDeps {
                 collections: Box::new(rocket_infra::FsCollectionRepo::new_standalone(
@@ -309,6 +316,7 @@ impl World {
                 Arc::new(NoSecrets),
             )
             .with_local(Box::new(FsOpenApiLocalRepo))
+            .with_consent(Arc::clone(&consent) as Arc<dyn OpenApiConsentStore>)
             .with_apply(deps)
             .with_clock(Arc::clone(&clock))
         })
@@ -386,26 +394,31 @@ fn a_collection_without_local_state_is_not_listed() {
 }
 
 #[test]
-fn a_local_state_without_an_opt_in_root_is_not_listed() {
+fn due_targets_skips_collections_without_consent() {
     let w = World::new(Answer::Same, &[]);
     let root = w.seed("moved", Some(SyncInterval::Hourly), Some(ago(3 * 3600)));
     assert_eq!(names(&w.service().due_targets(t0())), vec!["moved"]);
-    let mut local = w.local("moved");
-    local.opt_in_root = None;
-    FsOpenApiLocalRepo.save(&root, &local).expect("save");
+    let id = format!("src-{}", "moved");
+    w.consent.revoke(&root, &id).expect("revoke");
     assert!(w.service().due_targets(t0()).is_empty());
-    assert_eq!(
-        w.service().status(&root).expect("status").interval,
-        SyncInterval::Off
-    );
+    let status = w.service().status(&root).expect("status");
+    assert_eq!(status.interval, SyncInterval::Off);
+    assert_eq!(status.consent, rocket_collection::ConsentState::Missing);
 }
 
 #[test]
-fn a_local_state_opted_in_for_another_folder_is_not_listed() {
+fn opt_in_root_alone_no_longer_turns_checks_on() {
     let w = World::new(Answer::Same, &[]);
     let root = w.seed("copied", Some(SyncInterval::Hourly), Some(ago(3 * 3600)));
+    w.consent.revoke(&root, "src-copied").expect("revoke");
+    // A state that names exactly this folder in the legacy field changes nothing.
     let mut local = w.local("copied");
-    local.opt_in_root = Some("/somewhere/else/copied".to_string());
+    local.opt_in_root = Some(
+        std::fs::canonicalize(&root)
+            .expect("canonical")
+            .to_string_lossy()
+            .into_owned(),
+    );
     FsOpenApiLocalRepo.save(&root, &local).expect("save");
     assert!(w.service().due_targets(t0()).is_empty());
     assert_eq!(
@@ -415,20 +428,18 @@ fn a_local_state_opted_in_for_another_folder_is_not_listed() {
 }
 
 #[test]
-fn set_interval_opts_in_and_off_clears_it() {
+fn set_interval_turns_checks_on_and_off() {
     let w = World::new(Answer::Same, &[]);
     let root = w.seed("mine", None, None);
     let svc = w.service();
     svc.set_interval(&root, SyncInterval::Hourly).expect("on");
-    let canonical = crate::openapi_sync_service::canonical_root_string(&root);
-    assert_eq!(w.local("mine").opt_in_root, Some(canonical));
+    assert_eq!(w.local("mine").opt_in_root, None);
     assert_eq!(names(&svc.due_targets(t0())), vec!["mine"]);
     assert_eq!(
         svc.status(&root).expect("status").interval,
         SyncInterval::Hourly
     );
     svc.set_interval(&root, SyncInterval::Off).expect("off");
-    assert_eq!(w.local("mine").opt_in_root, None);
     assert!(svc.due_targets(t0()).is_empty());
 }
 

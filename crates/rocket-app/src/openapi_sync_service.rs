@@ -10,6 +10,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
+use rocket_collection::openapi_consent::{ConsentState, OpenApiConsentStore};
 use rocket_collection::openapi_local::{OpenApiLocalRepository, OpenApiLocalState};
 use rocket_collection::openapi_schedule::{clamp_retry_after, next_check_at, SchedulePlan};
 use rocket_collection::openapi_source::{
@@ -39,6 +40,8 @@ pub enum CheckOutcome {
         spec_sha256: String,
     },
     Failed {
+        /// A short machine word, for example `consent_required` or `not_found`.
+        code: String,
         message: String,
         retry_after_secs: Option<u64>,
     },
@@ -53,6 +56,8 @@ pub struct SyncStatusView {
     pub last_status: Option<SyncStatus>,
     pub has_pending: bool,
     pub has_token: bool,
+    /// Whether this machine approved checks for the source's current location.
+    pub consent: ConsentState,
 }
 
 /// A collection whose background check is due.
@@ -73,6 +78,8 @@ pub struct OpenApiSyncService {
     pub(crate) apply_deps: Option<ApplyDeps>,
     /// Set by `with_local`. Without it the repository of the apply deps is used.
     local: Option<Box<dyn OpenApiLocalRepository>>,
+    /// Set by `with_consent`. Without it no source has consent, so nothing checks.
+    consent: Option<Arc<dyn OpenApiConsentStore>>,
 }
 
 type LockMap =
@@ -90,22 +97,6 @@ pub(crate) fn collection_lock(root: &Path) -> Arc<std::sync::Mutex<()>> {
         .lock()
         .unwrap_or_else(|e| e.into_inner());
     Arc::clone(map.entry(key).or_default())
-}
-
-/// The collection folder as stored in `opt_in_root`: canonical, else as given.
-pub(crate) fn canonical_root_string(root: &Path) -> String {
-    std::fs::canonicalize(root)
-        .unwrap_or_else(|_| root.to_path_buf())
-        .to_string_lossy()
-        .into_owned()
-}
-
-/// The interval that counts on this machine: Off unless it was turned on for this folder.
-fn effective_interval(local: &OpenApiLocalState, root: &Path) -> SyncInterval {
-    match local.opt_in_root.as_deref() {
-        Some(opted) if opted == canonical_root_string(root) => local.sync_interval,
-        _ => SyncInterval::Off,
-    }
 }
 
 pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
@@ -166,6 +157,7 @@ impl OpenApiSyncService {
             clock: Arc::new(Utc::now),
             apply_deps: None,
             local: None,
+            consent: None,
         }
     }
 
@@ -173,6 +165,52 @@ impl OpenApiSyncService {
     pub fn with_local(mut self, local: Box<dyn OpenApiLocalRepository>) -> Self {
         self.local = Some(local);
         self
+    }
+
+    /// Adds the machine-local consent store. Without it every source counts as unapproved.
+    pub fn with_consent(mut self, consent: Arc<dyn OpenApiConsentStore>) -> Self {
+        self.consent = Some(consent);
+        self
+    }
+
+    /// Compares the approval on this machine with the source's current location. A store
+    /// that is missing or cannot be read gives `Missing`, so the answer fails closed.
+    fn consent_state_of(&self, root: &Path, source: &OpenApiSource) -> DomainResult<ConsentState> {
+        let Some(store) = &self.consent else {
+            return Ok(ConsentState::Missing);
+        };
+        Ok(match store.get(root, &source.source_id)? {
+            None => ConsentState::Missing,
+            Some(c) if c.location == source.location.display_url() => ConsentState::Granted,
+            Some(_) => ConsentState::LocationChanged,
+        })
+    }
+
+    /// True only when consent for the current location exists. A store error counts as no.
+    fn is_granted(&self, root: &Path, source: &OpenApiSource) -> bool {
+        matches!(
+            self.consent_state_of(root, source),
+            Ok(ConsentState::Granted)
+        )
+    }
+
+    /// The consent state of the collection's source on this machine.
+    pub fn consent_state(&self, root: &Path) -> DomainResult<ConsentState> {
+        let source = self.load(root)?;
+        self.consent_state_of(root, &source)
+    }
+
+    /// Approves the source's current location for this collection folder on this machine.
+    pub fn grant_consent(&self, root: &Path) -> DomainResult<()> {
+        let source = self.load(root)?;
+        self.grant_for(root, &source)
+    }
+
+    fn grant_for(&self, root: &Path, source: &OpenApiSource) -> DomainResult<()> {
+        let store = self.consent.as_ref().ok_or_else(|| {
+            DomainError::Internal("The sync approvals are not set up.".to_string())
+        })?;
+        store.grant(root, &source.source_id, &source.location.display_url())
     }
 
     /// The local state repository: the one given to `with_local`, else the apply deps' one.
@@ -208,8 +246,9 @@ impl OpenApiSyncService {
     }
 
     /// Reads the token strictly, so a locked keychain is told apart from no token.
-    fn read_token(&self, source: &OpenApiSource) -> TokenRead {
-        if source.source_id.is_empty() {
+    fn read_token(&self, root: &Path, source: &OpenApiSource) -> TokenRead {
+        // The keychain is not touched without consent for the current location.
+        if source.source_id.is_empty() || !self.is_granted(root, source) {
             return TokenRead::None;
         }
         match self.secrets.get_strict(&source.source_id, TOKEN_KEY) {
@@ -219,8 +258,9 @@ impl OpenApiSyncService {
         }
     }
 
-    fn stored_token(&self, source: &OpenApiSource) -> Option<Zeroizing<String>> {
-        if source.source_id.is_empty() {
+    fn stored_token(&self, root: &Path, source: &OpenApiSource) -> Option<Zeroizing<String>> {
+        // The keychain is not touched without consent for the current location.
+        if source.source_id.is_empty() || !self.is_granted(root, source) {
             return None;
         }
         self.secrets
@@ -253,6 +293,7 @@ impl OpenApiSyncService {
         });
         locals.save(root, &local)?;
         Ok(CheckOutcome::Failed {
+            code: code.to_string(),
             message,
             retry_after_secs,
         })
@@ -290,14 +331,40 @@ impl OpenApiSyncService {
         Ok(())
     }
 
+    /// The failed outcome for a source without consent, or `None` when it is approved. It
+    /// records nothing and touches neither the network nor the keychain.
+    fn consent_refusal(&self, root: &Path) -> DomainResult<Option<CheckOutcome>> {
+        let source = self.load(root)?;
+        Ok(match self.consent_state_of(root, &source)? {
+            ConsentState::Granted => None,
+            ConsentState::Missing => Some(CheckOutcome::Failed {
+                code: "consent_required".to_string(),
+                message: "Approve this spec link on this machine before it is checked.".to_string(),
+                retry_after_secs: None,
+            }),
+            ConsentState::LocationChanged => Some(CheckOutcome::Failed {
+                code: "location_changed".to_string(),
+                message:
+                    "The spec link changed since you approved it. Approve the new link to check it."
+                        .to_string(),
+                retry_after_secs: None,
+            }),
+        })
+    }
+
     pub async fn check(&self, collection_root: &Path) -> DomainResult<CheckOutcome> {
+        // The consent gate comes first: no recovery, no keychain read and no request
+        // without an approval of the current location on this machine.
+        if let Some(refusal) = self.consent_refusal(collection_root)? {
+            return Ok(refusal);
+        }
         self.settle(collection_root)?;
         // A local state that cannot be read fails the check before any request goes out.
         self.local_repo()?.load(collection_root)?;
         // Rule 1: a source file is required. Only a GitHub location gets a token.
         let mut source = self.load(collection_root)?;
         let read = match source.location {
-            SpecLocation::Github { .. } => self.read_token(&source),
+            SpecLocation::Github { .. } => self.read_token(collection_root, &source),
             SpecLocation::Https { .. } => TokenRead::None,
         };
         let keychain_failed = matches!(read, TokenRead::Unreadable);
@@ -546,13 +613,22 @@ impl OpenApiSyncService {
         } else {
             (source.last_checked_at.clone(), source.last_status.clone())
         };
+        let consent = self
+            .consent_state_of(collection_root, &source)
+            .unwrap_or(ConsentState::Missing);
+        // Without consent the interval counts as off, and the keychain is not read.
+        let interval = match consent {
+            ConsentState::Granted => local.sync_interval,
+            _ => SyncInterval::Off,
+        };
         Ok(SyncStatusView {
             location: source.location.display_url(),
-            interval: effective_interval(&local, collection_root),
+            interval,
             last_checked_at,
             last_status,
             has_pending: source.pending_sha256.is_some(),
-            has_token: self.stored_token(&source).is_some(),
+            has_token: self.stored_token(collection_root, &source).is_some(),
+            consent,
         })
     }
 
@@ -593,8 +669,7 @@ impl OpenApiSyncService {
                     continue;
                 }
             };
-            // Off, or turned on in another folder (a copied or committed state): not listed.
-            let interval = effective_interval(&local, &root);
+            let interval = local.sync_interval;
             if interval == SyncInterval::Off {
                 continue;
             }
@@ -606,6 +681,11 @@ impl OpenApiSyncService {
                     continue;
                 }
             };
+            // No approval of the current location on this machine (a copied, cloned or
+            // restored folder, or a changed link): not listed. A store error counts as no.
+            if !self.is_granted(&root, &source) {
+                continue;
+            }
             let plan = SchedulePlan {
                 interval,
                 source_id: &source.source_id,
@@ -642,14 +722,16 @@ impl OpenApiSyncService {
         let lock = collection_lock(collection_root);
         let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         // The source file must exist, so a stray folder gets no local state.
-        self.load(collection_root)?;
+        let source = self.load(collection_root)?;
         let locals = self.local_repo()?;
         let mut local = locals.load(collection_root)?.unwrap_or_default();
         local.sync_interval = interval;
-        local.opt_in_root = match interval {
-            SyncInterval::Off => None,
-            _ => Some(canonical_root_string(collection_root)),
-        };
+        // The legacy opt-in is ignored from now on, so it is no longer written.
+        local.opt_in_root = None;
+        // Turning checks on is an act on this machine, so it approves the shown location.
+        if interval != SyncInterval::Off {
+            self.grant_for(collection_root, &source)?;
+        }
         locals.save(collection_root, &local)
     }
 
@@ -670,7 +752,9 @@ impl OpenApiSyncService {
             source.source_id = OpenApiSource::new_source_id();
             self.sources.save(collection_root, &source)?;
         }
-        self.secrets.set(&source.source_id, TOKEN_KEY, token)
+        self.secrets.set(&source.source_id, TOKEN_KEY, token)?;
+        // Saving a token for this link approves the link on this machine.
+        self.grant_for(collection_root, &source)
     }
 
     pub fn clear_token(&self, collection_root: &Path) -> DomainResult<()> {
@@ -880,7 +964,9 @@ mod tests {
                 Arc::clone(&secrets) as Arc<dyn SecretStore>,
             )
             .with_local(Box::new(FsOpenApiLocalRepo))
+            .with_consent(Arc::new(rocket_collection::InMemoryConsentStore::new()))
             .with_clock(Arc::new(fixed_now));
+            svc.grant_consent(dir.path()).expect("consent");
             Self {
                 dir,
                 fetcher,
@@ -1572,6 +1658,7 @@ mod tests {
                 CheckOutcome::Failed {
                     message,
                     retry_after_secs,
+                    ..
                 } => {
                     assert!(message.contains(wording), "{message}");
                     assert_eq!(retry_after_secs, retry);
@@ -1704,7 +1791,9 @@ mod tests {
             Arc::new(LockedSecrets),
         )
         .with_local(Box::new(FsOpenApiLocalRepo))
+        .with_consent(Arc::new(rocket_collection::InMemoryConsentStore::new()))
         .with_clock(Arc::new(fixed_now));
+        svc.grant_consent(dir.path()).expect("consent");
         (dir, fetcher, svc)
     }
 
@@ -1752,7 +1841,9 @@ mod tests {
             Box::new(FlakyRepo(Arc::clone(&fail))),
             Arc::new(MemSecrets::default()),
         )
-        .with_local(Box::new(FsOpenApiLocalRepo));
+        .with_local(Box::new(FsOpenApiLocalRepo))
+        .with_consent(Arc::new(rocket_collection::InMemoryConsentStore::new()));
+        svc.grant_consent(dir.path()).expect("consent");
         fetcher.push(fetched(fixture(), "\"v2\""));
         assert!(svc.check(dir.path()).await.is_err());
         // The failed save left the hash and the file in step.
@@ -1770,7 +1861,7 @@ mod tests {
     }
 
     #[test]
-    fn token_follows_a_copied_collection_folder() {
+    fn a_copied_collection_folder_has_no_token_until_it_is_approved() {
         let f = Fixture::new(source(github()));
         f.svc.set_token(f.root(), TOKEN).expect("token");
         let copy = TempDir::new().expect("tempdir");
@@ -1782,6 +1873,11 @@ mod tests {
             std::fs::create_dir_all(to.parent().expect("parent")).expect("mkdir");
             std::fs::copy(&file, &to).expect("copy");
         }
+        // The copy has no approval on this machine, so the keychain is not read for it.
+        let status = f.svc.status(copy.path()).expect("status");
+        assert!(!status.has_token);
+        assert_eq!(status.consent, ConsentState::Missing);
+        f.svc.grant_consent(copy.path()).expect("grant");
         assert!(f.svc.status(copy.path()).expect("status").has_token);
     }
 
@@ -1940,7 +2036,9 @@ mod tests {
             Arc::new(SharedFetcher(Arc::clone(&fetcher))),
             Box::new(FsOpenApiSourceRepo),
             Arc::new(MemSecrets::default()),
-        );
+        )
+        .with_consent(Arc::new(rocket_collection::InMemoryConsentStore::new()));
+        svc.grant_consent(dir.path()).expect("consent");
         assert!(svc.check(dir.path()).await.is_err());
         assert!(svc.set_interval(dir.path(), SyncInterval::Daily).is_err());
         assert!(fetcher.requests.lock().expect("lock").is_empty());
@@ -1978,7 +2076,10 @@ mod tests {
             .save(dir.path(), &source(github()))
             .expect("seed");
         let root = dir.path().to_path_buf();
+        let consent: Arc<dyn OpenApiConsentStore> =
+            Arc::new(rocket_collection::InMemoryConsentStore::new());
         let mid_fetch = {
+            let consent = Arc::clone(&consent);
             let root = root.clone();
             move || {
                 let other = OpenApiSyncService::new(
@@ -1986,7 +2087,8 @@ mod tests {
                     Box::new(FsOpenApiSourceRepo),
                     Arc::new(MemSecrets::default()),
                 )
-                .with_local(Box::new(FsOpenApiLocalRepo));
+                .with_local(Box::new(FsOpenApiLocalRepo))
+                .with_consent(Arc::clone(&consent));
                 other
                     .set_interval(&root, SyncInterval::Weekly)
                     .expect("interval");
@@ -2004,7 +2106,9 @@ mod tests {
             Arc::new(MemSecrets::default()),
         )
         .with_local(Box::new(FsOpenApiLocalRepo))
+        .with_consent(Arc::clone(&consent))
         .with_clock(Arc::new(fixed_now));
+        svc.grant_consent(&root).expect("consent");
         svc.check(&root).await.expect("check");
         let local = FsOpenApiLocalRepo
             .load(&root)
@@ -2015,3 +2119,7 @@ mod tests {
         assert_eq!(local.last_checked_at, Some(fixed_now().to_rfc3339()));
     }
 }
+
+#[cfg(test)]
+#[path = "openapi_sync_consent_tests.rs"]
+mod consent_tests;

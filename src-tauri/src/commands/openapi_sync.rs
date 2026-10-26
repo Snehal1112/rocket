@@ -425,6 +425,7 @@ mod tests {
             }),
             has_pending: false,
             has_token: true,
+            consent: rocket_collection::ConsentState::Granted,
         });
         let json = serde_json::to_value(dto).expect("json");
         assert_eq!(

@@ -292,7 +292,9 @@ async fn world_from(
         Box::new(rocket_infra::FsOpenApiSourceRepo),
         Arc::new(NoSecrets),
     )
+    .with_consent(Arc::new(rocket_collection::InMemoryConsentStore::new()))
     .with_apply(deps(&ws_path, tx));
+    svc.grant_consent(&root).expect("consent");
     World {
         repo: rocket_infra::FsCollectionRepo::new_standalone(ws_path.join("collections")),
         _ws: ws,
@@ -495,7 +497,7 @@ async fn apply_keeps_the_timing_fields() {
     let before = w.svc.local_state(&w.name).expect("local");
     assert_eq!(before.consecutive_failures, 2);
     assert_eq!(before.sync_interval, SyncInterval::Daily);
-    assert!(before.opt_in_root.is_some());
+    assert!(before.opt_in_root.is_none());
     assert!(before.last_checked_at.is_some());
     // A partial apply keeps the failure counters and the status.
     let plan = w.plan();

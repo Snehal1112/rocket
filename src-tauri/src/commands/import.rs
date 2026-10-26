@@ -9,8 +9,8 @@ use rocket_import::{
 };
 use rocket_infra::{
     FsCollectionRepo, FsEnvironmentRepo, FsFileTxFactory, FsOpenApiBaselineRepo,
-    FsOpenApiLocalRepo, FsOpenApiSourceRepo, FsRequestRenderer, KeyringSecretStore,
-    SharedPathCollectionRepo,
+    FsOpenApiConsentRepo, FsOpenApiLocalRepo, FsOpenApiSourceRepo, FsRequestRenderer,
+    KeyringSecretStore, SharedPathCollectionRepo,
 };
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
@@ -158,12 +158,32 @@ fn parse_group_by(text: &str) -> Result<GroupBy, String> {
     GroupBy::parse(text).ok_or_else(|| "folder layout must be tags or paths".to_string())
 }
 
+/// The machine-local approvals for OpenAPI sync, `~/.rocket-api/openapi-sync.yml`. One store
+/// is shared by the whole process, so its write lock covers every service built per call.
+pub(crate) fn openapi_consent_store() -> Arc<dyn rocket_collection::OpenApiConsentStore> {
+    static STORE: std::sync::OnceLock<Arc<dyn rocket_collection::OpenApiConsentStore>> =
+        std::sync::OnceLock::new();
+    Arc::clone(STORE.get_or_init(|| {
+        match rocket_shared::paths::home_dir() {
+            Some(home) => Arc::new(FsOpenApiConsentRepo::new(
+                home.join(".rocket-api").join("openapi-sync.yml"),
+            )),
+            // Startup needs a home directory, so this is not expected. Approvals then last
+            // for this run only.
+            None => Arc::new(rocket_collection::InMemoryConsentStore::new()),
+        }
+    }))
+}
+
 /// Trims a token from the UI. A blank value means no token.
 fn token_arg(token: Option<String>) -> Option<String> {
     token
         .map(|t| t.trim().to_string())
         .filter(|t| !t.is_empty())
 }
+
+const CONSENT_NOT_SAVED: &str =
+    "The link could not be approved on this machine, so it will not be checked until you approve it.";
 
 const TOKEN_NOT_SAVED: &str =
     "The token could not be saved, so checks on this private repository will fail.";
@@ -177,6 +197,7 @@ fn store_token(
 ) -> bool {
     OpenApiSyncService::new(Arc::clone(fetcher), Box::new(FsOpenApiSourceRepo), secrets)
         .with_local(Box::new(FsOpenApiLocalRepo))
+        .with_consent(openapi_consent_store())
         .set_token(collection_root, token)
         .is_ok()
 }
@@ -189,6 +210,7 @@ pub(crate) fn make_sync_service(
     let secrets: Arc<dyn SecretStore> = Arc::new(KeyringSecretStore::new_openapi_sync());
     OpenApiSyncService::new(fetcher, Box::new(FsOpenApiSourceRepo), secrets)
         .with_local(Box::new(FsOpenApiLocalRepo))
+        .with_consent(openapi_consent_store())
         .with_apply(rocket_app::ApplyDeps {
             collections: Box::new(SharedPathCollectionRepo::new(active_workspace_path)),
             baselines: Box::new(FsOpenApiBaselineRepo),
@@ -338,8 +360,19 @@ pub async fn import_openapi_url(
         .await
         .map(OpenApiImportDto::from)
         .map_err(|e| e.to_string())?;
+    // The user typed this link on this machine, so it is approved for the new collection.
+    let root = base.join("collections").join(&dto.collection);
+    let approval = OpenApiSyncService::new(
+        Arc::clone(fetcher.inner()),
+        Box::new(FsOpenApiSourceRepo),
+        Arc::new(KeyringSecretStore::new_openapi_sync()),
+    )
+    .with_consent(openapi_consent_store())
+    .grant_consent(&root);
+    if approval.is_err() {
+        dto.warnings.push(CONSENT_NOT_SAVED.to_string());
+    }
     if let Some(token) = token.as_deref() {
-        let root = base.join("collections").join(&dto.collection);
         let secrets: Arc<dyn SecretStore> = Arc::new(KeyringSecretStore::new_openapi_sync());
         if !store_token(fetcher.inner(), secrets, &root, token) {
             dto.warnings.push(TOKEN_NOT_SAVED.to_string());
