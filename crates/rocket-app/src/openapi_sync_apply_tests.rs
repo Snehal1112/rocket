@@ -101,6 +101,8 @@ struct FakeFetcher {
     honor_304: AtomicBool,
     gate: Mutex<Option<Arc<Gate>>>,
     requests: Mutex<Vec<SpecFetchRequest>>,
+    /// Extra files by address: body and etag. They answer 304 to their own etag.
+    files: Mutex<BTreeMap<String, (String, String)>>,
 }
 
 impl FakeFetcher {
@@ -111,6 +113,7 @@ impl FakeFetcher {
             honor_304: AtomicBool::new(false),
             gate: Mutex::new(None),
             requests: Mutex::new(Vec::new()),
+            files: Mutex::new(BTreeMap::new()),
         }
     }
 }
@@ -121,6 +124,24 @@ struct SharedFetcher(Arc<FakeFetcher>);
 impl SpecFetcher for SharedFetcher {
     async fn fetch(&self, request: SpecFetchRequest) -> Result<SpecFetchOutcome, SpecFetchFailure> {
         let has_validator = request.if_none_match.is_some();
+        let file = self
+            .0
+            .files
+            .lock()
+            .expect("lock")
+            .get(&request.url)
+            .cloned();
+        if let Some((body, etag)) = file {
+            if request.if_none_match.as_deref() == Some(etag.as_str()) {
+                return Ok(SpecFetchOutcome::NotModified);
+            }
+            return Ok(SpecFetchOutcome::Fetched {
+                body: body.into_bytes(),
+                etag: Some(etag),
+                last_modified: None,
+                final_url: request.url.clone(),
+            });
+        }
         self.0.requests.lock().expect("lock").push(request);
         let gate = self.0.gate.lock().expect("lock").clone();
         if let Some(gate) = gate {
@@ -241,8 +262,17 @@ fn deps(ws: &Path, tx: Arc<dyn CollectionFileTxFactory>) -> ApplyDeps {
 }
 
 async fn world_with(tx: Arc<dyn CollectionFileTxFactory>) -> World {
+    world_from(tx, v1(), |_| {}).await
+}
+
+async fn world_from(
+    tx: Arc<dyn CollectionFileTxFactory>,
+    body: String,
+    setup: impl FnOnce(&FakeFetcher),
+) -> World {
     let ws = TempDir::new().expect("tempdir");
-    let fetcher = Arc::new(FakeFetcher::new(v1()));
+    let fetcher = Arc::new(FakeFetcher::new(body));
+    setup(&fetcher);
     let imported = import_service(ws.path())
         .import_openapi_url(
             &SharedFetcher(Arc::clone(&fetcher)),
@@ -1050,4 +1080,84 @@ async fn a_lost_staging_area_is_reported_and_the_foreign_journal_is_left_alone()
     // No recovery ran, so the other process's journal is still there.
     assert!(w.root.join(".rocket/apply-journal.json").is_file());
     assert_eq!(w.source().spec_sha256, before.spec_sha256);
+}
+
+const DEFS: &str = "https://example.com/specs/defs.yaml";
+
+fn defs_body(extra: bool) -> String {
+    let mut text =
+        "parameters:\n  limit: { name: limit, in: query, schema: { type: integer } }\n".to_string();
+    if extra {
+        text.push_str("  offset: { name: offset, in: query, schema: { type: integer } }\n");
+    }
+    text
+}
+
+fn spec_with_refs(names: &[&str]) -> String {
+    let params: Vec<serde_json::Value> = names
+        .iter()
+        .map(|n| json!({"$ref": format!("{DEFS}#/parameters/{n}")}))
+        .collect();
+    spec(json!({
+        "/pets": {"get": op("listPets", "pets", json!({"parameters": params}))},
+    }))
+}
+
+#[tokio::test]
+async fn a_changed_referenced_file_applies_the_new_parameter_and_keeps_user_edits() {
+    let w = world_from(
+        Arc::new(rocket_infra::FsFileTxFactory::new()),
+        spec_with_refs(&["limit", "offset"]),
+        |f| {
+            *f.etag.lock().expect("lock") = Some("\"m1\"".to_string());
+            f.honor_304.store(true, Ordering::SeqCst);
+            f.files
+                .lock()
+                .expect("lock")
+                .insert(DEFS.to_string(), (defs_body(true), "\"r1\"".to_string()));
+        },
+    )
+    .await;
+    let imported = w.source();
+    assert_eq!(imported.remote_refs.len(), 1);
+    // The user edits the request before the referenced file changes.
+    let path = imported
+        .operations
+        .iter()
+        .find(|o| o.key == "listPets")
+        .expect("entry")
+        .request_path
+        .clone();
+    let mut request = w.repo.get_request(&w.name, &path).expect("get");
+    request.url = "https://edited.example.com/pets".to_string();
+    w.repo.save_request(&w.name, &path, &request).expect("save");
+    // Only the file changes: a new parameter appears. The main spec still answers 304.
+    w.fetcher.files.lock().expect("lock").insert(
+        DEFS.to_string(),
+        (
+            defs_body(true).replace(
+                "offset:",
+                "page: { name: page, in: query, schema: { type: integer } }\n  offset:",
+            ),
+            "\"r2\"".to_string(),
+        ),
+    );
+    let main = spec_with_refs(&["limit", "offset", "page"]);
+    *w.fetcher.body.lock().expect("lock") = main;
+    let out = w.svc.check(&w.root).await.expect("check");
+    assert!(matches!(out, CheckOutcome::Changed { .. }), "{out:?}");
+    let plan = w.plan();
+    w.svc
+        .apply(&w.name, &w.approve(&plan, &[]))
+        .await
+        .expect("apply");
+    let applied = w.repo.get_request(&w.name, &path).expect("get");
+    assert_eq!(applied.url, "https://edited.example.com/pets");
+    let names: Vec<&str> = applied
+        .query_params
+        .iter()
+        .map(|q| q.key.as_str())
+        .collect();
+    assert!(names.contains(&"page"), "{names:?}");
+    assert_eq!(w.source().remote_refs[0].etag.as_deref(), Some("\"r2\""));
 }

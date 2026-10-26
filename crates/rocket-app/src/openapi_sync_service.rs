@@ -19,7 +19,9 @@ use rocket_environment::SecretStore;
 use rocket_http::spec_fetch::{
     SpecFetchFailure, SpecFetchOutcome, SpecFetchRequest, SpecFetcher, DEFAULT_MAX_SPEC_BYTES,
 };
-use rocket_import::{check_spec_text, fetch_failure_message, fetch_target};
+use rocket_import::{
+    bundle_spec, check_spec_text, fetch_failure_message, fetch_target, refs_unchanged, Bundle,
+};
 use rocket_shared::error::{DomainError, DomainResult};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
@@ -321,7 +323,57 @@ impl OpenApiSyncService {
             if_modified_since: source.last_modified.clone(),
             max_bytes: DEFAULT_MAX_SPEC_BYTES,
         };
-        let result = self.fetcher.fetch(request).await;
+        let mut result = self.fetcher.fetch(request.clone()).await;
+
+        // Rule 3 refinement: a 304 of the main spec says nothing about the files it refers to.
+        if matches!(result, Ok(SpecFetchOutcome::NotModified)) && !source.remote_refs.is_empty() {
+            let unchanged = if source.remote_refs_incomplete {
+                // Stored validators are not trusted, so the full path runs.
+                Ok(false)
+            } else {
+                refs_unchanged(
+                    self.fetcher.as_ref(),
+                    &source.location,
+                    token.as_ref().map(|t| t.as_str()),
+                    &source.remote_refs,
+                )
+                .await
+            };
+            match unchanged {
+                Ok(true) => {}
+                Ok(false) => {
+                    let mut fresh = request.clone();
+                    fresh.if_none_match = None;
+                    fresh.if_modified_since = None;
+                    result = match self.fetcher.fetch(fresh).await {
+                        Ok(SpecFetchOutcome::NotModified) => Err(SpecFetchFailure::Network(
+                            "the server did not send the file".to_string(),
+                        )),
+                        other => other,
+                    };
+                }
+                Err(failure) => result = Err(failure),
+            }
+        }
+
+        // A fresh body is bundled with the files it refers to before the lock is taken.
+        let mut bundled: Option<Result<Bundle, String>> = None;
+        if let Ok(SpecFetchOutcome::Fetched { body, .. }) = &result {
+            if check_spec_text(body).is_ok() {
+                bundled = Some(match std::str::from_utf8(body) {
+                    Ok(text) => bundle_spec(
+                        self.fetcher.as_ref(),
+                        text,
+                        &source.location,
+                        token.as_ref().map(|t| t.as_str()),
+                        &source.remote_refs,
+                    )
+                    .await
+                    .map_err(|e| capitalize(&e.to_string())),
+                    Err(_) => Err("The file is not valid text.".to_string()),
+                });
+            }
+        }
         drop(token);
 
         // The fetch can take long, so the lock was not held. Reload the source now and apply
@@ -394,10 +446,37 @@ impl OpenApiSyncService {
                 None,
             );
         }
+        let bundle = match bundled {
+            Some(Ok(bundle)) => bundle,
+            Some(Err(message)) => {
+                return self.fail(collection_root, &now, "not_a_spec", message, None);
+            }
+            None => {
+                return self.fail(
+                    collection_root,
+                    &now,
+                    "not_a_spec",
+                    "The file is not valid text.".to_string(),
+                    None,
+                );
+            }
+        };
+        // A file that could not be fetched keeps everything as it was.
+        if bundle.fetch_failed {
+            let mut message = "A file the spec refers to could not be loaded.".to_string();
+            for note in &bundle.notes {
+                message.push(' ');
+                message.push_str(note);
+            }
+            return self.fail(collection_root, &now, "ref_unavailable", message, None);
+        }
 
-        let hash = sha256_hex(&body);
+        let text = bundle.text.into_bytes();
+        let hash = sha256_hex(&text);
         source.etag = etag;
         source.last_modified = last_modified;
+        source.remote_refs = bundle.refs;
+        source.remote_refs_incomplete = bundle.fetch_failed;
 
         // Rule 5: the same spec as the imported one.
         if hash == source.spec_sha256 {
@@ -414,7 +493,7 @@ impl OpenApiSyncService {
         let kept = source.pending_sha256.as_deref() == Some(hash.as_str())
             && self.pending_is_sound(collection_root, &source);
         if !kept {
-            self.sources.save_pending(collection_root, &body)?;
+            self.sources.save_pending(collection_root, &text)?;
             source.pending_sha256 = Some(hash.clone());
         }
         self.sources.save(collection_root, &source)?;
@@ -808,6 +887,201 @@ mod tests {
             last_modified: None,
             final_url: "https://x".into(),
         })
+    }
+
+    const DEFS: &str = "https://example.com/defs.yaml";
+    const DEFS_BODY: &str = "parameters:\n  p: { name: p, in: query, schema: { type: string } }\n";
+
+    /// The fixture with one extra path whose operation refers to the given files.
+    fn with_refs(refs: &[&str]) -> Vec<u8> {
+        let mut v: serde_json::Value = serde_json::from_slice(&fixture()).expect("json");
+        let params: Vec<serde_json::Value> = refs
+            .iter()
+            .map(|r| serde_json::json!({ "$ref": r }))
+            .collect();
+        v["paths"]["/with-refs"] = serde_json::json!({
+            "get": { "operationId": "withRefs", "parameters": params,
+                     "responses": { "200": { "description": "ok" } } }
+        });
+        serde_json::to_vec(&v).expect("json")
+    }
+
+    fn ref_state(url: &str, etag: &str) -> rocket_collection::openapi_source::RemoteRefState {
+        rocket_collection::openapi_source::RemoteRefState {
+            url: url.to_string(),
+            etag: Some(etag.to_string()),
+            last_modified: None,
+        }
+    }
+
+    fn with_ref_source(location: SpecLocation, url: &str) -> OpenApiSource {
+        let mut src = source(location);
+        src.remote_refs = vec![ref_state(url, "\"r1\"")];
+        src
+    }
+
+    fn request_count(f: &Fixture) -> usize {
+        f.fetcher.requests.lock().expect("lock").len()
+    }
+
+    #[tokio::test]
+    async fn all_304_is_unchanged_with_no_main_refetch() {
+        let f = Fixture::new(with_ref_source(
+            SpecLocation::Https {
+                url: "https://example.com/a.json".into(),
+            },
+            DEFS,
+        ));
+        f.fetcher.push(Ok(SpecFetchOutcome::NotModified));
+        f.fetcher.push(Ok(SpecFetchOutcome::NotModified));
+        let out = f.svc.check(f.root()).await.expect("check");
+        assert_eq!(out, CheckOutcome::Unchanged);
+        assert_eq!(request_count(&f), 2);
+        let last = f.fetcher.last_request();
+        assert_eq!(last.url, DEFS);
+        assert_eq!(last.if_none_match.as_deref(), Some("\"r1\""));
+        assert_eq!(f.local().last_status, Some(SyncStatus::Unchanged));
+    }
+
+    #[tokio::test]
+    async fn a_changed_referenced_file_makes_the_spec_changed() {
+        let f = Fixture::new(with_ref_source(
+            SpecLocation::Https {
+                url: "https://example.com/a.json".into(),
+            },
+            DEFS,
+        ));
+        // The main spec is 304, the file is new, then the main spec and the file are fetched.
+        f.fetcher.push(Ok(SpecFetchOutcome::NotModified));
+        f.fetcher
+            .push(fetched(DEFS_BODY.as_bytes().to_vec(), "\"r2\""));
+        f.fetcher.push(fetched(
+            with_refs(&[&format!("{DEFS}#/parameters/p")]),
+            "\"m2\"",
+        ));
+        f.fetcher
+            .push(fetched(DEFS_BODY.as_bytes().to_vec(), "\"r2\""));
+        let out = f.svc.check(f.root()).await.expect("check");
+        let pending = f.pending().expect("pending copy");
+        assert_eq!(
+            out,
+            CheckOutcome::Changed {
+                spec_sha256: sha256_hex(&pending)
+            }
+        );
+        let text = String::from_utf8(pending).expect("utf8");
+        assert!(!text.contains(DEFS), "the file is inlined");
+        let s = f.load();
+        assert_eq!(s.pending_sha256, Some(sha256_hex(text.as_bytes())));
+        assert_eq!(s.remote_refs[0].etag.as_deref(), Some("\"r2\""));
+        assert_eq!(s.etag.as_deref(), Some("\"m2\""));
+        assert!(!s.remote_refs_incomplete);
+        // The third request is the main spec again, without validators.
+        let requests = f.fetcher.requests.lock().expect("lock");
+        assert_eq!(requests.len(), 4);
+        assert_eq!(requests[2].if_none_match, None);
+        assert_eq!(requests[2].if_modified_since, None);
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_file_fails_the_check_and_changes_nothing() {
+        let f = Fixture::new(with_ref_source(
+            SpecLocation::Https {
+                url: "https://example.com/a.json".into(),
+            },
+            DEFS,
+        ));
+        f.fetcher.push(fetched(
+            with_refs(&[&format!("{DEFS}#/parameters/p")]),
+            "\"m2\"",
+        ));
+        f.fetcher
+            .push(Err(SpecFetchFailure::Network("down".into())));
+        let before = f.source_bytes();
+        let out = f.svc.check(f.root()).await.expect("check");
+        match out {
+            CheckOutcome::Failed { message, .. } => {
+                assert!(
+                    message.starts_with("A file the spec refers to could not be loaded."),
+                    "{message}"
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(f.source_bytes(), before);
+        assert_eq!(f.pending(), None);
+        let l = f.local();
+        assert_eq!(l.consecutive_failures, 1);
+        assert_eq!(
+            l.last_status,
+            Some(SyncStatus::Failed {
+                code: "ref_unavailable".into()
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn a_spec_without_remote_refs_behaves_as_before() {
+        let f = Fixture::new(source(github()));
+        f.fetcher.push(fetched(changed("a"), "\"v2\""));
+        let out = f.svc.check(f.root()).await.expect("check");
+        assert_eq!(
+            out,
+            CheckOutcome::Changed {
+                spec_sha256: sha256_hex(&changed("a"))
+            }
+        );
+        assert_eq!(request_count(&f), 1);
+        assert_eq!(f.pending(), Some(changed("a")));
+        assert!(f.load().remote_refs.is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_token_is_not_sent_to_a_file_in_another_repository() {
+        let f = Fixture::new(source(github()));
+        f.svc.set_token(f.root(), TOKEN).expect("token");
+        let same = "https://raw.githubusercontent.com/o/r/main/defs.yaml#/parameters/p";
+        let other = "https://raw.githubusercontent.com/z/q/main/defs.yaml#/parameters/p";
+        f.fetcher.push(fetched(with_refs(&[same, other]), "\"m2\""));
+        f.fetcher
+            .push(fetched(DEFS_BODY.as_bytes().to_vec(), "\"r1\""));
+        f.fetcher
+            .push(fetched(DEFS_BODY.as_bytes().to_vec(), "\"r2\""));
+        f.svc.check(f.root()).await.expect("check");
+        let requests = f.fetcher.requests.lock().expect("lock");
+        assert_eq!(requests.len(), 3);
+        for r in requests.iter().skip(1) {
+            if r.url.contains("/z/q/") {
+                assert_eq!(r.bearer_token, None, "{}", r.url);
+            } else {
+                assert_eq!(r.bearer_token.as_deref(), Some(TOKEN), "{}", r.url);
+            }
+        }
+        assert!(requests.iter().any(|r| r.url.contains("/z/q/")));
+    }
+
+    #[tokio::test]
+    async fn refs_are_fetched_again_only_when_something_changed() {
+        let f = Fixture::new(with_ref_source(
+            SpecLocation::Https {
+                url: "https://example.com/a.json".into(),
+            },
+            DEFS,
+        ));
+        for _ in 0..2 {
+            f.fetcher.push(Ok(SpecFetchOutcome::NotModified));
+            f.fetcher.push(Ok(SpecFetchOutcome::NotModified));
+            f.svc.check(f.root()).await.expect("check");
+        }
+        // Two checks, each one validator request for the main spec and one for the file.
+        assert_eq!(request_count(&f), 4);
+        assert!(f
+            .fetcher
+            .requests
+            .lock()
+            .expect("lock")
+            .iter()
+            .all(|r| r.if_none_match.is_some()));
     }
 
     #[tokio::test]
