@@ -59,6 +59,7 @@ pub mod oauth2_service;
 pub mod openapi_sync_apply;
 pub mod openapi_sync_scheduler;
 pub mod openapi_sync_service;
+pub mod openapi_sync_view;
 pub mod proposal_service;
 pub mod proxy_settings_service;
 pub(crate) mod redaction;
@@ -141,6 +142,7 @@ pub use mcp_tool_service::{
 };
 pub use oauth2_service::OAuth2Service;
 pub use openapi_sync_apply::{ApplyDeps, RendererFactory};
+pub use openapi_sync_view::{PlanView, UnchangedView};
 pub use openapi_sync_scheduler::{
     OpenApiSyncScheduler, SchedulerConfig, SchedulerHandle, ServiceFactory,
 };

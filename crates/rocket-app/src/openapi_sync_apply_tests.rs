@@ -1159,3 +1159,6 @@ async fn a_changed_referenced_file_applies_the_new_parameter_and_keeps_user_edit
     assert!(applied.headers.iter().any(|h| h.key == "limit"));
     assert_eq!(w.source().remote_refs[0].etag.as_deref(), Some("\"r2\""));
 }
+
+#[path = "openapi_sync_plan_tests.rs"]
+mod plan_tests;

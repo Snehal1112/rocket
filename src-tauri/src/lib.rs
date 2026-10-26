@@ -1171,6 +1171,8 @@ pub fn run() {
             commands::import::import_wsdl,
             commands::import::import_openapi_file,
             commands::import::import_openapi_url,
+            commands::openapi_sync::openapi_sync_status,
+            commands::openapi_sync::openapi_sync_plan,
             commands::contract::attach_contract,
             commands::contract::update_contract,
             commands::contract::list_contracts,

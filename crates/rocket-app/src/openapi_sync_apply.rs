@@ -2,7 +2,7 @@
 //! undoes an apply that a crash cut short. The pure work is `rocket_import::build_apply`; this
 //! file loads the inputs, stages the result and commits.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -12,12 +12,13 @@ use rocket_collection::openapi_local::{OpenApiLocalRepository, OpenApiLocalState
 use rocket_collection::openapi_source::{OpenApiSource, SyncStatus};
 use rocket_collection::{CollectionItem, CollectionRepository, Folder};
 use rocket_import::{
-    build_apply, ApplyInputs, ApplyReport, CurrentRequest, FileChangeKind, ParsedSpec,
-    RequestRenderer, Selection, SyncInputs,
+    build_apply, item_digest, plan_with_links, variable_digest, ApplyInputs, ApplyReport,
+    CurrentRequest, FileChangeKind, ParsedSpec, RequestRenderer, Selection, SyncInputs,
 };
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::openapi_sync_service::{collection_lock, sha256_hex, OpenApiSyncService};
+use crate::openapi_sync_view::{PlanView, UnchangedView};
 
 const SOURCE_REL: &str = ".rocket/openapi-source.yml";
 const BASELINE_REL: &str = ".rocket/openapi-baseline.json";
@@ -110,6 +111,54 @@ struct Loaded {
     settings: rocket_collection::CollectionSettings,
 }
 
+/// What the plan needs besides `Loaded`: the parsed pending spec and the collection facts.
+struct Prepared {
+    incoming: ParsedSpec,
+    variables: Vec<String>,
+    base_url: Option<String>,
+}
+
+impl Loaded {
+    fn prepare(&self) -> DomainResult<Prepared> {
+        let incoming = ParsedSpec::parse(&self.pending_text)
+            .map_err(|e| DomainError::InvalidInput(e.to_string()))?;
+        let variables = self
+            .settings
+            .variables
+            .iter()
+            .map(|v| v.key.clone())
+            .collect();
+        let base_url = self
+            .settings
+            .variables
+            .iter()
+            .find(|v| v.key == BASE_URL_KEY)
+            .map(|v| v.value.clone());
+        Ok(Prepared {
+            incoming,
+            variables,
+            base_url,
+        })
+    }
+
+    /// The one place the plan inputs are put together, for `apply` and `plan` alike.
+    fn sync_inputs<'a>(
+        &'a self,
+        prepared: &'a Prepared,
+        skips: &'a BTreeMap<String, String>,
+    ) -> SyncInputs<'a> {
+        SyncInputs {
+            source: &self.source,
+            baseline: self.baseline.as_ref(),
+            incoming: &prepared.incoming,
+            current: &self.current,
+            current_base_url: prepared.base_url.as_deref(),
+            existing_variables: &prepared.variables,
+            skips,
+        }
+    }
+}
+
 impl OpenApiSyncService {
     fn deps(&self) -> DomainResult<&ApplyDeps> {
         self.apply_deps.as_ref().ok_or_else(not_set_up)
@@ -170,31 +219,10 @@ impl OpenApiSyncService {
             DomainError::Conflict("an earlier apply is not finished yet".to_string())
         })?;
         let loaded = self.load_for_apply(deps, repo, collection, &root)?;
-        let incoming = ParsedSpec::parse(&loaded.pending_text)
-            .map_err(|e| DomainError::InvalidInput(e.to_string()))?;
-        let variables: Vec<String> = loaded
-            .settings
-            .variables
-            .iter()
-            .map(|v| v.key.clone())
-            .collect();
-        let base_url = loaded
-            .settings
-            .variables
-            .iter()
-            .find(|v| v.key == BASE_URL_KEY)
-            .map(|v| v.value.clone());
+        let prepared = loaded.prepare()?;
         let renderer = (deps.renderer)(&root);
         let mut output = build_apply(&ApplyInputs {
-            plan_inputs: SyncInputs {
-                source: &loaded.source,
-                baseline: loaded.baseline.as_ref(),
-                incoming: &incoming,
-                current: &loaded.current,
-                current_base_url: base_url.as_deref(),
-                existing_variables: &variables,
-                skips: &loaded.local.skips,
-            },
+            plan_inputs: loaded.sync_inputs(&prepared, &loaded.local.skips),
             pending_sha256: sha256_hex(loaded.pending_text.as_bytes()),
             selection,
             renderer: renderer.as_ref(),
@@ -248,6 +276,77 @@ impl OpenApiSyncService {
             };
         }
         Ok(output.report)
+    }
+
+    /// What an apply would do with the pending spec, with the digests an approval carries. It
+    /// takes the collection lock like `apply` and writes nothing, not even a recovery.
+    pub fn plan(&self, collection: &str) -> DomainResult<PlanView> {
+        let deps = self.deps()?;
+        let pinned = deps.collections.pinned();
+        let repo: &dyn CollectionRepository =
+            pinned.as_deref().unwrap_or(deps.collections.as_ref());
+        let root = repo.collection_root_path(collection)?;
+        let lock = collection_lock(&root);
+        let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+        if self.load(&root)?.pending_sha256.is_none() {
+            return Ok(PlanView::empty());
+        }
+        let loaded = self.load_for_apply(deps, repo, collection, &root)?;
+        let prepared = loaded.prepare()?;
+        let inputs = loaded.sync_inputs(&prepared, &loaded.local.skips);
+        let plan =
+            plan_with_links(&inputs, &[]).map_err(|e| DomainError::InvalidInput(e.to_string()))?;
+        // A plan without the skips tells which items the user's skips hid.
+        let hidden: HashSet<String> = if plan.skipped_hidden == 0 {
+            HashSet::new()
+        } else {
+            let none = BTreeMap::new();
+            let full = plan_with_links(&loaded.sync_inputs(&prepared, &none), &[])
+                .map_err(|e| DomainError::InvalidInput(e.to_string()))?;
+            full.items.iter().map(|i| i.key().to_string()).collect()
+        };
+        let planned: HashSet<&str> = plan.items.iter().map(|i| i.key()).collect();
+        let deleted: HashSet<&str> = plan.deleted_by_user.iter().map(String::as_str).collect();
+        let by_uid: std::collections::HashMap<&str, &CurrentRequest> =
+            loaded.current.iter().map(|c| (c.uid.as_str(), c)).collect();
+        let unchanged = loaded
+            .source
+            .operations
+            .iter()
+            .filter(|o| {
+                !planned.contains(o.key.as_str())
+                    && !deleted.contains(o.key.as_str())
+                    && !hidden.contains(&o.key)
+            })
+            .map(|o| match by_uid.get(o.uid.as_str()) {
+                Some(cur) => UnchangedView {
+                    key: o.key.clone(),
+                    name: cur.request.name.clone(),
+                    request_path: Some(cur.request_path.clone()),
+                },
+                None => UnchangedView {
+                    key: o.key.clone(),
+                    name: o.key.clone(),
+                    request_path: Some(o.request_path.clone()),
+                },
+            })
+            .collect();
+        Ok(PlanView {
+            pending: true,
+            item_digests: plan.items.iter().map(item_digest).collect(),
+            variable_digests: plan.variable_changes.iter().map(variable_digest).collect(),
+            plan,
+            unchanged,
+        })
+    }
+
+    /// The sync state of a collection by name, resolved in the pinned active workspace.
+    pub fn status_of(&self, collection: &str) -> DomainResult<crate::SyncStatusView> {
+        let deps = self.deps()?;
+        let pinned = deps.collections.pinned();
+        let repo: &dyn CollectionRepository =
+            pinned.as_deref().unwrap_or(deps.collections.as_ref());
+        self.status(&repo.collection_root_path(collection)?)
     }
 
     /// Finishes or undoes an interrupted apply of one collection.

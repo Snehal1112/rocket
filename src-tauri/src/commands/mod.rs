@@ -22,6 +22,7 @@ pub mod grpc;
 pub mod history;
 pub mod export;
 pub mod import;
+pub mod openapi_sync;
 pub mod load_test;
 pub mod oauth2;
 pub mod proxy;
