@@ -605,13 +605,84 @@ async fn alias_growth_gives_back_the_original_text_with_a_note() {
     let body = format!("a: &a [{}]\nb: [{aliases}]\n", items.join(", "));
     fetcher.serve("https://example.com/bomb.yaml", &body);
     let text = spec_with(&["https://example.com/bomb.yaml#/a"]);
-    let bundle = bundle_with_limit(&fetcher, &text, &location(), None, 200_000)
+    let bundle = bundle_with_limit(&fetcher, &text, &location(), None, 200_000, MAX_YAML_NODES)
         .await
         .expect("bundle");
     assert_eq!(bundle.text, text);
     assert!(bundle.incomplete);
     assert!(bundle.refs.is_empty());
     assert_eq!(bundle.notes.len(), 1, "{:?}", bundle.notes);
+}
+
+fn alias_bomb(items: usize) -> String {
+    let list: Vec<String> = (0..items).map(|i| i.to_string()).collect();
+    let aliases = vec!["*a"; items].join(", ");
+    format!("a: &a [{}]\nb: [{aliases}]\n", list.join(", "))
+}
+
+#[tokio::test]
+async fn a_flat_alias_bomb_in_a_file_is_refused_quickly() {
+    let fetcher = FakeFetcher::default();
+    fetcher.serve("https://example.com/bomb.yaml", &alias_bomb(5000));
+    let text = spec_with(&["https://example.com/bomb.yaml#/a"]);
+    let started = std::time::Instant::now();
+    let bundle = bundle_with_limit(&fetcher, &text, &location(), None, MAX_TOTAL_BYTES, 100_000)
+        .await
+        .expect("bundle");
+    assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    assert_eq!(bundle.text, text);
+    assert!(bundle.incomplete);
+    assert_eq!(bundle.notes.len(), 1, "{:?}", bundle.notes);
+    assert!(bundle.notes[0].contains("bomb.yaml") && bundle.notes[0].contains("too complex"));
+}
+
+#[tokio::test]
+async fn a_file_with_a_few_aliases_still_loads() {
+    let fetcher = FakeFetcher::default();
+    fetcher.serve(
+        "https://example.com/d.yaml",
+        "base: &b { name: p, in: query }\np: *b\nq: *b\n",
+    );
+    let text = spec_with(&["https://example.com/d.yaml#/p"]);
+    let bundle = bundle_with_limit(&fetcher, &text, &location(), None, MAX_TOTAL_BYTES, 100_000)
+        .await
+        .expect("bundle");
+    assert!(!bundle.incomplete && bundle.notes.is_empty(), "{:?}", bundle.notes);
+    let doc = crate::openapi::parse_openapi(&bundle.text).expect("parse");
+    assert_eq!(doc.operations[0].parameters[0].name, "p");
+}
+
+#[tokio::test]
+async fn a_main_text_alias_bomb_returns_the_original_text() {
+    let fetcher = FakeFetcher::default();
+    let text = format!(
+        "{}x-bomb:\n  {}\n",
+        spec_with(&["https://example.com/d.yaml#/a"]),
+        alias_bomb(5000).replace('\n', "\n  ")
+    );
+    let bundle = bundle_with_limit(&fetcher, &text, &location(), None, MAX_TOTAL_BYTES, 100_000)
+        .await
+        .expect("bundle");
+    assert_eq!(bundle.text, text);
+    assert!(bundle.incomplete);
+    assert_eq!(bundle.notes.len(), 1);
+    assert!(fetcher.requests().is_empty());
+}
+
+#[tokio::test]
+async fn a_bom_prefixed_json_body_loads_as_json() {
+    let fetcher = FakeFetcher::default();
+    fetcher.serve(
+        "https://example.com/d.json",
+        "\u{feff}  {\"p\": {\"name\": \"p\", \"in\": \"query\"}}",
+    );
+    let text = spec_with(&["https://example.com/d.json#/p"]);
+    let bundle = bundle_spec(&fetcher, &text, &location(), None, &[])
+        .await
+        .expect("bundle");
+    assert!(bundle.notes.is_empty(), "{:?}", bundle.notes);
+    let doc = crate::openapi::parse_openapi(&bundle.text).expect("parse");
+    assert_eq!(doc.operations[0].parameters[0].name, "p");
 }
 
 #[tokio::test]
