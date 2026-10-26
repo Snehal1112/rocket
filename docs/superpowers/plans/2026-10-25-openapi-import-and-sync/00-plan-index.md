@@ -42,3 +42,9 @@ Rules for every plan:
 - P7: every check rewrites `openapi-source.yml` (`last_checked_at`, `last_status`), so a collection under git gets a diff each interval. Decide where timing state lives before the scheduler.
 - P9: `status().has_token` uses the lenient keychain read; use the strict read. An unknown `sync_interval` or `state` value is a load error; decide on forward compatibility.
 - Small: `OpenApiImportResult.source_id` is returned even when the source file save failed (return `None`); the TS `OpenApiImportResult` lacks `sourceId`.
+
+## Series 2 decisions (2026-10-26)
+
+- Ruling (user): keep a copy of the last applied spec at `<collection>/.rocket/openapi-applied.spec`. The converter is deterministic, so the per-field baseline is rebuilt by converting that copy. Collections imported before this have no copy; their first sync only knows whether a request was edited, and treats an edited request as the user's (nothing is overwritten).
+- Ruling (user): the spec copies (`openapi-applied.spec`, `openapi-pending.spec`) live in `.rocket/` and are git-ignored there through a `.rocket/.gitignore` that the code writes. A fresh clone has no copies, so its first check fetches the spec and treats it as the new baseline question described above.
+- Ruling (user delegated, designer's call): "possibly renamed" pairing is in the first version as a **hint only**. P5 detects candidates and returns them in the diff; P8 shows them; P9 adds a "Link as rename" action that re-points the stored operation key to the new one so the user's edits stay and the request is merged as Changed. Nothing is ever paired automatically. Rules: pair only when exactly one Removed and one New candidate match on each side, by (a) same operationId with a new method or path, (b) same method and same path template with a new operationId, or (c) same method and summary with a new path. Ambiguous matches are not offered.
