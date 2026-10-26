@@ -2,6 +2,8 @@ import type { ImportReport, SkippedItem, SkipReason } from '@/lib/tauri-api';
 
 /** Notes that share one cause, such as several references to the same file. */
 export interface NoteGroup {
+  /** Unique among the groups of one report (a file group and a text group never share it). */
+  key: string;
   /** The file the notes are about, or the whole note when it has no known file. */
   label: string;
   count: number;
@@ -53,6 +55,7 @@ export function buildReportView(report: Pick<ImportReport, 'skipped'>): ReportVi
     let group = groups.get(key);
     if (!group) {
       group = {
+        key,
         label: match ? match[1] : detail,
         count: 0,
         isFile: match !== null,

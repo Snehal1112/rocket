@@ -722,7 +722,7 @@ export function ImportCollectionDialog({
                     <TooltipProvider>
                       <ul className='mt-1.5 space-y-1 max-h-40 overflow-y-auto'>
                         {reportView.notes.map((group) => (
-                          <li key={group.label} className='text-xs text-muted-foreground'>
+                          <li key={group.key} className='text-xs text-muted-foreground'>
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <Button

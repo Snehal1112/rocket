@@ -36,6 +36,15 @@ describe('import report view', () => {
     expect(describeNoteGroup(view.notes[1])).toContain('1 reference comes from');
   });
 
+  it('gives_a_file_group_and_a_text_group_different_keys', () => {
+    const view = buildReportView({
+      skipped: [note('a $ref to d.yaml was not loaded'), note('d.yaml')],
+    });
+    expect(view.notes).toHaveLength(2);
+    expect(view.notes[0].label).toBe(view.notes[1].label);
+    expect(view.notes[0].key).not.toBe(view.notes[1].key);
+  });
+
   it('summary_does_not_call_notes_skipped', () => {
     const onlyNotes = buildReportView({ skipped: [note('a $ref to d.yaml was not loaded')] });
     expect(skippedSummary(onlyNotes)).toBeNull();
