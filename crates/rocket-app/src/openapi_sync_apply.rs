@@ -17,7 +17,7 @@ use rocket_import::{
 };
 use rocket_shared::error::{DomainError, DomainResult};
 
-use crate::openapi_sync_service::{sha256_hex, OpenApiSyncService};
+use crate::openapi_sync_service::{collection_lock, sha256_hex, OpenApiSyncService};
 
 const SOURCE_REL: &str = ".rocket/openapi-source.yml";
 const BASELINE_REL: &str = ".rocket/openapi-baseline.json";
@@ -115,7 +115,13 @@ impl OpenApiSyncService {
         self.apply_deps.as_ref().ok_or_else(not_set_up)
     }
 
-    fn load_for_apply(&self, deps: &ApplyDeps, name: &str, root: &Path) -> DomainResult<Loaded> {
+    fn load_for_apply(
+        &self,
+        deps: &ApplyDeps,
+        repo: &dyn CollectionRepository,
+        name: &str,
+        root: &Path,
+    ) -> DomainResult<Loaded> {
         let source = self.load(root)?;
         let pending = self.sources.load_pending(root)?;
         let pending = match (pending, source.pending_sha256.as_deref()) {
@@ -128,14 +134,14 @@ impl OpenApiSyncService {
         };
         let pending_text = String::from_utf8(pending)
             .map_err(|_| DomainError::InvalidInput("the pending spec is not text".to_string()))?;
-        let collection = deps.collections.get(name)?;
+        let collection = repo.get(name)?;
         let mut current = Vec::new();
         flatten(&collection.root, "", &mut current);
         Ok(Loaded {
             baseline: deps.baselines.load(root)?,
             local: deps.locals.load(root)?.unwrap_or_default(),
             existing_paths: deps.tx.list_files(root)?,
-            settings: deps.collections.get_settings(name)?,
+            settings: repo.get_settings(name)?,
             source,
             pending_text,
             current,
@@ -150,12 +156,20 @@ impl OpenApiSyncService {
         selection: &Selection,
     ) -> DomainResult<ApplyReport> {
         let deps = self.deps()?;
-        let root = deps.collections.collection_root_path(collection)?;
+        // One repository for the whole apply, so a workspace switch cannot mix two workspaces.
+        let pinned = deps.collections.pinned();
+        let repo: &dyn CollectionRepository =
+            pinned.as_deref().unwrap_or(deps.collections.as_ref());
+        let root = repo.collection_root_path(collection)?;
+        // Held from the recovery to the end, so a check, another apply or a settings change
+        // never works on state this apply is about to replace.
+        let lock = collection_lock(&root);
+        let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         // An earlier apply that was cut short is settled first.
         deps.tx.recover(&root).map_err(|_| {
             DomainError::Conflict("an earlier apply is not finished yet".to_string())
         })?;
-        let loaded = self.load_for_apply(deps, collection, &root)?;
+        let loaded = self.load_for_apply(deps, repo, collection, &root)?;
         let incoming = ParsedSpec::parse(&loaded.pending_text)
             .map_err(|e| DomainError::InvalidInput(e.to_string()))?;
         let variables: Vec<String> = loaded
@@ -222,7 +236,21 @@ impl OpenApiSyncService {
     /// Finishes or undoes an interrupted apply of one collection.
     pub fn recover(&self, collection: &str) -> DomainResult<RecoveryOutcome> {
         let deps = self.deps()?;
-        let root = deps.collections.collection_root_path(collection)?;
+        let pinned = deps.collections.pinned();
+        let repo: &dyn CollectionRepository =
+            pinned.as_deref().unwrap_or(deps.collections.as_ref());
+        self.recover_in(deps, repo, collection)
+    }
+
+    fn recover_in(
+        &self,
+        deps: &ApplyDeps,
+        repo: &dyn CollectionRepository,
+        collection: &str,
+    ) -> DomainResult<RecoveryOutcome> {
+        let root = repo.collection_root_path(collection)?;
+        let lock = collection_lock(&root);
+        let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         deps.tx.recover(&root)
     }
 
@@ -232,7 +260,11 @@ impl OpenApiSyncService {
         let Ok(deps) = self.deps() else {
             return Vec::new();
         };
-        let names = match deps.collections.list() {
+        // One repository for the whole pass, so a workspace switch cannot mix two workspaces.
+        let pinned = deps.collections.pinned();
+        let repo: &dyn CollectionRepository =
+            pinned.as_deref().unwrap_or(deps.collections.as_ref());
+        let names = match repo.list() {
             Ok(list) => list,
             Err(e) => {
                 tracing::warn!(error = %e, "collections could not be listed for sync recovery");
@@ -241,7 +273,7 @@ impl OpenApiSyncService {
         };
         let mut out = Vec::new();
         for summary in names {
-            match self.recover(&summary.name) {
+            match self.recover_in(deps, repo, &summary.name) {
                 Ok(RecoveryOutcome::Nothing) => {}
                 Ok(outcome) => out.push((summary.name, outcome)),
                 Err(e) => tracing::warn!(error = %e, "a sync recovery failed"),
@@ -253,7 +285,10 @@ impl OpenApiSyncService {
     /// The local choices of a collection. No file means the defaults.
     pub fn local_state(&self, collection: &str) -> DomainResult<OpenApiLocalState> {
         let deps = self.deps()?;
-        let root = deps.collections.collection_root_path(collection)?;
+        let pinned = deps.collections.pinned();
+        let repo: &dyn CollectionRepository =
+            pinned.as_deref().unwrap_or(deps.collections.as_ref());
+        let root = repo.collection_root_path(collection)?;
         Ok(deps.locals.load(&root)?.unwrap_or_default())
     }
 }

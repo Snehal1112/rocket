@@ -61,6 +61,23 @@ pub struct OpenApiSyncService {
     pub(crate) apply_deps: Option<ApplyDeps>,
 }
 
+type LockMap =
+    std::sync::Mutex<std::collections::HashMap<std::path::PathBuf, Arc<std::sync::Mutex<()>>>>;
+
+static COLLECTION_LOCKS: std::sync::OnceLock<LockMap> = std::sync::OnceLock::new();
+
+/// The lock of one collection, shared by every service in the process (commands build a
+/// service per call). A holder never awaits while it holds the lock and takes the file
+/// transaction's own guard only after this one, so the two cannot deadlock.
+pub(crate) fn collection_lock(root: &Path) -> Arc<std::sync::Mutex<()>> {
+    let key = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let mut map = COLLECTION_LOCKS
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    Arc::clone(map.entry(key).or_default())
+}
+
 pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
@@ -184,6 +201,14 @@ impl OpenApiSyncService {
         })
     }
 
+    /// True when the pending hash has its file and the file matches. No pending hash is fine.
+    fn pending_is_sound(&self, root: &Path, source: &OpenApiSource) -> bool {
+        let Some(hash) = source.pending_sha256.as_deref() else {
+            return true;
+        };
+        matches!(self.sources.load_pending(root), Ok(Some(bytes)) if sha256_hex(&bytes) == hash)
+    }
+
     /// Settles an interrupted apply before anything writes the collection's files.
     fn settle(&self, root: &Path) -> DomainResult<()> {
         if let Some(deps) = &self.apply_deps {
@@ -209,6 +234,12 @@ impl OpenApiSyncService {
         let now = (self.clock)().to_rfc3339();
 
         // Rule 2: send the stored validators.
+        // A pending hash without its file would make a 304 answer stick forever, so the
+        // validators are dropped and the spec is fetched again.
+        if !self.pending_is_sound(collection_root, &source) {
+            source.etag = None;
+            source.last_modified = None;
+        }
         let target = fetch_target(&source.location, token_sent);
         let request = SpecFetchRequest {
             url: target.url,
@@ -220,6 +251,12 @@ impl OpenApiSyncService {
         };
         let result = self.fetcher.fetch(request).await;
         drop(token);
+
+        // The fetch can take long, so the lock was not held. Reload the source now and apply
+        // only what the check owns, so a change made by an apply meanwhile is not undone.
+        let lock = collection_lock(collection_root);
+        let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
+        let mut source = self.load(collection_root)?;
 
         let (body, etag, last_modified) = match result {
             // Rule 8: a fetch failure changes nothing but the check record.
@@ -248,6 +285,13 @@ impl OpenApiSyncService {
             // Rule 3: the server says nothing changed since the validators.
             Ok(SpecFetchOutcome::NotModified) => {
                 source.last_checked_at = Some(now);
+                if !self.pending_is_sound(collection_root, &source) {
+                    // The pending copy is gone, so there is nothing to keep. Forget the
+                    // validators, and the next check fetches the spec again.
+                    source.etag = None;
+                    source.last_modified = None;
+                    source.pending_sha256 = None;
+                }
                 let outcome = if let Some(pending) = source.pending_sha256.clone() {
                     source.last_status = Some(SyncStatus::Changed);
                     CheckOutcome::Changed {
@@ -297,7 +341,9 @@ impl OpenApiSyncService {
 
         // Rule 6: the same spec as the pending copy, which is already kept.
         // Rule 7: a new valid spec becomes the pending copy.
-        if source.pending_sha256.as_deref() != Some(hash.as_str()) {
+        let kept = source.pending_sha256.as_deref() == Some(hash.as_str())
+            && self.pending_is_sound(collection_root, &source);
+        if !kept {
             self.sources.save_pending(collection_root, &body)?;
             source.pending_sha256 = Some(hash.clone());
         }
@@ -320,6 +366,8 @@ impl OpenApiSyncService {
 
     pub fn set_interval(&self, collection_root: &Path, interval: SyncInterval) -> DomainResult<()> {
         self.settle(collection_root)?;
+        let lock = collection_lock(collection_root);
+        let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         let mut source = self.load(collection_root)?;
         source.sync_interval = interval;
         self.sources.save(collection_root, &source)
@@ -327,6 +375,8 @@ impl OpenApiSyncService {
 
     pub fn set_token(&self, collection_root: &Path, token: &str) -> DomainResult<()> {
         self.settle(collection_root)?;
+        let lock = collection_lock(collection_root);
+        let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         let mut source = self.load(collection_root)?;
         if !matches!(source.location, SpecLocation::Github { .. }) {
             return Err(tokens_need_github());
@@ -683,7 +733,7 @@ mod tests {
     #[tokio::test]
     async fn html_body_fails_and_keeps_everything() {
         let mut src = source(github());
-        src.pending_sha256 = Some("keep".into());
+        src.pending_sha256 = Some(sha256_hex(b"kept"));
         let f = Fixture::new(src.clone());
         FsOpenApiSourceRepo
             .save_pending(f.root(), b"kept")

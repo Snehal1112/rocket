@@ -1,13 +1,14 @@
 //! Tests for applying a spec through the file transaction, on a real temporary workspace.
 
 use super::*;
+use crate::openapi_sync_service::{sha256_hex, CheckOutcome};
 use async_trait::async_trait;
 use rocket_collection::openapi_source::OpenApiSourceRepository;
 use rocket_environment::SecretStore;
 use rocket_http::spec_fetch::{SpecFetchFailure, SpecFetchOutcome, SpecFetchRequest, SpecFetcher};
 use rocket_import::{
-    fingerprint, item_digest, plan_with_links, ApprovedItem, Choice, GroupBy, ImportService,
-    SkipRequest, SyncItem, SyncPlan,
+    fingerprint, item_digest, plan_with_links, variable_digest, ApprovedItem, Choice, GroupBy,
+    ImportService, SkipRequest, SyncItem, SyncPlan, VariableApproval,
 };
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
@@ -89,18 +90,49 @@ fn import_service(ws: &Path) -> ImportService {
     )
 }
 
+struct Gate {
+    started: tokio::sync::Notify,
+    go: tokio::sync::Notify,
+}
+
 struct FakeFetcher {
     body: Mutex<String>,
+    etag: Mutex<Option<String>>,
+    honor_304: AtomicBool,
+    gate: Mutex<Option<Arc<Gate>>>,
+    requests: Mutex<Vec<SpecFetchRequest>>,
+}
+
+impl FakeFetcher {
+    fn new(body: String) -> Self {
+        Self {
+            body: Mutex::new(body),
+            etag: Mutex::new(None),
+            honor_304: AtomicBool::new(false),
+            gate: Mutex::new(None),
+            requests: Mutex::new(Vec::new()),
+        }
+    }
 }
 
 struct SharedFetcher(Arc<FakeFetcher>);
 
 #[async_trait]
 impl SpecFetcher for SharedFetcher {
-    async fn fetch(&self, _: SpecFetchRequest) -> Result<SpecFetchOutcome, SpecFetchFailure> {
+    async fn fetch(&self, request: SpecFetchRequest) -> Result<SpecFetchOutcome, SpecFetchFailure> {
+        let has_validator = request.if_none_match.is_some();
+        self.0.requests.lock().expect("lock").push(request);
+        let gate = self.0.gate.lock().expect("lock").clone();
+        if let Some(gate) = gate {
+            gate.started.notify_one();
+            gate.go.notified().await;
+        }
+        if has_validator && self.0.honor_304.load(Ordering::SeqCst) {
+            return Ok(SpecFetchOutcome::NotModified);
+        }
         Ok(SpecFetchOutcome::Fetched {
             body: self.0.body.lock().expect("lock").clone().into_bytes(),
-            etag: None,
+            etag: self.0.etag.lock().expect("lock").clone(),
             last_modified: None,
             final_url: LINK.to_string(),
         })
@@ -210,9 +242,7 @@ fn deps(ws: &Path, tx: Arc<dyn CollectionFileTxFactory>) -> ApplyDeps {
 
 async fn world_with(tx: Arc<dyn CollectionFileTxFactory>) -> World {
     let ws = TempDir::new().expect("tempdir");
-    let fetcher = Arc::new(FakeFetcher {
-        body: Mutex::new(v1()),
-    });
+    let fetcher = Arc::new(FakeFetcher::new(v1()));
     let imported = import_service(ws.path())
         .import_openapi_url(
             &SharedFetcher(Arc::clone(&fetcher)),
@@ -682,6 +712,17 @@ async fn recover_all_finds_journals_in_every_collection() {
     w.no_transaction_leftovers();
 }
 
+fn approve_vars(plan: &SyncPlan, names: &[&str]) -> Vec<VariableApproval> {
+    names
+        .iter()
+        .filter_map(|n| plan.variable_changes.iter().find(|c| c.name == *n))
+        .map(|c| VariableApproval {
+            name: c.name.clone(),
+            digest: variable_digest(c),
+        })
+        .collect()
+}
+
 fn v4() -> String {
     // Same operations as v1 but another server.
     v1().replace("https://api.example.com", "https://api2.example.com")
@@ -730,7 +771,7 @@ async fn a_base_url_change_keeps_the_collection_identity() {
     let plan = w.plan();
     assert_eq!(plan.variable_changes.len(), 1);
     let selection = Selection {
-        variables: vec!["baseUrl".to_string()],
+        variables: approve_vars(&plan, &["baseUrl"]),
         ..Selection::default()
     };
     w.svc.apply(&w.name, &selection).await.expect("apply");
@@ -757,12 +798,145 @@ async fn an_added_security_variable_keeps_the_collection_identity() {
         .map(|c| c.name.clone())
         .collect();
     assert!(!names.is_empty(), "{:?}", plan.variable_changes);
+    let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
     let selection = Selection {
-        variables: names.clone(),
+        variables: approve_vars(&plan, &name_refs),
         ..Selection::default()
     };
     w.svc.apply(&w.name, &selection).await.expect("apply");
     assert_identity_kept(&w, &before);
     let settings = w.repo.get_settings(&w.name).expect("settings");
     assert!(settings.variables.iter().any(|v| v.key == names[0]));
+}
+
+#[tokio::test]
+async fn a_spec_url_that_moves_after_the_review_is_not_applied() {
+    let w = world().await;
+    w.check_with(v4()).await;
+    let plan = w.plan();
+    let selection = Selection {
+        variables: approve_vars(&plan, &["baseUrl"]),
+        ..Selection::default()
+    };
+    // The spec changes its host again before the user applies.
+    w.check_with(v1().replace("https://api.example.com", "https://api3.example.com"))
+        .await;
+    let report = w.svc.apply(&w.name, &selection).await.expect("apply");
+    assert_eq!(report.stale, vec!["baseUrl".to_string()]);
+    let settings = w.repo.get_settings(&w.name).expect("settings");
+    let base = settings
+        .variables
+        .iter()
+        .find(|v| v.key == "baseUrl")
+        .expect("baseUrl");
+    assert_eq!(base.value, "https://api.example.com");
+    assert!(w.source().pending_sha256.is_some());
+}
+
+#[test]
+fn two_applies_on_one_collection_serialize() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
+    let w = rt.block_on(world());
+    rt.block_on(w.check_with(v2()));
+    let plan = w.plan();
+    let selection = w.approve(&plan, &[]);
+    let results: Vec<DomainResult<ApplyReport>> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..2)
+            .map(|_| {
+                scope.spawn(|| {
+                    tokio::runtime::Builder::new_current_thread()
+                        .build()
+                        .expect("runtime")
+                        .block_on(w.svc.apply(&w.name, &selection))
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().expect("thread"))
+            .collect()
+    });
+    let landed: Vec<&ApplyReport> = results.iter().filter_map(|r| r.as_ref().ok()).collect();
+    assert!(!landed.is_empty(), "{results:?}");
+    // The second run sees fresh state: it either refuses (the pending copy is gone) or has
+    // nothing left to apply. Nothing is lost either way.
+    for r in &results {
+        match r {
+            Ok(report) => assert!(report.applied.len() <= 2),
+            Err(e) => assert!(matches!(e, DomainError::Conflict(_)), "{e}"),
+        }
+    }
+    w.assert_fully_applied();
+    w.no_transaction_leftovers();
+}
+
+#[tokio::test]
+async fn a_check_finishing_during_an_apply_does_not_undo_it() {
+    let w = world().await;
+    w.check_with(v2()).await;
+    let plan = w.plan();
+    let selection = w.approve(&plan, &[]);
+    let gate = Arc::new(Gate {
+        started: tokio::sync::Notify::new(),
+        go: tokio::sync::Notify::new(),
+    });
+    *w.fetcher.gate.lock().expect("lock") = Some(Arc::clone(&gate));
+    let check = w.svc.check(&w.root);
+    let apply = async {
+        gate.started.notified().await;
+        let report = w.svc.apply(&w.name, &selection).await.expect("apply");
+        gate.go.notify_one();
+        report
+    };
+    let (outcome, report) = tokio::join!(check, apply);
+    assert_eq!(report.applied.len(), 2);
+    assert_eq!(outcome.expect("check"), CheckOutcome::Unchanged);
+    w.assert_fully_applied();
+}
+
+#[tokio::test]
+async fn a_pending_hash_without_its_file_is_fetched_again_after_a_304() {
+    let w = world().await;
+    *w.fetcher.etag.lock().expect("lock") = Some("\"e1\"".to_string());
+    w.fetcher.honor_304.store(true, Ordering::SeqCst);
+    w.check_with(v2()).await;
+    assert!(w.source().etag.is_some());
+    // A teammate's checkout has the source file but not the git-ignored pending copy.
+    rocket_infra::FsOpenApiSourceRepo
+        .clear_pending(&w.root)
+        .expect("clear");
+    let outcome = w.svc.check(&w.root).await.expect("check");
+    assert!(matches!(outcome, CheckOutcome::Changed { .. }));
+    assert!(rocket_infra::FsOpenApiSourceRepo
+        .load_pending(&w.root)
+        .expect("load")
+        .is_some());
+    let last = w
+        .fetcher
+        .requests
+        .lock()
+        .expect("lock")
+        .last()
+        .cloned()
+        .expect("request");
+    assert!(last.if_none_match.is_none());
+}
+
+#[tokio::test]
+async fn the_same_body_rewrites_a_missing_pending_copy() {
+    let w = world().await;
+    w.check_with(v2()).await;
+    rocket_infra::FsOpenApiSourceRepo
+        .clear_pending(&w.root)
+        .expect("clear");
+    let outcome = w.svc.check(&w.root).await.expect("check");
+    assert!(matches!(outcome, CheckOutcome::Changed { .. }));
+    let pending = rocket_infra::FsOpenApiSourceRepo
+        .load_pending(&w.root)
+        .expect("load")
+        .expect("pending is back");
+    assert_eq!(sha256_hex(&pending), sha256_hex(v2().as_bytes()));
 }
