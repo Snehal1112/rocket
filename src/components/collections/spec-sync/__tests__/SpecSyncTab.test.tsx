@@ -18,6 +18,7 @@ vi.mock('@/lib/tauri-api', async () => {
     onOpenApiSyncChecked: vi.fn(() => Promise.resolve(() => undefined)),
     onOpenApiSyncApplied: vi.fn(() => Promise.resolve(() => undefined)),
     applyOpenApiSync: vi.fn(),
+    disconnectOpenApiSync: vi.fn(),
   };
 });
 
@@ -102,6 +103,44 @@ describe('SpecSyncTab', () => {
     vi.mocked(tauriApi.getOpenApiSyncPlan).mockRejectedValue('Conflict: the pending spec changed, check again');
     renderWithQuery(<SpecSyncTab collection='c' />);
     expect(await screen.findByText('The pending spec changed, check again')).toBeInTheDocument();
+  });
+
+  it('shows the counts strip above the list', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
+    vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(makePlan());
+    renderWithQuery(<SpecSyncTab collection='c' />);
+    await screen.findByText('Folder: pets / read');
+    expect(screen.getByText('Spec updates pending')).toBeInTheDocument();
+    expect(screen.getByTestId('overview-pending')).toHaveTextContent('3');
+  });
+
+  it('no longer has the folded Settings section', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
+    vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(makePlan());
+    renderWithQuery(<SpecSyncTab collection='c' />);
+    await screen.findByText('Folder: pets / read');
+    expect(screen.queryByRole('button', { name: /^Settings/ })).toBeNull();
+  });
+
+  it('goes away after a disconnect', async () => {
+    let connected = true;
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockImplementation(async () =>
+      connected ? makeStatus() : null,
+    );
+    vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(makePlan());
+    vi.mocked(tauriApi.disconnectOpenApiSync).mockImplementation(async () => {
+      connected = false;
+    });
+    renderWithQuery(<SpecSyncTab collection='dis1' />);
+    await screen.findByText('Folder: pets / read');
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Spec sync actions' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Edit connection settings' }));
+    await user.click(await screen.findByRole('button', { name: 'Disconnect' }));
+    const confirm = await screen.findByRole('alertdialog');
+    await user.click(within(confirm).getByRole('button', { name: 'Disconnect' }));
+    await waitFor(() => expect(screen.queryByText('Spec sync')).toBeNull());
+    expect(tauriApi.disconnectOpenApiSync).toHaveBeenCalledTimes(1);
   });
 
   it('offers a Check now button next to the plan', async () => {

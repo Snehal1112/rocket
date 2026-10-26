@@ -1,6 +1,7 @@
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
+import * as tauriApi from '@/lib/tauri-api';
 import { renderWithQuery } from '@/test/trust-fixtures';
 import { SpecSyncHeader } from '../SpecSyncHeader';
 import { makeStatus } from './fixtures';
@@ -59,5 +60,45 @@ describe('SpecSyncHeader', () => {
     expect(screen.queryByText(/token=abc/)).toBeNull();
     await userEvent.setup().click(screen.getByRole('button', { name: 'Show full link' }));
     expect(screen.getByText('https://api.example.com/v1/spec.json?token=abc')).toBeInTheDocument();
+  });
+
+  describe('connection menu', () => {
+    beforeAll(() => {
+      HTMLElement.prototype.hasPointerCapture = vi.fn(() => false);
+      HTMLElement.prototype.scrollIntoView = vi.fn();
+    });
+
+    it('has a title and a menu with the two entries', async () => {
+      const user = userEvent.setup();
+      renderWithQuery(<SpecSyncHeader collection='c' status={makeStatus()} />);
+      expect(screen.getByText('Spec sync')).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: 'Spec sync actions' }));
+      expect(await screen.findByRole('menuitem', { name: 'Edit connection settings' })).toBeInTheDocument();
+      expect(screen.getByRole('menuitem', { name: 'Check now' })).toBeInTheDocument();
+    });
+
+    it('opens the connection dialog from the menu', async () => {
+      const user = userEvent.setup();
+      renderWithQuery(<SpecSyncHeader collection='c' status={makeStatus()} />);
+      await user.click(screen.getByRole('button', { name: 'Spec sync actions' }));
+      await user.click(await screen.findByRole('menuitem', { name: 'Edit connection settings' }));
+      expect(await screen.findByRole('dialog')).toHaveTextContent('Edit connection settings');
+    });
+
+    it('runs a check from the menu', async () => {
+      vi.mocked(tauriApi.checkOpenApiSyncNow).mockResolvedValue({ state: 'unchanged' });
+      const user = userEvent.setup();
+      renderWithQuery(<SpecSyncHeader collection='c' status={makeStatus()} />);
+      await user.click(screen.getByRole('button', { name: 'Spec sync actions' }));
+      await user.click(await screen.findByRole('menuitem', { name: 'Check now' }));
+      expect(tauriApi.checkOpenApiSyncNow).toHaveBeenCalledWith('c');
+    });
+
+    it('disables the menu check without consent', async () => {
+      const user = userEvent.setup();
+      renderWithQuery(<SpecSyncHeader collection='c' status={makeStatus({ consent: 'missing' })} />);
+      await user.click(screen.getByRole('button', { name: 'Spec sync actions' }));
+      expect(await screen.findByRole('menuitem', { name: 'Check now' })).toHaveAttribute('data-disabled');
+    });
   });
 });

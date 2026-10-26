@@ -36,13 +36,17 @@ export const openApiSyncKeys = {
 };
 
 /** The sync status of a collection, or null when it has no spec source. */
-export function useOpenApiSyncStatus(collection: string | null | undefined, includeToken = false) {
+export function useOpenApiSyncStatus(
+  collection: string | null | undefined,
+  includeToken = false,
+  enabled = true,
+) {
   return useQuery({
     // Local IPC work must not pause when WebKit reports the machine as offline.
     networkMode: 'always',
     queryKey: openApiSyncKeys.status(collection ?? '', includeToken),
     queryFn: () => getOpenApiSyncStatus(collection ?? '', includeToken),
-    enabled: !!collection,
+    enabled: enabled && !!collection,
     // A background check changes the answer, so it is never trusted for long.
     staleTime: 0,
     // An unreadable state file is a result to show, not a hiccup to retry.

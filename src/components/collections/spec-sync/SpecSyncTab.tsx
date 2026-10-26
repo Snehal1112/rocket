@@ -21,7 +21,7 @@ import { SpecSyncConsentBanner } from './SpecSyncConsentBanner';
 import { SpecSyncDetail } from './SpecSyncDetail';
 import { SpecSyncHeader } from './SpecSyncHeader';
 import { SpecSyncList } from './SpecSyncList';
-import { SpecSyncSettings } from './SpecSyncSettings';
+import { SpecSyncOverview } from './SpecSyncOverview';
 import {
   filterItems,
   filterVariables,
@@ -213,6 +213,7 @@ export function SpecSyncTab({ collection }: SpecSyncTabProps) {
             machine.
           </p>
         )}
+        <SpecSyncOverview plan={planData} status={s} />
         <SpecSyncActionsBar
           query={query}
           onQueryChange={setQuery}
@@ -282,7 +283,6 @@ export function SpecSyncTab({ collection }: SpecSyncTabProps) {
           consent={s.consent}
         />
       )}
-      <SpecSyncSettings collection={collection} status={s} />
       <div className='flex min-h-0 flex-1 flex-col'>{body}</div>
       <ApplyResultDialog
         report={last?.report ?? null}
