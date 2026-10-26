@@ -3,6 +3,8 @@
 //! A check never changes the collection. A newer valid spec is kept as a pending copy next to
 //! the source file. If a fetch or parse fails, the last good copy stays and nothing is applied.
 //! The token lives in the OS keychain only. It is never written to the collection folder.
+//! The keychain entry is keyed by the source id, so a copied collection folder shares its
+//! token with the original.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -77,6 +79,25 @@ fn failure_code(failure: &SpecFetchFailure) -> &'static str {
     }
 }
 
+/// What the keychain gave for a source's token.
+enum TokenRead {
+    Found(Zeroizing<String>),
+    None,
+    /// The keychain could not be read. The cause is not kept, so it cannot reach a message.
+    Unreadable,
+}
+
+const KEYCHAIN_UNREADABLE: &str = "The file was not found, or it needs a sign-in. \
+     The keychain could not be read, so no token was sent.";
+
+fn capitalize(text: &str) -> String {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
 fn tokens_need_github() -> DomainError {
     DomainError::InvalidInput("Tokens work with GitHub links only.".to_string())
 }
@@ -105,6 +126,18 @@ impl OpenApiSyncService {
         self.sources.load(root)?.ok_or_else(|| {
             DomainError::NotFound("This collection has no OpenAPI source.".to_string())
         })
+    }
+
+    /// Reads the token strictly, so a locked keychain is told apart from no token.
+    fn read_token(&self, source: &OpenApiSource) -> TokenRead {
+        if source.source_id.is_empty() {
+            return TokenRead::None;
+        }
+        match self.secrets.get_strict(&source.source_id, TOKEN_KEY) {
+            Ok(Some(t)) if !t.is_empty() => TokenRead::Found(Zeroizing::new(t)),
+            Ok(_) => TokenRead::None,
+            Err(_) => TokenRead::Unreadable,
+        }
     }
 
     fn stored_token(&self, source: &OpenApiSource) -> Option<Zeroizing<String>> {
@@ -143,9 +176,14 @@ impl OpenApiSyncService {
     pub async fn check(&self, collection_root: &Path) -> DomainResult<CheckOutcome> {
         // Rule 1: a source file is required. Only a GitHub location gets a token.
         let mut source = self.load(collection_root)?;
-        let token = match source.location {
-            SpecLocation::Github { .. } => self.stored_token(&source),
-            SpecLocation::Https { .. } => None,
+        let read = match source.location {
+            SpecLocation::Github { .. } => self.read_token(&source),
+            SpecLocation::Https { .. } => TokenRead::None,
+        };
+        let keychain_failed = matches!(read, TokenRead::Unreadable);
+        let token = match read {
+            TokenRead::Found(t) => Some(t),
+            _ => None,
         };
         let token_sent = token.is_some();
         let now = (self.clock)().to_rfc3339();
@@ -170,7 +208,14 @@ impl OpenApiSyncService {
                     SpecFetchFailure::RateLimited { retry_after_secs } => *retry_after_secs,
                     _ => None,
                 };
-                let message = fetch_failure_message(&failure, token_sent);
+                let message = match failure {
+                    SpecFetchFailure::NotFound | SpecFetchFailure::Unauthorized
+                        if keychain_failed =>
+                    {
+                        KEYCHAIN_UNREADABLE.to_string()
+                    }
+                    _ => fetch_failure_message(&failure, token_sent),
+                };
                 return self.fail(
                     collection_root,
                     source,
@@ -210,7 +255,7 @@ impl OpenApiSyncService {
                 source,
                 now,
                 "not_a_spec",
-                format!("The file is not a supported OpenAPI spec: {e}"),
+                capitalize(&e.to_string()),
                 None,
             );
         }
@@ -222,10 +267,11 @@ impl OpenApiSyncService {
 
         // Rule 5: the same spec as the imported one.
         if hash == source.spec_sha256 {
-            self.sources.clear_pending(collection_root)?;
+            // Save first: a leftover pending file is harmless, a hash without a file is not.
             source.pending_sha256 = None;
             source.last_status = Some(SyncStatus::Unchanged);
             self.sources.save(collection_root, &source)?;
+            self.sources.clear_pending(collection_root)?;
             return Ok(CheckOutcome::Unchanged);
         }
 
@@ -337,6 +383,53 @@ mod tests {
 
     #[derive(Default)]
     struct MemSecrets(Mutex<HashMap<(String, String), String>>);
+
+    /// A store whose strict read always fails, like a locked keychain.
+    struct LockedSecrets;
+
+    impl SecretStore for LockedSecrets {
+        fn get(&self, _: &str, _: &str) -> DomainResult<Option<String>> {
+            Ok(None)
+        }
+        fn get_strict(&self, _: &str, _: &str) -> DomainResult<Option<String>> {
+            Err(DomainError::Internal(
+                "keychain locked: secret-detail".into(),
+            ))
+        }
+        fn set(&self, _: &str, _: &str, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+        fn delete(&self, _: &str, _: &str) -> DomainResult<()> {
+            Ok(())
+        }
+    }
+
+    /// Delegates to the file repo, but can be told to fail every save.
+    struct FlakyRepo(Arc<std::sync::atomic::AtomicBool>);
+
+    impl OpenApiSourceRepository for FlakyRepo {
+        fn load(&self, root: &Path) -> DomainResult<Option<OpenApiSource>> {
+            FsOpenApiSourceRepo.load(root)
+        }
+        fn save(&self, root: &Path, source: &OpenApiSource) -> DomainResult<()> {
+            if self.0.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err(DomainError::Internal("disk full".into()));
+            }
+            FsOpenApiSourceRepo.save(root, source)
+        }
+        fn delete(&self, root: &Path) -> DomainResult<()> {
+            FsOpenApiSourceRepo.delete(root)
+        }
+        fn save_pending(&self, root: &Path, spec: &[u8]) -> DomainResult<()> {
+            FsOpenApiSourceRepo.save_pending(root, spec)
+        }
+        fn load_pending(&self, root: &Path) -> DomainResult<Option<Vec<u8>>> {
+            FsOpenApiSourceRepo.load_pending(root)
+        }
+        fn clear_pending(&self, root: &Path) -> DomainResult<()> {
+            FsOpenApiSourceRepo.clear_pending(root)
+        }
+    }
 
     impl SecretStore for MemSecrets {
         fn get(&self, scope: &str, key: &str) -> DomainResult<Option<String>> {
@@ -576,7 +669,16 @@ mod tests {
         f.fetcher
             .push(fetched(b"<html></html>".to_vec(), "\"new\""));
         let out = f.svc.check(f.root()).await.expect("check");
-        assert!(matches!(out, CheckOutcome::Failed { .. }), "{out:?}");
+        match &out {
+            CheckOutcome::Failed { message, .. } => {
+                assert!(message.starts_with("Not an OpenAPI"), "{message}");
+                assert_eq!(message.matches("not an OpenAPI").count(), 0, "{message}");
+            }
+            other => panic!("{other:?}"),
+        }
+        let req = f.fetcher.last_request();
+        assert_eq!(req.if_none_match, src.etag);
+        assert_eq!(req.if_modified_since, src.last_modified);
         let s = f.load();
         assert_eq!(s.etag, src.etag);
         assert_eq!(s.last_modified, src.last_modified);
@@ -595,17 +697,23 @@ mod tests {
     #[tokio::test]
     async fn fetch_failures_map_to_messages_and_retry_after() {
         let cases = [
-            (SpecFetchFailure::NotFound, "not_found", None),
+            (SpecFetchFailure::NotFound, "not_found", None, "private"),
             (
                 SpecFetchFailure::RateLimited {
                     retry_after_secs: Some(60),
                 },
                 "rate_limited",
                 Some(60),
+                "60 seconds",
             ),
-            (SpecFetchFailure::Network("x".into()), "network", None),
+            (
+                SpecFetchFailure::Network("x".into()),
+                "network",
+                None,
+                "could not be fetched: x",
+            ),
         ];
-        for (failure, code, retry) in cases {
+        for (failure, code, retry, wording) in cases {
             let src = source(github());
             let f = Fixture::new(src.clone());
             f.fetcher.push(Err(failure));
@@ -615,7 +723,7 @@ mod tests {
                     message,
                     retry_after_secs,
                 } => {
-                    assert!(!message.is_empty());
+                    assert!(message.contains(wording), "{message}");
                     assert_eq!(retry_after_secs, retry);
                 }
                 other => panic!("{other:?}"),
@@ -717,6 +825,95 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn unauthorized_without_a_token_says_to_add_one() {
+        let f = Fixture::new(source(github()));
+        f.fetcher.push(Err(SpecFetchFailure::Unauthorized));
+        match f.svc.check(f.root()).await.expect("check") {
+            CheckOutcome::Failed { message, .. } => {
+                assert!(message.contains("private"), "{message}");
+                assert!(message.contains("access token"), "{message}");
+                assert!(!message.contains("rejected"), "{message}");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    fn locked_fixture() -> (TempDir, Arc<FakeFetcher>, OpenApiSyncService) {
+        let dir = TempDir::new().expect("tempdir");
+        FsOpenApiSourceRepo
+            .save(dir.path(), &source(github()))
+            .expect("seed");
+        let fetcher = Arc::new(FakeFetcher::default());
+        let svc = OpenApiSyncService::new(
+            Arc::new(SharedFetcher(Arc::clone(&fetcher))),
+            Box::new(FsOpenApiSourceRepo),
+            Arc::new(LockedSecrets),
+        )
+        .with_clock(Arc::new(fixed_now));
+        (dir, fetcher, svc)
+    }
+
+    #[tokio::test]
+    async fn a_locked_keychain_still_fetches_a_public_file_without_a_token() {
+        let (dir, fetcher, svc) = locked_fixture();
+        fetcher.push(Ok(SpecFetchOutcome::NotModified));
+        let out = svc.check(dir.path()).await.expect("check");
+        assert_eq!(out, CheckOutcome::Unchanged);
+        let req = fetcher.last_request();
+        assert_eq!(req.bearer_token, None);
+        assert!(req.url.starts_with("https://raw.githubusercontent.com/"));
+    }
+
+    #[tokio::test]
+    async fn a_locked_keychain_explains_a_not_found_without_the_error_text() {
+        let (dir, fetcher, svc) = locked_fixture();
+        for failure in [SpecFetchFailure::NotFound, SpecFetchFailure::Unauthorized] {
+            fetcher.push(Err(failure));
+            match svc.check(dir.path()).await.expect("check") {
+                CheckOutcome::Failed { message, .. } => {
+                    assert!(message.contains("keychain"), "{message}");
+                    assert!(message.contains("token"), "{message}");
+                    assert!(!message.contains("secret-detail"), "{message}");
+                    assert!(!message.contains("locked"), "{message}");
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn an_unchanged_spec_saves_the_source_before_removing_the_pending_copy() {
+        let mut src = source(github());
+        src.pending_sha256 = Some("old".into());
+        let dir = TempDir::new().expect("tempdir");
+        FsOpenApiSourceRepo.save(dir.path(), &src).expect("seed");
+        FsOpenApiSourceRepo
+            .save_pending(dir.path(), b"leftover")
+            .expect("pending");
+        let fail = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let fetcher = Arc::new(FakeFetcher::default());
+        let svc = OpenApiSyncService::new(
+            Arc::new(SharedFetcher(Arc::clone(&fetcher))),
+            Box::new(FlakyRepo(Arc::clone(&fail))),
+            Arc::new(MemSecrets::default()),
+        );
+        fetcher.push(fetched(fixture(), "\"v2\""));
+        assert!(svc.check(dir.path()).await.is_err());
+        // The failed save left the hash and the file in step.
+        let loaded = FsOpenApiSourceRepo
+            .load(dir.path())
+            .expect("load")
+            .expect("src");
+        assert_eq!(loaded.pending_sha256, Some("old".into()));
+        assert_eq!(
+            FsOpenApiSourceRepo
+                .load_pending(dir.path())
+                .expect("pending"),
+            Some(b"leftover".to_vec())
+        );
     }
 
     #[test]

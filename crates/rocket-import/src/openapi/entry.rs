@@ -31,8 +31,8 @@ pub fn fetch_failure_message(failure: &SpecFetchFailure, token_sent: bool) -> St
                 .to_string()
         }
         SpecFetchFailure::Unauthorized | SpecFetchFailure::NotFound => {
-            "The file was not found, or it is private or needs a sign-in. \
-             Private links are not supported yet."
+            "The file was not found, or it needs a sign-in. \
+             For a private GitHub repository, add an access token."
                 .to_string()
         }
         other => other.to_string(),
@@ -476,7 +476,7 @@ mod tests {
         for failure in [SpecFetchFailure::Unauthorized, SpecFetchFailure::NotFound] {
             let text = describe_fetch_failure(&failure);
             assert!(text.contains("private"), "{text}");
-            assert!(text.contains("not supported yet"), "{text}");
+            assert!(text.contains("access token"), "{text}");
         }
         let limited = SpecFetchFailure::RateLimited {
             retry_after_secs: Some(60),

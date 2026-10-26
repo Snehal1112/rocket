@@ -151,6 +151,8 @@ Plan 2 of the OpenAPI series (`docs/superpowers/plans/2026-10-25-openapi-import-
 
 Sync state (Plan 4, task 1) lives in the same source file, all keys optional and skipped when empty: `source_id` (a v4 UUID, set at import; empty in older files), `sync_interval` (`off`, `hourly`, `daily`, `weekly`, `monthly`; default `off`; `is_due` treats an unreadable or future `last_checked_at` as due), `last_checked_at` (RFC 3339 UTC), `last_status` (`unchanged`, `changed` or `failed` with a machine `code`) and `pending_sha256`. A newer spec is kept as `<collection>/.rocket/openapi-pending.spec` through `save_pending`, `load_pending` and `clear_pending` on `OpenApiSourceRepository` (atomic write, a missing file is not an error). The file never holds a token.
 
+The check service (`OpenApiSyncService` in `rocket-app`, Plan 4 task 2) keeps the GitHub token in the keychain under the source id (`com.rocketapi.openapi-sync`, key `token`). A copied collection folder carries the same `source_id`, so it shares the token with the original. A keychain that cannot be read does not fail a check: the fetch goes out tokenless, and a 404 or 401 then says the keychain could not be read.
+
 ### Importing from a file or a link
 
 Plan 3 of the OpenAPI series. Code is in `openapi/entry.rs`; both methods return `OpenApiImportResult { report, collection, source_url, warnings }`.
@@ -158,7 +160,7 @@ Plan 3 of the OpenAPI series. Code is in `openapi/entry.rs`; both methods return
 - `import_openapi_file(path, group_by, workspace_id)` opens the file once, rejects a non-regular file or a length over 25 MB (`ImportError::SpecUnavailable`), then reads at most the cap with `read_capped`. It writes no source file and `source_url` is `None`.
 - `import_openapi_url(fetcher, sources, link, group_by, workspace_id)` (async) runs `parse_spec_url`, `fetch_target(.., false)` (no token), the fetch, then `import_openapi_text`, then saves the source file. A failed fetch or a `NotModified` answer is `SpecUnavailable` and creates nothing; a body that is not a spec is `NotAnOpenApiSpec`.
 - A source file that cannot be saved is a warning ("Sync could not be set up"), never an error. A GitHub ref of 40 hex characters warns that the commit never changes; 7 to 39 hex characters get a hedged warning, because it may be a branch name.
-- `NotFound` and `Unauthorized` share one message, because GitHub answers 404 for a private repository; it says private links are not supported yet.
+- `NotFound` and `Unauthorized` share one message, because GitHub answers 404 for a private repository; without a token it says a private GitHub repository needs an access token. With a token (`fetch_failure_message(_, true)`) it says the token was rejected or lacks Contents read access.
 - `GroupBy::parse` accepts exactly `tags` and `paths`.
 
 ### Fixture Files
