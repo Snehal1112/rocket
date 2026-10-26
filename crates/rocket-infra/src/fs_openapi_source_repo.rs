@@ -71,8 +71,10 @@ impl OpenApiSourceRepository for FsOpenApiSourceRepo {
     }
 
     fn save_pending(&self, collection_root: &Path, spec: &[u8]) -> DomainResult<()> {
+        // Ignore the file first, so a failure never leaves an unignored copy on disk.
+        crate::rocket_dir::ensure_gitignore(collection_root)?;
         atomic_write(&pending_path(collection_root), spec)?;
-        crate::rocket_dir::ensure_gitignore(collection_root)
+        Ok(())
     }
 
     fn load_pending(&self, collection_root: &Path) -> DomainResult<Option<Vec<u8>>> {
@@ -104,6 +106,16 @@ mod tests {
     };
     use rocket_collection::CollectionRepository;
     use tempfile::tempdir;
+
+    #[test]
+    fn a_failing_ignore_step_leaves_no_pending_file_behind() {
+        let dir = tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join(".rocket/.gitignore")).expect("mkdir");
+        assert!(FsOpenApiSourceRepo
+            .save_pending(dir.path(), b"spec")
+            .is_err());
+        assert!(!dir.path().join(".rocket/openapi-pending.spec").exists());
+    }
 
     fn sample(location: SpecLocation) -> OpenApiSource {
         OpenApiSource {

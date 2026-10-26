@@ -14,8 +14,8 @@ pub use importer::{
 pub use converter::openapi::baseline_hash;
 pub use openapi::{
     build_sync_plan, check_spec_text, fetch_failure_message, fetch_target, fingerprint,
-    merge_request, parse_spec_url, request_is_edited, source_record, Choice, CurrentRequest,
-    FetchTarget, FieldChange, FieldOutcome, GroupBy, MergeOutcome, OpenApiImportResult,
+    merge_item, merge_request, parse_spec_url, request_is_edited, source_record, Choice,
+    CurrentRequest, FetchTarget, FieldChange, FieldOutcome, GroupBy, MergeOutcome, OpenApiImportResult,
     SyncInputs, SyncItem, SyncPlan, VariableChange, VariableKind,
 };
 pub use report::{ImportReport, SkipReason, SkippedItem};

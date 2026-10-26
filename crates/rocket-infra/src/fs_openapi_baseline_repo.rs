@@ -49,8 +49,10 @@ impl OpenApiBaselineRepository for FsOpenApiBaselineRepo {
         let json = serde_json::to_vec_pretty(baseline).map_err(|e| {
             DomainError::Internal(format!("{BASELINE_FILE} could not be written: {e}"))
         })?;
+        // Ignore the file first, so a failure never leaves an unignored copy on disk.
+        crate::rocket_dir::ensure_gitignore(collection_root)?;
         atomic_write(&baseline_path(collection_root), &json)?;
-        crate::rocket_dir::ensure_gitignore(collection_root)
+        Ok(())
     }
 
     fn delete(&self, collection_root: &Path) -> DomainResult<()> {
@@ -143,6 +145,14 @@ mod tests {
             .expect("save");
         FsOpenApiBaselineRepo.delete(dir.path()).expect("delete");
         assert_eq!(FsOpenApiBaselineRepo.load(dir.path()).expect("load"), None);
+    }
+
+    #[test]
+    fn a_failing_ignore_step_leaves_no_baseline_file_behind() {
+        let dir = tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join(".rocket/.gitignore")).expect("mkdir");
+        assert!(FsOpenApiBaselineRepo.save(dir.path(), &sample()).is_err());
+        assert!(!dir.path().join(".rocket/openapi-baseline.json").exists());
     }
 
     #[test]

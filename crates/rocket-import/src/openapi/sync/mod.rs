@@ -9,6 +9,6 @@ pub use merge::{
     merge_request, request_is_edited, Choice, FieldChange, FieldOutcome, MergeOutcome,
 };
 pub use plan::{
-    build_sync_plan, fingerprint, CurrentRequest, SyncInputs, SyncItem, SyncPlan, VariableChange,
-    VariableKind,
+    build_sync_plan, fingerprint, merge_item, CurrentRequest, SyncInputs, SyncItem, SyncPlan,
+    VariableChange, VariableKind,
 };

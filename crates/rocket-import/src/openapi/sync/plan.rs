@@ -1,7 +1,7 @@
 //! Builds the sync plan: what a new spec would change, given the last synced baseline and the
 //! user's current requests. Pure code, nothing is written.
 
-use super::merge::{merge_request, request_is_edited, FieldOutcome, MergeOutcome};
+use super::merge::{merge_request, request_is_edited, Choice, FieldOutcome, MergeOutcome};
 use super::rename::{pair_renames, RenameFacts};
 use crate::converter::openapi::{
     baseline_hash, convert_operation, security_variable_names, BASE_URL_VARIABLE, CONVERTER_VERSION,
@@ -98,6 +98,9 @@ pub enum VariableKind {
 pub struct VariableChange {
     pub name: String,
     pub kind: VariableKind,
+    /// The value at the last sync, when a trusted baseline exists. With `None`, the user's value
+    /// counts as edited, so the apply step must keep it.
+    pub baseline: Option<String>,
     /// The collection's value now, if the variable exists.
     pub yours: Option<String>,
     /// The spec's value. `None` for a new empty secret.
@@ -273,7 +276,7 @@ fn removed_draft(
         facts: Some(RenameFacts {
             method: shown.method.clone(),
             url: shown.url.clone(),
-            name: shown.name.clone(),
+            name: strip_duplicate_suffix(&shown.name).to_string(),
         }),
     }
 }
@@ -287,16 +290,17 @@ fn changed_item(
     idx: &Indexes,
     plan: &mut SyncPlan,
 ) -> Option<SyncItem> {
-    let merge = match idx.baseline_by_key.get(op.key.as_str()) {
-        Some(baseline) => merge_request(baseline, &cur.request, incoming, &BTreeMap::new()),
-        None => {
-            let merge = cautious_merge(source_op, &cur.request, incoming);
-            if !merge.changes.is_empty() {
-                plan.cautious = true;
-            }
-            merge
-        }
-    };
+    let baseline = idx.baseline_by_key.get(op.key.as_str()).copied();
+    let (merge, spec) = merge_core(
+        baseline,
+        source_op,
+        &cur.request,
+        incoming,
+        &BTreeMap::new(),
+    );
+    if baseline.is_none() && !merge.changes.is_empty() {
+        plan.cautious = true;
+    }
     if merge.changes.is_empty() {
         return None;
     }
@@ -306,32 +310,111 @@ fn changed_item(
         request_path: cur.request_path.clone(),
         name: cur.request.name.clone(),
         merge,
-        fingerprint: fingerprint(incoming),
+        fingerprint: fingerprint(&spec),
     })
+}
+
+/// Merge one request the way the plan did, then apply the user's explicit choices on top.
+/// `baseline` is used only when it was written by the running converter and holds the
+/// operation; otherwise the merge is cautious. A cautious merge never takes a field from the
+/// spec unless the user chose it, except that an untouched request takes the spec's differences
+/// (name and description excepted). With no choices the result is the plan's.
+pub fn merge_item(
+    baseline: Option<&OpenApiBaseline>,
+    source_op: &SourceOperation,
+    current: &Request,
+    incoming: &Request,
+    choices: &BTreeMap<String, Choice>,
+) -> MergeOutcome {
+    let request = baseline
+        .filter(|b| b.converter_version == CONVERTER_VERSION)
+        .and_then(|b| b.operations.iter().find(|o| o.key == source_op.key))
+        .map(|o| &o.request);
+    merge_core(request, source_op, current, incoming, choices).0
+}
+
+/// The shared path: returns the outcome and the incoming request after the name fix.
+fn merge_core(
+    baseline: Option<&Request>,
+    source_op: &SourceOperation,
+    current: &Request,
+    incoming: &Request,
+    choices: &BTreeMap<String, Choice>,
+) -> (MergeOutcome, Request) {
+    let spec = with_duplicate_name(baseline.unwrap_or(current), incoming);
+    let outcome = match baseline {
+        Some(b) => merge_request(b, current, &spec, choices),
+        None => cautious_merge(source_op, current, &spec, choices),
+    };
+    (outcome, spec)
+}
+
+/// The importer saves a repeated name as `X (2)`, so the snapshot holds that name while the
+/// converter yields `X`. Carry the suffixed name onto the incoming request, or every plan would
+/// report a false name change.
+fn with_duplicate_name(reference: &Request, incoming: &Request) -> Request {
+    let mut spec = incoming.clone();
+    if let Some(rest) = reference.name.strip_prefix(&incoming.name) {
+        if is_duplicate_suffix(rest) {
+            spec.name = reference.name.clone();
+        }
+    }
+    spec
+}
+
+/// True for text like ` (2)`: a space, then a decimal number in parentheses.
+fn is_duplicate_suffix(rest: &str) -> bool {
+    rest.strip_prefix(" (")
+        .and_then(|r| r.strip_suffix(')'))
+        .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// The name without a trailing ` (n)` duplicate suffix.
+pub(crate) fn strip_duplicate_suffix(name: &str) -> &str {
+    if let Some(open) = name.rfind(" (") {
+        if is_duplicate_suffix(&name[open..]) {
+            return &name[..open];
+        }
+    }
+    name
 }
 
 /// Rule 4. The current request stands in for the baseline. A request whose synced fields still
 /// hash to the stored value is untouched, so the spec's differences are taken, except name and
-/// description, which the hash does not cover. Otherwise nothing is taken.
+/// description, which the hash does not cover. Otherwise nothing is taken. Explicit choices are
+/// applied on top, and only for the fields the user chose.
 fn cautious_merge(
     source_op: &SourceOperation,
     current: &Request,
     incoming: &Request,
+    choices: &BTreeMap<String, Choice>,
 ) -> MergeOutcome {
     let untouched = baseline_hash(current) == source_op.baseline_hash;
+    let keeps = |field: &str| !untouched || field == "name" || field == "description";
     let mut out = merge_request(current, current, incoming, &BTreeMap::new());
-    out.cautious = true;
-    if untouched {
-        out.merged.name = current.name.clone();
-        out.merged.description = current.description.clone();
-    } else {
-        out.merged = current.clone();
-    }
-    for change in &mut out.changes {
-        if !untouched || change.field == "name" || change.field == "description" {
-            change.outcome = FieldOutcome::KeepYours;
+    if choices.is_empty() {
+        if untouched {
+            out.merged.name = current.name.clone();
+            out.merged.description = current.description.clone();
+        } else {
+            out.merged = current.clone();
         }
+        for change in &mut out.changes {
+            if keeps(&change.field) {
+                change.outcome = FieldOutcome::KeepYours;
+            }
+        }
+    } else {
+        // Every field the user did not choose keeps the user's value.
+        let mut full = choices.clone();
+        for change in &out.changes {
+            if keeps(&change.field) {
+                full.entry(change.field.clone()).or_insert(Choice::Yours);
+            }
+        }
+        out = merge_request(current, current, incoming, &full);
     }
+    out.cautious = true;
     out
 }
 
@@ -407,10 +490,15 @@ fn variable_changes(inputs: &SyncInputs) -> Vec<VariableChange> {
         Some(b) => non_empty(&b.base_url),
         None => yours.clone(),
     };
+    let trusted_base_url = inputs
+        .baseline
+        .filter(|b| b.converter_version == CONVERTER_VERSION)
+        .map(|b| b.base_url.clone());
     if spec.is_some() && spec != baseline && spec != yours {
         out.push(VariableChange {
             name: BASE_URL_VARIABLE.to_string(),
             kind: VariableKind::BaseUrl,
+            baseline: trusted_base_url,
             yours,
             spec,
         });
@@ -423,6 +511,7 @@ fn variable_changes(inputs: &SyncInputs) -> Vec<VariableChange> {
                 out.push(VariableChange {
                     name,
                     kind: VariableKind::AddSecurity,
+                    baseline: None,
                     yours: None,
                     spec: None,
                 });
@@ -983,6 +1072,7 @@ mod tests {
             vec![VariableChange {
                 name: "baseUrl".to_string(),
                 kind: VariableKind::BaseUrl,
+                baseline: Some(BASE.to_string()),
                 yours: Some("https://mine.example.com".to_string()),
                 spec: Some("https://v2.example.com".to_string()),
             }]
@@ -1070,5 +1160,228 @@ mod tests {
         let elapsed = start.elapsed();
         assert_eq!(p.items.len(), 490 + 100 + 100);
         assert!(elapsed.as_secs_f64() < 2.0, "took {elapsed:?}");
+    }
+
+    // Final-review fix wave: choices, duplicate names, baseline in variable changes.
+
+    fn source_for(request: &Request) -> SourceOperation {
+        SourceOperation {
+            key: "k".to_string(),
+            uid: request.uid.clone(),
+            request_path: "x".to_string(),
+            baseline_hash: baseline_hash(request),
+        }
+    }
+
+    fn json_request(body: &str) -> Request {
+        let mut r = Request::new(
+            "List",
+            rocket_shared::types::HttpMethod::Get,
+            "{{baseUrl}}/a",
+        );
+        r.body = Some(rocket_shared::types::Body {
+            mode: rocket_shared::types::BodyMode::Json,
+            content: Some(body.to_string()),
+            form_data: None,
+            file_path: None,
+        });
+        r
+    }
+
+    fn choice(field: &str, c: Choice) -> BTreeMap<String, Choice> {
+        BTreeMap::from([(field.to_string(), c)])
+    }
+
+    #[test]
+    fn a_spec_choice_on_a_cautious_edited_request_changes_only_that_field() {
+        let base = json_request(r#"{"k":1,"m":1}"#);
+        let mut current = json_request(r#"{"k":5,"m":1}"#);
+        current
+            .headers
+            .push(rocket_shared::types::Header::new("X", "mine"));
+        let mut incoming = json_request(r#"{"k":1,"m":2}"#);
+        incoming
+            .headers
+            .push(rocket_shared::types::Header::new("Y", "spec"));
+        let out = merge_item(
+            None,
+            &source_for(&base),
+            &current,
+            &incoming,
+            &choice("header:Y", Choice::Spec),
+        );
+        assert!(out.cautious);
+        assert!(out.merged.headers.iter().any(|h| h.key == "Y"));
+        let mut merged = out.merged.clone();
+        merged.headers.retain(|h| h.key != "Y");
+        assert_eq!(merged, current);
+        let y = out
+            .changes
+            .iter()
+            .find(|c| c.field == "header:Y")
+            .expect("Y");
+        assert_eq!(y.outcome, FieldOutcome::TakeSpec);
+        assert!(out
+            .changes
+            .iter()
+            .filter(|c| c.field != "header:Y")
+            .all(|c| c.outcome == FieldOutcome::KeepYours));
+    }
+
+    #[test]
+    fn a_spec_choice_for_the_name_of_an_untouched_cautious_request_takes_it() {
+        let base = json_request(r#"{"k":1}"#);
+        let current = base.clone();
+        let mut incoming = base.clone();
+        incoming.name = "Renamed".to_string();
+        incoming.url = "{{baseUrl}}/b".to_string();
+        let src = source_for(&base);
+        let none = merge_item(None, &src, &current, &incoming, &BTreeMap::new());
+        assert_eq!(none.merged.name, "List");
+        assert_eq!(none.merged.url, "{{baseUrl}}/b");
+        let out = merge_item(
+            None,
+            &src,
+            &current,
+            &incoming,
+            &choice("name", Choice::Spec),
+        );
+        assert_eq!(out.merged.name, "Renamed");
+        assert_eq!(out.merged.url, "{{baseUrl}}/b");
+    }
+
+    #[test]
+    fn a_spec_choice_on_a_keep_yours_field_in_normal_mode_takes_the_spec() {
+        let base = json_request(r#"{"k":1}"#);
+        let mut current = base.clone();
+        current.url = "{{baseUrl}}/mine".to_string();
+        let mut incoming = base.clone();
+        incoming.url = "{{baseUrl}}/spec".to_string();
+        let baseline = OpenApiBaseline {
+            version: BASELINE_FILE_VERSION,
+            converter_version: CONVERTER_VERSION,
+            base_url: String::new(),
+            operations: vec![BaselineOperation {
+                key: "k".to_string(),
+                request: base.clone(),
+            }],
+        };
+        let src = source_for(&base);
+        let kept = merge_item(Some(&baseline), &src, &current, &incoming, &BTreeMap::new());
+        assert_eq!(kept.merged.url, "{{baseUrl}}/mine");
+        assert!(!kept.cautious);
+        let out = merge_item(
+            Some(&baseline),
+            &src,
+            &current,
+            &incoming,
+            &choice("url", Choice::Spec),
+        );
+        assert_eq!(out.merged.url, "{{baseUrl}}/spec");
+    }
+
+    #[test]
+    fn merge_item_without_choices_reproduces_the_plans_outcome() {
+        let w = import(&doc(&pets()), GroupBy::Tags);
+        let mut new = pets();
+        new[0].summary = "List pets v2".to_string();
+        new[0].path = "/pets/v2".to_string();
+        let incoming_doc = doc(&new);
+        let incoming = convert_operation(
+            &incoming_doc.operations[0],
+            &incoming_doc.security_schemes,
+            1,
+        )
+        .request;
+        let normal = plan(&w, &incoming_doc);
+        let expected = changed(&normal, "listPets");
+        let got = merge_item(
+            Some(&w.baseline),
+            &w.source.operations[0],
+            &w.current[0].request,
+            &incoming,
+            &BTreeMap::new(),
+        );
+        assert_eq!(&got, expected);
+
+        let mut w2 = import(&doc(&pets()), GroupBy::Tags);
+        w2.current[0].request.tests = None;
+        w2.current[0].request.url = "{{baseUrl}}/edited".to_string();
+        let cautious = plan_with(&w2, None, &incoming_doc, &BTreeMap::new());
+        let expected = changed(&cautious, "listPets");
+        let got = merge_item(
+            None,
+            &w2.source.operations[0],
+            &w2.current[0].request,
+            &incoming,
+            &BTreeMap::new(),
+        );
+        assert_eq!(&got, expected);
+    }
+
+    fn suffixed_world() -> World {
+        let mut w = import(&doc(&pets()), GroupBy::Tags);
+        w.baseline.operations[0].request.name = "List pets (2)".to_string();
+        w.current[0].request.name = "List pets (2)".to_string();
+        w
+    }
+
+    #[test]
+    fn an_unchanged_spec_with_a_suffixed_name_gives_an_empty_plan() {
+        let w = suffixed_world();
+        assert!(plan(&w, &doc(&pets())).items.is_empty());
+        let cautious = plan_with(&w, None, &doc(&pets()), &BTreeMap::new());
+        assert!(cautious.items.is_empty());
+        assert!(!cautious.cautious);
+    }
+
+    #[test]
+    fn a_real_summary_change_of_a_suffixed_request_still_changes_the_name() {
+        let w = suffixed_world();
+        let mut new = pets();
+        new[0].summary = "Something else".to_string();
+        let p = plan(&w, &doc(&new));
+        let name = changed(&p, "listPets")
+            .changes
+            .iter()
+            .find(|c| c.field == "name")
+            .expect("name change");
+        assert_eq!(name.spec.as_deref(), Some("Something else"));
+    }
+
+    #[test]
+    fn a_name_that_only_looks_like_a_suffix_is_not_one() {
+        assert!(!is_duplicate_suffix(" (final)"));
+        assert!(!is_duplicate_suffix(" ()"));
+        assert!(is_duplicate_suffix(" (12)"));
+        assert_eq!(strip_duplicate_suffix("Report (final)"), "Report (final)");
+        assert_eq!(strip_duplicate_suffix("Report (3)"), "Report");
+        let mut w = import(&doc(&pets()), GroupBy::Tags);
+        w.baseline.operations[0].request.name = "List pets (final)".to_string();
+        w.current[0].request.name = "List pets (final)".to_string();
+        let p = plan(&w, &doc(&pets()));
+        assert!(changed(&p, "listPets")
+            .changes
+            .iter()
+            .any(|c| c.field == "name"));
+    }
+
+    #[test]
+    fn rename_rule_b_pairs_a_suffixed_removed_name_with_a_new_one() {
+        let mut w = import(&doc(&pets()), GroupBy::Tags);
+        w.baseline.operations[1].request.name = "Get a pet (2)".to_string();
+        w.current[1].request.name = "Get a pet (2)".to_string();
+        let mut new = pets();
+        new[1].id = "getAnimal".to_string();
+        new[1].path = "/animals/{id}".to_string();
+        let p = plan(&w, &doc(&new));
+        let SyncItem::Removed {
+            possibly_renamed_to,
+            ..
+        } = p.items.last().expect("item")
+        else {
+            panic!("not Removed");
+        };
+        assert_eq!(possibly_renamed_to.as_deref(), Some("getAnimal"));
     }
 }
