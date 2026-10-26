@@ -19,6 +19,7 @@ vi.mock('@/lib/tauri-api', async () => {
     ...actual,
     getOpenApiSyncStatus: vi.fn(),
     onOpenApiSyncChecked: vi.fn(() => Promise.resolve(() => undefined)),
+    onOpenApiSyncApplied: vi.fn(() => Promise.resolve(() => undefined)),
   };
 });
 
@@ -30,7 +31,7 @@ describe('SpecSyncNotice', () => {
   it('renders nothing for a collection without a spec source', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(null);
     const { container } = renderWithQuery(<SpecSyncNotice collection='c' />);
-    await waitFor(() => expect(tauriApi.getOpenApiSyncStatus).toHaveBeenCalledWith('c'));
+    await waitFor(() => expect(tauriApi.getOpenApiSyncStatus).toHaveBeenCalledWith('c', false));
     expect(container).toBeEmptyDOMElement();
   });
 

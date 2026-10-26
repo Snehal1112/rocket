@@ -32,7 +32,7 @@ const tab: CollectionTab = {
 
 /** Waits for the status call, then lets its result reach the component. */
 async function settled() {
-  await waitFor(() => expect(tauriApi.getOpenApiSyncStatus).toHaveBeenCalledWith('demo'));
+  await waitFor(() => expect(tauriApi.getOpenApiSyncStatus).toHaveBeenCalledWith('demo', false));
   await act(async () => {
     await new Promise((r) => setTimeout(r, 20));
   });

@@ -13,6 +13,7 @@ vi.mock('@/lib/tauri-api', async () => {
     getOpenApiSyncStatus: vi.fn(),
     getOpenApiSyncPlan: vi.fn(),
     onOpenApiSyncChecked: vi.fn(() => Promise.resolve(() => undefined)),
+    onOpenApiSyncApplied: vi.fn(() => Promise.resolve(() => undefined)),
   };
 });
 
@@ -51,7 +52,7 @@ describe('SpecSyncTab', () => {
     expect(await screen.findByText('Folder: pets / read')).toBeInTheDocument();
     await userEvent.setup().click(screen.getByText('Delete pet'));
     expect(screen.getByText('Treated as edited, will be kept')).toBeInTheDocument();
-    expect(tauriApi.getOpenApiSyncPlan).toHaveBeenCalledWith('c');
+    expect(tauriApi.getOpenApiSyncPlan).toHaveBeenCalledWith('c', []);
   });
 
   it('shows the state file error with its message', async () => {

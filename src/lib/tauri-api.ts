@@ -1930,8 +1930,15 @@ export interface OpenApiSyncStatus {
   lastCheckedAt: string | null;
   lastStatus: OpenApiLastStatus | null;
   hasPending: boolean;
-  hasToken: boolean;
+  /** Present only when the status was requested with `includeToken`. */
+  hasToken?: boolean;
+  /** Whether this machine approved the spec link. */
+  consent: OpenApiConsent;
+  /** A fixed sentence for the last failed check. */
+  lastMessage?: string;
 }
+
+export type OpenApiConsent = 'granted' | 'missing' | 'locationChanged';
 
 export interface OpenApiFieldChange {
   field: string;
@@ -1999,11 +2006,96 @@ export interface OpenApiSyncPlan {
   warnings: string[];
 }
 
-export const getOpenApiSyncStatus = (collection: string) =>
-  invoke<OpenApiSyncStatus | null>('openapi_sync_status', { collection });
+export interface OpenApiCheckOutcome {
+  state: 'unchanged' | 'changed' | 'failed';
+  code?: string;
+  message?: string;
+  retryAfterSecs?: number;
+}
 
-export const getOpenApiSyncPlan = (collection: string) =>
-  invoke<OpenApiSyncPlan>('openapi_sync_plan', { collection });
+export interface OpenApiApprovedItem {
+  key: string;
+  digest: string;
+  /** Field name to `spec` or `yours`. */
+  choices: Record<string, 'spec' | 'yours'>;
+}
+
+export interface OpenApiSkip {
+  key: string;
+  fingerprint: string;
+}
+
+export interface OpenApiVariableApproval {
+  name: string;
+  digest: string;
+}
+
+export interface OpenApiSelection {
+  items: OpenApiApprovedItem[];
+  skips: OpenApiSkip[];
+  variables: OpenApiVariableApproval[];
+  /** `[oldKey, newKey]` pairs in the order the user linked them. */
+  renameLinks: Array<[string, string]>;
+}
+
+export interface OpenApiAppliedItem {
+  key: string;
+  kind: 'created' | 'updated';
+  requestPath: string;
+}
+
+export interface OpenApiApplyReport {
+  applied: OpenApiAppliedItem[];
+  stale: string[];
+  notRewritable: string[];
+  deleted: string[];
+  detached: string[];
+  skipped: number;
+  remaining: number;
+}
+
+/** The result of an apply, by the name the sync actions UI uses. */
+export type ApplyReport = OpenApiApplyReport;
+
+export const getOpenApiSyncStatus = (collection: string, includeToken = false) =>
+  invoke<OpenApiSyncStatus | null>('openapi_sync_status', {
+    collection,
+    ...(includeToken ? { includeToken: true } : {}),
+  });
+
+export const getOpenApiSyncPlan = (collection: string, links: Array<[string, string]> = []) =>
+  invoke<OpenApiSyncPlan>('openapi_sync_plan', {
+    collection,
+    ...(links.length > 0 ? { links } : {}),
+  });
+
+export const checkOpenApiSyncNow = (collection: string) =>
+  invoke<OpenApiCheckOutcome>('openapi_sync_check_now', { collection });
+
+export const setOpenApiSyncInterval = (collection: string, interval: OpenApiSyncInterval) =>
+  invoke<void>('openapi_sync_set_interval', { collection, interval });
+
+export const setOpenApiSyncToken = (collection: string, token: string) =>
+  invoke<void>('openapi_sync_set_token', { collection, token });
+
+export const clearOpenApiSyncToken = (collection: string) =>
+  invoke<void>('openapi_sync_clear_token', { collection });
+
+export const grantOpenApiSyncConsent = (collection: string, location: string) =>
+  invoke<void>('openapi_sync_grant_consent', { collection, location });
+
+export const revokeOpenApiSyncConsent = (collection: string) =>
+  invoke<void>('openapi_sync_revoke_consent', { collection });
+
+export const applyOpenApiSync = (collection: string, selection: OpenApiSelection) =>
+  invoke<OpenApiApplyReport>('openapi_sync_apply', { collection, selection });
+
+export const onOpenApiSyncApplied = (
+  handler: (event: { collection: string; applied: number; stale: number }) => void,
+): Promise<UnlistenFn> =>
+  listen<{ collection: string; applied: number; stale: number }>('openapi-sync-applied', (e) =>
+    handler(e.payload),
+  );
 
 export const onOpenApiSyncChecked = (
   handler: (event: { collection: string; status: string }) => void,

@@ -1,12 +1,21 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, type MockInstance, vi } from 'vitest';
 import * as tauriApi from '@/lib/tauri-api';
+import { collectionKeys } from '../collection-queries';
 import {
+  openApiSyncKeys,
+  useApplySync,
+  useCheckNow,
+  useClearToken,
+  useGrantConsent,
   useOpenApiSyncEvents,
   useOpenApiSyncPlan,
   useOpenApiSyncStatus,
+  useRevokeConsent,
+  useSetInterval,
+  useSetToken,
 } from '../openapi-sync-queries';
 
 vi.mock('@/lib/tauri-api', async () => {
@@ -16,6 +25,14 @@ vi.mock('@/lib/tauri-api', async () => {
     getOpenApiSyncStatus: vi.fn(),
     getOpenApiSyncPlan: vi.fn(),
     onOpenApiSyncChecked: vi.fn(),
+    onOpenApiSyncApplied: vi.fn(),
+    checkOpenApiSyncNow: vi.fn(),
+    setOpenApiSyncInterval: vi.fn(),
+    setOpenApiSyncToken: vi.fn(),
+    clearOpenApiSyncToken: vi.fn(),
+    grantOpenApiSyncConsent: vi.fn(),
+    revokeOpenApiSyncConsent: vi.fn(),
+    applyOpenApiSync: vi.fn(),
   };
 });
 
@@ -40,6 +57,7 @@ describe('openapi sync queries', () => {
       warnings: [],
     });
     vi.mocked(tauriApi.onOpenApiSyncChecked).mockResolvedValue(() => undefined);
+    vi.mocked(tauriApi.onOpenApiSyncApplied).mockResolvedValue(() => undefined);
   });
 
   it('the status hook returns null for a collection without a source', async () => {
@@ -55,7 +73,7 @@ describe('openapi sync queries', () => {
 
   it('the plan hook calls the API when enabled', async () => {
     renderHook(() => useOpenApiSyncPlan('A', true), { wrapper });
-    await waitFor(() => expect(tauriApi.getOpenApiSyncPlan).toHaveBeenCalledWith('A'));
+    await waitFor(() => expect(tauriApi.getOpenApiSyncPlan).toHaveBeenCalledWith('A', []));
   });
 
   it('an event refreshes only the named collection', async () => {
@@ -98,5 +116,131 @@ describe('openapi sync queries', () => {
     await waitFor(() => expect(tauriApi.onOpenApiSyncChecked).toHaveBeenCalled());
     unmount();
     await waitFor(() => expect(unlisten).toHaveBeenCalledTimes(1));
+  });
+
+  it('the status key includes includeToken and the plan key includes the links', () => {
+    expect(openApiSyncKeys.status('A', true)).not.toEqual(openApiSyncKeys.status('A'));
+    expect(openApiSyncKeys.plan('A', [['x', 'y']])).not.toEqual(openApiSyncKeys.plan('A', []));
+  });
+
+  it('the status hook passes includeToken to the API', async () => {
+    renderHook(() => useOpenApiSyncStatus('A', true), { wrapper });
+    await waitFor(() => expect(tauriApi.getOpenApiSyncStatus).toHaveBeenCalledWith('A', true));
+  });
+
+  it('a new link set refetches the plan', async () => {
+    const { rerender } = renderHook(
+      ({ links }: { links: Array<[string, string]> }) => useOpenApiSyncPlan('A', true, links),
+      { wrapper, initialProps: { links: [] as Array<[string, string]> } },
+    );
+    await waitFor(() => expect(tauriApi.getOpenApiSyncPlan).toHaveBeenCalledTimes(1));
+    rerender({ links: [['a', 'b']] });
+    await waitFor(() => expect(tauriApi.getOpenApiSyncPlan).toHaveBeenCalledTimes(2));
+    expect(tauriApi.getOpenApiSyncPlan).toHaveBeenLastCalledWith('A', [['a', 'b']]);
+  });
+
+  describe('mutations', () => {
+    type InvalidateSpy = MockInstance<QueryClient['invalidateQueries']>;
+    const invalidatedKeys = (spy: InvalidateSpy) =>
+      spy.mock.calls.map((c) => (c[0] as { queryKey: unknown }).queryKey);
+
+    const expectSyncKeysOnly = (spy: InvalidateSpy) => {
+      const keys = invalidatedKeys(spy);
+      expect(keys).toContainEqual(openApiSyncKeys.statusAll('A'));
+      expect(keys).toContainEqual(openApiSyncKeys.planAll('A'));
+      expect(keys).not.toContainEqual(collectionKeys.all);
+    };
+
+    it('useCheckNow invalidates status and plan', async () => {
+      vi.mocked(tauriApi.checkOpenApiSyncNow).mockResolvedValue({ state: 'unchanged' });
+      const spy = vi.spyOn(client, 'invalidateQueries');
+      const { result } = renderHook(() => useCheckNow('A'), { wrapper });
+      await result.current.mutateAsync();
+      expect(tauriApi.checkOpenApiSyncNow).toHaveBeenCalledWith('A');
+      expectSyncKeysOnly(spy);
+    });
+
+    it('useSetInterval invalidates status and plan', async () => {
+      vi.mocked(tauriApi.setOpenApiSyncInterval).mockResolvedValue(undefined);
+      const spy = vi.spyOn(client, 'invalidateQueries');
+      const { result } = renderHook(() => useSetInterval('A'), { wrapper });
+      await result.current.mutateAsync('daily');
+      expect(tauriApi.setOpenApiSyncInterval).toHaveBeenCalledWith('A', 'daily');
+      expectSyncKeysOnly(spy);
+    });
+
+    it('useSetToken invalidates status and plan', async () => {
+      vi.mocked(tauriApi.setOpenApiSyncToken).mockResolvedValue(undefined);
+      const spy = vi.spyOn(client, 'invalidateQueries');
+      const { result } = renderHook(() => useSetToken('A'), { wrapper });
+      await result.current.mutateAsync('tok');
+      expect(tauriApi.setOpenApiSyncToken).toHaveBeenCalledWith('A', 'tok');
+      expectSyncKeysOnly(spy);
+    });
+
+    it('useClearToken invalidates status and plan', async () => {
+      vi.mocked(tauriApi.clearOpenApiSyncToken).mockResolvedValue(undefined);
+      const spy = vi.spyOn(client, 'invalidateQueries');
+      const { result } = renderHook(() => useClearToken('A'), { wrapper });
+      await result.current.mutateAsync();
+      expect(tauriApi.clearOpenApiSyncToken).toHaveBeenCalledWith('A');
+      expectSyncKeysOnly(spy);
+    });
+
+    it('useGrantConsent invalidates status and plan', async () => {
+      vi.mocked(tauriApi.grantOpenApiSyncConsent).mockResolvedValue(undefined);
+      const spy = vi.spyOn(client, 'invalidateQueries');
+      const { result } = renderHook(() => useGrantConsent('A'), { wrapper });
+      await result.current.mutateAsync('https://x/y');
+      expect(tauriApi.grantOpenApiSyncConsent).toHaveBeenCalledWith('A', 'https://x/y');
+      expectSyncKeysOnly(spy);
+    });
+
+    it('useRevokeConsent invalidates status and plan', async () => {
+      vi.mocked(tauriApi.revokeOpenApiSyncConsent).mockResolvedValue(undefined);
+      const spy = vi.spyOn(client, 'invalidateQueries');
+      const { result } = renderHook(() => useRevokeConsent('A'), { wrapper });
+      await result.current.mutateAsync();
+      expect(tauriApi.revokeOpenApiSyncConsent).toHaveBeenCalledWith('A');
+      expectSyncKeysOnly(spy);
+    });
+
+    it('useApplySync returns the report and also invalidates the collection tree', async () => {
+      const report = {
+        applied: [],
+        stale: [],
+        notRewritable: [],
+        deleted: [],
+        detached: [],
+        skipped: 0,
+        remaining: 0,
+      };
+      vi.mocked(tauriApi.applyOpenApiSync).mockResolvedValue(report);
+      const spy = vi.spyOn(client, 'invalidateQueries');
+      const { result } = renderHook(() => useApplySync('A'), { wrapper });
+      const selection = { items: [], skips: [], variables: [], renameLinks: [] };
+      await expect(result.current.mutateAsync(selection)).resolves.toEqual(report);
+      expect(tauriApi.applyOpenApiSync).toHaveBeenCalledWith('A', selection);
+      const keys = invalidatedKeys(spy);
+      expect(keys).toContainEqual(openApiSyncKeys.statusAll('A'));
+      expect(keys).toContainEqual(openApiSyncKeys.planAll('A'));
+      expect(keys).toContainEqual(collectionKeys.all);
+    });
+  });
+
+  it('the applied event refreshes status, plan and the tree for the named collection only', async () => {
+    const spy = vi.spyOn(client, 'invalidateQueries');
+    renderHook(() => useOpenApiSyncEvents(), { wrapper });
+    await waitFor(() => expect(tauriApi.onOpenApiSyncApplied).toHaveBeenCalled());
+    vi.mocked(tauriApi.onOpenApiSyncApplied).mock.calls[0]?.[0]({
+      collection: 'A',
+      applied: 1,
+      stale: 0,
+    });
+    const keys = spy.mock.calls.map((c) => (c[0] as { queryKey: unknown }).queryKey);
+    expect(keys).toContainEqual(openApiSyncKeys.statusAll('A'));
+    expect(keys).toContainEqual(openApiSyncKeys.planAll('A'));
+    expect(keys).toContainEqual(collectionKeys.all);
+    expect(JSON.stringify(keys)).not.toContain('"B"');
   });
 });

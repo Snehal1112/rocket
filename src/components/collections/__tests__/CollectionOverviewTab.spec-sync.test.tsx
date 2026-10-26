@@ -28,6 +28,7 @@ vi.mock('@/lib/tauri-api', async () => {
       warnings: [],
     }),
     onOpenApiSyncChecked: vi.fn(() => Promise.resolve(() => undefined)),
+    onOpenApiSyncApplied: vi.fn(() => Promise.resolve(() => undefined)),
   };
 });
 

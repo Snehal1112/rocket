@@ -8,6 +8,7 @@ export function makeStatus(overrides: Partial<OpenApiSyncStatus> = {}): OpenApiS
     lastStatus: { state: 'changed' },
     hasPending: true,
     hasToken: false,
+    consent: 'granted',
     ...overrides,
   };
 }
