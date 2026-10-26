@@ -11,6 +11,7 @@ pub mod grpc_request;
 pub mod repository;
 pub mod request;
 pub mod request_kind;
+pub mod request_renderer;
 pub mod request_summary;
 mod script_file;
 pub mod settings;
@@ -39,6 +40,7 @@ pub use file_tx::{
 };
 pub use openapi_local::{OpenApiLocalRepository, OpenApiLocalState, LOCAL_STATE_FILE_VERSION};
 pub use request_kind::RequestKind;
+pub use request_renderer::RequestRenderer;
 pub use request_summary::RequestSummary;
 pub use script_file::{normalize_script_name, ScriptFileItem, SCRIPT_TEMPLATE};
 pub use settings::{CollectionSettings, CollectionVariable};

@@ -3,8 +3,9 @@
 
 use std::path::PathBuf;
 
-use rocket_collection::{request_filename_for, CollectionRepository, CollectionSettings, Request};
-use rocket_import::RequestRenderer;
+use rocket_collection::{
+    request_filename_for, CollectionRepository, CollectionSettings, Request, RequestRenderer,
+};
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::FsCollectionRepo;
@@ -60,14 +61,32 @@ impl RequestRenderer for FsRequestRenderer {
     }
 
     fn render_settings(&self, settings: &CollectionSettings) -> DomainResult<(String, Vec<u8>)> {
+        // The scratch collection starts from the real settings file, so its name, uid, docs and
+        // extensions survive. Without a root there is nothing to start from, so refuse.
+        let Some(real) = &self.root else {
+            return Err(DomainError::InvalidInput(
+                "the collection settings cannot be rendered without the collection folder".into(),
+            ));
+        };
+        let rel = "opencollection.yml";
+        let existing = std::fs::read(real.join(rel))
+            .map_err(|e| DomainError::Internal(format!("{rel} could not be read: {e}")))?;
         self.scratch(|repo, root| {
+            std::fs::write(root.join(rel), &existing).map_err(|e| {
+                DomainError::Internal(format!("a scratch file could not be written: {e}"))
+            })?;
             repo.save_settings(SCRATCH, settings)?;
-            let rel = "opencollection.yml";
             Ok((rel.to_string(), read(root, rel)?))
         })
     }
 
     fn render_folder(&self, folder_path: &str) -> DomainResult<Vec<u8>> {
+        // A folder file that already exists is kept as it is.
+        if let Some(real) = &self.root {
+            if let Ok(bytes) = std::fs::read(real.join(folder_path).join("folder.yml")) {
+                return Ok(bytes);
+            }
+        }
         self.scratch(|repo, root| {
             repo.create_folder(SCRATCH, folder_path)?;
             read(root, &format!("{folder_path}/folder.yml"))
@@ -141,10 +160,17 @@ mod tests {
         let renderer = FsRequestRenderer::new();
         let folder = renderer.render_folder("A/B").expect("folder");
         assert!(!folder.is_empty());
-        let (rel, bytes) = renderer
+        assert!(renderer
+            .render_settings(&CollectionSettings::default())
+            .is_err());
+        let dir = tempdir().expect("tempdir");
+        let repo = FsCollectionRepo::new_standalone(dir.path().to_path_buf());
+        repo.create("c").expect("create");
+        let real = FsRequestRenderer::for_collection(dir.path().join("c"));
+        let (rel, bytes) = real
             .render_settings(&CollectionSettings::default())
             .expect("settings");
         assert_eq!(rel, "opencollection.yml");
-        assert!(!bytes.is_empty());
+        assert!(String::from_utf8(bytes).expect("utf8").contains("name: c"));
     }
 }

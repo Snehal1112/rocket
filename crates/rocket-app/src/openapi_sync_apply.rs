@@ -205,10 +205,16 @@ impl OpenApiSyncService {
         }
         if let Err(e) = tx.commit() {
             // A failed commit can leave a journal that recovery finishes or undoes.
-            if let Err(re) = deps.tx.recover(&root) {
-                tracing::warn!(error = %re, "recovery after a failed apply did not finish");
-            }
-            return Err(e);
+            return match deps.tx.recover(&root) {
+                Ok(RecoveryOutcome::Finished { .. }) => Ok(output.report),
+                Ok(_) => Err(DomainError::Internal(format!("{e}; nothing was changed"))),
+                Err(re) => {
+                    tracing::warn!(error = %re, "recovery after a failed apply did not finish");
+                    Err(DomainError::Internal(format!(
+                        "{e}; the apply will be finished or undone the next time Rocket starts"
+                    )))
+                }
+            };
         }
         Ok(output.report)
     }

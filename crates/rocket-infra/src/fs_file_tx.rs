@@ -400,7 +400,57 @@ fn roll_back_and_clean(
     Ok(files)
 }
 
+/// Collection roots that a transaction or a recovery is working on in this process.
+static BUSY_ROOTS: std::sync::OnceLock<(
+    std::sync::Mutex<std::collections::HashSet<PathBuf>>,
+    std::sync::Condvar,
+)> = std::sync::OnceLock::new();
+
+fn busy_roots() -> &'static (
+    std::sync::Mutex<std::collections::HashSet<PathBuf>>,
+    std::sync::Condvar,
+) {
+    BUSY_ROOTS.get_or_init(Default::default)
+}
+
+/// Marks a collection root as in use until dropped, so a recovery never overlaps a running
+/// transaction on the same collection.
+struct RootGuard(PathBuf);
+
+impl RootGuard {
+    /// Takes the root, or `None` when another transaction or recovery holds it.
+    fn try_acquire(root: &Path) -> Option<Self> {
+        let (lock, _) = busy_roots();
+        let mut set = lock.lock().unwrap_or_else(|e| e.into_inner());
+        set.insert(root.to_path_buf())
+            .then(|| Self(root.to_path_buf()))
+    }
+
+    /// Takes the root, waiting while another holder has it.
+    fn acquire(root: &Path) -> Self {
+        let (lock, cvar) = busy_roots();
+        let mut set = lock.lock().unwrap_or_else(|e| e.into_inner());
+        while set.contains(root) {
+            set = cvar.wait(set).unwrap_or_else(|e| e.into_inner());
+        }
+        set.insert(root.to_path_buf());
+        Self(root.to_path_buf())
+    }
+}
+
+impl Drop for RootGuard {
+    fn drop(&mut self) {
+        let (lock, cvar) = busy_roots();
+        lock.lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.0);
+        cvar.notify_all();
+    }
+}
+
 struct FsFileTx {
+    /// Held until the transaction ends.
+    _guard: RootGuard,
     root: PathBuf,
     id: String,
     ops: Vec<JournalOp>,
@@ -559,9 +609,15 @@ impl CollectionFileTxFactory for FsFileTxFactory {
 
     fn begin(&self, collection_root: &Path) -> DomainResult<Box<dyn CollectionFileTx>> {
         guard(collection_root, ".rocket")?;
+        let Some(root_guard) = RootGuard::try_acquire(collection_root) else {
+            return Err(DomainError::Conflict(
+                "another sync apply is running on this collection".to_string(),
+            ));
+        };
         crate::rocket_dir::ensure_gitignore(collection_root)?;
         let id = uuid::Uuid::new_v4().to_string();
         let tx = FsFileTx {
+            _guard: root_guard,
             root: collection_root.to_path_buf(),
             id,
             ops: Vec::new(),
@@ -581,6 +637,8 @@ impl CollectionFileTxFactory for FsFileTxFactory {
     }
 
     fn recover(&self, collection_root: &Path) -> DomainResult<RecoveryOutcome> {
+        // Waits for a running transaction, so a staging journal is never taken for a leftover.
+        let _root = RootGuard::acquire(collection_root);
         let Some(mut journal) = read_journal(collection_root)? else {
             return Ok(RecoveryOutcome::Nothing);
         };
@@ -874,6 +932,25 @@ mod tests {
     }
 
     #[test]
+    fn recover_waits_for_a_running_transaction_and_keeps_its_journal() {
+        let dir = tempdir().expect("tempdir");
+        let mut tx = factory().begin(dir.path()).expect("begin");
+        tx.stage_put("a.yml", b"A").expect("put");
+        let root = dir.path().to_path_buf();
+        let handle = std::thread::spawn(move || factory().recover(&root));
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(
+            !handle.is_finished(),
+            "recover must wait for the transaction"
+        );
+        assert!(dir.path().join(".rocket/apply-journal.json").exists());
+        tx.commit().expect("commit");
+        let outcome = handle.join().expect("thread").expect("recover");
+        assert_eq!(outcome, RecoveryOutcome::Nothing);
+        assert_eq!(read(dir.path(), "a.yml"), "A");
+    }
+
+    #[test]
     fn begin_fails_when_a_journal_exists() {
         let dir = tempdir().expect("tempdir");
         let _open = factory().begin(dir.path()).expect("begin");
@@ -988,6 +1065,7 @@ mod tests {
     fn crashed_after(root: &Path, after: usize) {
         let id = "crash".to_string();
         let mut tx = FsFileTx {
+            _guard: RootGuard::acquire(root),
             root: root.to_path_buf(),
             id: id.clone(),
             ops: Vec::new(),

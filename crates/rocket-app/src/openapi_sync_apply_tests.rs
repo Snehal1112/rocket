@@ -447,7 +447,12 @@ async fn crash_mid_commit_is_finished_on_recovery() {
     w.check_with(v2()).await;
     let plan = w.plan();
     let selection = w.approve(&plan, &[]);
-    assert!(w.svc.apply(&w.name, &selection).await.is_err());
+    let err = w
+        .svc
+        .apply(&w.name, &selection)
+        .await
+        .expect_err("recovery is blocked");
+    assert!(err.to_string().contains("next time Rocket starts"), "{err}");
     assert!(w.root.join(".rocket/apply-journal.json").is_file());
     // Another apply refuses while the journal exists.
     let again = w.svc.apply(&w.name, &selection).await;
@@ -460,7 +465,7 @@ async fn crash_mid_commit_is_finished_on_recovery() {
 }
 
 #[tokio::test]
-async fn a_failed_commit_is_followed_by_recovery_inside_apply() {
+async fn a_failed_commit_that_recovery_finishes_reports_success() {
     let factory = Wrapper {
         inner: rocket_infra::FsFileTxFactory::with_crash(2),
         fail_stage_at: None,
@@ -469,9 +474,54 @@ async fn a_failed_commit_is_followed_by_recovery_inside_apply() {
     let w = world_with(Arc::new(factory)).await;
     w.check_with(v2()).await;
     let plan = w.plan();
-    assert!(w.svc.apply(&w.name, &w.approve(&plan, &[])).await.is_err());
+    let report = w
+        .svc
+        .apply(&w.name, &w.approve(&plan, &[]))
+        .await
+        .expect("every change landed");
+    assert_eq!(report.applied.len(), 2);
     w.assert_fully_applied();
     w.no_transaction_leftovers();
+}
+
+#[tokio::test]
+async fn a_failed_commit_that_rolls_back_says_nothing_changed() {
+    let factory = Wrapper {
+        inner: rocket_infra::FsFileTxFactory::with_fault(1),
+        fail_stage_at: None,
+        recover_blocked: Arc::new(AtomicBool::new(false)),
+    };
+    let w = world_with(Arc::new(factory)).await;
+    w.check_with(v2()).await;
+    let before = w.snapshot();
+    let plan = w.plan();
+    let err = w
+        .svc
+        .apply(&w.name, &w.approve(&plan, &[]))
+        .await
+        .expect_err("fails");
+    assert!(err.to_string().contains("nothing was changed"), "{err}");
+    assert_eq!(w.snapshot(), before);
+    w.no_transaction_leftovers();
+}
+
+#[tokio::test]
+async fn a_check_finishes_an_interrupted_apply_first() {
+    let blocked = Arc::new(AtomicBool::new(true));
+    let factory = Wrapper {
+        inner: rocket_infra::FsFileTxFactory::with_crash(2),
+        fail_stage_at: None,
+        recover_blocked: Arc::clone(&blocked),
+    };
+    let w = world_with(Arc::new(factory)).await;
+    w.check_with(v2()).await;
+    let plan = w.plan();
+    assert!(w.svc.apply(&w.name, &w.approve(&plan, &[])).await.is_err());
+    assert!(w.root.join(".rocket/apply-journal.json").is_file());
+    blocked.store(false, Ordering::SeqCst);
+    w.svc.check(&w.root).await.expect("check");
+    w.no_transaction_leftovers();
+    w.assert_fully_applied();
 }
 
 #[tokio::test]
@@ -613,13 +663,106 @@ async fn recover_all_finds_journals_in_every_collection() {
     let plan = w.plan();
     assert!(w.svc.apply(&w.name, &w.approve(&plan, &[])).await.is_err());
     // A second collection with a journal that was cut off while staging.
-    let other = w.ws_path.join("collections").join("Other");
     w.repo.create("Other").expect("create");
-    std::fs::create_dir_all(other.join(".rocket")).expect("dir");
+    let other = w.ws_path.join("collections").join("Other");
+    std::fs::create_dir_all(other.join(".rocket/staging/x")).expect("dir");
+    std::fs::write(
+        other.join(".rocket/apply-journal.json"),
+        r#"{"version":1,"id":"x","phase":"staging","ops":[]}"#,
+    )
+    .expect("journal");
     blocked.store(false, Ordering::SeqCst);
     let found = w.svc.recover_all();
-    assert_eq!(found.len(), 1);
-    assert_eq!(found[0].0, w.name);
-    assert!(matches!(found[0].1, RecoveryOutcome::Finished { .. }));
+    assert_eq!(found.len(), 2);
+    let first = found.iter().find(|(n, _)| *n == w.name).expect("first");
+    assert!(matches!(first.1, RecoveryOutcome::Finished { .. }));
+    let second = found.iter().find(|(n, _)| n == "Other").expect("second");
+    assert_eq!(second.1, RecoveryOutcome::Discarded);
+    assert!(!other.join(".rocket/apply-journal.json").exists());
     w.no_transaction_leftovers();
+}
+
+fn v4() -> String {
+    // Same operations as v1 but another server.
+    v1().replace("https://api.example.com", "https://api2.example.com")
+}
+
+fn v5() -> String {
+    let mut doc: serde_json::Value = serde_json::from_str(&v1()).expect("json");
+    doc["components"] =
+        json!({"securitySchemes": {"bearerAuth": {"type": "http", "scheme": "bearer"}}});
+    doc["security"] = json!([{"bearerAuth": []}]);
+    doc.to_string()
+}
+
+/// Adds an `extensions` key to the real settings file and returns its text.
+fn mark_settings(w: &World) -> String {
+    let path = w.root.join("opencollection.yml");
+    let text = std::fs::read_to_string(&path).expect("read");
+    let mut doc: serde_yaml::Value = serde_yaml::from_str(&text).expect("yaml");
+    let ext = serde_yaml::from_str::<serde_yaml::Value>("rocket-test: {keep: 1}").expect("yaml");
+    doc.as_mapping_mut()
+        .expect("map")
+        .insert("extensions".into(), ext);
+    std::fs::write(&path, serde_yaml::to_string(&doc).expect("yaml")).expect("write");
+    std::fs::read_to_string(&path).expect("read")
+}
+
+fn assert_identity_kept(w: &World, before: &str) {
+    let old: serde_yaml::Value = serde_yaml::from_str(before).expect("yaml");
+    let new: serde_yaml::Value = serde_yaml::from_str(
+        &std::fs::read_to_string(w.root.join("opencollection.yml")).expect("read"),
+    )
+    .expect("yaml");
+    assert_eq!(old["uid"], new["uid"]);
+    assert_eq!(old["info"]["name"], new["info"]["name"]);
+    assert_eq!(
+        old["extensions"]["rocket-test"],
+        new["extensions"]["rocket-test"]
+    );
+}
+
+#[tokio::test]
+async fn a_base_url_change_keeps_the_collection_identity() {
+    let w = world().await;
+    let before = mark_settings(&w);
+    w.check_with(v4()).await;
+    let plan = w.plan();
+    assert_eq!(plan.variable_changes.len(), 1);
+    let selection = Selection {
+        variables: vec!["baseUrl".to_string()],
+        ..Selection::default()
+    };
+    w.svc.apply(&w.name, &selection).await.expect("apply");
+    assert_identity_kept(&w, &before);
+    let settings = w.repo.get_settings(&w.name).expect("settings");
+    let base = settings
+        .variables
+        .iter()
+        .find(|v| v.key == "baseUrl")
+        .expect("baseUrl");
+    assert_eq!(base.value, "https://api2.example.com");
+}
+
+#[tokio::test]
+async fn an_added_security_variable_keeps_the_collection_identity() {
+    let w = world().await;
+    let before = mark_settings(&w);
+    w.check_with(v5()).await;
+    let plan = w.plan();
+    let names: Vec<String> = plan
+        .variable_changes
+        .iter()
+        .filter(|c| c.kind == rocket_import::VariableKind::AddSecurity)
+        .map(|c| c.name.clone())
+        .collect();
+    assert!(!names.is_empty(), "{:?}", plan.variable_changes);
+    let selection = Selection {
+        variables: names.clone(),
+        ..Selection::default()
+    };
+    w.svc.apply(&w.name, &selection).await.expect("apply");
+    assert_identity_kept(&w, &before);
+    let settings = w.repo.get_settings(&w.name).expect("settings");
+    assert!(settings.variables.iter().any(|v| v.key == names[0]));
 }

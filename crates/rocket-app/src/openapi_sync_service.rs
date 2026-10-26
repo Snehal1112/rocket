@@ -184,7 +184,16 @@ impl OpenApiSyncService {
         })
     }
 
+    /// Settles an interrupted apply before anything writes the collection's files.
+    fn settle(&self, root: &Path) -> DomainResult<()> {
+        if let Some(deps) = &self.apply_deps {
+            deps.tx.recover(root)?;
+        }
+        Ok(())
+    }
+
     pub async fn check(&self, collection_root: &Path) -> DomainResult<CheckOutcome> {
+        self.settle(collection_root)?;
         // Rule 1: a source file is required. Only a GitHub location gets a token.
         let mut source = self.load(collection_root)?;
         let read = match source.location {
@@ -310,12 +319,14 @@ impl OpenApiSyncService {
     }
 
     pub fn set_interval(&self, collection_root: &Path, interval: SyncInterval) -> DomainResult<()> {
+        self.settle(collection_root)?;
         let mut source = self.load(collection_root)?;
         source.sync_interval = interval;
         self.sources.save(collection_root, &source)
     }
 
     pub fn set_token(&self, collection_root: &Path, token: &str) -> DomainResult<()> {
+        self.settle(collection_root)?;
         let mut source = self.load(collection_root)?;
         if !matches!(source.location, SpecLocation::Github { .. }) {
             return Err(tokens_need_github());
