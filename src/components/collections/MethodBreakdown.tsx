@@ -29,6 +29,8 @@ export function MethodBreakdown({ items }: MethodBreakdownProps) {
   const rows = Object.entries(counts)
     .filter(([, count]) => count > 0)
     .sort(([, a], [, b]) => b - a);
+  // Bars scale to the largest method so the differences stay visible.
+  const maxCount = rows.length > 0 ? rows[0][1] : 0;
 
   return (
     <Card>
@@ -45,19 +47,21 @@ export function MethodBreakdown({ items }: MethodBreakdownProps) {
               bg: 'bg-foreground',
             };
             const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+            const barPct = maxCount > 0 ? (count / maxCount) * 100 : 0;
             return (
               <div key={method} className='flex items-center gap-3'>
                 <span className={cn('w-16 text-xs font-bold tracking-wide', color.text)}>
                   {method}
                 </span>
-                <div className='flex-1 h-2 bg-muted rounded-full overflow-hidden'>
+                <div className='flex-1 h-2 bg-accent rounded-full overflow-hidden'>
                   <div
-                    className={cn('h-full rounded-full w-[var(--bar-w)]', color.bg)}
-                    style={{ '--bar-w': `${pct}%` } as React.CSSProperties}
+                    className={cn('h-full rounded-full w-[var(--bar-w)] min-w-1.5', color.bg)}
+                    style={{ '--bar-w': `${barPct}%` } as React.CSSProperties}
                   />
                 </div>
-                <span className='text-xs text-muted-foreground w-20 text-right'>
-                  {count} ({pct}%)
+                <span className='text-xs tabular-nums text-foreground w-8 text-right'>{count}</span>
+                <span className='text-xs tabular-nums text-muted-foreground w-9 text-right'>
+                  {pct}%
                 </span>
               </div>
             );
