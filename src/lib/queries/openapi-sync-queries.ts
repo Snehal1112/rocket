@@ -172,6 +172,14 @@ export function useIsApplying(collection: string): boolean {
   return useSyncExternalStore(subscribeApplying, () => isApplying(collection));
 }
 
+/** Forgets the in-flight and last-outcome state of every collection, after a workspace switch. */
+export function clearApplyState(): void {
+  applyingCollections.clear();
+  for (const l of applyListeners) l();
+  lastApplies.clear();
+  for (const l of lastApplyListeners) l();
+}
+
 /** What the last apply of a collection ended with: a report or an error. */
 export interface LastApply {
   report?: OpenApiApplyReport;

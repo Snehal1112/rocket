@@ -29,7 +29,7 @@ import {
   firstEntryId,
   isPendingChangedError,
 } from './specSyncView';
-import { syncErrorMessage } from './syncErrors';
+import { GENERIC_SYNC_ERROR, syncErrorMessage } from './syncErrors';
 import { useSyncSelection } from './useSyncSelection';
 
 type Links = Array<[string, string]>;
@@ -145,7 +145,9 @@ export function SpecSyncTab({ collection }: SpecSyncTabProps) {
     return (
       <div className='p-4'>
         <StateBlock tone='error'>
-          The sync state file cannot be read: {syncErrorMessage(status.error)}
+          {syncErrorMessage(status.error) === GENERIC_SYNC_ERROR
+            ? GENERIC_SYNC_ERROR
+            : `The sync state file cannot be read: ${syncErrorMessage(status.error)}`}
         </StateBlock>
       </div>
     );

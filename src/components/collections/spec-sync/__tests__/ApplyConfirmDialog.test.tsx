@@ -26,7 +26,7 @@ describe('ApplyConfirmDialog', () => {
     renderDialog([newItem, changedItem, removed('a', false)], 2);
     expect(screen.getByText('1 new request will be added.')).toBeInTheDocument();
     expect(screen.getByText('1 changed request will be updated.')).toBeInTheDocument();
-    expect(screen.getByText('2 variable changes: kept as you have them when you changed the value.')).toBeInTheDocument();
+    expect(screen.getByText('2 variable changes will be applied. A value you changed yourself is kept.')).toBeInTheDocument();
   });
 
   it('says which removed requests are deleted and which are kept', () => {
@@ -46,7 +46,7 @@ describe('ApplyConfirmDialog', () => {
   it('uses the singular for one variable change', () => {
     renderDialog([newItem], 1);
     expect(
-      screen.getByText('1 variable change: kept as you have it when you changed the value.'),
+      screen.getByText('1 variable change will be applied. A value you changed yourself is kept.'),
     ).toBeInTheDocument();
   });
 

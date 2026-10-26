@@ -40,6 +40,8 @@ function planSignature(plan: OpenApiSyncPlan): string {
 
 /** True when the plan has the rename hint for the pair, or the merged Changed item under the new key. */
 function linkIsShown(plan: OpenApiSyncPlan, oldKey: string, newKey: string): boolean {
+  // A rename with no content change merges to nothing and is listed as unchanged.
+  if (plan.unchanged.some((u) => u.key === oldKey)) return true;
   return plan.items.some(
     (i) =>
       (i.kind === 'changed' && i.key === newKey) ||

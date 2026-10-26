@@ -92,7 +92,7 @@ function VariableBlock({ change }: { change: OpenApiVariableChange }) {
       <Value title='Spec' value={change.spec} />
       <p className='text-xs text-muted-foreground'>
         {change.kind === 'baseUrl'
-          ? 'If you changed this value yourself, Rocket keeps yours and only updates what it remembers of the spec.'
+          ? 'If you changed this value yourself, Rocket keeps yours and only updates what it remembers of the spec. With no trusted baseline the value is not updated.'
           : 'Applying adds this variable if you do not have it yet.'}
       </p>
     </div>

@@ -54,7 +54,7 @@ export function ApplyConfirmDialog({
             <li>{`${plural(kept, 'removed request', 'removed requests')} ${kept === 1 ? 'stays' : 'stay'} in your collection but ${kept === 1 ? 'is' : 'are'} no longer tracked, because you edited ${kept === 1 ? 'it' : 'them'} or Rocket cannot tell.`}</li>
           )}
           {variableCount > 0 && (
-            <li>{`${plural(variableCount, 'variable change', 'variable changes')}: kept as you have ${variableCount === 1 ? 'it' : 'them'} when you changed the value.`}</li>
+            <li>{`${plural(variableCount, 'variable change', 'variable changes')} will be applied. A value you changed yourself is kept.`}</li>
           )}
         </ul>
         <AlertDialogFooter>

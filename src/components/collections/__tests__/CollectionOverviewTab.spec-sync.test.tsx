@@ -81,7 +81,9 @@ describe('CollectionOverviewTab Spec sync tab', () => {
   it('shows the Spec sync tab and its message when the status errored', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockRejectedValue('bad yaml');
     renderWithQuery(<CollectionOverviewTab tab={makeTab('spec-sync')} />);
-    expect(await screen.findByText(/The sync state file cannot be read/)).toBeInTheDocument();
+    expect(
+      await screen.findByText('Something went wrong with the spec sync. Try again.'),
+    ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Spec sync' })).toBeInTheDocument();
   });
 

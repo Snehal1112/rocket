@@ -143,7 +143,7 @@ describe('SpecSyncDetail', () => {
     });
     render(<SpecSyncDetail {...props({ plan, selectedId: 'variable:baseUrl:baseUrl' })} />);
     expect(
-      screen.getByText(/If you changed this value yourself, Rocket keeps yours/),
+      screen.getByText(/If you changed this value yourself, Rocket keeps yours.*no trusted baseline/),
     ).toBeInTheDocument();
   });
 });

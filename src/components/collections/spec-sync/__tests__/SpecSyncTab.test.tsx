@@ -64,11 +64,16 @@ describe('SpecSyncTab', () => {
     );
     renderWithQuery(<SpecSyncTab collection='c' />);
     expect(
-      await screen.findByText(
-        'The sync state file cannot be read: Something went wrong with the spec sync. Try again.',
-      ),
+      await screen.findByText('Something went wrong with the spec sync. Try again.'),
     ).toBeInTheDocument();
+    expect(screen.queryByText(/state file cannot be read/)).toBeNull();
     expect(screen.queryByText(/home\/me/)).toBeNull();
+  });
+
+  it('prefixes a known status error with the state file sentence', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockRejectedValue('consent_required: x');
+    renderWithQuery(<SpecSyncTab collection='c' />);
+    expect(await screen.findByText(/The sync state file cannot be read: /)).toBeInTheDocument();
   });
 
   it('shows a fixed sentence for a plan error, never the path', async () => {
@@ -525,7 +530,7 @@ describe('SpecSyncTab actions', () => {
     );
     await user.click(screen.getByRole('button', { name: 'Apply' }));
     expect(
-      screen.getByText('1 variable change: kept as you have it when you changed the value.'),
+      screen.getByText('1 variable change will be applied. A value you changed yourself is kept.'),
     ).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Apply now' }));
     expect(await screen.findByText(/1 variable change was checked/)).toBeInTheDocument();

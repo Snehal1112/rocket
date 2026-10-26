@@ -124,6 +124,19 @@ describe('useSyncSelection', () => {
     expect(result.current.links).toEqual([['GET /animals', 'GET /pets']]);
   });
 
+  it('keeps a pure-rename link whose old key is listed as unchanged', () => {
+    const { result, rerender } = setup();
+    act(() => result.current.linkRename('GET /animals', 'GET /pets'));
+    // A rename with no content change merges to nothing and shows under unchanged.
+    rerender({
+      p: makePlan({
+        items: [{ ...changedItem, key: 'POST /other', digest: 'o' }],
+        unchanged: [{ key: 'GET /animals', name: 'List pets' }],
+      }),
+    });
+    expect(result.current.links).toEqual([['GET /animals', 'GET /pets']]);
+  });
+
   it('drops a link whose new key and hint are gone from the plan', () => {
     const { result, rerender } = setup();
     act(() => result.current.linkRename('GET /animals', 'GET /pets'));
