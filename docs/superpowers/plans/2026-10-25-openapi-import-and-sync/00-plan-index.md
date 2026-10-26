@@ -26,7 +26,7 @@ Rules for every plan:
 | P5b | `plan-05b-remote-refs.md`: a bundler that inlines remote `$ref` files into one self-contained text, import and check that use it, a clear dialog for what was not loaded. Done on branch openapi-remote-refs (ce02fe86..6b8696a4, plus the trap fix if it lands), final review clean after one fix wave with the ref-loss trap fixed afterwards, not yet merged to main. Manual check of the teamdigitale link in a built app pending | P4, P6, P7 |
 | P6 | `plan-06-apply-and-recovery.md`: file transaction with journal and recovery, apply builder (stale-approval digests, round-trip guard, skips, rename links), `OpenApiSyncService::apply` and launch recovery. Done on branch openapi-sync-apply (3aa8cb17..), final review clean after one fix wave, not yet merged to main | P5 |
 | P7 | `plan-07-scheduler.md`: interval and timing move to the local state, pure next-check rule with jitter and stored backoff, supervisor with launch catch-up and an event, start/restart/stop in the app. Done on branch openapi-sync-schedule (266ebc2c..2d096a2f), final review clean after one fix wave, not yet merged to main. Manual check in a built app pending | P4, P6 |
-| P8 | Spec sync tab: list and detail | P5, P6 |
+| P8 | `plan-08-spec-sync-tab.md`: read-only status and plan commands (service `plan`, DTOs), TS api and query hook, the Spec sync tab and the overview notice. 1 commands; 2 TS api and hook; 3 tab | P5, P6, P7 |
 | P9 | Spec sync tab: skip, apply, Check now, interval settings, token field | P7, P8 |
 
 ## Decisions log
