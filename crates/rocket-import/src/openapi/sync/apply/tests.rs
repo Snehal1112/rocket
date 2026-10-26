@@ -196,6 +196,8 @@ fn world(ops: &[O]) -> W {
             last_checked_at: None,
             last_status: Some(SyncStatus::Changed),
             pending_sha256: Some("new-hash".to_string()),
+            remote_refs: Vec::new(),
+            remote_refs_incomplete: false,
         },
         baseline: OpenApiBaseline {
             version: BASELINE_FILE_VERSION,

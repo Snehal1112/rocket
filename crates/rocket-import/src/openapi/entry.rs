@@ -3,7 +3,7 @@
 use crate::converter::openapi::CONVERTER_VERSION;
 use crate::error::{ImportError, ImportResult};
 use crate::importer::ImportService;
-use crate::openapi::{fetch_target, parse_spec_url, source_record, GroupBy};
+use crate::openapi::{bundle_spec, fetch_target, parse_spec_url, source_record, GroupBy};
 use crate::report::ImportReport;
 use rocket_collection::openapi_baseline::{
     BaselineOperation, OpenApiBaseline, OpenApiBaselineRepository, BASELINE_FILE_VERSION,
@@ -189,20 +189,23 @@ impl ImportService {
         let text = String::from_utf8(body)
             .map_err(|_| ImportError::NotAnOpenApiSpec("the file is not text".to_string()))?;
         let display_url = location.display_url();
+        let bundle = bundle_spec(fetcher, &text, &location, token, &[]).await?;
         let imported = self.import_openapi_text(
-            &text,
+            &bundle.text,
             &label_from_link(&display_url),
             group_by,
             workspace_id,
         )?;
 
-        let mut warnings = Vec::new();
+        let mut warnings = bundle.notes.clone();
         let record = source_record(
             &location,
             group_by,
-            text.as_bytes(),
+            bundle.text.as_bytes(),
             etag,
             last_modified,
+            bundle.refs.clone(),
+            bundle.incomplete,
             &imported,
         );
         let root = self.collections_root().join(&imported.collection);
@@ -349,6 +352,252 @@ mod tests {
             Ok(entries) => entries.count(),
             Err(_) => 0,
         }
+    }
+
+    /// Serves a different body per address. An address that is not listed is not found.
+    struct MapFetcher(Vec<(String, String, Option<String>)>);
+
+    #[async_trait]
+    impl SpecFetcher for MapFetcher {
+        async fn fetch(
+            &self,
+            request: SpecFetchRequest,
+        ) -> Result<SpecFetchOutcome, SpecFetchFailure> {
+            match self.0.iter().find(|(url, _, _)| *url == request.url) {
+                Some((url, body, etag)) => Ok(SpecFetchOutcome::Fetched {
+                    body: body.as_bytes().to_vec(),
+                    etag: etag.clone(),
+                    last_modified: None,
+                    final_url: url.clone(),
+                }),
+                None => Err(SpecFetchFailure::NotFound),
+            }
+        }
+    }
+
+    const SAMPLE_LINK: &str = "https://example.com/specs/api-example.yaml";
+    const DEFS_URL: &str = "https://example.com/defs/definitions.yaml";
+    const SAMPLE_SPEC: &str = r##"
+openapi: 3.0.3
+info: { title: Sample, version: '1' }
+paths:
+  /items:
+    get:
+      operationId: listItems
+      parameters:
+        - $ref: 'https://example.com/defs/definitions.yaml#/parameters/limit'
+        - $ref: 'https://example.com/defs/definitions.yaml#/parameters/offset'
+        - $ref: 'https://example.com/defs/definitions.yaml#/parameters/sort'
+      responses: { '200': { description: ok } }
+  /things:
+    get:
+      operationId: listThings
+      parameters:
+        - $ref: 'https://example.com/defs/definitions.yaml#/parameters/limit'
+      responses: { '200': { description: ok } }
+"##;
+    const DEFS: &str = r##"
+parameters:
+  limit: { name: limit, in: query, schema: { type: integer } }
+  offset: { name: offset, in: query, schema: { type: integer } }
+  sort: { name: sort, in: query, schema: { type: string } }
+"##;
+
+    fn sha(text: &str) -> String {
+        use sha2::{Digest, Sha256};
+        format!("{:x}", Sha256::digest(text.as_bytes()))
+    }
+
+    fn sample_fetcher(defs: bool) -> MapFetcher {
+        let mut files = vec![(SAMPLE_LINK.to_string(), SAMPLE_SPEC.to_string(), None)];
+        if defs {
+            files.push((
+                DEFS_URL.to_string(),
+                DEFS.to_string(),
+                Some("\"d1\"".to_string()),
+            ));
+        }
+        MapFetcher(files)
+    }
+
+    #[tokio::test]
+    async fn import_follows_a_remote_parameter_file() {
+        let ws = TempDir::new().expect("tempdir");
+        let service = ImportService::new_with_workspace_path(ws.path());
+        let result = service
+            .import_openapi_url(
+                &sample_fetcher(true),
+                &FsOpenApiSourceRepo,
+                &FsOpenApiBaselineRepo,
+                SAMPLE_LINK,
+                GroupBy::Tags,
+                None,
+                "ws",
+            )
+            .await
+            .expect("import");
+        assert_eq!(result.report.imported, 2);
+        assert!(
+            result.report.skipped.is_empty(),
+            "{:?}",
+            result.report.skipped
+        );
+        assert!(result.warnings.is_empty(), "{:?}", result.warnings);
+        let root = ws.path().join("collections").join(&result.collection);
+        let source = FsOpenApiSourceRepo
+            .load(&root)
+            .expect("load")
+            .expect("source file");
+        assert_eq!(source.remote_refs.len(), 1);
+        assert_eq!(source.remote_refs[0].url, DEFS_URL);
+        assert_eq!(source.remote_refs[0].etag.as_deref(), Some("\"d1\""));
+        assert!(!source.remote_refs_incomplete);
+        assert_ne!(source.spec_sha256, sha(SAMPLE_SPEC));
+        let bundled = crate::openapi::bundle_spec(
+            &sample_fetcher(true),
+            SAMPLE_SPEC,
+            &parse_spec_url(SAMPLE_LINK).expect("link"),
+            None,
+            &[],
+        )
+        .await
+        .expect("bundle");
+        assert_eq!(source.spec_sha256, sha(&bundled.text));
+        let first = source
+            .operations
+            .iter()
+            .find(|op| op.key == "listItems")
+            .expect("operation");
+        let request = std::fs::read_to_string(root.join(format!("{}.yml", first.request_path)))
+            .expect("request file");
+        for name in ["limit", "offset", "sort"] {
+            assert!(request.contains(name), "{name} missing in {request}");
+        }
+    }
+
+    #[tokio::test]
+    async fn import_with_an_unreachable_ref_still_creates_the_collection_with_one_note() {
+        let ws = TempDir::new().expect("tempdir");
+        let service = ImportService::new_with_workspace_path(ws.path());
+        let result = service
+            .import_openapi_url(
+                &sample_fetcher(false),
+                &FsOpenApiSourceRepo,
+                &FsOpenApiBaselineRepo,
+                SAMPLE_LINK,
+                GroupBy::Tags,
+                None,
+                "ws",
+            )
+            .await
+            .expect("import");
+        assert_eq!(result.report.imported, 2);
+        assert_eq!(result.warnings.len(), 1, "{:?}", result.warnings);
+        assert!(result.warnings[0].contains("definitions.yaml"));
+        let root = ws.path().join("collections").join(&result.collection);
+        let source = FsOpenApiSourceRepo
+            .load(&root)
+            .expect("load")
+            .expect("source file");
+        assert!(source.remote_refs.is_empty());
+        assert!(source.remote_refs_incomplete);
+    }
+
+    #[tokio::test]
+    async fn a_spec_without_remote_refs_has_the_same_hash_as_before() {
+        let ws = TempDir::new().expect("tempdir");
+        let service = ImportService::new_with_workspace_path(ws.path());
+        let text = fixture();
+        let fetcher = FakeFetcher::body(&text, None);
+        let result = service
+            .import_openapi_url(
+                &fetcher,
+                &FsOpenApiSourceRepo,
+                &FsOpenApiBaselineRepo,
+                LINK,
+                GroupBy::Tags,
+                None,
+                "ws",
+            )
+            .await
+            .expect("import");
+        let root = ws.path().join("collections").join(&result.collection);
+        let source = FsOpenApiSourceRepo
+            .load(&root)
+            .expect("load")
+            .expect("source file");
+        assert_eq!(source.spec_sha256, sha(&text));
+        assert!(source.remote_refs.is_empty());
+        let bytes = std::fs::read_to_string(root.join(".rocket/openapi-source.yml"))
+            .expect("source file bytes");
+        assert!(!bytes.contains("remote_refs"), "{bytes}");
+    }
+
+    #[test]
+    fn a_file_import_keeps_remote_refs_unresolved_with_the_new_wording() {
+        let ws = TempDir::new().expect("tempdir");
+        let service = ImportService::new_with_workspace_path(ws.path());
+        let file = ws.path().join("api-example.yaml");
+        std::fs::write(&file, SAMPLE_SPEC).expect("write");
+        let result = service
+            .import_openapi_file(&file, GroupBy::Tags, "ws")
+            .expect("import");
+        assert_eq!(result.report.imported, 2);
+        assert_eq!(result.report.skipped.len(), 4);
+        for item in &result.report.skipped {
+            match &item.reason {
+                crate::report::SkipReason::NotFollowed(text) => {
+                    assert_eq!(text, "a $ref to definitions.yaml was not loaded");
+                }
+                other => panic!("unexpected reason {other:?}"),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn the_source_file_never_holds_a_query_string() {
+        let spec = SAMPLE_SPEC.replace(
+            "definitions.yaml#/parameters/sort",
+            "definitions.yaml?token=SECRET#/parameters/sort",
+        );
+        let ws = TempDir::new().expect("tempdir");
+        let service = ImportService::new_with_workspace_path(ws.path());
+        let fetcher = MapFetcher(vec![
+            (SAMPLE_LINK.to_string(), spec, None),
+            (DEFS_URL.to_string(), DEFS.to_string(), None),
+        ]);
+        let result = service
+            .import_openapi_url(
+                &fetcher,
+                &FsOpenApiSourceRepo,
+                &FsOpenApiBaselineRepo,
+                SAMPLE_LINK,
+                GroupBy::Tags,
+                None,
+                "ws",
+            )
+            .await
+            .expect("import");
+        let root = ws.path().join("collections").join(&result.collection);
+        let bytes = std::fs::read_to_string(root.join(".rocket/openapi-source.yml"))
+            .expect("source file bytes");
+        assert!(!bytes.contains("SECRET") && !bytes.contains('?'), "{bytes}");
+        assert!(
+            result.warnings.iter().all(|w| !w.contains("SECRET")),
+            "{:?}",
+            result.warnings
+        );
+        assert!(!result
+            .report
+            .skipped
+            .iter()
+            .any(|i| format!("{:?}", i.reason).contains("SECRET")));
+        // A deterministic skip does not make the bundle incomplete.
+        let source = FsOpenApiSourceRepo
+            .load(&root)
+            .expect("load")
+            .expect("source");
+        assert!(!source.remote_refs_incomplete);
     }
 
     const LINK: &str = "https://example.com/specs/orders.json";

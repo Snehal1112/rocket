@@ -25,4 +25,6 @@ pub enum SkipReason {
     UnsupportedRequestType(String),
     UnsupportedAuthType(String),
     ParseError(String),
+    /// A part of the spec was left out, but the request was imported. Not a skipped item.
+    NotFollowed(String),
 }

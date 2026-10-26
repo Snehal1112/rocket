@@ -196,6 +196,32 @@ fn resolve_pointer<'a>(root: &'a Yaml, pointer: &str) -> Option<&'a Yaml> {
     Some(cur)
 }
 
+/// The note for a `$ref` that is not a local pointer. It names only the file or the host, never
+/// a query or the full path.
+fn unresolved_note(target: &str) -> String {
+    format!("a $ref to {} was not loaded", ref_label(target))
+}
+
+fn ref_label(target: &str) -> String {
+    let head = target.split('#').next().unwrap_or_default();
+    if let Ok(url) = url::Url::parse(head) {
+        if let Some(name) = url
+            .path_segments()
+            .and_then(|mut segments| segments.rfind(|s| !s.is_empty()))
+        {
+            return name.to_string();
+        }
+        if let Some(host) = url.host_str() {
+            return host.to_string();
+        }
+    }
+    let head = head.split('?').next().unwrap_or_default();
+    head.rsplit('/')
+        .find(|s| !s.is_empty())
+        .unwrap_or("another file")
+        .to_string()
+}
+
 /// Follow a chain of `$ref` objects to the item they point at. A remote or broken
 /// reference gives `None`, and a remote one adds a warning.
 fn deref<'a>(root: &'a Yaml, value: &'a Yaml, warnings: &mut Vec<String>) -> Option<&'a Yaml> {
@@ -205,7 +231,7 @@ fn deref<'a>(root: &'a Yaml, value: &'a Yaml, warnings: &mut Vec<String>) -> Opt
             return Some(cur);
         };
         if !target.starts_with("#/") {
-            warnings.push(format!("remote $ref was not followed: {target}"));
+            warnings.push(unresolved_note(target));
             return None;
         }
         cur = resolve_pointer(root, target)?;
@@ -253,7 +279,7 @@ fn to_json(
         Yaml::Mapping(map) => {
             if let Some(target) = value.get("$ref").and_then(Yaml::as_str) {
                 if !target.starts_with("#/") {
-                    warnings.push(format!("remote $ref was not followed: {target}"));
+                    warnings.push(unresolved_note(target));
                     return Json::Null;
                 }
                 if depth >= MAX_INLINE_DEPTH || visiting.iter().any(|v| v == target) {
@@ -583,6 +609,22 @@ paths:
         assert_eq!(doc.operations[0].parameters.len(), 1);
         assert_eq!(doc.operations[0].parameters[0].name, "ok");
         assert_eq!(doc.warnings.len(), 1);
+    }
+
+    #[test]
+    fn unresolved_note_names_only_the_file_or_the_host() {
+        assert_eq!(
+            unresolved_note("https://h.example/a/b/definitions.yaml?token=x#/p/limit"),
+            "a $ref to definitions.yaml was not loaded"
+        );
+        assert_eq!(
+            unresolved_note("https://h.example#/p"),
+            "a $ref to h.example was not loaded"
+        );
+        assert_eq!(
+            unresolved_note("../common/defs.yaml#/p"),
+            "a $ref to defs.yaml was not loaded"
+        );
     }
 
     #[test]

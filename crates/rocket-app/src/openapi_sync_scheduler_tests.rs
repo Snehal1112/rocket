@@ -242,6 +242,8 @@ impl World {
             last_checked_at: None,
             last_status: None,
             pending_sha256: None,
+            remote_refs: Vec::new(),
+            remote_refs_incomplete: false,
         };
         FsOpenApiSourceRepo.save(&root, &source).expect("source");
         if let Some(interval) = interval {

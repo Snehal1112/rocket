@@ -891,7 +891,7 @@ impl ImportService {
         for warning in &doc.warnings {
             report.skipped.push(SkippedItem {
                 path: source_label.to_string(),
-                reason: SkipReason::UnsupportedRequestType(warning.clone()),
+                reason: SkipReason::NotFollowed(warning.clone()),
             });
         }
 

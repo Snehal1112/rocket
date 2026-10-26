@@ -744,6 +744,8 @@ mod tests {
             last_checked_at: None,
             last_status: None,
             pending_sha256: None,
+            remote_refs: Vec::new(),
+            remote_refs_incomplete: false,
         }
     }
 

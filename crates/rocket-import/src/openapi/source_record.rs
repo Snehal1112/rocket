@@ -3,18 +3,24 @@
 use crate::importer::OpenApiImportOutcome;
 use crate::openapi::GroupBy;
 use rocket_collection::openapi_source::{
-    OpenApiSource, SourceOperation, SpecLocation, SyncInterval, SOURCE_FILE_VERSION,
+    OpenApiSource, RemoteRefState, SourceOperation, SpecLocation, SyncInterval, SOURCE_FILE_VERSION,
 };
 use sha2::{Digest, Sha256};
 
 /// The source record for an import: where the spec came from, the layout that was chosen, a
 /// hash of the spec text and its server validators, and one entry per imported request.
+/// `spec_body` is the text that was imported (the bundled text when files were inlined), and
+/// `remote_refs` holds the validators of the inlined files. `refs_incomplete` is true when a
+/// file could not be loaded.
+#[allow(clippy::too_many_arguments)]
 pub fn source_record(
     location: &SpecLocation,
     group_by: GroupBy,
     spec_body: &[u8],
     etag: Option<String>,
     last_modified: Option<String>,
+    remote_refs: Vec<RemoteRefState>,
+    refs_incomplete: bool,
     outcome: &OpenApiImportOutcome,
 ) -> OpenApiSource {
     OpenApiSource {
@@ -39,6 +45,8 @@ pub fn source_record(
         last_checked_at: None,
         last_status: None,
         pending_sha256: None,
+        remote_refs,
+        remote_refs_incomplete: refs_incomplete,
     }
 }
 
@@ -76,6 +84,8 @@ mod tests {
             b"abc",
             Some("\"e\"".to_string()),
             None,
+            Vec::new(),
+            false,
             &outcome,
         );
         assert_eq!(record.version, SOURCE_FILE_VERSION);
@@ -110,7 +120,16 @@ mod tests {
         let location = SpecLocation::Https {
             url: "https://example.com/orders.json".to_string(),
         };
-        let record = source_record(&location, GroupBy::Paths, b"x", None, None, &outcome);
+        let record = source_record(
+            &location,
+            GroupBy::Paths,
+            b"x",
+            None,
+            None,
+            Vec::new(),
+            false,
+            &outcome,
+        );
         assert_eq!(record.group_by, "paths");
     }
 
@@ -128,8 +147,26 @@ mod tests {
         let location = SpecLocation::Https {
             url: "https://example.com/orders.json".to_string(),
         };
-        let a = source_record(&location, GroupBy::Tags, b"x", None, None, &outcome);
-        let b = source_record(&location, GroupBy::Tags, b"x", None, None, &outcome);
+        let a = source_record(
+            &location,
+            GroupBy::Tags,
+            b"x",
+            None,
+            None,
+            Vec::new(),
+            false,
+            &outcome,
+        );
+        let b = source_record(
+            &location,
+            GroupBy::Tags,
+            b"x",
+            None,
+            None,
+            Vec::new(),
+            false,
+            &outcome,
+        );
         assert!(!a.source_id.is_empty());
         assert_ne!(a.source_id, b.source_id);
         assert_eq!(a.sync_interval, SyncInterval::Off);

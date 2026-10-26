@@ -136,6 +136,8 @@ mod tests {
             last_checked_at: None,
             last_status: None,
             pending_sha256: Some("ef".repeat(32)),
+            remote_refs: Vec::new(),
+            remote_refs_incomplete: false,
         }
     }
 

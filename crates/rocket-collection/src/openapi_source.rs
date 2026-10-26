@@ -41,6 +41,13 @@ pub struct OpenApiSource {
     /// Hex SHA-256 of the newer spec kept in the pending copy, if any.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pending_sha256: Option<String>,
+    /// The files the spec refers to by link, with their validators from the import.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub remote_refs: Vec<RemoteRefState>,
+    /// True when a referenced file could not be loaded at import, so a check must fetch
+    /// every file again instead of trusting a 304.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub remote_refs_incomplete: bool,
 }
 
 impl OpenApiSource {
@@ -207,6 +214,26 @@ mod tests {
         assert!(!out.contains("sync_interval"), "{out}");
         assert!(!out.contains("last_checked_at"), "{out}");
         assert!(!out.contains("last_status"), "{out}");
+    }
+
+    #[test]
+    fn remote_refs_round_trip_and_are_skipped_when_empty() {
+        let yaml = "version: 1\nlocation:\n  kind: https\n  url: https://example.com/a.json\n";
+        let mut source: OpenApiSource = serde_yaml::from_str(yaml).expect("parse");
+        assert!(source.remote_refs.is_empty());
+        assert!(!source.remote_refs_incomplete);
+        let out = serde_yaml::to_string(&source).expect("write");
+        assert!(!out.contains("remote_refs"), "{out}");
+        source.remote_refs = vec![RemoteRefState {
+            url: "https://example.com/d.yaml".to_string(),
+            etag: Some("\"e\"".to_string()),
+            last_modified: None,
+        }];
+        source.remote_refs_incomplete = true;
+        let out = serde_yaml::to_string(&source).expect("write");
+        let back: OpenApiSource = serde_yaml::from_str(&out).expect("parse");
+        assert_eq!(back, source);
+        assert!(out.contains("remote_refs_incomplete: true"), "{out}");
     }
 
     #[test]
