@@ -19,6 +19,8 @@ pub struct OpenApiImportResult {
     pub collection: String,
     /// The link the spec came from. `None` for a file import.
     pub source_url: Option<String>,
+    /// The id written to the source file. `None` for a file import.
+    pub source_id: Option<String>,
     /// Problems that did not stop the import.
     pub warnings: Vec<String>,
 }
@@ -39,7 +41,8 @@ pub fn fetch_failure_message(failure: &SpecFetchFailure, token_sent: bool) -> St
     }
 }
 
-/// Used by the import path, which never sends a token.
+/// Message for a fetch that sent no token.
+#[cfg(test)]
 fn describe_fetch_failure(failure: &SpecFetchFailure) -> String {
     fetch_failure_message(failure, false)
 }
@@ -128,35 +131,43 @@ impl ImportService {
             report: outcome.report,
             collection: outcome.collection,
             source_url: None,
+            source_id: None,
             warnings: Vec::new(),
         })
     }
 
     /// Fetch a spec from a link, import it as a new collection and remember the link in the
     /// collection's source file. A failed fetch creates nothing. A source file that cannot be
-    /// written is a warning, not an error.
+    /// written is a warning, not an error. A token is sent to GitHub links only and is never
+    /// stored here; the caller keeps it in the keychain.
     pub async fn import_openapi_url(
         &self,
         fetcher: &dyn SpecFetcher,
         sources: &dyn OpenApiSourceRepository,
         link: &str,
         group_by: GroupBy,
+        token: Option<&str>,
         workspace_id: &str,
     ) -> ImportResult<OpenApiImportResult> {
         let location = parse_spec_url(link)?;
-        let target = fetch_target(&location, false);
+        let token = token.map(str::trim).filter(|t| !t.is_empty());
+        if token.is_some() && !matches!(location, SpecLocation::Github { .. }) {
+            return Err(ImportError::SpecUnavailable(
+                "Tokens work with GitHub links only.".to_string(),
+            ));
+        }
+        let target = fetch_target(&location, token.is_some());
         let request = SpecFetchRequest {
             url: target.url,
             accept: target.accept,
-            bearer_token: None,
+            bearer_token: token.map(str::to_string),
             if_none_match: None,
             if_modified_since: None,
             max_bytes: DEFAULT_MAX_SPEC_BYTES,
         };
-        let outcome = fetcher
-            .fetch(request)
-            .await
-            .map_err(|f| ImportError::SpecUnavailable(describe_fetch_failure(&f)))?;
+        let outcome = fetcher.fetch(request).await.map_err(|f| {
+            ImportError::SpecUnavailable(fetch_failure_message(&f, token.is_some()))
+        })?;
         let (body, etag, last_modified) = match outcome {
             SpecFetchOutcome::Fetched {
                 body,
@@ -210,6 +221,7 @@ impl ImportService {
             report: imported.report,
             collection: imported.collection,
             source_url: Some(display_url),
+            source_id: Some(record.source_id.clone()),
             warnings,
         })
     }
@@ -320,7 +332,14 @@ mod tests {
         let service = ImportService::new_with_workspace_path(ws.path());
         let fetcher = FakeFetcher::body(&fixture(), Some("\"e1\""));
         let result = service
-            .import_openapi_url(&fetcher, &FsOpenApiSourceRepo, LINK, GroupBy::Tags, "ws")
+            .import_openapi_url(
+                &fetcher,
+                &FsOpenApiSourceRepo,
+                LINK,
+                GroupBy::Tags,
+                None,
+                "ws",
+            )
             .await
             .expect("import");
         let root = ws.path().join("collections").join(&result.collection);
@@ -344,7 +363,14 @@ mod tests {
         let fetcher = FakeFetcher::body(&fixture(), None);
         let link = "https://github.com/o/r/blob/main/api/orders.json";
         let result = service
-            .import_openapi_url(&fetcher, &FsOpenApiSourceRepo, link, GroupBy::Tags, "ws")
+            .import_openapi_url(
+                &fetcher,
+                &FsOpenApiSourceRepo,
+                link,
+                GroupBy::Tags,
+                None,
+                "ws",
+            )
             .await
             .expect("import");
         let request = fetcher.last_request();
@@ -367,7 +393,14 @@ mod tests {
         let service = ImportService::new_with_workspace_path(ws.path());
         let fetcher = FakeFetcher::new(Err(SpecFetchFailure::NotFound));
         let err = service
-            .import_openapi_url(&fetcher, &FsOpenApiSourceRepo, LINK, GroupBy::Tags, "ws")
+            .import_openapi_url(
+                &fetcher,
+                &FsOpenApiSourceRepo,
+                LINK,
+                GroupBy::Tags,
+                None,
+                "ws",
+            )
             .await
             .expect_err("should fail");
         assert!(matches!(err, ImportError::SpecUnavailable(_)), "{err:?}");
@@ -380,7 +413,14 @@ mod tests {
         let service = ImportService::new_with_workspace_path(ws.path());
         let fetcher = FakeFetcher::new(Ok(SpecFetchOutcome::NotModified));
         let err = service
-            .import_openapi_url(&fetcher, &FsOpenApiSourceRepo, LINK, GroupBy::Tags, "ws")
+            .import_openapi_url(
+                &fetcher,
+                &FsOpenApiSourceRepo,
+                LINK,
+                GroupBy::Tags,
+                None,
+                "ws",
+            )
             .await
             .expect_err("should fail");
         assert!(matches!(err, ImportError::SpecUnavailable(_)), "{err:?}");
@@ -393,7 +433,14 @@ mod tests {
         let service = ImportService::new_with_workspace_path(ws.path());
         let fetcher = FakeFetcher::body("<html><body>Sign in</body></html>", None);
         let err = service
-            .import_openapi_url(&fetcher, &FsOpenApiSourceRepo, LINK, GroupBy::Tags, "ws")
+            .import_openapi_url(
+                &fetcher,
+                &FsOpenApiSourceRepo,
+                LINK,
+                GroupBy::Tags,
+                None,
+                "ws",
+            )
             .await
             .expect_err("should fail");
         assert!(matches!(err, ImportError::NotAnOpenApiSpec(_)), "{err:?}");
@@ -406,7 +453,7 @@ mod tests {
         let service = ImportService::new_with_workspace_path(ws.path());
         let fetcher = FakeFetcher::body(&fixture(), None);
         let result = service
-            .import_openapi_url(&fetcher, &FailingSources, LINK, GroupBy::Tags, "ws")
+            .import_openapi_url(&fetcher, &FailingSources, LINK, GroupBy::Tags, None, "ws")
             .await
             .expect("import");
         assert!(ws
@@ -425,7 +472,14 @@ mod tests {
         let fetcher = FakeFetcher::body(&fixture(), None);
         let sha = "https://github.com/o/r/blob/0123456789abcdef0123456789abcdef01234567/api.yaml";
         let result = service
-            .import_openapi_url(&fetcher, &FsOpenApiSourceRepo, sha, GroupBy::Tags, "ws")
+            .import_openapi_url(
+                &fetcher,
+                &FsOpenApiSourceRepo,
+                sha,
+                GroupBy::Tags,
+                None,
+                "ws",
+            )
             .await
             .expect("import");
         assert_eq!(result.warnings.len(), 1);
@@ -434,7 +488,14 @@ mod tests {
 
         let branch = "https://github.com/o/r/blob/main/api.yaml";
         let result = service
-            .import_openapi_url(&fetcher, &FsOpenApiSourceRepo, branch, GroupBy::Tags, "ws")
+            .import_openapi_url(
+                &fetcher,
+                &FsOpenApiSourceRepo,
+                branch,
+                GroupBy::Tags,
+                None,
+                "ws",
+            )
             .await
             .expect("import");
         assert!(result.warnings.is_empty());
@@ -527,12 +588,168 @@ mod tests {
         let fetcher = FakeFetcher::body(&fixture(), None);
         let link = "https://github.com/o/r/blob/deadbeef/api.yaml";
         let result = service
-            .import_openapi_url(&fetcher, &FsOpenApiSourceRepo, link, GroupBy::Tags, "ws")
+            .import_openapi_url(
+                &fetcher,
+                &FsOpenApiSourceRepo,
+                link,
+                GroupBy::Tags,
+                None,
+                "ws",
+            )
             .await
             .expect("import");
         assert_eq!(result.warnings.len(), 1);
         assert!(result.warnings[0].contains("may point to a commit"));
         assert!(!result.warnings[0].contains("points to a commit"));
+    }
+
+    const GH_LINK: &str = "https://github.com/o/r/blob/main/api/orders.json";
+
+    #[tokio::test]
+    async fn github_link_with_a_token_uses_the_contents_api_and_a_bearer() {
+        let ws = TempDir::new().expect("tempdir");
+        let service = ImportService::new_with_workspace_path(ws.path());
+        let fetcher = FakeFetcher::body(&fixture(), None);
+        service
+            .import_openapi_url(
+                &fetcher,
+                &FsOpenApiSourceRepo,
+                GH_LINK,
+                GroupBy::Tags,
+                Some("t0k"),
+                "ws",
+            )
+            .await
+            .expect("import");
+        let request = fetcher.last_request();
+        assert!(
+            request.url.starts_with("https://api.github.com/"),
+            "{}",
+            request.url
+        );
+        assert_eq!(request.bearer_token.as_deref(), Some("t0k"));
+        assert!(
+            request.accept.as_deref().is_some_and(|a| a.contains("raw")),
+            "{:?}",
+            request.accept
+        );
+    }
+
+    #[tokio::test]
+    async fn https_link_with_a_token_is_refused_before_any_fetch() {
+        let ws = TempDir::new().expect("tempdir");
+        let service = ImportService::new_with_workspace_path(ws.path());
+        let fetcher = FakeFetcher::body(&fixture(), None);
+        let err = service
+            .import_openapi_url(
+                &fetcher,
+                &FsOpenApiSourceRepo,
+                LINK,
+                GroupBy::Tags,
+                Some("t0k"),
+                "ws",
+            )
+            .await
+            .expect_err("should fail");
+        assert!(matches!(err, ImportError::SpecUnavailable(_)), "{err:?}");
+        assert!(fetcher.last.lock().expect("lock").is_none());
+        assert_eq!(collection_count(ws.path()), 0);
+        assert!(!err.to_string().contains("t0k"));
+    }
+
+    fn files_under(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    files_under(&path, out);
+                } else {
+                    out.push(path);
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn token_never_reaches_the_source_file_or_the_result() {
+        let ws = TempDir::new().expect("tempdir");
+        let service = ImportService::new_with_workspace_path(ws.path());
+        let fetcher = FakeFetcher::body(&fixture(), None);
+        let result = service
+            .import_openapi_url(
+                &fetcher,
+                &FsOpenApiSourceRepo,
+                GH_LINK,
+                GroupBy::Tags,
+                Some("t0k"),
+                "ws",
+            )
+            .await
+            .expect("import");
+        let mut files = Vec::new();
+        files_under(ws.path(), &mut files);
+        assert!(!files.is_empty());
+        for file in files {
+            let bytes = std::fs::read(&file).expect("read");
+            let text = String::from_utf8_lossy(&bytes);
+            assert!(!text.contains("t0k"), "{}", file.display());
+        }
+        assert!(result.warnings.iter().all(|w| !w.contains("t0k")));
+        assert!(!format!("{result:?}").contains("t0k"));
+    }
+
+    #[tokio::test]
+    async fn unauthorized_with_a_token_says_the_token_was_rejected() {
+        let ws = TempDir::new().expect("tempdir");
+        let service = ImportService::new_with_workspace_path(ws.path());
+        let fetcher = FakeFetcher::new(Err(SpecFetchFailure::Unauthorized));
+        let err = service
+            .import_openapi_url(
+                &fetcher,
+                &FsOpenApiSourceRepo,
+                GH_LINK,
+                GroupBy::Tags,
+                Some("t0k"),
+                "ws",
+            )
+            .await
+            .expect_err("should fail");
+        let text = err.to_string();
+        assert!(text.contains("token was rejected"), "{text}");
+        assert!(!text.contains("t0k"));
+        assert_eq!(collection_count(ws.path()), 0);
+    }
+
+    #[tokio::test]
+    async fn link_import_returns_the_source_id_written_to_the_file() {
+        let ws = TempDir::new().expect("tempdir");
+        let service = ImportService::new_with_workspace_path(ws.path());
+        let fetcher = FakeFetcher::body(&fixture(), None);
+        let result = service
+            .import_openapi_url(
+                &fetcher,
+                &FsOpenApiSourceRepo,
+                LINK,
+                GroupBy::Tags,
+                None,
+                "ws",
+            )
+            .await
+            .expect("import");
+        let root = ws.path().join("collections").join(&result.collection);
+        let source = FsOpenApiSourceRepo
+            .load(&root)
+            .expect("load")
+            .expect("source file");
+        assert!(!source.source_id.is_empty());
+        assert_eq!(result.source_id, Some(source.source_id));
+
+        let file = ws.path().join("orders.json");
+        std::fs::write(&file, fixture()).expect("write");
+        let from_file = service
+            .import_openapi_file(&file, GroupBy::Tags, "ws")
+            .expect("import");
+        assert_eq!(from_file.source_id, None);
     }
 
     #[test]

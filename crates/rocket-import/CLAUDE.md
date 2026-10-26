@@ -155,12 +155,13 @@ The check service (`OpenApiSyncService` in `rocket-app`, Plan 4 task 2) keeps th
 
 ### Importing from a file or a link
 
-Plan 3 of the OpenAPI series. Code is in `openapi/entry.rs`; both methods return `OpenApiImportResult { report, collection, source_url, warnings }`.
+Plan 3 of the OpenAPI series. Code is in `openapi/entry.rs`; both methods return `OpenApiImportResult { report, collection, source_url, source_id, warnings }` (`source_id` is `None` for a file import).
 
 - `import_openapi_file(path, group_by, workspace_id)` opens the file once, rejects a non-regular file or a length over 25 MB (`ImportError::SpecUnavailable`), then reads at most the cap with `read_capped`. It writes no source file and `source_url` is `None`.
-- `import_openapi_url(fetcher, sources, link, group_by, workspace_id)` (async) runs `parse_spec_url`, `fetch_target(.., false)` (no token), the fetch, then `import_openapi_text`, then saves the source file. A failed fetch or a `NotModified` answer is `SpecUnavailable` and creates nothing; a body that is not a spec is `NotAnOpenApiSpec`.
+- `import_openapi_url(fetcher, sources, link, group_by, token, workspace_id)` (async) runs `parse_spec_url`, `fetch_target(.., token.is_some())`, the fetch, then `import_openapi_text`, then saves the source file. A failed fetch or a `NotModified` answer is `SpecUnavailable` and creates nothing; a body that is not a spec is `NotAnOpenApiSpec`.
 - A source file that cannot be saved is a warning ("Sync could not be set up"), never an error. A GitHub ref of 40 hex characters warns that the commit never changes; 7 to 39 hex characters get a hedged warning, because it may be a branch name.
 - `NotFound` and `Unauthorized` share one message, because GitHub answers 404 for a private repository; without a token it says a private GitHub repository needs an access token. With a token (`fetch_failure_message(_, true)`) it says the token was rejected or lacks Contents read access.
+- Token (Plan 4, task 3): a blank token counts as none. With a token and a GitHub link the fetch uses the contents API and a bearer; with a token and any other link it returns `SpecUnavailable` ("Tokens work with GitHub links only.") before any fetch. The import never stores the token. The Tauri command saves it with `OpenApiSyncService::set_token` after a successful import; if that fails the import still succeeds with a warning. The token never reaches a file, a warning or an error text.
 - `GroupBy::parse` accepts exactly `tags` and `paths`.
 
 ### Fixture Files
