@@ -5,7 +5,7 @@ use crate::openapi::model::{
     OpenApiDoc, Operation, ParamLocation, Parameter, RequestBodySpec, SecurityScheme,
     SecuritySchemeKind,
 };
-use crate::openapi::yaml_budget::{BudgetFail, YamlBudget, MAX_YAML_BYTES, READER_MAX_NODES};
+use crate::openapi::yaml_budget::{node_limit_for, BudgetFail, YamlBudget, MAX_YAML_BYTES};
 use rocket_shared::types::HttpMethod;
 use serde_json::Value as Json;
 use serde_yaml::Value as Yaml;
@@ -35,7 +35,8 @@ const METHODS: [(&str, HttpMethod); 8] = [
 /// The document is walked as YAML so paths and operations keep their document order.
 pub fn parse_openapi(text: &str) -> ImportResult<OpenApiDoc> {
     // Aliases can expand a small text to billions of nodes, so count before building a value.
-    let budget = YamlBudget::new(READER_MAX_NODES, MAX_YAML_BYTES);
+    // The node limit grows with the text, as the bundler's does, so a bundle it made passes.
+    let budget = YamlBudget::new(node_limit_for(text.len()), MAX_YAML_BYTES);
     if budget.check(text) == Err(BudgetFail::Exceeded) {
         return Err(ImportError::NotAnOpenApiSpec(
             "the file is too large or too complex to read".into(),
@@ -592,10 +593,23 @@ paths:
             "openapi: 3.0.3\nx-a: &a [{}]\nx-b: [{aliases}]\n",
             items.join(", ")
         );
+        let _timed = crate::openapi::yaml_budget::timed_test();
         let started = std::time::Instant::now();
         let err = parse_openapi(&text).expect_err("bomb");
         assert!(started.elapsed() < std::time::Duration::from_secs(5));
         assert!(matches!(err, ImportError::NotAnOpenApiSpec(m) if m.contains("too complex")));
+    }
+
+    #[test]
+    fn a_large_spec_without_aliases_is_read() {
+        let _heavy = crate::openapi::yaml_budget::heavy_test();
+        let text = crate::openapi::yaml_budget::large_alias_free_spec(4000);
+        assert!(text.len() >= 8 * 1024 * 1024, "{} bytes", text.len());
+        // The old fixed limit of 1,000,000 nodes refused this text.
+        let old = YamlBudget::new(1_000_000, MAX_YAML_BYTES);
+        assert_eq!(old.check(&text), Err(BudgetFail::Exceeded));
+        let doc = parse_openapi(&text).expect("a large spec without aliases parses");
+        assert_eq!(doc.operations.len(), 4000);
     }
 
     #[test]
@@ -659,6 +673,7 @@ paths:
             ));
         }
         text.push_str("    S20: { type: string }\n");
+        let _timed = crate::openapi::yaml_budget::timed_test();
         let started = std::time::Instant::now();
         let doc = parse_openapi(&text).expect("spec should parse");
         assert!(

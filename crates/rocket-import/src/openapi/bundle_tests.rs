@@ -154,7 +154,10 @@ async fn skips_query_userinfo_http_and_private_hosts_with_a_note() {
     // The two loopback spellings (2130706433 and 0x7f.1) share one note.
     assert_eq!(bundle.notes.len(), 11, "{:?}", bundle.notes);
     for note in &bundle.notes {
-        assert!(!note.contains("SECRET") && !note.contains("token"), "{note}");
+        assert!(
+            !note.contains("SECRET") && !note.contains("token"),
+            "{note}"
+        );
         assert!(!note.contains("pw"), "{note}");
     }
 }
@@ -175,13 +178,21 @@ fn deduplicates_urls_and_drops_fragments() {
 
 #[test]
 fn inlines_a_file_and_rewrites_pointers_inside_it() {
-    let mut main = yaml(&spec_with(&["https://example.com/d.yaml#/parameters/limit"]));
+    let mut main = yaml(&spec_with(&[
+        "https://example.com/d.yaml#/parameters/limit",
+    ]));
     let file = yaml(
         "parameters:\n  limit:\n    name: limit\n    in: query\n    schema:\n      $ref: '#/schemas/Num'\nschemas:\n  Num: { type: integer }\n",
     );
-    inline_refs(&mut main, &[("https://example.com/d.yaml".to_string(), file)]);
+    inline_refs(
+        &mut main,
+        &[("https://example.com/d.yaml".to_string(), file)],
+    );
     let text = serde_yaml::to_string(&main).expect("yaml");
-    assert!(text.contains("#/x-rocket-remote/0/parameters/limit"), "{text}");
+    assert!(
+        text.contains("#/x-rocket-remote/0/parameters/limit"),
+        "{text}"
+    );
     assert!(text.contains("#/x-rocket-remote/0/schemas/Num"), "{text}");
     assert!(!text.contains("example.com"), "{text}");
 }
@@ -235,8 +246,16 @@ async fn a_cycle_between_two_files_terminates() {
         .expect("bundle");
     assert_eq!(fetcher.requests().len(), 2);
     assert!(!bundle.incomplete);
-    assert!(bundle.text.contains("#/x-rocket-remote/1/y"), "{}", bundle.text);
-    assert!(bundle.text.contains("#/x-rocket-remote/0/x"), "{}", bundle.text);
+    assert!(
+        bundle.text.contains("#/x-rocket-remote/1/y"),
+        "{}",
+        bundle.text
+    );
+    assert!(
+        bundle.text.contains("#/x-rocket-remote/0/x"),
+        "{}",
+        bundle.text
+    );
 }
 
 #[tokio::test]
@@ -497,7 +516,10 @@ async fn all_304_is_unchanged() {
         refs_unchanged(&fetcher, &location(), None, &previous).await,
         Ok(true)
     );
-    assert_eq!(fetcher.requests()[0].if_none_match.as_deref(), Some("\"1\""));
+    assert_eq!(
+        fetcher.requests()[0].if_none_match.as_deref(),
+        Some("\"1\"")
+    );
 }
 
 #[tokio::test]
@@ -571,9 +593,12 @@ async fn a_github_blob_link_to_another_repo_is_fetched_raw_without_token() {
     assert_eq!(requests[0].bearer_token, None);
 }
 
+// The test lock is held across awaits on purpose; the test runtime has one thread.
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn a_huge_spec_scans_fast_and_keeps_few_notes() {
     let fetcher = FakeFetcher::default();
+    let _timed = crate::openapi::yaml_budget::timed_test();
     let started = std::time::Instant::now();
     let owned: Vec<String> = (0..50_000)
         .map(|i| format!("http://example.com/f{i}.yaml"))
@@ -605,9 +630,17 @@ async fn alias_growth_gives_back_the_original_text_with_a_note() {
     let body = format!("a: &a [{}]\nb: [{aliases}]\n", items.join(", "));
     fetcher.serve("https://example.com/bomb.yaml", &body);
     let text = spec_with(&["https://example.com/bomb.yaml#/a"]);
-    let bundle = bundle_with_limit(&fetcher, &text, &location(), None, 200_000, MAX_YAML_NODES, MAX_YAML_BYTES)
-        .await
-        .expect("bundle");
+    let bundle = bundle_with_limit(
+        &fetcher,
+        &text,
+        &location(),
+        None,
+        200_000,
+        node_limit_for,
+        MAX_YAML_BYTES,
+    )
+    .await
+    .expect("bundle");
     assert_eq!(bundle.text, text);
     assert!(bundle.incomplete);
     assert!(bundle.refs.is_empty());
@@ -621,14 +654,24 @@ fn alias_bomb(items: usize) -> String {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn a_flat_alias_bomb_in_a_file_is_refused_quickly() {
     let fetcher = FakeFetcher::default();
     fetcher.serve("https://example.com/bomb.yaml", &alias_bomb(5000));
     let text = spec_with(&["https://example.com/bomb.yaml#/a"]);
+    let _timed = crate::openapi::yaml_budget::timed_test();
     let started = std::time::Instant::now();
-    let bundle = bundle_with_limit(&fetcher, &text, &location(), None, MAX_TOTAL_BYTES, 100_000, MAX_YAML_BYTES)
-        .await
-        .expect("bundle");
+    let bundle = bundle_with_limit(
+        &fetcher,
+        &text,
+        &location(),
+        None,
+        MAX_TOTAL_BYTES,
+        |_| 100_000,
+        MAX_YAML_BYTES,
+    )
+    .await
+    .expect("bundle");
     assert!(started.elapsed() < std::time::Duration::from_secs(2));
     assert_eq!(bundle.text, text);
     assert!(bundle.incomplete);
@@ -637,6 +680,7 @@ async fn a_flat_alias_bomb_in_a_file_is_refused_quickly() {
 }
 
 #[tokio::test]
+#[allow(clippy::await_holding_lock)]
 async fn a_big_string_aliased_many_times_is_refused_by_bytes() {
     let fetcher = FakeFetcher::default();
     let big = "x".repeat(100 * 1024);
@@ -646,6 +690,7 @@ async fn a_big_string_aliased_many_times_is_refused_by_bytes() {
         &format!("a: &a '{big}'\nb: [{aliases}]\n"),
     );
     let text = spec_with(&["https://example.com/s.yaml#/a"]);
+    let _timed = crate::openapi::yaml_budget::timed_test();
     let started = std::time::Instant::now();
     // Well under the node limit; only the byte limit (10 MB here) stops it.
     let bundle = bundle_with_limit(
@@ -654,7 +699,7 @@ async fn a_big_string_aliased_many_times_is_refused_by_bytes() {
         &location(),
         None,
         MAX_TOTAL_BYTES,
-        MAX_YAML_NODES,
+        node_limit_for,
         10 * 1024 * 1024,
     )
     .await
@@ -681,7 +726,7 @@ async fn a_big_aliased_mapping_key_is_refused_by_bytes() {
         &location(),
         None,
         MAX_TOTAL_BYTES,
-        MAX_YAML_NODES,
+        node_limit_for,
         10 * 1024 * 1024,
     )
     .await
@@ -709,7 +754,7 @@ async fn the_budget_is_shared_by_all_files() {
         &location(),
         None,
         MAX_TOTAL_BYTES,
-        900,
+        |_| 900,
         MAX_YAML_BYTES,
     )
     .await
@@ -737,7 +782,7 @@ async fn a_file_over_the_shared_budget_and_the_files_after_it_get_notes() {
         &location(),
         None,
         MAX_TOTAL_BYTES,
-        500,
+        |_| 500,
         MAX_YAML_BYTES,
     )
     .await
@@ -757,10 +802,22 @@ async fn a_file_with_a_few_aliases_still_loads() {
         "base: &b { name: p, in: query }\np: *b\nq: *b\n",
     );
     let text = spec_with(&["https://example.com/d.yaml#/p"]);
-    let bundle = bundle_with_limit(&fetcher, &text, &location(), None, MAX_TOTAL_BYTES, 100_000, MAX_YAML_BYTES)
-        .await
-        .expect("bundle");
-    assert!(!bundle.incomplete && bundle.notes.is_empty(), "{:?}", bundle.notes);
+    let bundle = bundle_with_limit(
+        &fetcher,
+        &text,
+        &location(),
+        None,
+        MAX_TOTAL_BYTES,
+        |_| 100_000,
+        MAX_YAML_BYTES,
+    )
+    .await
+    .expect("bundle");
+    assert!(
+        !bundle.incomplete && bundle.notes.is_empty(),
+        "{:?}",
+        bundle.notes
+    );
     let doc = crate::openapi::parse_openapi(&bundle.text).expect("parse");
     assert_eq!(doc.operations[0].parameters[0].name, "p");
 }
@@ -773,9 +830,17 @@ async fn a_main_text_alias_bomb_returns_the_original_text() {
         spec_with(&["https://example.com/d.yaml#/a"]),
         alias_bomb(5000).replace('\n', "\n  ")
     );
-    let bundle = bundle_with_limit(&fetcher, &text, &location(), None, MAX_TOTAL_BYTES, 100_000, MAX_YAML_BYTES)
-        .await
-        .expect("bundle");
+    let bundle = bundle_with_limit(
+        &fetcher,
+        &text,
+        &location(),
+        None,
+        MAX_TOTAL_BYTES,
+        |_| 100_000,
+        MAX_YAML_BYTES,
+    )
+    .await
+    .expect("bundle");
     assert_eq!(bundle.text, text);
     assert!(bundle.incomplete);
     assert_eq!(bundle.notes.len(), 1);
@@ -863,4 +928,53 @@ async fn a_stored_ref_to_a_blocked_address_is_never_fetched() {
         Ok(false)
     );
     assert!(fetcher.requests().is_empty());
+}
+
+#[tokio::test]
+#[allow(clippy::await_holding_lock)]
+async fn a_large_bundle_without_aliases_loads_and_the_reader_accepts_it() {
+    use crate::openapi::yaml_budget::large_alias_free_spec;
+    let _heavy = crate::openapi::yaml_budget::heavy_test();
+    let fetcher = FakeFetcher::default();
+    let mut refs = String::new();
+    let mut texts = Vec::new();
+    for i in 0..3 {
+        let url = format!("https://example.com/f{i}.yaml");
+        let body = format!(
+            "p: {{ name: p{i}, in: query }}\n{}",
+            large_alias_free_spec(1000)
+        );
+        fetcher.serve(&url, &body);
+        refs.push_str(&format!("        - $ref: '{url}#/p'\n"));
+        texts.push(body);
+    }
+    let main = large_alias_free_spec(1500).replacen(
+        "paths:\n",
+        &format!(
+            "paths:\n  /a:\n    get:\n      operationId: getA\n      parameters:\n{refs}      \
+             responses: {{ '200': {{ description: ok }} }}\n"
+        ),
+        1,
+    );
+    let total: usize = main.len() + texts.iter().map(String::len).sum::<usize>();
+    assert!(total >= 8 * 1024 * 1024, "{total} bytes");
+
+    let bundle = bundle_spec(&fetcher, &main, &location(), None, &[])
+        .await
+        .expect("bundle");
+    assert!(!bundle.incomplete, "{:?}", bundle.notes);
+    assert_eq!(bundle.refs.len(), 3);
+    // The bundle has more than 1,000,000 nodes, so the old fixed reader limit refused it.
+    let old_reader = YamlBudget::new(1_000_000, MAX_YAML_BYTES);
+    assert_eq!(old_reader.check(&bundle.text), Err(BudgetFail::Exceeded));
+    // A bundle that passed bundling is not refused by the reader for its node count.
+    let doc = crate::openapi::parse_openapi(&bundle.text).expect("parse");
+    assert_eq!(doc.operations.len(), 1501);
+    let get_a = doc
+        .operations
+        .iter()
+        .find(|op| op.key == "getA")
+        .expect("getA");
+    let names: Vec<&str> = get_a.parameters.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["p0", "p1", "p2"]);
 }

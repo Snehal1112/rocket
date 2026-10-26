@@ -6,6 +6,7 @@
 
 use crate::error::{ImportError, ImportResult};
 use crate::openapi::entry::fetch_failure_message;
+use crate::openapi::yaml_budget::{node_limit_for, BudgetFail, YamlBudget};
 use crate::openapi::{fetch_target, parse_spec_url};
 pub use rocket_collection::openapi_source::RemoteRefState;
 use rocket_collection::openapi_source::SpecLocation;
@@ -13,7 +14,6 @@ use rocket_http::spec_fetch::{
     redirect_target_allowed, SpecFetchFailure, SpecFetchOutcome, SpecFetchRequest, SpecFetcher,
     DEFAULT_MAX_SPEC_BYTES,
 };
-use crate::openapi::yaml_budget::{BudgetFail, YamlBudget};
 use serde_yaml::Value as Yaml;
 use std::collections::{HashMap, HashSet};
 use url::Url;
@@ -27,9 +27,6 @@ const MAX_DEPTH: usize = 3;
 /// Most bytes for the main spec plus all files.
 const MAX_TOTAL_BYTES: usize = DEFAULT_MAX_SPEC_BYTES;
 
-/// Most YAML nodes the main text and all referenced files may yield together, counting an
-/// alias every time it is replayed.
-const MAX_YAML_NODES: usize = 2_000_000;
 /// Most string bytes the main text and all referenced files may yield together.
 const MAX_YAML_BYTES: usize = MAX_TOTAL_BYTES;
 
@@ -223,7 +220,8 @@ fn collect(value: &Yaml, base: Option<&Url>, scan: &mut Scan) {
 enum ParseFail {
     /// It is not YAML or JSON, or not a mapping.
     Invalid,
-    /// It has more nodes than the budget, aliases counted every time they are replayed.
+    /// It has more nodes or string bytes than the budget, aliases counted every time they are
+    /// replayed.
     TooComplex,
 }
 
@@ -260,7 +258,7 @@ fn parse_file_mapping(text: &str, budget: &YamlBudget) -> Result<Yaml, ParseFail
 /// order. Skipped references are not listed. A relative reference needs `base`. At most one
 /// more than the file limit is returned.
 pub fn find_remote_refs(main_text: &str, base: Option<&str>) -> Vec<String> {
-    let budget = YamlBudget::new(MAX_YAML_NODES, MAX_YAML_BYTES);
+    let budget = YamlBudget::new(node_limit_for(main_text.len()), MAX_YAML_BYTES);
     let Ok(root) = parse_yaml_mapping(main_text, &budget) else {
         return Vec::new();
     };
@@ -486,7 +484,7 @@ pub async fn bundle_spec(
         location,
         token,
         MAX_TOTAL_BYTES,
-        MAX_YAML_NODES,
+        node_limit_for,
         MAX_YAML_BYTES,
     )
     .await
@@ -498,7 +496,7 @@ async fn bundle_with_limit(
     location: &SpecLocation,
     token: Option<&str>,
     max_total: usize,
-    max_nodes: usize,
+    node_limit: fn(usize) -> usize,
     max_bytes: usize,
 ) -> ImportResult<Bundle> {
     let mut bundle = Bundle {
@@ -507,8 +505,9 @@ async fn bundle_with_limit(
         notes: Vec::new(),
         incomplete: false,
     };
-    // One budget for the main text and every file, so many files cannot add up past it.
-    let yaml_budget = YamlBudget::new(max_nodes, max_bytes);
+    // One budget for the main text and every file, so many files cannot add up past it. Its
+    // node limit grows with the bytes accepted so far (`node_limit` of their total).
+    let yaml_budget = YamlBudget::new(node_limit(main_text.len()), max_bytes);
     let mut yaml_spent = false;
     let mut main = match parse_yaml_mapping(main_text, &yaml_budget) {
         Ok(main) => main,
@@ -537,14 +536,7 @@ async fn bundle_with_limit(
     let mut seen: HashSet<String> = HashSet::new();
     let mut queue: Vec<Queued> = Vec::new();
     let mut noted = LimitNotes::default();
-    enqueue(
-        scan.urls,
-        1,
-        &mut seen,
-        &mut queue,
-        &mut noted,
-        &mut bundle,
-    );
+    enqueue(scan.urls, 1, &mut seen, &mut queue, &mut noted, &mut bundle);
 
     let mut total = main_text.len();
     let mut files: Vec<(String, Yaml)> = Vec::new();
@@ -616,6 +608,8 @@ async fn bundle_with_limit(
             continue;
         }
         total += body.len();
+        // The file is judged with the main text and every accepted body, itself included.
+        yaml_budget.set_max_nodes(node_limit(total));
         let Ok(text) = String::from_utf8(body) else {
             bundle.incomplete = true;
             bundle.notes.push(format!(
