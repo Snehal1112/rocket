@@ -10,6 +10,7 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
+  RefreshCw,
   Trash2,
   TriangleAlert,
 } from 'lucide-react';
@@ -48,6 +49,7 @@ import { sortItemsFoldersFirst } from '@/lib/collection-utils';
 import { createRequestErrorMessage } from '@/lib/create-request-error';
 import { createDefaultRequest } from '@/lib/pane-utils';
 import { useFlows } from '@/lib/queries/flow-queries';
+import { useOpenApiSyncStatus } from '@/lib/queries/openapi-sync-queries';
 import { useWorkspaces } from '@/lib/queries/workspace-queries';
 import type { Collection, CollectionSummary, Contract, FlowListEntry } from '@/lib/tauri-api';
 import {
@@ -119,6 +121,9 @@ export function CollectionNode({
   const [createRequestOpen, setCreateRequestOpen] = useState(false);
   const [newScriptOpen, setNewScriptOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  // The sync status is only asked for once a menu of this collection has been opened.
+  const [menuSeen, setMenuSeen] = useState(false);
+  const specSync = useOpenApiSyncStatus(summary.name, false, menuSeen);
   // Fetch the flow list only while the node is expanded.
   const { data: flows = EMPTY_FLOWS } = useFlows(summary.name, open);
 
@@ -302,6 +307,18 @@ export function CollectionNode({
     usePaneStore.getState().openTab(tab);
   };
 
+  const openSpecSync = () => {
+    const tab: CollectionTab = {
+      id: summary.uid,
+      title: summary.name,
+      tabType: 'collection',
+      collectionName: summary.name,
+      isDirty: false,
+    };
+    usePaneStore.getState().openTab(tab);
+    usePaneStore.getState().openCollectionTab(summary.name, 'spec-sync');
+  };
+
   const handleNewRequestCreate = async () => {
     const name = newRequestName.trim();
     if (!name) {
@@ -364,7 +381,7 @@ export function CollectionNode({
     : flows;
 
   return (
-    <ContextMenu>
+    <ContextMenu onOpenChange={(o) => o && setMenuSeen(true)}>
       <ContextMenuTrigger asChild>
         <div className='group relative flex items-center'>
           <TreeItem
@@ -463,7 +480,7 @@ export function CollectionNode({
             </TreeItemContent>
           </TreeItem>
 
-          <DropdownMenu>
+          <DropdownMenu onOpenChange={(o) => o && setMenuSeen(true)}>
             <DropdownMenuTrigger asChild>
               <button
                 type='button'
@@ -498,6 +515,11 @@ export function CollectionNode({
               <DropdownMenuItem onClick={() => setExportOpen(true)}>
                 <Download aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Export...
               </DropdownMenuItem>
+              {specSync.data && (
+                <DropdownMenuItem onClick={openSpecSync}>
+                  <RefreshCw aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> OpenAPI sync
+                </DropdownMenuItem>
+              )}
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={() => {
@@ -560,6 +582,11 @@ export function CollectionNode({
         <ContextMenuItem onClick={() => setExportOpen(true)}>
           <Download aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Export...
         </ContextMenuItem>
+        {specSync.data && (
+          <ContextMenuItem onClick={openSpecSync}>
+            <RefreshCw aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> OpenAPI sync
+          </ContextMenuItem>
+        )}
         <ContextMenuSeparator />
         <ContextMenuItem
           onClick={() => {
