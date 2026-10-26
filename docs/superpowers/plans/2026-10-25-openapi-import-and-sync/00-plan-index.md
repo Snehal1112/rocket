@@ -21,7 +21,7 @@ Rules for every plan:
 
 | ID | Plan | Needs |
 |---|---|---|
-| P4 | `plan-04-check-and-token.md`: sync state in the source file, `OpenApiSyncService` (conditional fetch, pending copy, token in the keychain), import with a token. Written, waiting for review | P2, P3 |
+| P4 | `plan-04-check-and-token.md`: sync state in the source file, `OpenApiSyncService` (conditional fetch, pending copy, token in the keychain), import with a token. Done on branch openapi-import (a26a3384..71594576), final review clean | P2, P3 |
 | P5 | Three-way diff and per-field merge engine (pure) | P1, P2 |
 | P6 | Apply approved changes with a staging area and recovery journal | P5 |
 | P7 | Scheduler: supervisor, intervals, jitter, backoff, launch catch-up, notice | P4 |
@@ -32,3 +32,13 @@ Rules for every plan:
 
 - Ruling (2026-10-25): the design is approved. Import ships before sync. Provenance lives in a sidecar file in the collection folder (`openapi-source.yml`), keyed by request `uid`, because `Request` has no extension slot.
 - Ruling (2026-10-25): the sidecar lives at `<collection>/.rocket/openapi-source.yml`, not at the collection root. A dot folder is already hidden from the collection loader and the Bruno export, so no loader change is needed (the contract feature uses `.rocket/contracts/` the same way). It never holds a token.
+- Ruling (2026-10-26, Plan 4): a locked keychain must not break checks for public repositories. `check` reads the token with `get_strict`, falls back to a tokenless fetch on a keychain error, and says so only when that fetch fails with not found or unauthorized. A tokenless 404 now tells the user to add an access token for a private GitHub repository.
+- Ruling (2026-10-26, Plan 4): the default sync interval is off, so a new import makes no background requests until the user opts in.
+
+## Carry-forward from the Plan 4 final review
+
+- **P9 must decide before `check` is reachable from the UI (Important).** The token is keyed only by `source_id`, which sits in a committed YAML file. A collection from someone else that reuses a known `source_id` and points `location` at a private GitHub file would make the victim's check send the victim's token to that path, and the content could land in `.rocket/openapi-pending.spec`. Fix by gating `check` behind the collection trust gate, or by binding the keychain entry to the location (store owner and repo with the token and refuse on a mismatch). Update the spec line "one token per collection" too. Copies of a folder share one token by design.
+- P5/P6: before applying, verify `sha256(load_pending()) == pending_sha256`. On a 304 with `pending_sha256` set but the pending file missing, drop the stored ETag and Last-Modified and fetch again, or the check stays on "changed" with nothing to apply.
+- P7: every check rewrites `openapi-source.yml` (`last_checked_at`, `last_status`), so a collection under git gets a diff each interval. Decide where timing state lives before the scheduler.
+- P9: `status().has_token` uses the lenient keychain read; use the strict read. An unknown `sync_interval` or `state` value is a load error; decide on forward compatibility.
+- Small: `OpenApiImportResult.source_id` is returned even when the source file save failed (return `None`); the TS `OpenApiImportResult` lacks `sourceId`.
