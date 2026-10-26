@@ -37,6 +37,8 @@ export const openApiSyncKeys = {
 /** The sync status of a collection, or null when it has no spec source. */
 export function useOpenApiSyncStatus(collection: string | null | undefined, includeToken = false) {
   return useQuery({
+    // Local IPC work must not pause when WebKit reports the machine as offline.
+    networkMode: 'always',
     queryKey: openApiSyncKeys.status(collection ?? '', includeToken),
     queryFn: () => getOpenApiSyncStatus(collection ?? '', includeToken),
     enabled: !!collection,
@@ -70,6 +72,8 @@ export function useOpenApiSyncPlan(
   links: Links = NO_LINKS,
 ) {
   return useQuery({
+    // Local IPC work must not pause when WebKit reports the machine as offline.
+    networkMode: 'always',
     queryKey: openApiSyncKeys.plan(collection ?? '', links),
     queryFn: () => getOpenApiSyncPlan(collection ?? '', links),
     // The old plan stays on screen while a new link set loads, for the same collection only.
@@ -90,6 +94,7 @@ function invalidateSync(queryClient: QueryClient, collection: string): void {
 export function useCheckNow(collection: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    networkMode: 'always',
     mutationFn: () => checkOpenApiSyncNow(collection),
     onSettled: () => invalidateSync(queryClient, collection),
   });
@@ -98,6 +103,7 @@ export function useCheckNow(collection: string) {
 export function useSetInterval(collection: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    networkMode: 'always',
     mutationFn: (interval: OpenApiSyncInterval) => setOpenApiSyncInterval(collection, interval),
     onSettled: () => invalidateSync(queryClient, collection),
   });
@@ -106,6 +112,7 @@ export function useSetInterval(collection: string) {
 export function useSetToken(collection: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    networkMode: 'always',
     mutationFn: (token: string) => setOpenApiSyncToken(collection, token),
     // The cache drops the mutation as soon as it settles, so the token does not linger.
     gcTime: 0,
@@ -116,6 +123,7 @@ export function useSetToken(collection: string) {
 export function useClearToken(collection: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    networkMode: 'always',
     mutationFn: () => clearOpenApiSyncToken(collection),
     onSettled: () => invalidateSync(queryClient, collection),
   });
@@ -124,6 +132,7 @@ export function useClearToken(collection: string) {
 export function useGrantConsent(collection: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    networkMode: 'always',
     mutationFn: (location: string) => grantOpenApiSyncConsent(collection, location),
     onSettled: () => invalidateSync(queryClient, collection),
   });
@@ -132,6 +141,7 @@ export function useGrantConsent(collection: string) {
 export function useRevokeConsent(collection: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    networkMode: 'always',
     mutationFn: () => revokeOpenApiSyncConsent(collection),
     onSettled: () => invalidateSync(queryClient, collection),
   });
@@ -162,16 +172,53 @@ export function useIsApplying(collection: string): boolean {
   return useSyncExternalStore(subscribeApplying, () => isApplying(collection));
 }
 
+/** What the last apply of a collection ended with: a report or an error. */
+export interface LastApply {
+  report?: OpenApiApplyReport;
+  error?: unknown;
+  /** How many variable changes the apply carried. */
+  variableCount: number;
+}
+
+// The outcome lives here, not in a component, so leaving the tab mid-apply does not lose it.
+const lastApplies = new Map<string, LastApply>();
+const lastApplyListeners = new Set<() => void>();
+
+function setLastApply(collection: string, value: LastApply | null): void {
+  if (value) lastApplies.set(collection, value);
+  else lastApplies.delete(collection);
+  for (const l of lastApplyListeners) l();
+}
+
+function subscribeLastApply(listener: () => void): () => void {
+  lastApplyListeners.add(listener);
+  return () => lastApplyListeners.delete(listener);
+}
+
+/** The last apply outcome of the collection, and a way to dismiss it. */
+export function useLastApply(collection: string): { last: LastApply | null; dismiss: () => void } {
+  const last = useSyncExternalStore(subscribeLastApply, () => lastApplies.get(collection) ?? null);
+  const dismiss = useCallback(() => setLastApply(collection, null), [collection]);
+  return { last, dismiss };
+}
+
 /**
  * Applies a selection and refreshes status, plan and the collection tree. Only one apply
- * runs at a time per collection, a call while one is in flight is a silent no-op.
+ * runs at a time per collection, a call while one is in flight is a silent no-op
+ * for `mutate` and a rejection for `mutateAsync`.
  */
 export function useApplySync(collection: string) {
   const queryClient = useQueryClient();
   const mutation = useMutation<OpenApiApplyReport, unknown, OpenApiSelection>({
+    networkMode: 'always',
     mutationFn: async (selection) => {
       try {
-        return await applyOpenApiSync(collection, selection);
+        const report = await applyOpenApiSync(collection, selection);
+        setLastApply(collection, { report, variableCount: selection.variables.length });
+        return report;
+      } catch (error) {
+        setLastApply(collection, { error, variableCount: 0 });
+        throw error;
       } finally {
         setApplying(collection, false);
       }
@@ -186,14 +233,18 @@ export function useApplySync(collection: string) {
     (selection, options) => {
       if (applyingCollections.has(collection)) return;
       setApplying(collection, true);
+      setLastApply(collection, null);
       mutate(selection, options);
     },
     [collection, mutate],
   );
   const guardedMutateAsync = useCallback<typeof mutateAsync>(
     (selection, options) => {
-      if (applyingCollections.has(collection)) return Promise.resolve(undefined as never);
+      if (applyingCollections.has(collection)) {
+        return Promise.reject(new Error('An apply is already running.'));
+      }
       setApplying(collection, true);
+      setLastApply(collection, null);
       return mutateAsync(selection, options);
     },
     [collection, mutateAsync],

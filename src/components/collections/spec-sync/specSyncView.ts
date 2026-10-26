@@ -134,8 +134,8 @@ export function splitLocation(location: string): { short: string; full: string |
   return { short: location, full: null };
 }
 
-/** The message of a failed command, which arrives as a string or an Error. */
-export function syncErrorMessage(err: unknown): string {
+/** The raw text of a failed command, for matching only. It is never shown. */
+function rawErrorText(err: unknown): string {
   if (err instanceof Error) return err.message;
   if (typeof err === 'string') return err;
   if (err && typeof err === 'object' && 'message' in err && typeof err.message === 'string') {
@@ -146,7 +146,7 @@ export function syncErrorMessage(err: unknown): string {
 
 /** True when the pending copy no longer matches the one that was checked. */
 export function isPendingChangedError(err: unknown): boolean {
-  return syncErrorMessage(err).includes('pending spec changed');
+  return rawErrorText(err).includes('pending spec changed');
 }
 
 /** What a field takes when the user has not chosen: conflicts keep the user's value. */

@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { useCheckNow } from '@/lib/queries/openapi-sync-queries';
 import type { OpenApiCheckOutcome, OpenApiConsent } from '@/lib/tauri-api';
+import { cn } from '@/lib/utils';
 import { syncErrorMessage } from './syncErrors';
 
 interface CheckNowButtonProps {
@@ -59,7 +60,7 @@ export function CheckNowButton({ collection, consent }: CheckNowButtonProps) {
                 disabled={check.isPending || !granted}
               >
                 <RefreshCw
-                  className={`mr-1 h-3.5 w-3.5 ${check.isPending ? 'animate-spin' : ''}`}
+                  className={cn('mr-1 h-3.5 w-3.5', check.isPending && 'animate-spin')}
                   aria-hidden='true'
                 />
                 Check now
@@ -76,7 +77,7 @@ export function CheckNowButton({ collection, consent }: CheckNowButtonProps) {
       {text && (
         <p
           role='status'
-          className={`text-xs ${failed ? 'text-destructive' : 'text-muted-foreground'}`}
+          className={cn('text-xs', failed ? 'text-destructive' : 'text-muted-foreground')}
         >
           {text}
         </p>

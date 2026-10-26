@@ -26,20 +26,27 @@ describe('ApplyConfirmDialog', () => {
     renderDialog([newItem, changedItem, removed('a', false)], 2);
     expect(screen.getByText('1 new request will be added.')).toBeInTheDocument();
     expect(screen.getByText('1 changed request will be updated.')).toBeInTheDocument();
-    expect(screen.getByText('2 variable changes will be applied.')).toBeInTheDocument();
+    expect(screen.getByText('2 variable changes: kept as you have them when you changed the value.')).toBeInTheDocument();
   });
 
   it('says which removed requests are deleted and which are kept', () => {
     renderDialog([removed('a', false), removed('b', false), removed('c', true), removed('d', null)]);
     expect(
       screen.getByText(
-        '2 removed requests will be deleted if Rocket can rewrite them, you did not edit them.',
+        '2 removed requests will be deleted if Rocket can rewrite them, because you did not edit them.',
       ),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        '2 removed requests stay in your collection but are no longer tracked, you edited them or it cannot be known.',
+        '2 removed requests stay in your collection but are no longer tracked, because you edited them or Rocket cannot tell.',
       ),
+    ).toBeInTheDocument();
+  });
+
+  it('uses the singular for one variable change', () => {
+    renderDialog([newItem], 1);
+    expect(
+      screen.getByText('1 variable change: kept as you have it when you changed the value.'),
     ).toBeInTheDocument();
   });
 

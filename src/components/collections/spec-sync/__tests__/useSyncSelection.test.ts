@@ -107,14 +107,30 @@ describe('useSyncSelection', () => {
     expect(result.current.links).toEqual([['a', 'b']]);
   });
 
-  it('keeps the links when the plan changed because of them, then clears them on the next change', () => {
+  it('keeps a link through new plans while the rename hint or the merged item is there', () => {
     const { result, rerender } = setup();
-    act(() => result.current.linkRename('a', 'b'));
-    // The linked plan arrives.
-    rerender({ p: makePlan({ items: [{ ...changedItem, digest: 'linked' }] }) });
-    expect(result.current.links).toEqual([['a', 'b']]);
-    // A later plan with new digests and the same links means the link was used up.
-    rerender({ p: makePlan({ items: [{ ...changedItem, digest: 'later' }] }) });
+    act(() => result.current.linkRename('GET /animals', 'GET /pets'));
+    // A background refresh: the unlinked plan still has the rename hint.
+    rerender({ p: makePlan({ items: [{ ...newItem, digest: 'again' }] }) });
+    expect(result.current.links).toEqual([['GET /animals', 'GET /pets']]);
+    // The linked plan: the pair is one Changed item under the new key.
+    rerender({
+      p: makePlan({ items: [{ ...changedItem, key: 'GET /pets', digest: 'linked' }] }),
+    });
+    expect(result.current.links).toEqual([['GET /animals', 'GET /pets']]);
+    rerender({
+      p: makePlan({ items: [{ ...changedItem, key: 'GET /pets', digest: 'later' }] }),
+    });
+    expect(result.current.links).toEqual([['GET /animals', 'GET /pets']]);
+  });
+
+  it('drops a link whose new key and hint are gone from the plan', () => {
+    const { result, rerender } = setup();
+    act(() => result.current.linkRename('GET /animals', 'GET /pets'));
+    act(() => result.current.linkRename('x', 'y'));
+    rerender({ p: makePlan({ items: [{ ...newItem, digest: 'again' }] }) });
+    expect(result.current.links).toEqual([['GET /animals', 'GET /pets']]);
+    rerender({ p: makePlan({ items: [{ ...changedItem, key: 'POST /other', digest: 'o' }] }) });
     expect(result.current.links).toEqual([]);
   });
 
@@ -128,11 +144,11 @@ describe('useSyncSelection', () => {
 
   it('keeps the links when a plan arrives after an error under the same links', () => {
     const { result, rerender } = setup();
-    act(() => result.current.linkRename('a', 'b'));
-    rerender({ p: makePlan({ items: [{ ...changedItem, digest: 'linked' }] }) });
+    act(() => result.current.linkRename('GET /animals', 'GET /pets'));
+    rerender({ p: makePlan({ items: [{ ...changedItem, key: 'GET /pets', digest: 'linked' }] }) });
     // The plan query fails, then Check again succeeds under the same links.
     rerender({ p: undefined });
-    rerender({ p: makePlan({ items: [{ ...changedItem, digest: 'again' }] }) });
-    expect(result.current.links).toEqual([['a', 'b']]);
+    rerender({ p: makePlan({ items: [{ ...changedItem, key: 'GET /pets', digest: 'again' }] }) });
+    expect(result.current.links).toEqual([['GET /animals', 'GET /pets']]);
   });
 });

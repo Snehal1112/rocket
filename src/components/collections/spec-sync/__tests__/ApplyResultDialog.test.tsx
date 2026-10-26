@@ -17,9 +17,20 @@ const report: OpenApiApplyReport = {
   remaining: 4,
 };
 
-function renderDialog(r: OpenApiApplyReport, onCheckAgain = vi.fn(), checking = false) {
+function renderDialog(
+  r: OpenApiApplyReport,
+  onCheckAgain = vi.fn(),
+  checking = false,
+  variableCount = 0,
+) {
   render(
-    <ApplyResultDialog report={r} onClose={vi.fn()} onCheckAgain={onCheckAgain} checking={checking} />,
+    <ApplyResultDialog
+      report={r}
+      variableCount={variableCount}
+      onClose={vi.fn()}
+      onCheckAgain={onCheckAgain}
+      checking={checking}
+    />,
   );
   return onCheckAgain;
 }
@@ -37,6 +48,8 @@ describe('ApplyResultDialog', () => {
       screen.getByText(/1 left as it is because Rocket cannot rewrite its file/),
     ).toBeInTheDocument();
     expect(screen.getByText('1 deleted because the spec removed it.')).toBeInTheDocument();
+    expect(screen.getByText('GET /d')).toBeInTheDocument();
+    expect(screen.getByText('GET /t')).toBeInTheDocument();
     expect(
       screen.getByText('1 removed from the spec but kept in your collection, no longer tracked.'),
     ).toBeInTheDocument();
@@ -69,5 +82,33 @@ describe('ApplyResultDialog', () => {
   it('disables Check again while it runs', () => {
     renderDialog(report, vi.fn(), true);
     expect(screen.getByRole('button', { name: 'Check again' })).toBeDisabled();
+  });
+
+  it('uses plural grammar for several deleted or unrewritable requests', () => {
+    renderDialog({
+      ...report,
+      notRewritable: ['a', 'b'],
+      deleted: ['c', 'd'],
+      detached: ['e', 'f'],
+    });
+    expect(
+      screen.getByText(/2 left as they are because Rocket cannot rewrite their files/),
+    ).toBeInTheDocument();
+    expect(screen.getByText('2 deleted because the spec removed them.')).toBeInTheDocument();
+  });
+
+  it('mentions variables and does not say nothing was applied for a variables-only apply', () => {
+    renderDialog(
+      { applied: [], stale: [], notRewritable: [], deleted: [], detached: [], skipped: 0, remaining: 0 },
+      vi.fn(),
+      false,
+      2,
+    );
+    expect(
+      screen.getByText(
+        '2 variable changes were checked. A value you changed yourself was kept.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Nothing was applied.')).toBeNull();
   });
 });

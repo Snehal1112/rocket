@@ -61,7 +61,7 @@ const Row = memo(function Row({
   return (
     <div className={cn('flex items-start gap-1 rounded-md pl-2', selected && 'bg-accent')}>
       <Checkbox
-        aria-label={`Select ${label}`}
+        aria-label={`Include ${label} in apply`}
         checked={checked}
         onCheckedChange={() => (isVariable ? onToggleVariable(toggleKey) : onToggle(toggleKey))}
         className='mt-2.5'

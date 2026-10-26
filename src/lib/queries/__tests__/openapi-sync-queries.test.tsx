@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, type MockInstance, vi } from 'vitest';
 import * as tauriApi from '@/lib/tauri-api';
@@ -11,6 +11,7 @@ import {
   useClearToken,
   useGrantConsent,
   useIsApplying,
+  useLastApply,
   useOpenApiSyncEvents,
   useOpenApiSyncPlan,
   useOpenApiSyncStatus,
@@ -181,6 +182,68 @@ describe('openapi sync queries', () => {
     expect(other.result.current).toBe(false);
     finish({});
     await waitFor(() => expect(watcher.result.current).toBe(false));
+  });
+
+  it('the apply hook rejects a duplicate mutateAsync with the already-running error', async () => {
+    let finish: (v: unknown) => void = () => undefined;
+    vi.mocked(tauriApi.applyOpenApiSync).mockReset();
+    vi.mocked(tauriApi.applyOpenApiSync).mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      }) as never,
+    );
+    const { result } = renderHook(() => useApplySync('D'), { wrapper });
+    const selection = { items: [], skips: [], variables: [], renameLinks: [] };
+    const first = result.current.mutateAsync(selection);
+    await expect(result.current.mutateAsync(selection)).rejects.toThrow(
+      'An apply is already running.',
+    );
+    finish({});
+    await first;
+  });
+
+  it('keeps the last apply outcome per collection until it is dismissed', async () => {
+    const report = {
+      applied: [],
+      stale: [],
+      notRewritable: [],
+      deleted: [],
+      detached: [],
+      skipped: 0,
+      remaining: 0,
+    };
+    vi.mocked(tauriApi.applyOpenApiSync).mockReset();
+    vi.mocked(tauriApi.applyOpenApiSync).mockResolvedValue(report);
+    const runner = renderHook(() => useApplySync('L'), { wrapper });
+    const first = renderHook(() => useLastApply('L'), { wrapper });
+    expect(first.result.current.last).toBeNull();
+    await runner.result.current.mutateAsync({
+      items: [],
+      skips: [],
+      variables: [{ name: 'v', digest: 'd' }],
+      renameLinks: [],
+    });
+    await waitFor(() => expect(first.result.current.last?.report).toEqual(report));
+    expect(first.result.current.last?.variableCount).toBe(1);
+    // A hook that mounts later still sees it.
+    const later = renderHook(() => useLastApply('L'), { wrapper });
+    expect(later.result.current.last?.report).toEqual(report);
+    const other = renderHook(() => useLastApply('M'), { wrapper });
+    expect(other.result.current.last).toBeNull();
+    act(() => later.result.current.dismiss());
+    expect(first.result.current.last).toBeNull();
+  });
+
+  it('keeps the error of a failed apply', async () => {
+    vi.mocked(tauriApi.applyOpenApiSync).mockReset();
+    vi.mocked(tauriApi.applyOpenApiSync).mockRejectedValue('boom');
+    const runner = renderHook(() => useApplySync('E'), { wrapper });
+    const watch = renderHook(() => useLastApply('E'), { wrapper });
+    await expect(
+      runner.result.current.mutateAsync({ items: [], skips: [], variables: [], renameLinks: [] }),
+    ).rejects.toBe('boom');
+    await waitFor(() => expect(watch.result.current.last?.error).toBe('boom'));
+    expect(watch.result.current.last?.report).toBeUndefined();
   });
 
   describe('mutations', () => {

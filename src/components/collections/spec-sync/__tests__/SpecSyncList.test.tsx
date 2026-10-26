@@ -81,9 +81,9 @@ describe('SpecSyncList', () => {
     const p = props();
     render(<SpecSyncList {...p} />);
     const user = userEvent.setup();
-    await user.click(screen.getByRole('checkbox', { name: 'Select Add pet' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Include Add pet in apply' }));
     expect(p.onToggle).toHaveBeenCalledWith('POST /pets');
-    screen.getByRole('checkbox', { name: 'Select List pets' }).focus();
+    screen.getByRole('checkbox', { name: 'Include List pets in apply' }).focus();
     await user.keyboard(' ');
     expect(p.onToggle).toHaveBeenCalledWith('GET /pets');
     // The checkbox does not select the row.
@@ -93,8 +93,8 @@ describe('SpecSyncList', () => {
   it('shows checked and skipped state from the sets', () => {
     const p = props({ approved: new Set(['POST /pets']), skips: new Set(['GET /pets']) });
     render(<SpecSyncList {...p} />);
-    expect(screen.getByRole('checkbox', { name: 'Select Add pet' })).toBeChecked();
-    expect(screen.getByRole('checkbox', { name: 'Select List pets' })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Include Add pet in apply' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Include List pets in apply' })).not.toBeChecked();
     expect(screen.getByText('Skipped')).toBeInTheDocument();
   });
 
@@ -104,7 +104,7 @@ describe('SpecSyncList', () => {
     });
     const p = props({ plan });
     render(<SpecSyncList {...p} />);
-    await userEvent.setup().click(screen.getByRole('checkbox', { name: 'Select Base URL baseUrl' }));
+    await userEvent.setup().click(screen.getByRole('checkbox', { name: 'Include Base URL baseUrl in apply' }));
     expect(p.onToggleVariable).toHaveBeenCalledWith('baseUrl');
     expect(p.onToggle).not.toHaveBeenCalled();
   });

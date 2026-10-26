@@ -7,12 +7,12 @@ import {
   openApiSyncKeys,
   useApplySync,
   useIsApplying,
+  useLastApply,
   useOpenApiSyncEvents,
   useOpenApiSyncPlan,
   useOpenApiSyncStatus,
 } from '@/lib/queries/openapi-sync-queries';
 import { formatRelativeTime } from '@/lib/relative-time';
-import type { OpenApiApplyReport } from '@/lib/tauri-api';
 import { ApplyConfirmDialog } from './ApplyConfirmDialog';
 import { ApplyResultDialog } from './ApplyResultDialog';
 import { buildSelection } from './buildSelection';
@@ -28,9 +28,8 @@ import {
   findEntry,
   firstEntryId,
   isPendingChangedError,
-  syncErrorMessage,
 } from './specSyncView';
-import { syncErrorMessage as applyErrorMessage } from './syncErrors';
+import { syncErrorMessage } from './syncErrors';
 import { useSyncSelection } from './useSyncSelection';
 
 type Links = Array<[string, string]>;
@@ -49,11 +48,12 @@ export function SpecSyncTab({ collection }: SpecSyncTabProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [report, setReport] = useState<OpenApiApplyReport | null>(null);
+  const [busyNotice, setBusyNotice] = useState(false);
   const [checking, setChecking] = useState(false);
   const queryClient = useQueryClient();
   const apply = useApplySync(collection);
   const applyingAnywhere = useIsApplying(collection);
+  const { last, dismiss } = useLastApply(collection);
 
   // The first entry is selected by default, and again when the chosen one is gone.
   const planData = plan.data;
@@ -85,21 +85,31 @@ export function SpecSyncTab({ collection }: SpecSyncTabProps) {
   // An emptied selection, for example after a plan change, closes the dialog for good.
   if (confirmOpen && approvedItems.length + variables.size === 0) setConfirmOpen(false);
 
-  const onSettledOk = useCallback((r: OpenApiApplyReport) => setReport(r), []);
+  // The notice goes away once the other apply is done.
+  if (busyNotice && !applyingAnywhere) setBusyNotice(false);
+
   const confirmApply = () => {
     setConfirmOpen(false);
+    if (isApplying(collection)) {
+      setBusyNotice(true);
+      return;
+    }
+    const sentLinks = sel.selection.renameLinks.length > 0;
     apply.mutate(sel.selection, {
-      onSuccess: (r) => {
-        // The links are used up once they are written, so the next apply must not resend them.
-        sel.clearLinks();
-        onSettledOk(r);
+      // The links are used up once they are written, so the next apply must not resend them.
+      onSuccess: () => {
+        if (sentLinks) sel.clearLinks();
       },
     });
   };
   const skipSelected = () => {
     if (!planData) return;
     const keys = approvedItems.map((i) => i.key);
-    if (keys.length === 0 || isApplying(collection)) return;
+    if (keys.length === 0) return;
+    if (isApplying(collection)) {
+      setBusyNotice(true);
+      return;
+    }
     // Only the skips go out, with no links. Other approvals wait for the Apply button.
     const selection = buildSelection(planData, {
       approved: new Set(),
@@ -109,11 +119,10 @@ export function SpecSyncTab({ collection }: SpecSyncTabProps) {
       links: [],
     });
     sel.skip(keys);
-    apply.mutate(selection, { onSuccess: onSettledOk, onError: () => sel.unskip(keys) });
+    apply.mutate(selection, { onError: () => sel.unskip(keys) });
   };
   const checkAgain = async () => {
     setChecking(true);
-    apply.reset();
     try {
       await Promise.all([
         queryClient.refetchQueries({ queryKey: openApiSyncKeys.statusAll(collection) }),
@@ -121,7 +130,7 @@ export function SpecSyncTab({ collection }: SpecSyncTabProps) {
       ]);
     } finally {
       setChecking(false);
-      setReport(null);
+      dismiss();
     }
   };
 
@@ -198,7 +207,8 @@ export function SpecSyncTab({ collection }: SpecSyncTabProps) {
       <div className='flex min-h-0 flex-1 flex-col'>
         {s.consent !== 'granted' && (
           <p className='px-4 pt-2 text-xs text-muted-foreground'>
-            This pending spec came with the collection files. It was not fetched on this machine.
+            This pending spec came with the collection files. It may not have been checked on this
+            machine.
           </p>
         )}
         <SpecSyncActionsBar
@@ -208,15 +218,17 @@ export function SpecSyncTab({ collection }: SpecSyncTabProps) {
           selectedCount={approved.size + variables.size}
           itemSelectedCount={approvedItems.length}
           locked={plan.isPlaceholderData}
-          busy={apply.isPending || applyingAnywhere || plan.isPlaceholderData}
+          busy={apply.isPending || applyingAnywhere || plan.isFetching}
           onSelectAll={selectAll}
           onSelectNone={selectNone}
           onSkip={skipSelected}
           onApply={() => setConfirmOpen(true)}
         />
-        {apply.isError && (
+        {(busyNotice || (last !== null && last.report === undefined)) && (
           <div className='px-4 pt-2'>
-            <StateBlock tone='error'>{applyErrorMessage(apply.error)}</StateBlock>
+            <StateBlock tone='error'>
+              {syncErrorMessage(busyNotice ? 'An apply is already running.' : last?.error)}
+            </StateBlock>
           </div>
         )}
         <div className='flex min-h-0 flex-1'>
@@ -271,8 +283,9 @@ export function SpecSyncTab({ collection }: SpecSyncTabProps) {
       <SpecSyncSettings collection={collection} status={s} />
       <div className='flex min-h-0 flex-1 flex-col'>{body}</div>
       <ApplyResultDialog
-        report={report}
-        onClose={() => setReport(null)}
+        report={last?.report ?? null}
+        variableCount={last?.variableCount ?? 0}
+        onClose={dismiss}
         onCheckAgain={checkAgain}
         checking={checking}
       />

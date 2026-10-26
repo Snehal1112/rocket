@@ -48,13 +48,13 @@ export function ApplyConfirmDialog({
             <li>{`${plural(changed, 'changed request', 'changed requests')} will be updated.`}</li>
           )}
           {deleted > 0 && (
-            <li>{`${plural(deleted, 'removed request', 'removed requests')} will be deleted if Rocket can rewrite ${deleted === 1 ? 'it' : 'them'}, you did not edit ${deleted === 1 ? 'it' : 'them'}.`}</li>
+            <li>{`${plural(deleted, 'removed request', 'removed requests')} will be deleted if Rocket can rewrite ${deleted === 1 ? 'it' : 'them'}, because you did not edit ${deleted === 1 ? 'it' : 'them'}.`}</li>
           )}
           {kept > 0 && (
-            <li>{`${plural(kept, 'removed request', 'removed requests')} ${kept === 1 ? 'stays' : 'stay'} in your collection but ${kept === 1 ? 'is' : 'are'} no longer tracked, you edited ${kept === 1 ? 'it' : 'them'} or it cannot be known.`}</li>
+            <li>{`${plural(kept, 'removed request', 'removed requests')} ${kept === 1 ? 'stays' : 'stay'} in your collection but ${kept === 1 ? 'is' : 'are'} no longer tracked, because you edited ${kept === 1 ? 'it' : 'them'} or Rocket cannot tell.`}</li>
           )}
           {variableCount > 0 && (
-            <li>{`${plural(variableCount, 'variable change', 'variable changes')} will be applied.`}</li>
+            <li>{`${plural(variableCount, 'variable change', 'variable changes')}: kept as you have ${variableCount === 1 ? 'it' : 'them'} when you changed the value.`}</li>
           )}
         </ul>
         <AlertDialogFooter>

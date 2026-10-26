@@ -1,6 +1,7 @@
-import { act, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { useApplySync } from '@/lib/queries/openapi-sync-queries';
 import * as tauriApi from '@/lib/tauri-api';
 import { renderWithQuery } from '@/test/trust-fixtures';
 import { SpecSyncTab } from '../SpecSyncTab';
@@ -57,12 +58,29 @@ describe('SpecSyncTab', () => {
     expect(tauriApi.getOpenApiSyncPlan).toHaveBeenCalledWith('c', []);
   });
 
-  it('shows the state file error with its message', async () => {
-    vi.mocked(tauriApi.getOpenApiSyncStatus).mockRejectedValue('bad yaml at line 3');
+  it('shows a fixed sentence for a state file error, never the path', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockRejectedValue(
+      'bad yaml in /home/me/proj/.rocket/openapi-source.yml at line 3',
+    );
     renderWithQuery(<SpecSyncTab collection='c' />);
     expect(
-      await screen.findByText(/The sync state file cannot be read: bad yaml at line 3/),
+      await screen.findByText(
+        'The sync state file cannot be read: Something went wrong with the spec sync. Try again.',
+      ),
     ).toBeInTheDocument();
+    expect(screen.queryByText(/home\/me/)).toBeNull();
+  });
+
+  it('shows a fixed sentence for a plan error, never the path', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
+    vi.mocked(tauriApi.getOpenApiSyncPlan).mockRejectedValue('cannot read /home/me/spec.json');
+    renderWithQuery(<SpecSyncTab collection='c' />);
+    expect(
+      await screen.findByText(
+        'The plan cannot be built: Something went wrong with the spec sync. Try again.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/home\/me/)).toBeNull();
   });
 
   it('asks for a new check when the pending spec changed', async () => {
@@ -79,7 +97,7 @@ describe('SpecSyncTab', () => {
     await screen.findByText('Folder: pets / read');
     expect(screen.getByRole('button', { name: 'Check now' })).toBeEnabled();
     expect(screen.queryByText('Trust this spec link')).toBeNull();
-    expect(screen.queryByText(/not fetched on this machine/)).toBeNull();
+    expect(screen.queryByText(/may not have been checked/)).toBeNull();
   });
 
   it('asks for approval first, keeps Check now off and leaves apply and skip alone', async () => {
@@ -93,10 +111,10 @@ describe('SpecSyncTab', () => {
     await screen.findByText('Folder: pets / read');
     expect(
       screen.getByText(
-        'This pending spec came with the collection files. It was not fetched on this machine.',
+        'This pending spec came with the collection files. It may not have been checked on this machine.',
       ),
     ).toBeInTheDocument();
-    await userEvent.setup().click(screen.getByRole('checkbox', { name: 'Select Add pet' }));
+    await userEvent.setup().click(screen.getByRole('checkbox', { name: 'Include Add pet in apply' }));
     expect(screen.getByRole('button', { name: /^Apply/ })).toBeEnabled();
   });
 
@@ -141,7 +159,7 @@ describe('SpecSyncTab actions', () => {
     await screen.findByText('Folder: pets / read');
     expect(screen.getAllByRole('checkbox')).toHaveLength(3);
     expect(screen.getByText('0 selected')).toBeInTheDocument();
-    await userEvent.setup().click(screen.getByRole('checkbox', { name: 'Select Add pet' }));
+    await userEvent.setup().click(screen.getByRole('checkbox', { name: 'Include Add pet in apply' }));
     expect(screen.getByText('1 selected')).toBeInTheDocument();
   });
 
@@ -173,7 +191,7 @@ describe('SpecSyncTab actions', () => {
     renderWithQuery(<SpecSyncTab collection='skip1' />);
     const user = userEvent.setup();
     await screen.findByText('Add pet');
-    await user.click(screen.getByRole('checkbox', { name: 'Select Add pet' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Include Add pet in apply' }));
     await user.click(screen.getByRole('button', { name: /^Skip selected/ }));
     await waitFor(() =>
       expect(tauriApi.applyOpenApiSync).toHaveBeenCalledWith('skip1', {
@@ -201,7 +219,7 @@ describe('SpecSyncTab actions', () => {
     await user.click(screen.getByRole('button', { name: 'Apply' }));
     expect(screen.getByText('1 new request will be added.')).toBeInTheDocument();
     expect(
-      screen.getByText('1 removed request will be deleted if Rocket can rewrite it, you did not edit it.'),
+      screen.getByText('1 removed request will be deleted if Rocket can rewrite it, because you did not edit it.'),
     ).toBeInTheDocument();
     await user.dblClick(screen.getByRole('button', { name: 'Apply now' }));
     expect(await screen.findByText('1 applied: 0 created, 1 updated.')).toBeInTheDocument();
@@ -225,7 +243,7 @@ describe('SpecSyncTab actions', () => {
         name: 'Take spec',
       }),
     );
-    await user.click(screen.getByRole('checkbox', { name: 'Select Add pet' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Include Add pet in apply' }));
     await user.click(screen.getByRole('button', { name: 'Apply' }));
     await user.click(screen.getByRole('button', { name: 'Apply now' }));
     await waitFor(() => expect(tauriApi.applyOpenApiSync).toHaveBeenCalled());
@@ -260,7 +278,7 @@ describe('SpecSyncTab actions', () => {
     renderWithQuery(<SpecSyncTab collection='err1' />);
     const user = userEvent.setup();
     await screen.findByText('Add pet');
-    await user.click(screen.getByRole('checkbox', { name: 'Select Add pet' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Include Add pet in apply' }));
     await user.click(screen.getByRole('button', { name: 'Apply' }));
     await user.click(screen.getByRole('button', { name: 'Apply now' }));
     expect(
@@ -275,7 +293,7 @@ describe('SpecSyncTab actions', () => {
     renderWithQuery(<SpecSyncTab collection='again1' />);
     const user = userEvent.setup();
     await screen.findByText('Add pet');
-    await user.click(screen.getByRole('checkbox', { name: 'Select Add pet' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Include Add pet in apply' }));
     await user.click(screen.getByRole('button', { name: 'Apply' }));
     await user.click(screen.getByRole('button', { name: 'Apply now' }));
     await screen.findByText('1 applied: 0 created, 1 updated.');
@@ -310,13 +328,13 @@ describe('SpecSyncTab actions', () => {
     await user.click(await screen.findByRole('button', { name: 'Link as rename' }));
     await screen.findByText('Changed (1)');
     // A skip with a link in place carries no links.
-    await user.click(await screen.findByRole('checkbox', { name: 'Select List pets' }));
+    await user.click(await screen.findByRole('checkbox', { name: 'Include List pets in apply' }));
     await user.click(screen.getByRole('button', { name: /^Skip selected/ }));
     await waitFor(() => expect(tauriApi.applyOpenApiSync).toHaveBeenCalledTimes(1));
     expect(vi.mocked(tauriApi.applyOpenApiSync).mock.calls[0]?.[1].renameLinks).toEqual([]);
     await user.click((await screen.findAllByRole('button', { name: 'Close' }))[0] as HTMLElement);
     // An apply sends the link, and the next selection does not.
-    await user.click(await screen.findByRole('checkbox', { name: 'Select List pets' }));
+    await user.click(await screen.findByRole('checkbox', { name: 'Include List pets in apply' }));
     await user.click(screen.getByRole('button', { name: 'Apply' }));
     await user.click(screen.getByRole('button', { name: 'Apply now' }));
     await waitFor(() => expect(tauriApi.applyOpenApiSync).toHaveBeenCalledTimes(2));
@@ -338,7 +356,7 @@ describe('SpecSyncTab actions', () => {
     const link = await screen.findByRole('button', { name: 'Link as rename' });
     await userEvent.setup().click(link);
     expect(screen.queryByText('Loading the plan...')).toBeNull();
-    expect(screen.getByRole('checkbox', { name: 'Select List pets' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Include List pets in apply' })).toBeInTheDocument();
     // Apply waits for the real plan.
     expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled();
   });
@@ -359,7 +377,7 @@ describe('SpecSyncTab actions', () => {
     );
     const user = userEvent.setup();
     await screen.findAllByText('Add pet');
-    for (const box of screen.getAllByRole('checkbox', { name: 'Select Add pet' })) {
+    for (const box of screen.getAllByRole('checkbox', { name: 'Include Add pet in apply' })) {
       await user.click(box);
     }
     await user.click(screen.getAllByRole('button', { name: 'Apply' })[0] as HTMLElement);
@@ -368,7 +386,10 @@ describe('SpecSyncTab actions', () => {
     await waitFor(() => expect(screen.getAllByRole('button', { name: 'Apply' })[1]).toBeDisabled());
     expect(screen.getAllByRole('button', { name: /^Skip selected/ })[1]).toBeDisabled();
     await act(async () => finish(report));
-    await user.click((await screen.findAllByRole('button', { name: 'Close' }))[0] as HTMLElement);
+    // Both tabs show the shared report, so Escape closes it for both.
+    await screen.findAllByText('Apply finished');
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByText('Apply finished')).toBeNull());
     await waitFor(() => expect(screen.getAllByRole('button', { name: 'Apply' })[1]).toBeEnabled());
     expect(screen.queryByText('Skipped')).toBeNull();
   });
@@ -378,7 +399,7 @@ describe('SpecSyncTab actions', () => {
     renderWithQuery(<SpecSyncTab collection='keep2' />);
     const user = userEvent.setup();
     await screen.findByText('Add pet');
-    await user.click(screen.getByRole('checkbox', { name: 'Select Add pet' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Include Add pet in apply' }));
     await user.type(screen.getByRole('searchbox', { name: 'Search changes' }), 'List');
     await user.click(screen.getByRole('button', { name: 'Select all (1)' }));
     expect(screen.getByText('2 selected')).toBeInTheDocument();
@@ -389,7 +410,7 @@ describe('SpecSyncTab actions', () => {
     renderWithQuery(<SpecSyncTab collection='conf1' />);
     const user = userEvent.setup();
     await screen.findByText('Add pet');
-    await user.click(screen.getByRole('checkbox', { name: 'Select Add pet' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Include Add pet in apply' }));
     await user.click(screen.getByRole('button', { name: 'Apply' }));
     expect(screen.getByRole('button', { name: 'Apply now' })).toBeInTheDocument();
     vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(
@@ -400,8 +421,143 @@ describe('SpecSyncTab actions', () => {
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Apply now' })).toBeNull());
     expect(screen.getByText('0 selected')).toBeInTheDocument();
     // Selecting again must not pop the dialog open by itself.
-    await user.click(await screen.findByRole('checkbox', { name: 'Select Add pet' }));
+    await user.click(await screen.findByRole('checkbox', { name: 'Include Add pet in apply' }));
     expect(screen.getByText('1 selected')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Apply now' })).toBeNull();
+  });
+
+  it('keeps the rename links through a background refresh of the plan', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
+    const linked = makePlan({
+      items: [{ ...changedItem, key: 'GET /pets', name: 'List pets' } as OpenApiSyncItem],
+    });
+    const unlinked = makePlan({
+      items: [
+        { ...newItem },
+        { ...removedItem, key: 'GET /animals', possiblyRenamedTo: undefined } as OpenApiSyncItem,
+      ],
+    });
+    vi.mocked(tauriApi.getOpenApiSyncPlan).mockImplementation(async (_c, links = []) =>
+      links.length > 0 ? { ...linked, warnings: [`w${Math.random()}`] } : unlinked,
+    );
+    vi.mocked(tauriApi.applyOpenApiSync).mockResolvedValue(report);
+    renderWithQuery(<SpecSyncTab collection='links3' />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Link as rename' }));
+    await screen.findByText('Changed (1)');
+    const onChecked = vi.mocked(tauriApi.onOpenApiSyncChecked).mock.calls[0]?.[0];
+    await act(async () => onChecked?.({ collection: 'links3' } as never));
+    await user.click(await screen.findByRole('checkbox', { name: 'Include List pets in apply' }));
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    await user.click(screen.getByRole('button', { name: 'Apply now' }));
+    await waitFor(() => expect(tauriApi.applyOpenApiSync).toHaveBeenCalled());
+    expect(vi.mocked(tauriApi.applyOpenApiSync).mock.calls[0]?.[1].renameLinks).toEqual([
+      ['GET /animals', 'GET /pets'],
+    ]);
+  });
+
+  it('disables Apply while the plan refetches', async () => {
+    mockSync();
+    renderWithQuery(<SpecSyncTab collection='fetch1' />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('checkbox', { name: 'Include Add pet in apply' }));
+    expect(screen.getByRole('button', { name: 'Apply' })).toBeEnabled();
+    vi.mocked(tauriApi.getOpenApiSyncPlan).mockReturnValue(new Promise(() => undefined));
+    const onChecked = vi.mocked(tauriApi.onOpenApiSyncChecked).mock.calls[0]?.[0];
+    await act(async () => onChecked?.({ collection: 'fetch1' } as never));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled());
+  });
+
+  it('shows the report again when the tab is opened after leaving mid-apply', async () => {
+    mockSync();
+    let finish: (v: OpenApiApplyReport) => void = () => undefined;
+    vi.mocked(tauriApi.applyOpenApiSync).mockReturnValue(
+      new Promise<OpenApiApplyReport>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const first = renderWithQuery(<SpecSyncTab collection='away1' />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('checkbox', { name: 'Include Add pet in apply' }));
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    await user.click(screen.getByRole('button', { name: 'Apply now' }));
+    first.unmount();
+    await act(async () => finish(report));
+    renderWithQuery(<SpecSyncTab collection='away1' />);
+    expect(await screen.findByText('1 applied: 0 created, 1 updated.')).toBeInTheDocument();
+    await user.click((await screen.findAllByRole('button', { name: 'Close' }))[0] as HTMLElement);
+    await waitFor(() => expect(screen.queryByText('Apply finished')).toBeNull());
+  });
+
+  it('shows the apply error again after leaving mid-apply', async () => {
+    mockSync();
+    let fail: (e: unknown) => void = () => undefined;
+    vi.mocked(tauriApi.applyOpenApiSync).mockReturnValue(
+      new Promise<OpenApiApplyReport>((_resolve, reject) => {
+        fail = reject;
+      }),
+    );
+    const first = renderWithQuery(<SpecSyncTab collection='away2' />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('checkbox', { name: 'Include Add pet in apply' }));
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    await user.click(screen.getByRole('button', { name: 'Apply now' }));
+    first.unmount();
+    await act(async () => fail('Conflict: an earlier apply is not finished yet'));
+    renderWithQuery(<SpecSyncTab collection='away2' />);
+    expect(
+      await screen.findByText('Another apply is not finished yet. Wait a moment and try again.'),
+    ).toBeInTheDocument();
+  });
+
+  it('describes a variables-only apply without saying nothing was applied', async () => {
+    mockSync(
+      makePlan({
+        items: [],
+        variableChanges: [{ name: 'baseUrl', kind: 'baseUrl', digest: 'dv', spec: 'https://x' }],
+      }),
+    );
+    vi.mocked(tauriApi.applyOpenApiSync).mockResolvedValue({ ...report, applied: [] });
+    renderWithQuery(<SpecSyncTab collection='vars1' />);
+    const user = userEvent.setup();
+    await user.click(
+      await screen.findByRole('checkbox', { name: 'Include Base URL baseUrl in apply' }),
+    );
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    expect(
+      screen.getByText('1 variable change: kept as you have it when you changed the value.'),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Apply now' }));
+    expect(await screen.findByText(/1 variable change was checked/)).toBeInTheDocument();
+    expect(screen.queryByText('Nothing was applied.')).toBeNull();
+  });
+
+  it('tells the user when Confirm meets an apply that is already running', async () => {
+    mockSync();
+    vi.mocked(tauriApi.applyOpenApiSync).mockReturnValue(new Promise(() => undefined));
+    function Starter() {
+      const apply = useApplySync('race1');
+      return (
+        <button
+          type='button'
+          onClick={() => apply.mutate({ items: [], skips: [], variables: [], renameLinks: [] })}
+        >
+          start other
+        </button>
+      );
+    }
+    renderWithQuery(
+      <>
+        <SpecSyncTab collection='race1' />
+        <Starter />
+      </>,
+    );
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('checkbox', { name: 'Include Add pet in apply' }));
+    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    fireEvent.click(screen.getByText('start other'));
+    await user.click(screen.getByRole('button', { name: 'Apply now' }));
+    expect(await screen.findByText('Another apply is still running. Wait for it to finish.')).toBeInTheDocument();
+    expect(tauriApi.applyOpenApiSync).toHaveBeenCalledTimes(1);
   });
 });

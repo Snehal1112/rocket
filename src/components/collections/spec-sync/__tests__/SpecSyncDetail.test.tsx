@@ -135,4 +135,15 @@ describe('SpecSyncDetail', () => {
     await userEvent.setup().click(screen.getByRole('button', { name: 'Unlink rename' }));
     expect(p.onUnlink).toHaveBeenCalledWith('GET /old');
   });
+
+  it('explains that an edited variable value is kept', () => {
+    const plan = makePlan({
+      items: [],
+      variableChanges: [{ name: 'baseUrl', kind: 'baseUrl', digest: 'v', spec: 'https://x' }],
+    });
+    render(<SpecSyncDetail {...props({ plan, selectedId: 'variable:baseUrl:baseUrl' })} />);
+    expect(
+      screen.getByText(/If you changed this value yourself, Rocket keeps yours/),
+    ).toBeInTheDocument();
+  });
 });

@@ -38,6 +38,16 @@ function planSignature(plan: OpenApiSyncPlan): string {
   return [...items, ...vars].join('\u0001');
 }
 
+/** True when the plan has the rename hint for the pair, or the merged Changed item under the new key. */
+function linkIsShown(plan: OpenApiSyncPlan, oldKey: string, newKey: string): boolean {
+  return plan.items.some(
+    (i) =>
+      (i.kind === 'changed' && i.key === newKey) ||
+      (i.kind === 'new' && i.key === newKey && i.possiblyRenamedFrom === oldKey) ||
+      (i.kind === 'removed' && i.key === oldKey && i.possiblyRenamedTo === newKey),
+  );
+}
+
 function withKeys(set: Set<string>, keys: Iterable<string>, on: boolean): Set<string> {
   const next = new Set(set);
   for (const k of keys) {
@@ -59,16 +69,15 @@ export function useSyncSelection(
 ) {
   const [state, setState] = useState<State>(emptyState);
   const signature = useMemo(() => (plan ? planSignature(plan) : ''), [plan]);
-  const linksKey = JSON.stringify(links);
-  const [seen, setSeen] = useState({ signature, linksKey });
-  if (seen.signature !== signature) {
-    setSeen({ signature, linksKey });
+  const [seen, setSeen] = useState(signature);
+  if (seen !== signature) {
+    setSeen(signature);
     setState(emptyState());
-    // A new plan under the same links means the links were used up, so they must not be
-    // sent again. A plan that changed because a link was added keeps them, and so does one
-    // that follows a failed plan, which has an empty signature.
-    if (links.length > 0 && signature !== '' && seen.signature !== '' && seen.linksKey === linksKey)
-      setLinks([]);
+    // Links stay across new plans. Only the ones the plan no longer shows are dropped.
+    if (plan && links.length > 0) {
+      const valid = links.filter(([oldKey, newKey]) => linkIsShown(plan, oldKey, newKey));
+      if (valid.length !== links.length) setLinks(valid);
+    }
   }
 
   const toggle = useCallback((key: string) => {
