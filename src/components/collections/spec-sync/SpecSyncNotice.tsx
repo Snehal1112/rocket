@@ -13,12 +13,14 @@ export function SpecSyncNotice({ collection }: SpecSyncNoticeProps) {
   useOpenApiSyncEvents();
   const { data: status } = useOpenApiSyncStatus(collection);
   const openCollectionTab = usePaneStore((s) => s.openCollectionTab);
-  if (!status || status.lastStatus?.state !== 'changed' || !status.hasPending) return null;
+  // Without approval on this machine the spec was not fetched here, so nothing is claimed.
+  if (!status || status.consent !== 'granted') return null;
+  if (status.lastStatus?.state !== 'changed' || !status.hasPending) return null;
   return (
     <Alert>
       <RefreshCw className='mt-0.5 h-4 w-4 shrink-0' aria-hidden='true' />
       <div className='flex flex-1 flex-col gap-1'>
-        <p className='font-semibold'>The API spec has changed.</p>
+        <p className='font-semibold'>A new version of the spec was found.</p>
         <p className='text-muted-foreground'>Review what would change in this collection.</p>
         <div>
           <Button

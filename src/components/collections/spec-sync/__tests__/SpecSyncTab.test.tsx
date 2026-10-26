@@ -72,12 +72,39 @@ describe('SpecSyncTab', () => {
     expect(await screen.findByText('The pending spec changed, check again')).toBeInTheDocument();
   });
 
-  it('never offers a check now button', async () => {
+  it('offers a Check now button next to the plan', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
     vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(makePlan());
     renderWithQuery(<SpecSyncTab collection='c' />);
     await screen.findByText('Folder: pets / read');
-    await waitFor(() => expect(screen.queryByText(/check now/i)).toBeNull());
+    expect(screen.getByRole('button', { name: 'Check now' })).toBeEnabled();
+    expect(screen.queryByText('Trust this spec link')).toBeNull();
+  });
+
+  it('asks for approval first, keeps Check now off and leaves apply and skip alone', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(
+      makeStatus({ consent: 'missing', interval: 'off' }),
+    );
+    vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(makePlan());
+    renderWithQuery(<SpecSyncTab collection='cons1' />);
+    expect(await screen.findByText('Trust this spec link')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Check now' })).toBeDisabled();
+    await screen.findByText('Folder: pets / read');
+    await userEvent.setup().click(screen.getByRole('checkbox', { name: 'Select Add pet' }));
+    expect(screen.getByRole('button', { name: /^Apply/ })).toBeEnabled();
+  });
+
+  it('explains that the link must be approved when there is no plan', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(
+      makeStatus({
+        consent: 'locationChanged',
+        hasPending: false,
+        lastCheckedAt: null,
+        lastStatus: null,
+      }),
+    );
+    renderWithQuery(<SpecSyncTab collection='cons2' />);
+    expect(await screen.findByText(/Approve the spec link first/)).toBeInTheDocument();
   });
 });
 

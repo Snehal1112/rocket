@@ -51,6 +51,23 @@ describe('SpecSyncNotice', () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it('says a new version was found and never claims a fetch', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
+    renderWithQuery(<SpecSyncNotice collection='c' />);
+    expect(await screen.findByText('A new version of the spec was found.')).toBeInTheDocument();
+    expect(screen.queryByText(/fetched from/i)).toBeNull();
+  });
+
+  it.each(['missing', 'locationChanged'] as const)(
+    'renders nothing for a pending spec while consent is %s',
+    async (consent) => {
+      vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus({ consent }));
+      const { container } = renderWithQuery(<SpecSyncNotice collection='c' />);
+      await waitFor(() => expect(tauriApi.getOpenApiSyncStatus).toHaveBeenCalled());
+      expect(container).toBeEmptyDOMElement();
+    },
+  );
+
   it('opens the Spec sync tab on click', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
     renderWithQuery(<SpecSyncNotice collection='c' />);

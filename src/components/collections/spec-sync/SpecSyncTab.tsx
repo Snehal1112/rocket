@@ -17,9 +17,11 @@ import { ApplyConfirmDialog } from './ApplyConfirmDialog';
 import { ApplyResultDialog } from './ApplyResultDialog';
 import { buildSelection } from './buildSelection';
 import { SpecSyncActionsBar } from './SpecSyncActionsBar';
+import { SpecSyncConsentBanner } from './SpecSyncConsentBanner';
 import { SpecSyncDetail } from './SpecSyncDetail';
 import { SpecSyncHeader } from './SpecSyncHeader';
 import { SpecSyncList } from './SpecSyncList';
+import { SpecSyncSettings } from './SpecSyncSettings';
 import {
   filterItems,
   filterVariables,
@@ -152,9 +154,11 @@ export function SpecSyncTab({ collection }: SpecSyncTabProps) {
       size='compact'
       title='No changes found'
       reason={
-        s.lastCheckedAt
-          ? `Last checked ${formatRelativeTime(s.lastCheckedAt)}.`
-          : 'The spec has not been checked yet.'
+        s.consent !== 'granted'
+          ? 'Approve the spec link first, then check for changes.'
+          : s.lastCheckedAt
+            ? `Last checked ${formatRelativeTime(s.lastCheckedAt)}.`
+            : 'The spec has not been checked yet.'
       }
     />
   );
@@ -245,7 +249,11 @@ export function SpecSyncTab({ collection }: SpecSyncTabProps) {
 
   return (
     <div className='flex h-full flex-col overflow-hidden'>
-      <SpecSyncHeader status={s} />
+      <SpecSyncHeader collection={collection} status={s} />
+      {s.consent !== 'granted' && (
+        <SpecSyncConsentBanner collection={collection} location={s.location} consent={s.consent} />
+      )}
+      <SpecSyncSettings collection={collection} status={s} />
       <div className='flex min-h-0 flex-1 flex-col'>{body}</div>
       <ApplyResultDialog
         report={report}

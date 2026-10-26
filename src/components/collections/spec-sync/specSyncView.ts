@@ -111,6 +111,19 @@ export function intervalLabel(interval: OpenApiSyncInterval): string {
   return INTERVAL_LABEL[interval];
 }
 
+/** A link with a query or hash is split into a short form and the full text. */
+export function splitLocation(location: string): { short: string; full: string | null } {
+  try {
+    const url = new URL(location);
+    if ((url.protocol === 'https:' || url.protocol === 'http:') && (url.search || url.hash)) {
+      return { short: `${url.host}${url.pathname}`, full: location };
+    }
+  } catch {
+    // Not a URL, so it is shown as it is.
+  }
+  return { short: location, full: null };
+}
+
 /** The message of a failed command, which arrives as a string or an Error. */
 export function syncErrorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
