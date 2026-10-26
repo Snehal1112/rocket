@@ -190,6 +190,28 @@ describe('ImportCollectionDialog OpenAPI source', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Import' }));
     expect(await screen.findByText('This link points at a commit')).toBeInTheDocument();
   });
+  it('shows notes without calling them skipped', async () => {
+    mockImportOpenApiUrl.mockResolvedValue({
+      ...openApiResult,
+      report: {
+        ...report,
+        skipped: [1, 2, 3].map(() => ({
+          path: 'api-example.yaml',
+          reason: { type: 'notFollowed' as const, detail: 'a $ref to definitions.yaml was not loaded' },
+        })),
+      },
+    });
+    renderDialog();
+    await openOpenApiTab();
+    await userEvent.type(screen.getByRole('textbox'), 'https://example.com/o.json');
+    await userEvent.click(screen.getByRole('button', { name: 'Import' }));
+    expect(await screen.findByRole('button', { name: '1 note' })).toBeInTheDocument();
+    expect(screen.queryByText(/skipped/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/notFollowed/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '1 note' }));
+    expect(await screen.findByText(/3 references come from another file/)).toBeInTheDocument();
+  });
+
   it('shows a token field in Link mode and hides it in File mode', async () => {
     renderDialog();
     await openOpenApiTab();

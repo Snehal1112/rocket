@@ -1,5 +1,14 @@
 import { open as openFilePicker } from '@tauri-apps/plugin-dialog';
-import { ChevronDown, ChevronRight, FileCode, FileJson, Loader2, Plus, Upload } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronRight,
+  FileCode,
+  FileJson,
+  Info,
+  Loader2,
+  Plus,
+  Upload,
+} from 'lucide-react';
 import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -15,6 +24,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import {
   createWorkspace as apiCreateWorkspace,
   getAppDataDir,
@@ -29,6 +39,13 @@ import {
   type OpenApiGroupBy,
 } from '@/lib/tauri-api';
 import { switchWorkspaceSafely } from '@/lib/workspace-switch';
+import {
+  buildReportView,
+  describeNoteGroup,
+  notesSummary,
+  reasonLabel,
+  skippedSummary,
+} from './importReportView';
 import { describeSource, type SourceKind } from './importSources';
 
 interface ImportCollectionDialogProps {
@@ -96,6 +113,11 @@ export function ImportCollectionDialog({
   const [report, setReport] = useState<ImportReport | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [skippedOpen, setSkippedOpen] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(false);
+  // Items that were not imported and notes about left-out parts are shown apart.
+  const reportView = buildReportView(report ?? { skipped: [] });
+  const skippedText = skippedSummary(reportView);
+  const notesText = notesSummary(reportView);
   const [openapiMode, setOpenapiMode] = useState<OpenApiMode>('link');
   const [link, setLink] = useState('');
   // Held in state only. It is never shown again and is cleared on close and tab switch.
@@ -646,7 +668,7 @@ export function ImportCollectionDialog({
                 </div>
               )}
 
-              {report.skipped.length > 0 && (
+              {skippedText && (
                 <Collapsible open={skippedOpen} onOpenChange={setSkippedOpen}>
                   <CollapsibleTrigger asChild>
                     <Button
@@ -659,23 +681,73 @@ export function ImportCollectionDialog({
                       ) : (
                         <ChevronRight className='h-3 w-3' />
                       )}
-                      {report.skipped.length} item{report.skipped.length !== 1 ? 's' : ''} skipped
+                      {skippedText}
                     </Button>
                   </CollapsibleTrigger>
                   <CollapsibleContent>
                     <ul className='mt-1.5 space-y-1 max-h-40 overflow-y-auto'>
-                      {report.skipped.map((item, i) => (
+                      {reportView.skipped.map((item, i) => (
                         // biome-ignore lint/suspicious/noArrayIndexKey: stable list order after import
                         <li key={i} className='text-xs text-muted-foreground'>
                           <span className='font-mono'>{item.path}</span>
                           {' — '}
                           <span className='text-amber-500'>
-                            {item.reason.type}
+                            {reasonLabel(item.reason)}
                             {item.reason.detail ? `: ${item.reason.detail}` : ''}
                           </span>
                         </li>
                       ))}
                     </ul>
+                  </CollapsibleContent>
+                </Collapsible>
+              )}
+
+              {notesText && (
+                <Collapsible open={notesOpen} onOpenChange={setNotesOpen}>
+                  <CollapsibleTrigger asChild>
+                    <Button
+                      variant='ghost'
+                      size='sm'
+                      className='h-auto p-0 gap-1 text-xs text-muted-foreground hover:text-foreground hover:bg-transparent'
+                    >
+                      {notesOpen ? (
+                        <ChevronDown className='h-3 w-3' />
+                      ) : (
+                        <ChevronRight className='h-3 w-3' />
+                      )}
+                      {notesText}
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <TooltipProvider>
+                      <ul className='mt-1.5 space-y-1 max-h-40 overflow-y-auto'>
+                        {reportView.notes.map((group) => (
+                          <li key={group.label} className='text-xs text-muted-foreground'>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  type='button'
+                                  variant='ghost'
+                                  size='sm'
+                                  className='h-auto w-full items-start justify-start gap-1.5 whitespace-normal p-0 text-left text-xs font-normal text-muted-foreground hover:bg-transparent'
+                                  aria-label={`Not loaded: ${describeNoteGroup(group)}`}
+                                >
+                                  <Info className='mt-0.5 h-3 w-3 shrink-0 text-amber-500' />
+                                  <span>
+                                    <span className='font-medium'>Not loaded</span>
+                                    {' — '}
+                                    {describeNoteGroup(group)}
+                                  </span>
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent className='max-w-sm break-words'>
+                                {group.paths.join(', ')}: {group.details.join('; ')}
+                              </TooltipContent>
+                            </Tooltip>
+                          </li>
+                        ))}
+                      </ul>
+                    </TooltipProvider>
                   </CollapsibleContent>
                 </Collapsible>
               )}

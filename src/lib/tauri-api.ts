@@ -1809,7 +1809,8 @@ export const updateRequestDocs = (
 export type SkipReason =
   | { type: 'unsupportedRequestType'; detail: string }
   | { type: 'unsupportedAuthType'; detail: string }
-  | { type: 'parseError'; detail: string };
+  | { type: 'parseError'; detail: string }
+  | { type: 'notFollowed'; detail: string };
 
 export interface SkippedItem {
   path: string;
