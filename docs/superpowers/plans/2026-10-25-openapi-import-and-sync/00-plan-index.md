@@ -22,7 +22,7 @@ Rules for every plan:
 | ID | Plan | Needs |
 |---|---|---|
 | P4 | `plan-04-check-and-token.md`: sync state in the source file, `OpenApiSyncService` (conditional fetch, pending copy, token in the keychain), import with a token. Done on branch openapi-import (a26a3384..71594576), final review clean | P2, P3 |
-| P5 | Three-way diff and per-field merge engine (pure) | P1, P2 |
+| P5 | `plan-05-diff-and-merge.md`: baseline snapshot of converted requests (written at import), per-request three-way merge, sync plan (New, Changed, Removed, rename hints, skips, cautious mode). Written, waiting for review | P1, P2, P4 |
 | P6 | Apply approved changes with a staging area and recovery journal | P5 |
 | P7 | Scheduler: supervisor, intervals, jitter, backoff, launch catch-up, notice | P4 |
 | P8 | Spec sync tab: list and detail | P5, P6 |
