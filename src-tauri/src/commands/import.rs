@@ -13,7 +13,7 @@ use rocket_infra::{
     SharedPathCollectionRepo,
 };
 use serde::Serialize;
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
 struct FsEnvFactory(PathBuf);
 impl EnvironmentRepositoryFactory for FsEnvFactory {
@@ -219,6 +219,77 @@ pub(crate) fn recover_openapi_syncs(
     });
 }
 
+/// A running background loop that can be told to stop.
+pub(crate) trait Stoppable {
+    fn stop(&self);
+}
+
+impl Stoppable for rocket_app::SchedulerHandle {
+    fn stop(&self) {
+        rocket_app::SchedulerHandle::stop(self);
+    }
+}
+
+/// Holds the handle of the running sync supervisor, so a workspace switch or the app exit can
+/// stop it. Generic over `Stoppable` so tests can use a counting stand-in.
+pub(crate) struct SyncSchedulerSlot<H: Stoppable = rocket_app::SchedulerHandle>(Mutex<Option<H>>);
+
+impl<H: Stoppable> Default for SyncSchedulerSlot<H> {
+    fn default() -> Self {
+        Self(Mutex::new(None))
+    }
+}
+
+impl<H: Stoppable> SyncSchedulerSlot<H> {
+    /// Stops the previous handle first, then keeps the new one.
+    pub(crate) fn replace(&self, handle: H) {
+        let mut guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(old) = guard.take() {
+            old.stop();
+        }
+        *guard = Some(handle);
+    }
+
+    /// Stops and drops the kept handle. Calling it again does nothing.
+    pub(crate) fn stop(&self) {
+        let mut guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(old) = guard.take() {
+            old.stop();
+        }
+    }
+}
+
+/// Starts the sync supervisor for the active workspace and keeps its handle in the slot, which
+/// stops the previous one first. It checks only collections whose local interval is on. Recovery
+/// is not awaited here: the first tick waits 30 s and `check` recovers before it fetches.
+pub(crate) fn start_sync_scheduler(
+    app: &AppHandle,
+    active_workspace_path: Arc<Mutex<PathBuf>>,
+    fetcher: Arc<dyn SpecFetcher>,
+) {
+    let Some(slot) = app.try_state::<SyncSchedulerSlot>() else {
+        tracing::error!(
+            code = "sync_scheduler_slot_missing",
+            "sync supervisor not started"
+        );
+        return;
+    };
+    // Stop the old loop before building the new one.
+    slot.stop();
+    let factory: rocket_app::ServiceFactory = Arc::new(move || {
+        make_sync_service(Arc::clone(&active_workspace_path), Arc::clone(&fetcher))
+    });
+    let events = Arc::new(crate::tauri_event_bus::TauriEventBus::new(app.clone()));
+    let scheduler = rocket_app::OpenApiSyncScheduler::new(
+        factory,
+        events,
+        rocket_app::SchedulerConfig::default(),
+    );
+    // The scheduler spawns on the current tokio runtime, so enter the app runtime first.
+    let _guard = tauri::async_runtime::handle().inner().enter();
+    slot.replace(scheduler.start());
+}
+
 /// Import an OpenAPI or Swagger spec file as a new collection.
 #[tauri::command]
 pub async fn import_openapi_file(
@@ -275,6 +346,40 @@ pub async fn import_openapi_url(
         }
     }
     Ok(dto)
+}
+
+#[cfg(test)]
+mod sync_scheduler_slot {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct Counting(Arc<AtomicUsize>);
+    impl Stoppable for Counting {
+        fn stop(&self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn replace_stops_the_previous_handle() {
+        let slot = SyncSchedulerSlot::<Counting>::default();
+        let first = Arc::new(AtomicUsize::new(0));
+        let second = Arc::new(AtomicUsize::new(0));
+        slot.replace(Counting(Arc::clone(&first)));
+        slot.replace(Counting(Arc::clone(&second)));
+        assert_eq!(first.load(Ordering::SeqCst), 1);
+        assert_eq!(second.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn stop_is_idempotent() {
+        let slot = SyncSchedulerSlot::<Counting>::default();
+        let count = Arc::new(AtomicUsize::new(0));
+        slot.replace(Counting(Arc::clone(&count)));
+        slot.stop();
+        slot.stop();
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+    }
 }
 
 #[cfg(test)]

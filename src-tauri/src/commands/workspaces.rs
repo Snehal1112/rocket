@@ -89,6 +89,12 @@ pub fn switch_workspace(
         Arc::clone(active_path.inner()),
         Arc::clone(fetcher.inner()),
     );
+    // Stop the old workspace's supervisor and start one for the new workspace.
+    crate::commands::import::start_sync_scheduler(
+        &app,
+        Arc::clone(active_path.inner()),
+        Arc::clone(fetcher.inner()),
+    );
     // Cached flow runs belong to the old workspace. A same-named flow in the
     // new one is a different flow.
     flow_exec.clear_run_cache();

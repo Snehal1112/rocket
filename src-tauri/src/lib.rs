@@ -481,6 +481,14 @@ pub fn run() {
             // Settle a sync apply that a crash cut short, off the startup path.
             commands::import::recover_openapi_syncs(
                 Arc::clone(&active_workspace_path),
+                Arc::clone(&spec_fetcher),
+            );
+            // The supervisor checks only collections with a local interval. Its first tick waits
+            // 30 s and `check` recovers first, so it does not race the recovery above.
+            app.manage(commands::import::SyncSchedulerSlot::<rocket_app::SchedulerHandle>::default());
+            commands::import::start_sync_scheduler(
+                app.handle(),
+                Arc::clone(&active_workspace_path),
                 spec_fetcher,
             );
             let proxy_svc = rocket_app::ProxySettingsService::new(
@@ -1224,6 +1232,9 @@ pub fn run() {
         .expect("error while running tauri application")
         .run(|app_handle, event| {
             if let tauri::RunEvent::Exit = event {
+                if let Some(slot) = app_handle.try_state::<commands::import::SyncSchedulerSlot>() {
+                    slot.stop();
+                }
                 if let Some(acp_session_svc) =
                     app_handle.try_state::<rocket_app::AcpSessionService>()
                 {
