@@ -12,6 +12,7 @@ import {
 import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
   Dialog,
@@ -122,6 +123,7 @@ export function ImportCollectionDialog({
   const [link, setLink] = useState('');
   // Held in state only. It is never shown again and is cleared on close and tab switch.
   const [token, setToken] = useState('');
+  const [checkForUpdates, setCheckForUpdates] = useState(false);
   const [groupBy, setGroupBy] = useState<OpenApiGroupBy>('tags');
   const [warnings, setWarnings] = useState<string[]>([]);
 
@@ -142,6 +144,7 @@ export function ImportCollectionDialog({
       setOpenapiMode('link');
       setLink('');
       setToken('');
+      setCheckForUpdates(false);
       setGroupBy('tags');
       setWarnings([]);
     }, 200);
@@ -160,6 +163,7 @@ export function ImportCollectionDialog({
     setOpenapiMode('link');
     setLink('');
     setToken('');
+    setCheckForUpdates(false);
     setGroupBy('tags');
   }
 
@@ -262,10 +266,15 @@ export function ImportCollectionDialog({
       let result: ImportReport;
       let importWarnings: string[] = [];
       if (importSource === 'openapi') {
-        const imported =
-          openapiMode === 'link'
-            ? await importOpenApiUrl(link.trim(), groupBy, targetWsId, token.trim() || undefined)
-            : await importOpenApiFile(source?.path ?? '', groupBy, targetWsId);
+        const linkToken = token.trim() || undefined;
+        let imported: Awaited<ReturnType<typeof importOpenApiUrl>>;
+        if (openapiMode !== 'link') {
+          imported = await importOpenApiFile(source?.path ?? '', groupBy, targetWsId);
+        } else if (checkForUpdates) {
+          imported = await importOpenApiUrl(link.trim(), groupBy, targetWsId, linkToken, true);
+        } else {
+          imported = await importOpenApiUrl(link.trim(), groupBy, targetWsId, linkToken);
+        }
         result = imported.report;
         importWarnings = imported.warnings;
       } else if (!source) {
@@ -397,6 +406,21 @@ export function ImportCollectionDialog({
                     <p className='text-[11px] text-muted-foreground'>
                       Only for private GitHub repositories. Kept in your system keychain, never in
                       the collection.
+                    </p>
+                  </div>
+                  <div className='space-y-1'>
+                    <div className='flex items-center gap-2'>
+                      <Checkbox
+                        id='openapi-check-updates'
+                        checked={checkForUpdates}
+                        onCheckedChange={(v) => setCheckForUpdates(v === true)}
+                      />
+                      <Label htmlFor='openapi-check-updates' className='text-xs font-medium'>
+                        Check for spec updates
+                      </Label>
+                    </div>
+                    <p className='text-[11px] text-muted-foreground'>
+                      Rocket checks the link every 5 minutes while the app is open.
                     </p>
                   </div>
                 </div>

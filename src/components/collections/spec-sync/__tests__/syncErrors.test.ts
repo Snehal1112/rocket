@@ -10,6 +10,12 @@ describe('syncErrorMessage', () => {
     expect(text).not.toContain('consent_required');
   });
 
+  it('maps the disconnect busy sentence', () => {
+    expect(
+      syncErrorMessage('An apply is running on this collection. Try again when it finishes.'),
+    ).toBe('An apply is running on this collection. Try again when it finishes.');
+  });
+
   it('maps the location_changed prefix', () => {
     const text = syncErrorMessage(
       'Conflict: location_changed: the spec link changed, approve the new link first.',

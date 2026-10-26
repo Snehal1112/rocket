@@ -101,6 +101,9 @@ export function variableLabel(change: OpenApiVariableChange): string {
 
 const INTERVAL_LABEL: Record<OpenApiSyncInterval, string> = {
   off: 'Off',
+  every_5_minutes: 'Every 5 minutes',
+  every_15_minutes: 'Every 15 minutes',
+  every_30_minutes: 'Every 30 minutes',
   hourly: 'Every hour',
   daily: 'Every day',
   weekly: 'Every week',

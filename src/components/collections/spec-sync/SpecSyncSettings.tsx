@@ -22,7 +22,16 @@ import type { OpenApiSyncInterval, OpenApiSyncStatus } from '@/lib/tauri-api';
 import { intervalLabel, isGithubLocation } from './specSyncView';
 import { syncErrorMessage } from './syncErrors';
 
-const INTERVALS: OpenApiSyncInterval[] = ['off', 'hourly', 'daily', 'weekly', 'monthly'];
+const INTERVALS: OpenApiSyncInterval[] = [
+  'off',
+  'every_5_minutes',
+  'every_15_minutes',
+  'every_30_minutes',
+  'hourly',
+  'daily',
+  'weekly',
+  'monthly',
+];
 
 interface SpecSyncSettingsProps {
   collection: string;

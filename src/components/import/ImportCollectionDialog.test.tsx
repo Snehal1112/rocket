@@ -301,4 +301,56 @@ describe('ImportCollectionDialog OpenAPI source', () => {
     expect(await screen.findByText('Import complete')).toBeInTheDocument();
     expect(document.body.innerHTML).not.toContain('t0k');
   });
+
+  it('offers the update check in Link mode only, off by default, with a hint', async () => {
+    renderDialog();
+    await openOpenApiTab();
+    const box = screen.getByRole('checkbox', { name: 'Check for spec updates' });
+    expect(box).not.toBeChecked();
+    expect(
+      screen.getByText('Rocket checks the link every 5 minutes while the app is open.'),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'File' }));
+    expect(screen.queryByRole('checkbox', { name: 'Check for spec updates' })).toBeNull();
+  });
+
+  it('sends checkForUpdates true only when ticked', async () => {
+    mockImportOpenApiUrl.mockResolvedValue(openApiResult);
+    renderDialog();
+    await openOpenApiTab();
+    await userEvent.type(screen.getByRole('textbox'), 'https://example.com/o.json');
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Check for spec updates' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Import' }));
+    await waitFor(() =>
+      expect(mockImportOpenApiUrl).toHaveBeenCalledWith(
+        'https://example.com/o.json',
+        'tags',
+        'ws1',
+        undefined,
+        true,
+      ),
+    );
+  });
+
+  it('resets the update check when the dialog closes and reopens', async () => {
+    renderDialog();
+    await openOpenApiTab();
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Check for spec updates' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Bruno' })).toBeInTheDocument());
+    await openOpenApiTab();
+    expect(screen.getByRole('checkbox', { name: 'Check for spec updates' })).not.toBeChecked();
+  });
+
+  it('shows the warning when update checks could not be turned on', async () => {
+    mockImportOpenApiUrl.mockResolvedValue({
+      ...openApiResult,
+      warnings: ['Update checks could not be turned on. Turn them on in Spec sync.'],
+    });
+    renderDialog();
+    await openOpenApiTab();
+    await userEvent.type(screen.getByRole('textbox'), 'https://example.com/o.json');
+    await userEvent.click(screen.getByRole('button', { name: 'Import' }));
+    expect(await screen.findByText(/Update checks could not be turned on/)).toBeInTheDocument();
+  });
 });

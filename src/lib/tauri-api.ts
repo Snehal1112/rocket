@@ -1905,19 +1905,29 @@ export const importOpenApiUrl = (
   groupBy: OpenApiGroupBy,
   targetWorkspaceId: string,
   token?: string,
+  checkForUpdates?: boolean,
 ) =>
   invoke<OpenApiImportResult>('import_openapi_url', {
     link,
     groupBy,
     targetWorkspaceId,
     ...(token === undefined ? {} : { token }),
+    ...(checkForUpdates ? { checkForUpdates: true } : {}),
   });
 
 // ============================================================
 // OpenAPI spec sync
 // ============================================================
 
-export type OpenApiSyncInterval = 'off' | 'hourly' | 'daily' | 'weekly' | 'monthly';
+export type OpenApiSyncInterval =
+  | 'off'
+  | 'every_5_minutes'
+  | 'every_15_minutes'
+  | 'every_30_minutes'
+  | 'hourly'
+  | 'daily'
+  | 'weekly'
+  | 'monthly';
 
 export interface OpenApiLastStatus {
   state: 'unchanged' | 'changed' | 'failed';
@@ -1927,6 +1937,8 @@ export interface OpenApiLastStatus {
 export interface OpenApiSyncStatus {
   location: string;
   interval: OpenApiSyncInterval;
+  /** True when the saved interval name was not recognised and reads as off. */
+  intervalUnknown?: boolean;
   lastCheckedAt: string | null;
   lastStatus: OpenApiLastStatus | null;
   hasPending: boolean;
@@ -2080,6 +2092,13 @@ export const setOpenApiSyncToken = (collection: string, token: string) =>
 
 export const clearOpenApiSyncToken = (collection: string) =>
   invoke<void>('openapi_sync_clear_token', { collection });
+
+/** Removes the sync state of a collection. `removeToken` is sent only when true. */
+export const disconnectOpenApiSync = (collection: string, removeToken?: boolean) =>
+  invoke<void>('openapi_sync_disconnect', {
+    collection,
+    ...(removeToken ? { removeToken: true } : {}),
+  });
 
 export const grantOpenApiSyncConsent = (collection: string, location: string) =>
   invoke<void>('openapi_sync_grant_consent', { collection, location });

@@ -4,6 +4,7 @@ import {
   applyOpenApiSync,
   checkOpenApiSyncNow,
   clearOpenApiSyncToken,
+  disconnectOpenApiSync,
   getOpenApiSyncPlan,
   getOpenApiSyncStatus,
   grantOpenApiSyncConsent,
@@ -144,6 +145,23 @@ export function useRevokeConsent(collection: string) {
     networkMode: 'always',
     mutationFn: () => revokeOpenApiSyncConsent(collection),
     onSettled: () => invalidateSync(queryClient, collection),
+  });
+}
+
+/** Removes the sync state of a collection and refreshes everything that showed it. */
+export function useDisconnectSync(collection: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    networkMode: 'always',
+    mutationFn: (removeToken?: boolean) => disconnectOpenApiSync(collection, removeToken),
+    onSuccess: () => {
+      setApplying(collection, false);
+      setLastApply(collection, null);
+    },
+    onSettled: () => {
+      invalidateSync(queryClient, collection);
+      void queryClient.invalidateQueries({ queryKey: collectionKeys.all });
+    },
   });
 }
 

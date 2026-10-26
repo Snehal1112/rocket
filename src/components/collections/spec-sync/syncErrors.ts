@@ -26,6 +26,10 @@ const KNOWN: Array<[string, string]> = [
     'an earlier apply is not finished yet',
     'Another apply is not finished yet. Wait a moment and try again.',
   ],
+  [
+    'An apply is running on this collection. Try again when it finishes.',
+    'An apply is running on this collection. Try again when it finishes.',
+  ],
   ['An apply is already running.', 'Another apply is still running. Wait for it to finish.'],
   ['Tokens work with GitHub links only.', 'Tokens work with GitHub links only.'],
   ['The token is empty.', 'Enter a token first.'],

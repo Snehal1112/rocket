@@ -10,6 +10,7 @@ import {
   useApplySync,
   useCheckNow,
   useClearToken,
+  useDisconnectSync,
   useGrantConsent,
   useIsApplying,
   useLastApply,
@@ -35,6 +36,7 @@ vi.mock('@/lib/tauri-api', async () => {
     clearOpenApiSyncToken: vi.fn(),
     grantOpenApiSyncConsent: vi.fn(),
     revokeOpenApiSyncConsent: vi.fn(),
+    disconnectOpenApiSync: vi.fn(),
     applyOpenApiSync: vi.fn(),
   };
 });
@@ -314,6 +316,30 @@ describe('openapi sync queries', () => {
       await result.current.mutateAsync();
       expect(tauriApi.revokeOpenApiSyncConsent).toHaveBeenCalledWith('A');
       expectSyncKeysOnly(spy);
+    });
+
+    it('useDisconnectSync invalidates sync keys and the tree, and clears the last apply', async () => {
+      vi.mocked(tauriApi.applyOpenApiSync).mockRejectedValue(new Error('x'));
+      vi.mocked(tauriApi.disconnectOpenApiSync).mockResolvedValue(undefined);
+      const selection = { items: [], skips: [], variables: [], renameLinks: [] };
+      const apply = renderHook(() => ({ a: useApplySync('A'), l: useLastApply('A') }), {
+        wrapper,
+      });
+      await act(async () => {
+        await apply.result.current.a.mutateAsync(selection).catch(() => undefined);
+      });
+      expect(apply.result.current.l.last).not.toBeNull();
+      const spy = vi.spyOn(client, 'invalidateQueries');
+      const { result } = renderHook(() => useDisconnectSync('A'), { wrapper });
+      await act(async () => {
+        await result.current.mutateAsync(true);
+      });
+      expect(tauriApi.disconnectOpenApiSync).toHaveBeenCalledWith('A', true);
+      const keys = invalidatedKeys(spy);
+      expect(keys).toContainEqual(openApiSyncKeys.statusAll('A'));
+      expect(keys).toContainEqual(openApiSyncKeys.planAll('A'));
+      expect(keys).toContainEqual(collectionKeys.all);
+      expect(apply.result.current.l.last).toBeNull();
     });
 
     it('useApplySync returns the report and also invalidates the collection tree', async () => {

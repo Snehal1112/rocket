@@ -5,9 +5,11 @@ import {
   applyOpenApiSync,
   checkOpenApiSyncNow,
   clearOpenApiSyncToken,
+  disconnectOpenApiSync,
   getOpenApiSyncPlan,
   getOpenApiSyncStatus,
   grantOpenApiSyncConsent,
+  importOpenApiUrl,
   onOpenApiSyncApplied,
   onOpenApiSyncChecked,
   revokeOpenApiSyncConsent,
@@ -116,5 +118,35 @@ describe('OpenAPI sync API', () => {
     const cb = vi.mocked(listen).mock.calls[0][1] as (e: { payload: unknown }) => void;
     cb({ payload: { collection: 'Orders', applied: 2, stale: 1 } });
     expect(handler).toHaveBeenCalledWith({ collection: 'Orders', applied: 2, stale: 1 });
+  });
+
+  it('disconnectOpenApiSync sends removeToken only when true', async () => {
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    await disconnectOpenApiSync('Orders');
+    expect(invoke).toHaveBeenLastCalledWith('openapi_sync_disconnect', { collection: 'Orders' });
+    await disconnectOpenApiSync('Orders', false);
+    expect(invoke).toHaveBeenLastCalledWith('openapi_sync_disconnect', { collection: 'Orders' });
+    await disconnectOpenApiSync('Orders', true);
+    expect(invoke).toHaveBeenLastCalledWith('openapi_sync_disconnect', {
+      collection: 'Orders',
+      removeToken: true,
+    });
+  });
+
+  it('importOpenApiUrl sends checkForUpdates only when true', async () => {
+    vi.mocked(invoke).mockResolvedValue({});
+    await importOpenApiUrl('https://x/y.json', 'tags', 'ws1');
+    expect(invoke).toHaveBeenLastCalledWith('import_openapi_url', {
+      link: 'https://x/y.json',
+      groupBy: 'tags',
+      targetWorkspaceId: 'ws1',
+    });
+    await importOpenApiUrl('https://x/y.json', 'tags', 'ws1', undefined, true);
+    expect(invoke).toHaveBeenLastCalledWith('import_openapi_url', {
+      link: 'https://x/y.json',
+      groupBy: 'tags',
+      targetWorkspaceId: 'ws1',
+      checkForUpdates: true,
+    });
   });
 });
