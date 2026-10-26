@@ -72,7 +72,7 @@ impl OpenApiSourceRepository for FsOpenApiSourceRepo {
 
     fn save_pending(&self, collection_root: &Path, spec: &[u8]) -> DomainResult<()> {
         atomic_write(&pending_path(collection_root), spec)?;
-        Ok(())
+        crate::rocket_dir::ensure_gitignore(collection_root)
     }
 
     fn load_pending(&self, collection_root: &Path) -> DomainResult<Option<Vec<u8>>> {

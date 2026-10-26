@@ -10,6 +10,10 @@ use rocket_shared::types::{
 use serde_json::Value as Json;
 use sha2::{Digest, Sha256};
 
+/// Version of the conversion rules. Bump it on any change to `convert_operation` output, so a
+/// sync knows a baseline was built by different rules.
+pub const CONVERTER_VERSION: u32 = 1;
+
 /// The collection variable every request URL starts with.
 pub(crate) const BASE_URL_VARIABLE: &str = "baseUrl";
 /// Longest request name, in characters.

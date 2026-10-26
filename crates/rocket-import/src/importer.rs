@@ -1025,6 +1025,7 @@ impl ImportService {
                         request_path,
                         uid: converted.request.uid.clone(),
                         baseline_hash,
+                        baseline: converted.request,
                     });
                 }
                 Err(e) => report.skipped.push(SkippedItem {
@@ -1038,6 +1039,7 @@ impl ImportService {
             report,
             collection: col_name,
             operations,
+            base_url: doc.servers.first().cloned().unwrap_or_default(),
         })
     }
 
@@ -1289,7 +1291,7 @@ pub(crate) const MAX_WSDL_REQUESTS: usize = 2000;
 pub(crate) const MAX_OPENAPI_OPERATIONS: usize = 5_000;
 
 /// One request written by an OpenAPI import, with what a later sync needs to find it again.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ImportedOperation {
     /// The operation key from the spec (`operationId`, else `METHOD /path`).
     pub key: String,
@@ -1298,6 +1300,8 @@ pub struct ImportedOperation {
     pub uid: String,
     /// Hash of the imported fields at import time, see `converter::openapi::baseline_hash`.
     pub baseline_hash: String,
+    /// The request exactly as it was saved, including a " (n)" name suffix.
+    pub baseline: rocket_collection::Request,
 }
 
 /// The result of an OpenAPI import.
@@ -1307,6 +1311,8 @@ pub struct OpenApiImportOutcome {
     /// The name of the collection that was created.
     pub collection: String,
     pub operations: Vec<ImportedOperation>,
+    /// The `servers[0]` URL of the spec, empty when there is none.
+    pub base_url: String,
 }
 
 /// Most envelope bytes one WSDL import generates, summed over all requests.

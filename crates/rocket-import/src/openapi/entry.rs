@@ -1,9 +1,13 @@
 //! Import an OpenAPI spec from a file on disk or from a link.
 
+use crate::converter::openapi::CONVERTER_VERSION;
 use crate::error::{ImportError, ImportResult};
 use crate::importer::ImportService;
 use crate::openapi::{fetch_target, parse_spec_url, source_record, GroupBy};
 use crate::report::ImportReport;
+use rocket_collection::openapi_baseline::{
+    BaselineOperation, OpenApiBaseline, OpenApiBaselineRepository, BASELINE_FILE_VERSION,
+};
 use rocket_collection::openapi_source::{OpenApiSourceRepository, SpecLocation};
 use rocket_http::spec_fetch::{
     SpecFetchFailure, SpecFetchOutcome, SpecFetchRequest, SpecFetcher, DEFAULT_MAX_SPEC_BYTES,
@@ -144,6 +148,7 @@ impl ImportService {
         &self,
         fetcher: &dyn SpecFetcher,
         sources: &dyn OpenApiSourceRepository,
+        baselines: &dyn OpenApiBaselineRepository,
         link: &str,
         group_by: GroupBy,
         token: Option<&str>,
@@ -204,6 +209,26 @@ impl ImportService {
         if let Err(e) = sources.save(&root, &record) {
             warnings.push(format!("Sync could not be set up: {e}"));
         }
+        let baseline = OpenApiBaseline {
+            version: BASELINE_FILE_VERSION,
+            converter_version: CONVERTER_VERSION,
+            base_url: imported.base_url.clone(),
+            operations: imported
+                .operations
+                .iter()
+                .map(|op| BaselineOperation {
+                    key: op.key.clone(),
+                    request: op.baseline.clone(),
+                })
+                .collect(),
+        };
+        if baselines.save(&root, &baseline).is_err() {
+            warnings.push(
+                "The baseline snapshot could not be saved. \
+                 The review will be cautious until the next sync."
+                    .to_string(),
+            );
+        }
         match commit_ref(&location) {
             Some(CommitRef::Certain) => warnings.push(
                 "This link points to a commit, so the file will never change and \
@@ -234,11 +259,13 @@ mod tests {
     use crate::importer::ImportService;
     use crate::openapi::GroupBy;
     use async_trait::async_trait;
+    use rocket_collection::openapi_baseline::OpenApiBaseline as Baseline;
     use rocket_collection::openapi_source::{OpenApiSource, OpenApiSourceRepository, SpecLocation};
+    use rocket_collection::CollectionRepository;
     use rocket_http::spec_fetch::{
         SpecFetchFailure, SpecFetchOutcome, SpecFetchRequest, SpecFetcher, DEFAULT_MAX_SPEC_BYTES,
     };
-    use rocket_infra::FsOpenApiSourceRepo;
+    use rocket_infra::{FsCollectionRepo, FsOpenApiBaselineRepo, FsOpenApiSourceRepo};
     use rocket_shared::error::{DomainError, DomainResult};
     use std::path::Path;
     use std::sync::Mutex;
@@ -335,6 +362,7 @@ mod tests {
             .import_openapi_url(
                 &fetcher,
                 &FsOpenApiSourceRepo,
+                &FsOpenApiBaselineRepo,
                 LINK,
                 GroupBy::Tags,
                 None,
@@ -366,6 +394,7 @@ mod tests {
             .import_openapi_url(
                 &fetcher,
                 &FsOpenApiSourceRepo,
+                &FsOpenApiBaselineRepo,
                 link,
                 GroupBy::Tags,
                 None,
@@ -396,6 +425,7 @@ mod tests {
             .import_openapi_url(
                 &fetcher,
                 &FsOpenApiSourceRepo,
+                &FsOpenApiBaselineRepo,
                 LINK,
                 GroupBy::Tags,
                 None,
@@ -416,6 +446,7 @@ mod tests {
             .import_openapi_url(
                 &fetcher,
                 &FsOpenApiSourceRepo,
+                &FsOpenApiBaselineRepo,
                 LINK,
                 GroupBy::Tags,
                 None,
@@ -436,6 +467,7 @@ mod tests {
             .import_openapi_url(
                 &fetcher,
                 &FsOpenApiSourceRepo,
+                &FsOpenApiBaselineRepo,
                 LINK,
                 GroupBy::Tags,
                 None,
@@ -453,7 +485,15 @@ mod tests {
         let service = ImportService::new_with_workspace_path(ws.path());
         let fetcher = FakeFetcher::body(&fixture(), None);
         let result = service
-            .import_openapi_url(&fetcher, &FailingSources, LINK, GroupBy::Tags, None, "ws")
+            .import_openapi_url(
+                &fetcher,
+                &FailingSources,
+                &FsOpenApiBaselineRepo,
+                LINK,
+                GroupBy::Tags,
+                None,
+                "ws",
+            )
             .await
             .expect("import");
         assert!(ws
@@ -475,6 +515,7 @@ mod tests {
             .import_openapi_url(
                 &fetcher,
                 &FsOpenApiSourceRepo,
+                &FsOpenApiBaselineRepo,
                 sha,
                 GroupBy::Tags,
                 None,
@@ -491,6 +532,7 @@ mod tests {
             .import_openapi_url(
                 &fetcher,
                 &FsOpenApiSourceRepo,
+                &FsOpenApiBaselineRepo,
                 branch,
                 GroupBy::Tags,
                 None,
@@ -591,6 +633,7 @@ mod tests {
             .import_openapi_url(
                 &fetcher,
                 &FsOpenApiSourceRepo,
+                &FsOpenApiBaselineRepo,
                 link,
                 GroupBy::Tags,
                 None,
@@ -614,6 +657,7 @@ mod tests {
             .import_openapi_url(
                 &fetcher,
                 &FsOpenApiSourceRepo,
+                &FsOpenApiBaselineRepo,
                 GH_LINK,
                 GroupBy::Tags,
                 Some("t0k"),
@@ -644,6 +688,7 @@ mod tests {
             .import_openapi_url(
                 &fetcher,
                 &FsOpenApiSourceRepo,
+                &FsOpenApiBaselineRepo,
                 LINK,
                 GroupBy::Tags,
                 Some("t0k"),
@@ -679,6 +724,7 @@ mod tests {
             .import_openapi_url(
                 &fetcher,
                 &FsOpenApiSourceRepo,
+                &FsOpenApiBaselineRepo,
                 GH_LINK,
                 GroupBy::Tags,
                 Some("t0k"),
@@ -707,6 +753,7 @@ mod tests {
             .import_openapi_url(
                 &fetcher,
                 &FsOpenApiSourceRepo,
+                &FsOpenApiBaselineRepo,
                 GH_LINK,
                 GroupBy::Tags,
                 Some("t0k"),
@@ -729,6 +776,7 @@ mod tests {
             .import_openapi_url(
                 &fetcher,
                 &FsOpenApiSourceRepo,
+                &FsOpenApiBaselineRepo,
                 LINK,
                 GroupBy::Tags,
                 None,
@@ -750,6 +798,124 @@ mod tests {
             .import_openapi_file(&file, GroupBy::Tags, "ws")
             .expect("import");
         assert_eq!(from_file.source_id, None);
+    }
+
+    struct FailingBaselines;
+
+    impl OpenApiBaselineRepository for FailingBaselines {
+        fn load(&self, _root: &Path) -> DomainResult<Option<Baseline>> {
+            Ok(None)
+        }
+        fn save(&self, _root: &Path, _baseline: &Baseline) -> DomainResult<()> {
+            Err(DomainError::Internal("disk full".to_string()))
+        }
+        fn delete(&self, _root: &Path) -> DomainResult<()> {
+            Ok(())
+        }
+    }
+
+    async fn import_fixture(ws: &Path) -> OpenApiImportResult {
+        let service = ImportService::new_with_workspace_path(ws);
+        let fetcher = FakeFetcher::body(&fixture(), None);
+        service
+            .import_openapi_url(
+                &fetcher,
+                &FsOpenApiSourceRepo,
+                &FsOpenApiBaselineRepo,
+                LINK,
+                GroupBy::Tags,
+                None,
+                "ws",
+            )
+            .await
+            .expect("import")
+    }
+
+    #[tokio::test]
+    async fn link_import_writes_a_baseline_matching_the_saved_requests() {
+        let ws = TempDir::new().expect("tempdir");
+        let result = import_fixture(ws.path()).await;
+        let root = ws.path().join("collections").join(&result.collection);
+        let baseline = FsOpenApiBaselineRepo
+            .load(&root)
+            .expect("load")
+            .expect("baseline file");
+        let source = FsOpenApiSourceRepo
+            .load(&root)
+            .expect("load")
+            .expect("source file");
+        assert_eq!(baseline.operations.len(), result.report.imported);
+        assert_eq!(baseline.operations.len(), source.operations.len());
+        let repo = FsCollectionRepo::new_standalone(ws.path().join("collections"));
+        for (op, entry) in baseline.operations.iter().zip(&source.operations) {
+            assert_eq!(op.key, entry.key);
+            let mut saved = repo
+                .get_request(&result.collection, &entry.request_path)
+                .expect("saved request");
+            let mut snap = op.request.clone();
+            saved.file_name = None;
+            snap.file_name = None;
+            assert_eq!(snap, saved, "{}", op.key);
+        }
+        let ignore = std::fs::read_to_string(root.join(".rocket/.gitignore")).expect("gitignore");
+        assert!(ignore.contains("openapi-baseline.json"), "{ignore}");
+    }
+
+    #[tokio::test]
+    async fn baseline_records_the_converter_version_and_base_url() {
+        let ws = TempDir::new().expect("tempdir");
+        let result = import_fixture(ws.path()).await;
+        let root = ws.path().join("collections").join(&result.collection);
+        let baseline = FsOpenApiBaselineRepo
+            .load(&root)
+            .expect("load")
+            .expect("baseline file");
+        assert_eq!(baseline.converter_version, CONVERTER_VERSION);
+        assert_eq!(baseline.version, BASELINE_FILE_VERSION);
+        let spec: serde_json::Value = serde_json::from_str(&fixture()).expect("json");
+        let expected = spec["servers"][0]["url"].as_str().unwrap_or_default();
+        assert!(!expected.is_empty());
+        assert_eq!(baseline.base_url, expected);
+    }
+
+    #[tokio::test]
+    async fn baseline_write_failure_is_a_warning_not_an_error() {
+        let ws = TempDir::new().expect("tempdir");
+        let service = ImportService::new_with_workspace_path(ws.path());
+        let fetcher = FakeFetcher::body(&fixture(), None);
+        let result = service
+            .import_openapi_url(
+                &fetcher,
+                &FsOpenApiSourceRepo,
+                &FailingBaselines,
+                LINK,
+                GroupBy::Tags,
+                None,
+                "ws",
+            )
+            .await
+            .expect("import");
+        assert_eq!(result.warnings.len(), 1);
+        assert!(
+            result.warnings[0].contains("cautious"),
+            "{:?}",
+            result.warnings
+        );
+        let root = ws.path().join("collections").join(&result.collection);
+        assert!(FsOpenApiSourceRepo.load(&root).expect("load").is_some());
+    }
+
+    #[test]
+    fn file_import_writes_no_baseline() {
+        let ws = TempDir::new().expect("tempdir");
+        let service = ImportService::new_with_workspace_path(ws.path());
+        let file = ws.path().join("orders.json");
+        std::fs::write(&file, fixture()).expect("write");
+        let result = service
+            .import_openapi_file(&file, GroupBy::Tags, "ws")
+            .expect("import");
+        let root = ws.path().join("collections").join(&result.collection);
+        assert!(!root.join(".rocket/openapi-baseline.json").exists());
     }
 
     #[test]

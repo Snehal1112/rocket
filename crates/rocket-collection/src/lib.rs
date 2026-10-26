@@ -3,6 +3,7 @@ pub mod contract;
 pub mod folder;
 pub mod folder_settings;
 pub mod graphql_request;
+pub mod openapi_baseline;
 pub mod openapi_source;
 pub mod grpc_request;
 pub mod repository;
@@ -27,6 +28,9 @@ pub use grpc_request::{GrpcMessage, GrpcMetadataEntry, GrpcMethodType, GrpcReque
 pub use repository::{CollectionRepository, RequestScriptPhase};
 pub use request::{
     candidate_filename, fold_name, request_filename_for, Request, MAX_FILENAME_COLLISION_RETRIES,
+};
+pub use openapi_baseline::{
+    BaselineOperation, OpenApiBaseline, OpenApiBaselineRepository, BASELINE_FILE_VERSION,
 };
 pub use request_kind::RequestKind;
 pub use request_summary::RequestSummary;

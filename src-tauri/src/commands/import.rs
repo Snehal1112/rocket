@@ -7,7 +7,10 @@ use rocket_http::SpecFetcher;
 use rocket_import::{
     EnvironmentRepositoryFactory, GroupBy, ImportReport, ImportService, OpenApiImportResult,
 };
-use rocket_infra::{FsCollectionRepo, FsEnvironmentRepo, FsOpenApiSourceRepo, KeyringSecretStore};
+use rocket_infra::{
+    FsCollectionRepo, FsEnvironmentRepo, FsOpenApiBaselineRepo, FsOpenApiSourceRepo,
+    KeyringSecretStore,
+};
 use serde::Serialize;
 use tauri::State;
 
@@ -215,6 +218,7 @@ pub async fn import_openapi_url(
         .import_openapi_url(
             fetcher.inner().as_ref(),
             &FsOpenApiSourceRepo,
+            &FsOpenApiBaselineRepo,
             &link,
             group_by,
             token.as_deref(),
