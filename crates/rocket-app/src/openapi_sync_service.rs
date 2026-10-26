@@ -481,7 +481,11 @@ impl OpenApiSyncService {
             let lost: Vec<&str> = source
                 .remote_refs
                 .iter()
-                .filter(|p| bundle.whole_failed || bundle.unloaded.iter().any(|u| *u == p.url))
+                .filter(|p| {
+                    bundle.whole_failed
+                        || bundle.unloaded.iter().any(|u| *u == p.url)
+                        || (bundle.scan_truncated && !bundle.refs.iter().any(|r| r.url == p.url))
+                })
                 .map(|p| p.url.as_str())
                 .collect();
             if !lost.is_empty() {

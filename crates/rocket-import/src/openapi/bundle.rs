@@ -56,6 +56,9 @@ pub struct Bundle {
     /// True when the whole bundle step failed (the main text is too complex, or the files
     /// grow too large combined), so every file of an earlier bundle counts as lost.
     pub whole_failed: bool,
+    /// True when a scan stopped at the file limit, so later addresses were never met and are
+    /// not in `unloaded`. A stored file missing from `refs` then counts as lost.
+    pub scan_truncated: bool,
 }
 
 /// What one `$ref` string points at.
@@ -578,6 +581,7 @@ async fn bundle_with_limit(
         retry_after_secs: None,
         unloaded: Vec::new(),
         whole_failed: false,
+        scan_truncated: false,
     };
     // One budget for the main text and every file, so many files cannot add up past it. Its
     // node limit grows with the bytes accepted so far (`node_limit` of their total).
@@ -606,6 +610,7 @@ async fn bundle_with_limit(
     let mut scan = Scan::new(main_url.clone());
     collect(&main, main_base.as_ref(), &mut scan);
     scan.finish();
+    bundle.scan_truncated |= scan.full();
     bundle.notes = scan.notes;
 
     let mut seen: HashSet<String> = HashSet::new();
@@ -728,6 +733,7 @@ async fn bundle_with_limit(
         let mut child = Scan::new(main_url.clone());
         collect(&value, file_base.as_ref(), &mut child);
         child.finish();
+        bundle.scan_truncated |= child.full();
         for note in child.notes {
             push_unique(&mut bundle.notes, note);
         }

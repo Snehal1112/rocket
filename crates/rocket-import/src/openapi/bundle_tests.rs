@@ -1025,6 +1025,7 @@ async fn unloaded_lists_a_failing_file_and_a_limit_skipped_file() {
     assert!(bundle.unloaded.contains(&urls[0]), "{:?}", bundle.unloaded);
     assert!(bundle.unloaded.contains(&urls[20]), "{:?}", bundle.unloaded);
     assert!(!bundle.unloaded.contains(&urls[1]));
+    assert!(bundle.scan_truncated);
     let mut dedup = bundle.unloaded.clone();
     dedup.sort();
     dedup.dedup();
