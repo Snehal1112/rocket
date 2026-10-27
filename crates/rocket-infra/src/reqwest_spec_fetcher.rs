@@ -8,8 +8,8 @@ use reqwest::header::{
     RETRY_AFTER, USER_AGENT,
 };
 use rocket_http::{
-    redirect_target_allowed, same_origin, SpecFetchFailure, SpecFetchOutcome, SpecFetchRequest,
-    SpecFetcher, MAX_SPEC_REDIRECTS,
+    is_loopback_http, redirect_target_allowed, same_origin, SpecFetchFailure, SpecFetchOutcome,
+    SpecFetchRequest, SpecFetcher, MAX_SPEC_REDIRECTS,
 };
 use std::time::Duration;
 
@@ -72,7 +72,9 @@ impl SpecFetcher for ReqwestSpecFetcher {
     async fn fetch(&self, request: SpecFetchRequest) -> Result<SpecFetchOutcome, SpecFetchFailure> {
         let first = reqwest::Url::parse(&request.url)
             .map_err(|_| SpecFetchFailure::Network("the link is not a valid URL".to_string()))?;
-        if self.strict && first.scheme() != "https" {
+        // The first hop is https, or plain http to this machine for a dev server. Redirect hops
+        // below stay https only.
+        if self.strict && first.scheme() != "https" && !is_loopback_http(&first) {
             return Err(SpecFetchFailure::NotHttps);
         }
         let client = self.client()?;
@@ -82,9 +84,11 @@ impl SpecFetcher for ReqwestSpecFetcher {
             if let Some(accept) = &request.accept {
                 call = call.header(ACCEPT, accept);
             }
-            // The token goes only to the origin it was meant for, never after a redirect away.
+            // The token goes only to the origin it was meant for, never after a redirect away,
+            // and never over plain http.
             if let Some(token) = &request.bearer_token {
-                if same_origin(first.as_str(), current.as_str()) {
+                let plain_http = self.strict && current.scheme() == "http";
+                if !plain_http && same_origin(first.as_str(), current.as_str()) {
                     call = call.bearer_auth(token);
                 }
             }
@@ -488,21 +492,73 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejects_http_without_the_test_switch() {
+    async fn a_loopback_http_first_hop_is_fetched() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .respond_with(ResponseTemplate::new(200))
+            .and(path("/openapi.json"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("{}"))
             .mount(&server)
             .await;
-        let out = ReqwestSpecFetcher::new()
-            .fetch(request(format!("{}/x", server.uri())))
+        let outcome = ReqwestSpecFetcher::new()
+            .fetch(request(format!("{}/openapi.json", server.uri())))
             .await
-            .expect_err("http is refused");
-        assert_eq!(out, SpecFetchFailure::NotHttps);
-        assert!(server
+            .expect("a dev server on this machine is fetched in strict mode");
+        assert!(matches!(outcome, SpecFetchOutcome::Fetched { .. }));
+    }
+
+    #[tokio::test]
+    async fn a_non_loopback_http_first_hop_is_not_https() {
+        for url in [
+            "http://example.com/x",
+            "http://localhost.evil.com/x",
+            "http://192.168.1.5/x",
+            "http://0.0.0.0/x",
+            "http://user@localhost/x",
+        ] {
+            let out = ReqwestSpecFetcher::new()
+                .fetch(request(url.to_string()))
+                .await
+                .expect_err(url);
+            assert_eq!(out, SpecFetchFailure::NotHttps, "{url}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_redirect_to_http_is_still_blocked() {
+        let first = MockServer::start().await;
+        let second = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/start"))
+            .respond_with(
+                ResponseTemplate::new(302)
+                    .insert_header("location", format!("{}/target", second.uri())),
+            )
+            .mount(&first)
+            .await;
+        let out = ReqwestSpecFetcher::new()
+            .fetch(request(format!("{}/start", first.uri())))
+            .await
+            .expect_err("redirect to http");
+        assert_eq!(out, SpecFetchFailure::BlockedRedirect);
+        assert!(second
             .received_requests()
             .await
             .expect("recorded")
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_token_is_not_sent_over_http() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("{}"))
+            .mount(&server)
+            .await;
+        let mut req = request(format!("{}/openapi.json", server.uri()));
+        req.bearer_token = Some("s3cret".to_string());
+        ReqwestSpecFetcher::new().fetch(req).await.expect("fetched");
+        let seen = server.received_requests().await.expect("recorded");
+        assert_eq!(seen.len(), 1);
+        assert!(seen[0].headers.get("authorization").is_none());
     }
 }

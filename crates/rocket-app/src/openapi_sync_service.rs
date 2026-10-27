@@ -124,7 +124,7 @@ pub fn safe_message(code: &str) -> &'static str {
         "unauthorized" => "The server refused access to the file.",
         "rate_limited" => "The server asked to slow down. The check will try again later.",
         "too_large" => "The file is larger than the size limit.",
-        "not_https" => "The link must use https.",
+        "not_https" => "The link must use https. Plain http works only for localhost.",
         "too_many_redirects" => "The link redirected too many times.",
         "blocked_redirect" => "The link redirected somewhere that is not allowed.",
         "status" => "The server answered with an error.",
@@ -1015,6 +1015,14 @@ mod tests {
     use tempfile::TempDir;
 
     type Reply = Result<SpecFetchOutcome, SpecFetchFailure>;
+
+    #[test]
+    fn not_https_message_mentions_localhost() {
+        assert_eq!(
+            safe_message("not_https"),
+            "The link must use https. Plain http works only for localhost."
+        );
+    }
 
     #[derive(Default)]
     struct FakeFetcher {
