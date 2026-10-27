@@ -24,7 +24,7 @@ use crate::openapi_sync_view::{PlanView, UnchangedView};
 pub(crate) const SOURCE_REL: &str = ".rocket/openapi-source.yml";
 pub(crate) const BASELINE_REL: &str = ".rocket/openapi-baseline.json";
 pub(crate) const LOCAL_REL: &str = ".rocket/openapi-local.json";
-const PENDING_REL: &str = ".rocket/openapi-pending.spec";
+pub(crate) const PENDING_REL: &str = ".rocket/openapi-pending.spec";
 pub(crate) const APPLIED_REL: &str = ".rocket/openapi-applied.spec";
 pub(crate) const BACKUPS_REL: &str = ".rocket/openapi-reset-backups.json";
 const BASE_URL_KEY: &str = "baseUrl";

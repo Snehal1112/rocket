@@ -59,6 +59,7 @@ pub mod load_test_service;
 pub mod mcp_read_views;
 pub mod mcp_tool_service;
 pub mod oauth2_service;
+pub mod openapi_change_link;
 pub mod openapi_connect;
 pub mod openapi_sync_apply;
 pub mod openapi_sync_changes;
@@ -149,6 +150,7 @@ pub use mcp_tool_service::{
 };
 pub use oauth2_service::OAuth2Service;
 pub use openapi_sync_apply::{ApplyDeps, RendererFactory};
+pub use openapi_change_link::{ChangeLinkOutcome, ChangeLinkPreview};
 pub use openapi_connect::{
     request_digest, ConnectAmbiguous, ConnectOperationRow, ConnectOutcome, ConnectPair,
     ConnectPreview, ConnectRequestRow, ConnectRow,

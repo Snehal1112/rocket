@@ -76,16 +76,16 @@ pub struct ConnectPreview {
 }
 
 const STALE_COLLECTION: &str = "The collection changed. Run the preview again.";
-const STALE_SPEC: &str = "The spec changed. Run the preview again.";
+pub(crate) const STALE_SPEC: &str = "The spec changed. Run the preview again.";
 const CHOSEN_TWICE: &str = "A request or an operation is chosen twice.";
-const APPLY_RUNNING: &str = "A sync is running. Try again when it is done.";
+pub(crate) const APPLY_RUNNING: &str = "A sync is running. Try again when it is done.";
 const FAILED: &str = "Connecting failed. Nothing was changed.";
 const WARN_CHECKS: &str = "Checks are not enabled yet.";
 const WARN_TOKEN: &str = "The token was not saved.";
 const BASE_URL_KEY: &str = "baseUrl";
 const ALREADY_CONNECTED: &str = "This collection is already connected to an OpenAPI spec.";
-const NEEDS_LINK: &str = "Enter the spec link.";
-const NOT_A_SPEC: &str = "The file is not a supported OpenAPI spec.";
+pub(crate) const NEEDS_LINK: &str = "Enter the spec link.";
+pub(crate) const NOT_A_SPEC: &str = "The file is not a supported OpenAPI spec.";
 const COULD_NOT_LOAD: &str = "The spec could not be loaded.";
 
 /// What the user decided for one request or operation in the Initial sync review.
@@ -124,7 +124,7 @@ fn infra_error(error: DomainError) -> DomainError {
 
 /// A fixed sentence for a failed fetch or bundle. The fetch messages are already fixed, and
 /// anything else (a parse error with a path, say) becomes a general sentence.
-fn safe_import_message(error: ImportError) -> String {
+pub(crate) fn safe_import_message(error: ImportError) -> String {
     match error {
         ImportError::SpecUnavailable(message) => message,
         ImportError::NotAnOpenApiSpec(_) => NOT_A_SPEC.to_string(),

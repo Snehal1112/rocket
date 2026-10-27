@@ -21,7 +21,7 @@ fn hand_made(w: &World, requests: &[(&str, &str, &str)]) {
     }
 }
 
-fn snapshot(root: &Path) -> BTreeMap<String, Vec<u8>> {
+pub(super) fn snapshot(root: &Path) -> BTreeMap<String, Vec<u8>> {
     fn walk(dir: &Path, root: &Path, out: &mut BTreeMap<String, Vec<u8>>) {
         for entry in std::fs::read_dir(dir).expect("read_dir") {
             let path = entry.expect("entry").path();

@@ -1243,3 +1243,7 @@ mod reset_tests;
 #[cfg(test)]
 #[path = "openapi_connect_tests.rs"]
 mod connect_tests;
+
+#[cfg(test)]
+#[path = "openapi_change_link_tests.rs"]
+mod change_link_tests;

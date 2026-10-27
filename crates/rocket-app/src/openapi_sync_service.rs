@@ -33,7 +33,7 @@ use zeroize::Zeroizing;
 use crate::collection_lock::collection_lock;
 use crate::openapi_sync_apply::ApplyDeps;
 
-const TOKEN_KEY: &str = "token";
+pub(crate) const TOKEN_KEY: &str = "token";
 
 /// What one check found.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,7 +82,7 @@ type Clock = Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>;
 pub struct OpenApiSyncService {
     pub(crate) fetcher: Arc<dyn SpecFetcher>,
     pub(crate) sources: Box<dyn OpenApiSourceRepository>,
-    secrets: Arc<dyn SecretStore>,
+    pub(crate) secrets: Arc<dyn SecretStore>,
     clock: Clock,
     /// Set by `with_apply`. Without it `apply` and `recover` refuse.
     pub(crate) apply_deps: Option<ApplyDeps>,
@@ -427,7 +427,7 @@ impl OpenApiSyncService {
     }
 
     /// Records a finished check in the local state. A success resets the failure state.
-    fn record_success(
+    pub(crate) fn record_success(
         &self,
         root: &Path,
         now: &DateTime<Utc>,
