@@ -1,4 +1,9 @@
-import type { OpenApiSyncItem, OpenApiSyncPlan, OpenApiSyncStatus } from '@/lib/tauri-api';
+import type {
+  ConnectPreview,
+  OpenApiSyncItem,
+  OpenApiSyncPlan,
+  OpenApiSyncStatus,
+} from '@/lib/tauri-api';
 
 export function makeStatus(overrides: Partial<OpenApiSyncStatus> = {}): OpenApiSyncStatus {
   return {
@@ -59,6 +64,44 @@ export function makePlan(overrides: Partial<OpenApiSyncPlan> = {}): OpenApiSyncP
     deletedByUser: [],
     cautious: false,
     warnings: [],
+    ...overrides,
+  };
+}
+
+export function makeConnectPreview(
+  overrides: Partial<ConnectPreview> = {},
+): ConnectPreview {
+  const request = (uid: string, method: string, url: string, name = uid) => ({
+    uid,
+    requestPath: `${uid}.yml`,
+    method,
+    url,
+    name,
+  });
+  const operation = (method: string, path: string, summary: string | null = null) => ({
+    key: `${method} ${path}`,
+    method,
+    path,
+    summary,
+    tag: 'pets',
+  });
+  return {
+    specTitle: 'Pets API',
+    specVersion: '1.0.0',
+    digest: 'digest-1',
+    specSha256: 'sha-1',
+    matched: [
+      { request: request('r1', 'GET', '{{baseUrl}}/pets'), operation: operation('GET', '/pets') },
+    ],
+    suggested: [
+      {
+        request: request('r2', 'GET', '{{baseUrl}}/animals', 'List pets'),
+        operation: operation('GET', '/pets/all', 'List pets'),
+      },
+    ],
+    inSpecOnly: [operation('POST', '/pets')],
+    yoursOnly: [request('r3', 'GET', '{{baseUrl}}/health')],
+    ambiguous: [],
     ...overrides,
   };
 }

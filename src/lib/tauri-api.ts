@@ -2183,6 +2183,84 @@ export const restoreOpenApiSync = (collection: string, key: string) =>
 export const discardOpenApiSyncBackup = (collection: string, key: string) =>
   invoke<void>('openapi_sync_discard_backup', { collection, key });
 
+export interface ConnectRequestRow {
+  uid: string;
+  requestPath: string;
+  method: string;
+  url: string;
+  name: string;
+}
+
+export interface ConnectOperationRow {
+  key: string;
+  method: string;
+  path: string;
+  summary: string | null;
+  tag: string;
+}
+
+export interface ConnectPair {
+  request: ConnectRequestRow;
+  operation: ConnectOperationRow;
+}
+
+export interface ConnectAmbiguous {
+  requests: ConnectRequestRow[];
+  operations: ConnectOperationRow[];
+}
+
+/** What a spec link would connect to. Nothing is written until the confirm. */
+export interface ConnectPreview {
+  specTitle: string;
+  specVersion: string | null;
+  digest: string;
+  specSha256: string;
+  matched: ConnectPair[];
+  suggested: ConnectPair[];
+  inSpecOnly: ConnectOperationRow[];
+  yoursOnly: ConnectRequestRow[];
+  ambiguous: ConnectAmbiguous[];
+}
+
+/** One decision of the Initial sync review. `uid` and `key` follow the kind. */
+export interface ConnectRow {
+  kind: 'link' | 'add' | 'skip' | 'keep';
+  uid?: string;
+  key?: string;
+}
+
+export interface ConnectOutcome {
+  linked: number;
+  added: number;
+  skipped: number;
+  warnings: string[];
+}
+
+export interface ConnectConfirmArgs {
+  collection: string;
+  link: string;
+  token?: string;
+  rows: ConnectRow[];
+  groupBy: OpenApiGroupBy;
+  interval?: OpenApiSyncInterval;
+  digest: string;
+  specSha256: string;
+}
+
+export const previewOpenApiConnect = (collection: string, link: string, token?: string) =>
+  invoke<ConnectPreview>('openapi_connect_preview', {
+    collection,
+    link,
+    ...(token ? { token } : {}),
+  });
+
+export const confirmOpenApiConnect = ({ token, interval, ...args }: ConnectConfirmArgs) =>
+  invoke<ConnectOutcome>('openapi_connect_confirm', {
+    ...args,
+    ...(token ? { token } : {}),
+    ...(interval ? { interval } : {}),
+  });
+
 export const getOpenApiSyncBadges = () => invoke<OpenApiBadge[]>('openapi_sync_badges');
 
 export const getOpenApiSyncPlan = (collection: string, links: Array<[string, string]> = []) =>

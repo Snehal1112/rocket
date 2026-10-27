@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   applyOpenApiSync,
   checkOpenApiSyncNow,
+  confirmOpenApiConnect,
   clearOpenApiSyncToken,
   disconnectOpenApiSync,
   discardOpenApiSyncBackup,
@@ -17,6 +18,7 @@ import {
   importOpenApiUrl,
   onOpenApiSyncApplied,
   onOpenApiSyncChecked,
+  previewOpenApiConnect,
   resetOpenApiSync,
   restoreOpenApiSync,
   revokeOpenApiSyncConsent,
@@ -202,6 +204,43 @@ describe('OpenAPI sync API', () => {
       groupBy: 'tags',
       targetWorkspaceId: 'ws1',
       checkForUpdates: true,
+    });
+  });
+
+  it('preview_calls_openapi_connect_preview', async () => {
+    vi.mocked(invoke).mockResolvedValue({});
+    await previewOpenApiConnect('Orders', 'https://x/y.json');
+    expect(invoke).toHaveBeenLastCalledWith('openapi_connect_preview', {
+      collection: 'Orders',
+      link: 'https://x/y.json',
+    });
+    await previewOpenApiConnect('Orders', 'https://x/y.json', 'tok');
+    expect(invoke).toHaveBeenLastCalledWith('openapi_connect_preview', {
+      collection: 'Orders',
+      link: 'https://x/y.json',
+      token: 'tok',
+    });
+  });
+
+  it('confirm_calls_openapi_connect_confirm_with_rows_and_digest', async () => {
+    vi.mocked(invoke).mockResolvedValue({ linked: 1, added: 0, skipped: 0, warnings: [] });
+    await confirmOpenApiConnect({
+      collection: 'Orders',
+      link: 'https://x/y.json',
+      rows: [{ kind: 'keep', uid: 'r1' }],
+      groupBy: 'tags',
+      interval: 'daily',
+      digest: 'd',
+      specSha256: 's',
+    });
+    expect(invoke).toHaveBeenLastCalledWith('openapi_connect_confirm', {
+      collection: 'Orders',
+      link: 'https://x/y.json',
+      rows: [{ kind: 'keep', uid: 'r1' }],
+      groupBy: 'tags',
+      interval: 'daily',
+      digest: 'd',
+      specSha256: 's',
     });
   });
 });

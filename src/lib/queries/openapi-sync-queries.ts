@@ -2,8 +2,10 @@ import { type QueryClient, useMutation, useQuery, useQueryClient } from '@tansta
 import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 import {
   applyOpenApiSync,
+  type ConnectConfirmArgs,
   checkOpenApiSyncNow,
   clearOpenApiSyncToken,
+  confirmOpenApiConnect,
   discardOpenApiSyncBackup,
   disconnectOpenApiSync,
   getOpenApiSyncBadges,
@@ -18,6 +20,7 @@ import {
   type OpenApiSyncInterval,
   onOpenApiSyncApplied,
   onOpenApiSyncChecked,
+  previewOpenApiConnect,
   resetOpenApiSync,
   restoreOpenApiSync,
   revokeOpenApiSyncConsent,
@@ -239,6 +242,29 @@ export function useDiscardOpenApiBackup(collection: string) {
   return useMutation({
     networkMode: 'always',
     mutationFn: (key: string) => discardOpenApiSyncBackup(collection, key),
+    onSettled: () => refreshAfterReset(queryClient, collection),
+  });
+}
+
+/** Fetches and matches a spec link. Writes nothing, so nothing is refreshed. */
+export function usePreviewOpenApiConnect(collection: string) {
+  return useMutation({
+    networkMode: 'always',
+    // The token only lives in the call, so the cache drops it as soon as it settles.
+    gcTime: 0,
+    mutationFn: (args: { link: string; token?: string }) =>
+      previewOpenApiConnect(collection, args.link, args.token),
+  });
+}
+
+/** Connects the collection. It now has a source, so the tree and every sync view reload. */
+export function useConfirmOpenApiConnect(collection: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    networkMode: 'always',
+    gcTime: 0,
+    mutationFn: (args: Omit<ConnectConfirmArgs, 'collection'>) =>
+      confirmOpenApiConnect({ ...args, collection }),
     onSettled: () => refreshAfterReset(queryClient, collection),
   });
 }

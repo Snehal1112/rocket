@@ -9,6 +9,7 @@ import {
   openApiSyncKeys,
   useApplySync,
   useCheckNow,
+  useConfirmOpenApiConnect,
   useClearToken,
   useDiscardOpenApiBackup,
   useDisconnectSync,
@@ -22,6 +23,7 @@ import {
   useOpenApiSyncOverview,
   useOpenApiSyncSpecView,
   useOpenApiSyncPlan,
+  usePreviewOpenApiConnect,
   useOpenApiSyncStatus,
   useResetOpenApiSync,
   useRestoreOpenApiSync,
@@ -53,6 +55,8 @@ vi.mock('@/lib/tauri-api', async () => {
     restoreOpenApiSync: vi.fn(),
     discardOpenApiSyncBackup: vi.fn(),
     applyOpenApiSync: vi.fn(),
+    previewOpenApiConnect: vi.fn(),
+    confirmOpenApiConnect: vi.fn(),
   };
 });
 
@@ -641,5 +645,46 @@ describe('openapi sync queries', () => {
         'A',
       ]);
     });
+  });
+
+  it('a_confirmed_connect_refreshes_status_overview_changes_plan_and_badges', async () => {
+    vi.mocked(tauriApi.confirmOpenApiConnect).mockResolvedValue({
+      linked: 1,
+      added: 0,
+      skipped: 0,
+      warnings: [],
+    });
+    const spy = vi.spyOn(client, 'invalidateQueries');
+    const { result } = renderHook(() => useConfirmOpenApiConnect('A'), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({
+        link: 'https://x/y.json',
+        rows: [],
+        groupBy: 'tags',
+        digest: 'd',
+        specSha256: 's',
+      });
+    });
+    expect(tauriApi.confirmOpenApiConnect).toHaveBeenCalledWith(
+      expect.objectContaining({ collection: 'A', digest: 'd' }),
+    );
+    const keys = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(keys).toContainEqual(openApiSyncKeys.statusAll('A'));
+    expect(keys).toContainEqual(openApiSyncKeys.overview('A'));
+    expect(keys).toContainEqual(openApiSyncKeys.changes('A'));
+    expect(keys).toContainEqual(openApiSyncKeys.planAll('A'));
+    expect(keys).toContainEqual(openApiSyncKeys.badges);
+    expect(keys).toContainEqual(collectionKeys.all);
+  });
+
+  it('the_preview_hook_passes_the_link_and_token_and_refreshes_nothing', async () => {
+    vi.mocked(tauriApi.previewOpenApiConnect).mockResolvedValue({} as never);
+    const spy = vi.spyOn(client, 'invalidateQueries');
+    const { result } = renderHook(() => usePreviewOpenApiConnect('A'), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ link: 'https://x/y.json', token: 'tok' });
+    });
+    expect(tauriApi.previewOpenApiConnect).toHaveBeenCalledWith('A', 'https://x/y.json', 'tok');
+    expect(spy).not.toHaveBeenCalled();
   });
 });
