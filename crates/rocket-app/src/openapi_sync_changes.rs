@@ -10,7 +10,7 @@ use rocket_shared::error::DomainResult;
 use crate::collection_lock::collection_lock;
 use crate::openapi_sync_apply::flatten_requests;
 use crate::openapi_sync_service::OpenApiSyncService;
-use crate::openapi_sync_view::{BadgeView, ChangeRow, ChangesView, OverviewView};
+use crate::openapi_sync_view::{BackupRow, BadgeView, ChangeRow, ChangesView, OverviewView};
 
 fn row(
     key: Option<&str>,
@@ -108,11 +108,40 @@ impl OpenApiSyncService {
             .filter(|c| !known.contains(c.uid.as_str()))
             .map(|c| row(None, c, Some(c.request_path.clone()), Vec::new()))
             .collect();
+        // A service without a backups store has none. An unreadable file is an error, so a
+        // damaged file never reads as "no backups".
+        let mut backups = Vec::new();
+        if let Ok(store) = self.backup_repo() {
+            for entry in store.load(&root)?.unwrap_or_default().entries {
+                let fields = match base_by_key.get(entry.key.as_str()) {
+                    Some(base) => {
+                        let none = BTreeMap::new();
+                        merge_request(base, base, &entry.request, &none)
+                            .changes
+                            .into_iter()
+                            .map(|c| c.field)
+                            .collect()
+                    }
+                    None => Vec::new(),
+                };
+                backups.push(BackupRow {
+                    key: entry.key,
+                    name: entry.request.name.clone(),
+                    method: entry.request.method.to_string(),
+                    url: entry.request.url.clone(),
+                    request_path: entry.request_path,
+                    saved_at: entry.saved_at,
+                    fields,
+                });
+            }
+        }
         Ok(ChangesView {
             baseline_trusted: baseline.is_some(),
             modified,
             added,
             deleted,
+            backups,
+            reset_available: baseline.is_some(),
         })
     }
 
@@ -129,7 +158,9 @@ impl OpenApiSyncService {
         let root = repo.collection_root_path(collection)?;
         let source = self.load(&root)?;
         // The pending copy when one waits, else the applied copy.
-        let latest = self.latest_spec_bytes(&root, &source)?.map(|(bytes, _)| bytes);
+        let latest = self
+            .latest_spec_bytes(&root, &source)?
+            .map(|(bytes, _)| bytes);
         let spec_version = latest
             .and_then(|bytes| String::from_utf8(bytes).ok())
             .and_then(|text| ParsedSpec::parse(&text).ok())

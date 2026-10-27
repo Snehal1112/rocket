@@ -51,6 +51,21 @@ pub struct ChangeRow {
     pub fields: Vec<String>,
 }
 
+/// A request the user reset to the spec, with the version they had kept as a backup.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackupRow {
+    pub key: String,
+    pub name: String,
+    pub method: String,
+    pub url: String,
+    pub request_path: String,
+    /// RFC 3339 UTC time of the reset.
+    pub saved_at: String,
+    /// Names of the spec-owned fields where the backup differs from the spec. Empty without a
+    /// trusted baseline.
+    pub fields: Vec<String>,
+}
+
 /// What the user changed since the last import or sync.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChangesView {
@@ -60,6 +75,10 @@ pub struct ChangesView {
     pub modified: Vec<ChangeRow>,
     pub added: Vec<ChangeRow>,
     pub deleted: Vec<ChangeRow>,
+    /// Requests reset by the user whose old version can still be restored.
+    pub backups: Vec<BackupRow>,
+    /// True when a reset can run: the baseline is there and of the current converter version.
+    pub reset_available: bool,
 }
 
 /// The counts and facts of the Overview tab. `in_sync` and `changed_by_you` are `None` when

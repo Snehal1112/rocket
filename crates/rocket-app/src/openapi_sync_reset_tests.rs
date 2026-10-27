@@ -392,3 +392,44 @@ async fn reset_never_touches_another_request_at_the_old_path() {
     );
     assert!(backups(&w).is_none());
 }
+
+#[tokio::test]
+async fn changes_lists_backups_with_differing_fields() {
+    let w = world().await;
+    edit(&w, "listPets", "https://edited.example.com/x");
+    w.svc.reset(&w.name, &keys(&["listPets"])).expect("reset");
+    let view = w.svc.changes(&w.name).expect("changes");
+    // After the reset the request equals the spec, so only the backup remains.
+    assert!(view.modified.is_empty());
+    assert_eq!(view.backups.len(), 1);
+    let row = &view.backups[0];
+    assert_eq!(row.key, "listPets");
+    assert_eq!(row.url, "https://edited.example.com/x");
+    assert_eq!(row.request_path, path_of(&w, "listPets"));
+    assert_eq!(row.fields, vec!["url".to_string()]);
+    assert!(!row.saved_at.is_empty());
+    assert!(view.reset_available);
+}
+
+#[tokio::test]
+async fn changes_reports_reset_unavailable_without_a_trusted_baseline() {
+    let w = world().await;
+    std::fs::remove_file(w.root.join(".rocket/openapi-baseline.json")).expect("remove");
+    let view = w.svc.changes(&w.name).expect("changes");
+    assert!(!view.reset_available);
+}
+
+#[tokio::test]
+async fn a_corrupt_backups_file_gives_an_error_not_an_empty_list() {
+    let w = world().await;
+    std::fs::write(w.root.join(".rocket/openapi-reset-backups.json"), "{oops").expect("write");
+    assert!(w.svc.changes(&w.name).is_err());
+}
+
+#[tokio::test]
+async fn changes_has_no_backups_for_a_fresh_import() {
+    let w = world().await;
+    let view = w.svc.changes(&w.name).expect("changes");
+    assert!(view.backups.is_empty());
+    assert!(view.reset_available);
+}

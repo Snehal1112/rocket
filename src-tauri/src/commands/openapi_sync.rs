@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 use std::collections::BTreeMap;
 
 use rocket_app::{
-    safe_message, BadgeView, ChangeRow, ChangesView, CheckOutcome, OpenApiSyncService,
-    OverviewView, PlanView, SpecView, SpecViewState, SyncStatusView,
+    safe_message, BackupRow, BadgeView, ChangeRow, ChangesView, CheckOutcome, OpenApiSyncService,
+    OverviewView, PlanView, ResetReport, SpecView, SpecViewState, SyncStatusView,
 };
 use rocket_collection::openapi_source::{SyncInterval, SyncStatus};
 use rocket_collection::ConsentState;
@@ -485,6 +485,31 @@ pub struct ChangeRowDto {
     pub fields: Vec<String>,
 }
 
+/// A request the user reset, with the version they can restore.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupRowDto {
+    pub key: String,
+    pub name: String,
+    pub method: String,
+    pub url: String,
+    pub request_path: String,
+    pub saved_at: String,
+    pub fields: Vec<String>,
+}
+
+fn backup_row_dto(row: BackupRow) -> BackupRowDto {
+    BackupRowDto {
+        key: row.key,
+        name: row.name,
+        method: row.method,
+        url: row.url,
+        request_path: row.request_path,
+        saved_at: row.saved_at,
+        fields: row.fields,
+    }
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChangesDto {
@@ -492,6 +517,8 @@ pub struct ChangesDto {
     pub modified: Vec<ChangeRowDto>,
     pub added: Vec<ChangeRowDto>,
     pub deleted: Vec<ChangeRowDto>,
+    pub backups: Vec<BackupRowDto>,
+    pub reset_available: bool,
 }
 
 fn change_row_dto(row: ChangeRow) -> ChangeRowDto {
@@ -512,7 +539,97 @@ fn changes_dto(view: ChangesView) -> ChangesDto {
         modified: view.modified.into_iter().map(change_row_dto).collect(),
         added: view.added.into_iter().map(change_row_dto).collect(),
         deleted: view.deleted.into_iter().map(change_row_dto).collect(),
+        backups: view.backups.into_iter().map(backup_row_dto).collect(),
+        reset_available: view.reset_available,
     }
+}
+
+/// Which keys a reset changed and which it left alone.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetReportDto {
+    pub reset: Vec<String>,
+    pub skipped: Vec<String>,
+}
+
+/// A fixed sentence for a failed reset, restore or discard. The raw error never reaches the UI.
+fn reset_error(error: DomainError) -> String {
+    match error {
+        DomainError::InvalidInput(m) if m.contains("older version") => {
+            "These requests cannot be reset because the sync data is from an older version."
+                .to_string()
+        }
+        DomainError::Conflict(m) if m.contains("changed on disk") => {
+            "The request changed on disk. Reload and try again.".to_string()
+        }
+        DomainError::Conflict(_) => "A sync is running. Try again when it is done.".to_string(),
+        DomainError::NotFound(_) => "There is no backup for this request.".to_string(),
+        _ => "Reset failed. Nothing was changed.".to_string(),
+    }
+}
+
+async fn run_reset<T: Send + 'static>(
+    workspace_path: Arc<Mutex<PathBuf>>,
+    fetcher: Arc<dyn SpecFetcher>,
+    call: impl FnOnce(OpenApiSyncService) -> Result<T, DomainError> + Send + 'static,
+) -> Result<T, String> {
+    tokio::task::spawn_blocking(move || call(make_sync_service(workspace_path, fetcher)))
+        .await
+        .map_err(|_| TASK_FAILED.to_string())?
+        .map_err(reset_error)
+}
+
+/// Puts the spec-owned fields of the given requests back to the last synced spec and keeps the
+/// user's version as a backup. Never contacts the network.
+#[tauri::command]
+pub async fn openapi_sync_reset(
+    collection: String,
+    keys: Vec<String>,
+    workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
+    fetcher: State<'_, Arc<dyn SpecFetcher>>,
+) -> Result<ResetReportDto, String> {
+    run_reset(
+        Arc::clone(workspace_path.inner()),
+        Arc::clone(fetcher.inner()),
+        move |service| {
+            service
+                .reset(&collection, &keys)
+                .map(|ResetReport { reset, skipped }| ResetReportDto { reset, skipped })
+        },
+    )
+    .await
+}
+
+/// Writes the backed-up version of a request back and removes the backup.
+#[tauri::command]
+pub async fn openapi_sync_restore(
+    collection: String,
+    key: String,
+    workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
+    fetcher: State<'_, Arc<dyn SpecFetcher>>,
+) -> Result<(), String> {
+    run_reset(
+        Arc::clone(workspace_path.inner()),
+        Arc::clone(fetcher.inner()),
+        move |service| service.restore(&collection, &key),
+    )
+    .await
+}
+
+/// Removes a backup without touching any request.
+#[tauri::command]
+pub async fn openapi_sync_discard_backup(
+    collection: String,
+    key: String,
+    workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
+    fetcher: State<'_, Arc<dyn SpecFetcher>>,
+) -> Result<(), String> {
+    run_reset(
+        Arc::clone(workspace_path.inner()),
+        Arc::clone(fetcher.inner()),
+        move |service| service.discard(&collection, &key),
+    )
+    .await
 }
 
 #[derive(Debug, Serialize)]
@@ -1501,6 +1618,16 @@ mod tests {
             modified: vec![row(Some("getPet"))],
             added: vec![row(None)],
             deleted: Vec::new(),
+            backups: vec![BackupRow {
+                key: "getPet".to_string(),
+                name: "getPet".to_string(),
+                method: "GET".to_string(),
+                url: "{{baseUrl}}/mine".to_string(),
+                request_path: "pets/getPet".to_string(),
+                saved_at: "2026-10-27T10:00:00+00:00".to_string(),
+                fields: vec!["url".to_string()],
+            }],
+            reset_available: true,
         }))
         .expect("json");
         assert_eq!(json["baselineTrusted"], true);
@@ -1509,6 +1636,32 @@ mod tests {
         assert_eq!(json["modified"][0]["fields"], json!(["url"]));
         assert_eq!(json["added"][0]["key"], serde_json::Value::Null);
         assert_eq!(json["deleted"], json!([]));
+        assert_eq!(json["resetAvailable"], true);
+        assert_eq!(json["backups"][0]["savedAt"], "2026-10-27T10:00:00+00:00");
+        assert_eq!(json["backups"][0]["requestPath"], "pets/getPet");
+        assert_eq!(json["backups"][0]["fields"], json!(["url"]));
+    }
+
+    #[test]
+    fn reset_errors_map_to_fixed_sentences() {
+        let older = reset_error(DomainError::InvalidInput(
+            "These requests cannot be reset because the sync data is from an older version."
+                .to_string(),
+        ));
+        assert!(older.contains("older version"));
+        let busy = reset_error(DomainError::Conflict(
+            "another sync apply is running on this collection".to_string(),
+        ));
+        assert_eq!(busy, "A sync is running. Try again when it is done.");
+        let changed = reset_error(DomainError::Conflict(
+            "The request changed on disk. Reload and try again.".to_string(),
+        ));
+        assert_eq!(changed, "The request changed on disk. Reload and try again.");
+        let missing = reset_error(DomainError::NotFound("x".to_string()));
+        assert_eq!(missing, "There is no backup for this request.");
+        let other = reset_error(DomainError::Internal("cannot write /home/me/secret".to_string()));
+        assert_eq!(other, "Reset failed. Nothing was changed.");
+        assert!(!other.contains("secret"));
     }
 
     #[test]

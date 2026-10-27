@@ -150,7 +150,7 @@ pub use oauth2_service::OAuth2Service;
 pub use openapi_sync_apply::{ApplyDeps, RendererFactory};
 pub use openapi_sync_reset::ResetReport;
 pub use openapi_sync_view::{
-    BadgeView, ChangeRow, ChangesView, OverviewView, PlanView, SpecOpRow, SpecTagGroup, SpecView,
+    BackupRow, BadgeView, ChangeRow, ChangesView, OverviewView, PlanView, SpecOpRow, SpecTagGroup, SpecView,
     SpecViewState, UnchangedView,
 };
 pub use openapi_sync_scheduler::{
