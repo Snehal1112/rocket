@@ -297,6 +297,7 @@ async fn world_from(
         Arc::new(NoSecrets(Arc::clone(&secret_reads))),
     )
     .with_consent(Arc::new(rocket_collection::InMemoryConsentStore::new()))
+    .with_backups(Arc::new(rocket_infra::FsOpenApiBackupRepo))
     .with_apply(deps(&ws_path, tx));
     svc.grant_current(&root).expect("consent");
     World {
@@ -1196,3 +1197,7 @@ mod changes_tests;
 #[cfg(test)]
 #[path = "openapi_sync_spec_view_tests.rs"]
 mod spec_view_tests;
+
+#[cfg(test)]
+#[path = "openapi_sync_reset_tests.rs"]
+mod reset_tests;

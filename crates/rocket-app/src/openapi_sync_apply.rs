@@ -26,6 +26,7 @@ const BASELINE_REL: &str = ".rocket/openapi-baseline.json";
 const LOCAL_REL: &str = ".rocket/openapi-local.json";
 const PENDING_REL: &str = ".rocket/openapi-pending.spec";
 const APPLIED_REL: &str = ".rocket/openapi-applied.spec";
+pub(crate) const BACKUPS_REL: &str = ".rocket/openapi-reset-backups.json";
 const BASE_URL_KEY: &str = "baseUrl";
 
 /// Builds the renderer for the collection folder at the given path.
@@ -103,13 +104,13 @@ fn stage_all(
     Ok(())
 }
 
-fn to_yaml(source: &OpenApiSource) -> DomainResult<Vec<u8>> {
+pub(crate) fn to_yaml(source: &OpenApiSource) -> DomainResult<Vec<u8>> {
     serde_yaml::to_string(source)
         .map(String::into_bytes)
         .map_err(|e| DomainError::Internal(format!("the source file could not be written: {e}")))
 }
 
-fn to_json<T: serde::Serialize>(value: &T) -> DomainResult<Vec<u8>> {
+pub(crate) fn to_json<T: serde::Serialize>(value: &T) -> DomainResult<Vec<u8>> {
     serde_json::to_vec_pretty(value)
         .map_err(|e| DomainError::Internal(format!("a state file could not be written: {e}")))
 }
@@ -273,6 +274,23 @@ impl OpenApiSyncService {
             // The spec that was just applied becomes the saved copy.
             extra.push((APPLIED_REL, Some(loaded.pending_text.clone().into_bytes())));
             extra.push((PENDING_REL, None));
+        }
+        // A sync that updates an endpoint drops its reset backup in the same transaction.
+        if let Ok(repo) = self.backup_repo() {
+            let touched: Vec<String> = output
+                .report
+                .applied
+                .iter()
+                .map(|a| a.key.clone())
+                .chain(output.report.deleted.iter().cloned())
+                .collect();
+            match repo.load(&root) {
+                Ok(Some(backups)) if backups.entries.iter().any(|e| touched.contains(&e.key)) => {
+                    extra.push((BACKUPS_REL, Some(to_json(&backups.without_keys(&touched))?)));
+                }
+                Ok(_) => {}
+                Err(e) => tracing::debug!(error = %e, "the reset backups could not be read"),
+            }
         }
         let mut tx = deps.tx.begin(&root)?;
         if let Err(e) = stage_all(tx.as_mut(), &output.files, extra) {

@@ -90,6 +90,8 @@ pub struct OpenApiSyncService {
     local: Option<Box<dyn OpenApiLocalRepository>>,
     /// Set by `with_consent`. Without it no source has consent, so nothing checks.
     consent: Option<Arc<dyn OpenApiConsentStore>>,
+    /// Set by `with_backups`. Without it reset, restore and discard refuse.
+    backups: Option<Arc<dyn rocket_collection::openapi_backup::OpenApiBackupRepository>>,
 }
 
 pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
@@ -172,7 +174,25 @@ impl OpenApiSyncService {
             apply_deps: None,
             local: None,
             consent: None,
+            backups: None,
         }
+    }
+
+    /// Adds the repository of the reset backups, which reset, restore and discard need.
+    pub fn with_backups(
+        mut self,
+        backups: Arc<dyn rocket_collection::openapi_backup::OpenApiBackupRepository>,
+    ) -> Self {
+        self.backups = Some(backups);
+        self
+    }
+
+    pub(crate) fn backup_repo(
+        &self,
+    ) -> DomainResult<&dyn rocket_collection::openapi_backup::OpenApiBackupRepository> {
+        self.backups.as_deref().ok_or_else(|| {
+            DomainError::Internal("Resetting requests is not set up.".to_string())
+        })
     }
 
     /// Adds the repository of the local state, where the interval and the check timing live.
