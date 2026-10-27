@@ -96,6 +96,35 @@ export function fieldLabel(field: string): string {
   return field.charAt(0).toUpperCase() + field.slice(1);
 }
 
+const RESET_KEPT =
+  'Your scripts, tests, assertions and docs are kept. A backup is kept until the next sync.';
+
+/** A field name inside a sentence: `URL`, `header Accept`, `body $.a`, `name`. */
+function resetFieldPhrase(field: string): string {
+  if (field === 'url') return 'URL';
+  return field.replace(':', ' ');
+}
+
+function joinPhrases(items: string[]): string {
+  if (items.length <= 1) return items.join('');
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+}
+
+/** The confirm text for resetting one request to the last synced spec. */
+export function resetConfirmText(row: { method: string; url: string; fields: string[] }): string {
+  const target = `${row.method} ${row.url}`.trim();
+  const back =
+    row.fields.length === 0
+      ? "Everything the spec sets goes back to the spec's version."
+      : `${joinPhrases(row.fields.map(resetFieldPhrase))} ${row.fields.length === 1 ? 'goes' : 'go'} back to the spec's version.`;
+  return `Reset ${target} to the spec? ${back} ${RESET_KEPT}`;
+}
+
+/** The confirm text for resetting several requests at once. */
+export function resetAllConfirmText(count: number): string {
+  return `Reset ${count} ${count === 1 ? 'request' : 'requests'} to the spec? Everything the spec sets goes back to the spec's version. ${RESET_KEPT}`;
+}
+
 export function variableLabel(change: OpenApiVariableChange): string {
   return change.kind === 'baseUrl' ? `Base URL ${change.name}` : `Security ${change.name}`;
 }

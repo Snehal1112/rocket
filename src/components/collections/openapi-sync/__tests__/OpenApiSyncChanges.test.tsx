@@ -1,4 +1,5 @@
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as tauriApi from '@/lib/tauri-api';
 import type { OpenApiChangeRow, OpenApiChanges } from '@/lib/tauri-api';
@@ -7,7 +8,7 @@ import { OpenApiSyncChanges } from '../OpenApiSyncChanges';
 
 vi.mock('@/lib/tauri-api', async () => {
   const actual = await vi.importActual<typeof tauriApi>('@/lib/tauri-api');
-  return { ...actual, getOpenApiSyncChanges: vi.fn() };
+  return { ...actual, getOpenApiSyncChanges: vi.fn(), resetOpenApiSync: vi.fn() };
 });
 
 function row(over: Partial<OpenApiChangeRow> = {}): OpenApiChangeRow {
@@ -97,12 +98,108 @@ describe('OpenApiSyncChanges', () => {
     expect(screen.queryByText('Modified (0)')).toBeNull();
   });
 
-  it('has_no_buttons_in_this_version', async () => {
-    show(changes({ modified: [row()], added: [row({ uid: 'u2' })], deleted: [row({ uid: 'u3' })] }));
-    await screen.findByText('Modified (1)');
-    const lists = screen.getAllByRole('list');
-    for (const list of lists) expect(within(list).queryAllByRole('button')).toHaveLength(0);
+  it('modified_rows_have_a_reset_button', async () => {
+    show(changes({ modified: [row(), row({ uid: 'u2', key: 'GET /b' })] }));
+    await screen.findByText('Modified (2)');
+    expect(screen.getAllByRole('button', { name: 'Reset to spec' })).toHaveLength(2);
+  });
+
+  it('added_and_deleted_rows_have_no_buttons', async () => {
+    show(changes({ added: [row({ uid: 'u2' })], deleted: [row({ uid: 'u3' })] }));
+    await screen.findByText('Added by you (1)');
     expect(screen.queryAllByRole('button')).toHaveLength(0);
+  });
+
+  it('reset_asks_first_and_cancel_sends_nothing', async () => {
+    show(changes({ modified: [row({ method: 'GET', url: '/orders', fields: ['url', 'header:Accept'] })] }));
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Reset to spec' }));
+    const dialog = await screen.findByRole('alertdialog');
+    expect(
+      within(dialog).getByText(
+        "Reset GET /orders to the spec? URL and header Accept go back to the spec's version. Your scripts, tests, assertions and docs are kept. A backup is kept until the next sync.",
+      ),
+    ).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(tauriApi.resetOpenApiSync).not.toHaveBeenCalled();
+  });
+
+  it('confirming_a_reset_sends_that_one_key', async () => {
+    vi.mocked(tauriApi.resetOpenApiSync).mockResolvedValue({ reset: ['GET /pets'], skipped: [] });
+    show(changes({ modified: [row(), row({ uid: 'u2', key: 'GET /b', name: 'B' })] }));
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByRole('button', { name: 'Reset to spec' }))[0]);
+    await user.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Reset' }));
+    await waitFor(() =>
+      expect(tauriApi.resetOpenApiSync).toHaveBeenCalledWith('c', ['GET /pets']),
+    );
+  });
+
+  it('reset_all_asks_once_with_the_count_and_sends_all_keys', async () => {
+    vi.mocked(tauriApi.resetOpenApiSync).mockResolvedValue({ reset: [], skipped: [] });
+    show(
+      changes({
+        modified: [
+          row(),
+          row({ uid: 'u2', key: 'GET /b' }),
+          row({ uid: 'u3', key: 'GET /c' }),
+        ],
+      }),
+    );
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Reset all to spec (3)' }));
+    const dialog = await screen.findByRole('alertdialog');
+    expect(within(dialog).getByText(/^Reset 3 requests to the spec\?/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Reset' }));
+    await waitFor(() =>
+      expect(tauriApi.resetOpenApiSync).toHaveBeenCalledWith('c', ['GET /pets', 'GET /b', 'GET /c']),
+    );
+    expect(tauriApi.resetOpenApiSync).toHaveBeenCalledTimes(1);
+  });
+
+  it('reset_is_disabled_with_a_note_when_unavailable', async () => {
+    show(changes({ resetAvailable: false, baselineTrusted: false, modified: [row()] }));
+    expect(await screen.findByRole('button', { name: 'Reset to spec' })).toBeDisabled();
+    expect(
+      screen.getByText(
+        'These requests cannot be reset because the sync data is from an older version.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('shows_a_fixed_sentence_when_the_reset_fails', async () => {
+    vi.mocked(tauriApi.resetOpenApiSync).mockRejectedValue(
+      'The request changed on disk. Reload and try again.',
+    );
+    show(changes({ modified: [row()] }));
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Reset to spec' }));
+    await user.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Reset' }));
+    expect(
+      await screen.findByText('The request changed on disk. Reload and try again.'),
+    ).toBeInTheDocument();
+  });
+
+  it('an_unknown_reset_error_is_not_shown_raw', async () => {
+    vi.mocked(tauriApi.resetOpenApiSync).mockRejectedValue('failed at /home/me/secret.yml');
+    show(changes({ modified: [row()] }));
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Reset to spec' }));
+    await user.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Reset' }));
+    await screen.findByRole('alert');
+    expect(screen.queryByText(/secret\.yml/)).toBeNull();
+  });
+
+  it('the_buttons_are_disabled_while_a_reset_runs', async () => {
+    vi.mocked(tauriApi.resetOpenApiSync).mockReturnValue(new Promise(() => undefined));
+    show(changes({ modified: [row(), row({ uid: 'u2', key: 'GET /b' })] }));
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByRole('button', { name: 'Reset to spec' }))[0]);
+    await user.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Reset' }));
+    await waitFor(() =>
+      expect(screen.getAllByRole('button', { name: 'Reset to spec' })[1]).toBeDisabled(),
+    );
+    expect(screen.getByRole('button', { name: 'Reset all to spec (2)' })).toBeDisabled();
   });
 
   it('shows_a_fixed_sentence_when_loading_fails', async () => {

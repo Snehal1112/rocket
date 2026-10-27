@@ -10,10 +10,31 @@ import {
   isPendingChangedError,
   outcomeLabel,
   renameHint,
+  resetConfirmText,
 } from '../openApiSyncView';
 import { changedItem, makePlan, newItem, removedItem } from './fixtures';
 
 describe('openApiSyncView', () => {
+  it('reset_confirm_text_names_the_method_url_and_fields', () => {
+    expect(
+      resetConfirmText({ method: 'GET', url: '/orders', fields: ['url', 'header:Accept'] }),
+    ).toBe(
+      "Reset GET /orders to the spec? URL and header Accept go back to the spec's version. Your scripts, tests, assertions and docs are kept. A backup is kept until the next sync.",
+    );
+  });
+
+  it('reset_confirm_text_handles_one_field_and_none', () => {
+    expect(resetConfirmText({ method: 'POST', url: '/a', fields: ['body:$.a'] })).toContain(
+      'body $.a goes back to the spec',
+    );
+    expect(resetConfirmText({ method: 'POST', url: '/a', fields: [] })).toContain(
+      "Everything the spec sets goes back to the spec's version.",
+    );
+    expect(
+      resetConfirmText({ method: 'GET', url: '/a', fields: ['url', 'name', 'auth'] }),
+    ).toContain('URL, name and auth go back');
+  });
+
   it('groups New, Changed, Removed in that order with counts', () => {
     const groups = groupItems([removedItem, changedItem, newItem, { ...newItem, key: 'x' }]);
     expect(groups.map((g) => [g.label, g.items.length])).toEqual([

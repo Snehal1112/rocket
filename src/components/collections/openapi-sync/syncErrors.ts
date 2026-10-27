@@ -38,6 +38,20 @@ const KNOWN: Array<[string, string]> = [
   ['Tokens work with GitHub links only.', 'Tokens work with GitHub links only.'],
   ['The token is empty.', 'Enter a token first.'],
   ['The saved spec cannot be shown.', 'The saved spec cannot be shown.'],
+  [
+    'These requests cannot be reset because the sync data is from an older version.',
+    'These requests cannot be reset because the sync data is from an older version.',
+  ],
+  [
+    'A sync is running. Try again when it is done.',
+    'A sync is running. Try again when it is done.',
+  ],
+  [
+    'The request changed on disk. Reload and try again.',
+    'The request changed on disk. Reload and try again.',
+  ],
+  ['There is no backup for this request.', 'There is no backup for this request.'],
+  ['Reset failed. Nothing was changed.', 'Reset failed. Nothing was changed.'],
 ];
 
 function rawText(error: unknown): string | null {
