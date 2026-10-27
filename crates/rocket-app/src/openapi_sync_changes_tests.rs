@@ -331,3 +331,14 @@ async fn badges_ignores_an_unreadable_state_file() {
     assert_eq!(badges.len(), 1);
     assert_eq!(badges[0].collection, w.name);
 }
+
+#[tokio::test]
+async fn overview_counts_a_modified_and_waiting_operation_once() {
+    let w = world().await;
+    edit_url(&w, "listPets");
+    w.check_with(v2()).await;
+    let view = w.svc.overview(&w.name).expect("overview");
+    assert_eq!(view.changed_by_you, Some(1));
+    // listPets is modified and waiting, getInventory is waiting, so one is in sync.
+    assert_eq!(view.in_sync, Some(1));
+}

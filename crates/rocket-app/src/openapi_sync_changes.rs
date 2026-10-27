@@ -135,24 +135,25 @@ impl OpenApiSyncService {
             .and_then(|text| ParsedSpec::parse(&text).ok())
             .and_then(|spec| spec.version().map(str::to_string));
         let endpoints = u32::try_from(source.operations.len()).unwrap_or(u32::MAX);
-        // Skipped items are not in the plan, so they are not counted as waiting.
-        let waiting_ops = source
-            .operations
-            .iter()
-            .filter(|o| plan.plan.items.iter().any(|i| i.key() == o.key))
-            .count();
-        let waiting_ops = u32::try_from(waiting_ops).unwrap_or(u32::MAX);
         let waiting = plan.plan.items.len() + plan.plan.variable_changes.len();
         let changed = u32::try_from(changes.modified.len()).unwrap_or(u32::MAX);
-        let (in_sync, changed_by_you) = if changes.baseline_trusted {
-            (
-                Some(
-                    endpoints
-                        .saturating_sub(changed)
-                        .saturating_sub(waiting_ops),
-                ),
-                Some(changed),
+        // An operation that is both modified and waiting counts once. Skipped items are not in
+        // the plan, so they do not count as waiting.
+        let touched: HashSet<&str> = changes
+            .modified
+            .iter()
+            .filter_map(|r| r.key.as_deref())
+            .chain(
+                source
+                    .operations
+                    .iter()
+                    .map(|o| o.key.as_str())
+                    .filter(|k| plan.plan.items.iter().any(|i| i.key() == *k)),
             )
+            .collect();
+        let touched = u32::try_from(touched.len()).unwrap_or(u32::MAX);
+        let (in_sync, changed_by_you) = if changes.baseline_trusted {
+            (Some(endpoints.saturating_sub(touched)), Some(changed))
         } else {
             (None, None)
         };
