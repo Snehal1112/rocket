@@ -14,6 +14,7 @@ import type { OpenApiSyncStatus } from '@/lib/tauri-api';
 import { CheckNowButtonView, useCheckRunner } from './CheckNowButton';
 import { type ChipState, chipState } from './chipState';
 import { DisconnectSyncDialog } from './DisconnectSyncDialog';
+import { nextStep } from './nextStep';
 import { OpenApiSyncConnectionDialog } from './OpenApiSyncConnectionDialog';
 import { intervalLabel, splitLocation } from './openApiSyncView';
 
@@ -44,10 +45,16 @@ export function OpenApiSyncHeader({
 }: OpenApiSyncHeaderProps) {
   const [showFull, setShowFull] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogFocus, setDialogFocus] = useState<'token' | undefined>();
   const [disconnectOpen, setDisconnectOpen] = useState(false);
   const runner = useCheckRunner(collection, status.consent);
   const chip = chipState(status, waiting);
   const failed = status.lastStatus?.state === 'failed';
+  const step = nextStep(status);
+  const openDialog = (focus?: 'token') => {
+    setDialogFocus(focus);
+    setDialogOpen(true);
+  };
   const { short, full } = splitLocation(status.location);
   return (
     <div className='flex flex-col gap-2 border-b border-border/70 px-4 py-3'>
@@ -70,7 +77,7 @@ export function OpenApiSyncHeader({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align='start'>
-                <DropdownMenuItem onSelect={() => setDialogOpen(true)}>
+                <DropdownMenuItem onSelect={() => openDialog()}>
                   Edit connection settings
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => setDisconnectOpen(true)}>
@@ -103,7 +110,7 @@ export function OpenApiSyncHeader({
         </div>
         <div className='flex flex-wrap items-center gap-2'>
           {/* The same dialog is in the menu, but a faint icon is easy to miss. */}
-          <Button variant='outline' size='sm' onClick={() => setDialogOpen(true)}>
+          <Button variant='outline' size='sm' onClick={() => openDialog()}>
             <Settings2 aria-hidden='true' className='mr-1.5 h-3.5 w-3.5' />
             Connection settings
           </Button>
@@ -121,6 +128,17 @@ export function OpenApiSyncHeader({
             {status.lastMessage ?? 'The last check failed.'}
             {status.lastStatus?.code ? ` (${status.lastStatus.code})` : ''}
           </p>
+          {step.kind !== 'none' && (
+            <Button
+              variant='outline'
+              size='sm'
+              className='mt-2'
+              disabled={step.kind === 'check_now' && runner.pending}
+              onClick={step.kind === 'add_token' ? () => openDialog('token') : runner.run}
+            >
+              {step.label}
+            </Button>
+          )}
         </Alert>
       )}
       <DisconnectSyncDialog
@@ -133,6 +151,7 @@ export function OpenApiSyncHeader({
         status={status}
         open={dialogOpen}
         onOpenChange={setDialogOpen}
+        focus={dialogFocus}
       />
     </div>
   );

@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import * as tauriApi from '@/lib/tauri-api';
@@ -8,7 +8,7 @@ import { makeStatus } from './fixtures';
 
 vi.mock('@/lib/tauri-api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/tauri-api')>('@/lib/tauri-api');
-  return { ...actual, checkOpenApiSyncNow: vi.fn() };
+  return { ...actual, checkOpenApiSyncNow: vi.fn(), getOpenApiSyncStatus: vi.fn() };
 });
 
 describe('OpenApiSyncHeader', () => {
@@ -74,6 +74,70 @@ describe('OpenApiSyncHeader', () => {
       />,
     );
     expect(screen.getByRole('alert')).toHaveTextContent('The spec host did not answer in time.');
+  });
+
+  describe('next step in the failed-check alert', () => {
+    const GITHUB = 'https://github.com/acme/api/blob/main/openapi.yaml';
+    const failedWith = (code: string, over: Record<string, unknown> = {}) =>
+      makeStatus({
+        location: GITHUB,
+        lastStatus: { state: 'failed', code },
+        lastMessage: 'The check failed.',
+        ...over,
+      });
+
+    it('a_not_found_failure_offers_add_access_token', () => {
+      renderWithQuery(
+        <OpenApiSyncHeader collection='c' waiting={0} status={failedWith('not_found')} />,
+      );
+      const alert = screen.getByRole('alert');
+      expect(within(alert).getByRole('button', { name: 'Add access token' })).toBeInTheDocument();
+      expect(within(alert).queryByRole('button', { name: 'Check now' })).toBeNull();
+    });
+
+    it('no_add_access_token_for_a_non_github_link', () => {
+      renderWithQuery(
+        <OpenApiSyncHeader
+          collection='c'
+          waiting={0}
+          status={failedWith('not_found', { location: 'https://example.com/o.yaml' })}
+        />,
+      );
+      expect(within(screen.getByRole('alert')).queryByRole('button')).toBeNull();
+    });
+
+    it('add_access_token_opens_the_dialog_at_the_token', async () => {
+      vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(failedWith('not_found'));
+      renderWithQuery(
+        <OpenApiSyncHeader collection='c' waiting={0} status={failedWith('not_found')} />,
+      );
+      await userEvent
+        .setup()
+        .click(within(screen.getByRole('alert')).getByRole('button', { name: 'Add access token' }));
+      const input = await screen.findByLabelText('Access token');
+      await waitFor(() => expect(input).toHaveFocus());
+    });
+
+    it('a_network_failure_offers_check_now', async () => {
+      vi.mocked(tauriApi.checkOpenApiSyncNow).mockResolvedValue({ state: 'unchanged' });
+      renderWithQuery(
+        <OpenApiSyncHeader collection='c' waiting={0} status={failedWith('network')} />,
+      );
+      const button = within(screen.getByRole('alert')).getByRole('button', { name: 'Check now' });
+      await userEvent.setup().click(button);
+      await waitFor(() => expect(tauriApi.checkOpenApiSyncNow).toHaveBeenCalledWith('c'));
+    });
+
+    it('check_now_in_the_alert_respects_consent', () => {
+      renderWithQuery(
+        <OpenApiSyncHeader
+          collection='c'
+          waiting={0}
+          status={failedWith('network', { consent: 'missing' })}
+        />,
+      );
+      expect(within(screen.getByRole('alert')).queryByRole('button')).toBeNull();
+    });
   });
 
   it('hides the query of an Https link behind Show full link', async () => {
