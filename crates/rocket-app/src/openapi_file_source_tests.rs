@@ -207,3 +207,43 @@ async fn a_linked_import_then_a_changed_file_gives_a_pending_update() {
     let second = w.svc.check(&root).await.expect("check");
     assert!(matches!(second, CheckOutcome::Changed { .. }), "{second:?}");
 }
+
+#[tokio::test]
+async fn the_status_and_the_approval_show_the_resolved_absolute_path() {
+    let w = world().await;
+    use_file_source(&w, &v1());
+    let status = w.svc.status(&w.root, false).expect("status");
+    let want = format!("file://{}", w.root.join(SPEC_FILE).display());
+    assert_eq!(status.location, want);
+    // The approval takes the text the user was shown.
+    w.svc.revoke_consent(&w.root).expect("revoke");
+    w.svc
+        .grant_consent(&w.root, &status.location)
+        .expect("grant");
+    assert_eq!(
+        w.svc.consent_state(&w.root).expect("state"),
+        rocket_collection::ConsentState::Granted
+    );
+}
+
+#[tokio::test]
+async fn a_hostile_file_path_cannot_be_approved_or_read() {
+    let w = world().await;
+    use_file_source(&w, &v1());
+    for bad in [
+        "a/../../../../etc/passwd",
+        "//attacker.example/share/api.yaml",
+    ] {
+        let mut source = w.source();
+        source.location = SpecLocation::File {
+            path: bad.to_string(),
+        };
+        rocket_infra::FsOpenApiSourceRepo
+            .save(&w.root, &source)
+            .expect("save");
+        let shown = source.location.display_url_at(&w.root);
+        assert!(w.svc.grant_consent(&w.root, &shown).is_err(), "{bad}");
+        assert!(w.svc.grant_consent_for_link(&w.root, bad).is_err(), "{bad}");
+    }
+    assert_eq!(w.reader_reads.load(Ordering::SeqCst), 0);
+}

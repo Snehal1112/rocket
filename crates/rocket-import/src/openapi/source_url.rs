@@ -161,12 +161,15 @@ pub fn parse_spec_target(input: &str, root: &Path) -> ImportResult<SpecLocation>
     } else {
         text
     };
-    if path_text.is_empty() || path_text.contains('\0') {
+    // The typed text is checked as well: a `//server/share` path loses a slash when it is parsed
+    // as a path on this system, but it is a network share on Windows.
+    let path = stored_path(path_text, root);
+    if !rocket_collection::openapi_source::file_path_allowed(path_text)
+        || !rocket_collection::openapi_source::file_path_allowed(&path)
+    {
         return Err(reject("that is not a link or a file path"));
     }
-    Ok(SpecLocation::File {
-        path: stored_path(path_text, root),
-    })
+    Ok(SpecLocation::File { path })
 }
 
 /// True for `name:` or `name://` with a scheme name longer than one letter, so a Windows drive
@@ -698,5 +701,18 @@ mod tests {
         );
         // Plain http elsewhere is still refused, not read as a file name.
         assert!(parse_spec_target("http://example.com/o.json", root).is_err());
+    }
+
+    #[test]
+    fn parse_spec_target_refuses_paths_that_are_not_plain() {
+        let root = Path::new("/work/shop");
+        for input in [
+            "//attacker.example/share/api.yaml",
+            "file:////attacker.example/share/api.yaml",
+            "specs/../../../../etc/passwd",
+            "../../etc/passwd",
+        ] {
+            assert!(parse_spec_target(input, root).is_err(), "{input}");
+        }
     }
 }

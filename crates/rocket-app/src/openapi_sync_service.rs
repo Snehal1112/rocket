@@ -277,12 +277,12 @@ impl OpenApiSyncService {
         let lock = collection_lock(root);
         let _guard = lock.lock();
         let source = self.load(root)?;
-        if source.location.display_url() != expected_location {
+        if source.location.display_url_at(root) != expected_location {
             return Err(DomainError::Conflict(
                 "The spec link changed. Check the link and approve it again.".to_string(),
             ));
         }
-        if parse_spec_target(&source.location.display_url(), root)
+        if parse_spec_target(&source.location.display_url_at(root), root)
             .ok()
             .as_ref()
             != Some(&source.location)
@@ -332,7 +332,7 @@ impl OpenApiSyncService {
     #[cfg(test)]
     pub(crate) fn grant_current(&self, root: &Path) -> DomainResult<()> {
         let source = self.load(root)?;
-        self.grant_consent(root, &source.location.display_url())
+        self.grant_consent(root, &source.location.display_url_at(root))
     }
 
     /// The source when this machine approved its current location, else the refusal to give.
@@ -570,9 +570,16 @@ impl OpenApiSyncService {
             max_bytes: DEFAULT_MAX_SPEC_BYTES,
         };
         // A spec file is read by the reader. It has no validators and no redirects.
-        let mut result = match source.location.resolve_file(collection_root) {
-            Some(path) => self.read_spec_file(&path),
-            None => self.fetcher.fetch(request.clone()).await,
+        let mut result = match (
+            &source.location,
+            source.location.resolve_file(collection_root),
+        ) {
+            (_, Some(path)) => self.read_spec_file(&path),
+            // A file path that is not allowed is never read.
+            (SpecLocation::File { .. }, None) => {
+                Err(SpecFetchFailure::LocalFile(LocalReadFailure::Io))
+            }
+            _ => self.fetcher.fetch(request.clone()).await,
         };
 
         // Rule 3 refinement: a 304 of the main spec says nothing about the files it refers to.
@@ -845,7 +852,7 @@ impl OpenApiSyncService {
             _ => SyncInterval::Off,
         };
         Ok(SyncStatusView {
-            location: source.location.display_url(),
+            location: source.location.display_url_at(collection_root),
             interval,
             last_checked_at,
             last_status,

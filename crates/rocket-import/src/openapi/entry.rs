@@ -358,11 +358,18 @@ impl ImportService {
         group_by: GroupBy,
         workspace_id: &str,
     ) -> ImportResult<OpenApiImportResult> {
+        // The path is stored and approved as typed, so it must name the same file wherever it is
+        // read from, and it must survive being stored as text.
+        let Some(path_text) = path.to_str().filter(|_| path.is_absolute()) else {
+            return Err(ImportError::SpecUnavailable(
+                "Choose the file with its full path.".to_string(),
+            ));
+        };
         let text = read_spec_file_text(path)?;
         let imported =
             self.import_openapi_text(&text, &file_label_of(path), group_by, workspace_id)?;
         let root = self.collections_root().join(&imported.collection);
-        let location = parse_spec_target(&path.to_string_lossy(), &root)?;
+        let location = parse_spec_target(path_text, &root)?;
         let display_url = location.display_url();
         let mut warnings = Vec::new();
         let source_id = write_sync_state(
@@ -993,6 +1000,23 @@ parameters:
         let root = ws.path().join("collections").join(&result.collection);
         assert!(result.source_url.is_none() && result.source_id.is_none());
         assert!(!root.join(".rocket").exists());
+    }
+
+    #[test]
+    fn a_linked_import_needs_an_absolute_path() {
+        let ws = TempDir::new().expect("tempdir");
+        let service = ImportService::new_with_workspace_path(ws.path());
+        let err = service
+            .import_openapi_file_linked(
+                &FsOpenApiSourceRepo,
+                &FsOpenApiBaselineRepo,
+                Path::new("orders.json"),
+                GroupBy::Tags,
+                "ws",
+            )
+            .err()
+            .expect("refused");
+        assert!(err.to_string().contains("full path"), "{err}");
     }
 
     #[test]

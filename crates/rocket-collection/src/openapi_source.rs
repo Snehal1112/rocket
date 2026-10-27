@@ -193,6 +193,26 @@ pub struct RemoteRefState {
     pub last_modified: Option<String>,
 }
 
+/// True for a stored file path that Rocket itself could have written: no NUL, no network share
+/// (`//server/share` or `\\server\share`), and `..` only as the one leading part (a file beside
+/// the collection). A committed source can hold anything, so this runs before a path is shown,
+/// approved or read.
+pub fn file_path_allowed(path: &str) -> bool {
+    if path.is_empty() || path.contains('\0') {
+        return false;
+    }
+    if path.starts_with("//") || path.starts_with("\\\\") {
+        return false;
+    }
+    let parts: Vec<&str> = path.split(['/', '\\']).collect();
+    let dots = parts.iter().filter(|p| **p == "..").count();
+    match dots {
+        0 => true,
+        1 => parts.first() == Some(&".."),
+        _ => false,
+    }
+}
+
 /// The place a spec is fetched from. Persisted, so keys are snake_case with no renaming.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -225,9 +245,20 @@ impl SpecLocation {
         }
     }
 
-    /// The file to read for a `File` location, with a relative path joined to `root`.
+    /// The text shown for approval. A file is shown as its resolved absolute path, so the user
+    /// sees which file on this computer will be read; other locations show their link.
+    pub fn display_url_at(&self, root: &Path) -> String {
+        match self.resolve_file(root) {
+            Some(path) => format!("file://{}", lexical_clean(&path).display()),
+            None => self.display_url(),
+        }
+    }
+
+    /// The file to read for a `File` location, with a relative path joined to `root`. A path
+    /// that `file_path_allowed` refuses gives `None`.
     pub fn resolve_file(&self, root: &Path) -> Option<PathBuf> {
         match self {
+            SpecLocation::File { path } if !file_path_allowed(path) => None,
             SpecLocation::File { path } => {
                 let path = Path::new(path);
                 Some(if path.is_absolute() {
@@ -249,6 +280,22 @@ impl SpecLocation {
             SpecLocation::Https { .. } | SpecLocation::File { .. } => false,
         }
     }
+}
+
+/// Resolves `.` and `..` parts without touching the disk.
+fn lexical_clean(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -409,5 +456,57 @@ mod tests {
             url: "https://example.com/a.json".to_string(),
         };
         assert_eq!(https.resolve_file(root), None);
+    }
+
+    #[test]
+    fn file_path_allowed_table() {
+        for ok in [
+            "specs/a.yaml",
+            "../a.yaml",
+            "/srv/a.yaml",
+            "C:/x/a.yaml",
+            "a.yaml",
+        ] {
+            assert!(file_path_allowed(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            "specs/../../x",
+            "../../x",
+            "a/../b",
+            "//server/share/a.yaml",
+            "\\\\server\\share\\a.yaml",
+            "a\0b",
+        ] {
+            assert!(!file_path_allowed(bad), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn a_path_that_is_not_allowed_is_never_resolved() {
+        let root = Path::new("/work/shop");
+        assert_eq!(file("//server/share/a.yaml").resolve_file(root), None);
+        assert_eq!(file("a/../../../etc/passwd").resolve_file(root), None);
+    }
+
+    #[test]
+    fn display_url_at_shows_the_resolved_absolute_path() {
+        let root = Path::new("/work/shop");
+        assert_eq!(
+            file("specs/api.yaml").display_url_at(root),
+            "file:///work/shop/specs/api.yaml"
+        );
+        assert_eq!(
+            file("../api.yaml").display_url_at(root),
+            "file:///work/api.yaml"
+        );
+        assert_eq!(
+            file("/srv/api.yaml").display_url_at(root),
+            "file:///srv/api.yaml"
+        );
+        let https = SpecLocation::Https {
+            url: "https://example.com/a.json".to_string(),
+        };
+        assert_eq!(https.display_url_at(root), "https://example.com/a.json");
     }
 }
