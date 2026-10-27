@@ -3,14 +3,17 @@
 use crate::converter::openapi::CONVERTER_VERSION;
 use crate::error::{ImportError, ImportResult};
 use crate::importer::ImportService;
-use crate::openapi::{bundle_spec, fetch_target, parse_spec_url, source_record, Bundle, GroupBy};
+use crate::openapi::{
+    bundle_spec, fetch_target, parse_spec_target, parse_spec_url, source_record, Bundle, GroupBy,
+};
 use crate::report::ImportReport;
 use rocket_collection::openapi_baseline::{
     BaselineOperation, OpenApiBaseline, OpenApiBaselineRepository, BASELINE_FILE_VERSION,
 };
 use rocket_collection::openapi_source::{OpenApiSourceRepository, SpecLocation};
 use rocket_http::spec_fetch::{
-    SpecFetchFailure, SpecFetchOutcome, SpecFetchRequest, SpecFetcher, DEFAULT_MAX_SPEC_BYTES,
+    LocalReadFailure, LocalSpecReader, SpecFetchFailure, SpecFetchOutcome, SpecFetchRequest,
+    SpecFetcher, DEFAULT_MAX_SPEC_BYTES,
 };
 use std::io::Read;
 use std::path::Path;
@@ -43,6 +46,14 @@ pub fn fetch_failure_message(failure: &SpecFetchFailure, token_sent: bool) -> St
         }
         // A network error can carry a host or path, so only a fixed sentence goes on.
         SpecFetchFailure::Network(_) => "The file could not be fetched.".to_string(),
+        // A file on this computer: a fixed sentence that names no path.
+        SpecFetchFailure::LocalFile(failure) => match failure {
+            LocalReadFailure::NotFound => "The spec file was not found on this computer.",
+            LocalReadFailure::NotAFile => "The path is not a file.",
+            LocalReadFailure::TooLarge => "The file is larger than the 25 MB limit.",
+            LocalReadFailure::Io => "The spec file could not be read.",
+        }
+        .to_string(),
         other => other.to_string(),
     }
 }
@@ -114,6 +125,53 @@ pub struct FetchedSpec {
     pub last_modified: Option<String>,
 }
 
+/// Where a spec can come from: the network, or a file on this computer.
+pub struct SpecSources<'a> {
+    pub fetcher: &'a dyn SpecFetcher,
+    pub reader: &'a dyn LocalSpecReader,
+}
+
+/// Reads or fetches the spec named by `input`: a link, a `file://` URL or a path. A relative
+/// path is read from `root`. A token is for GitHub links only. A file is read by the reader and
+/// its references to other files are not followed. Nothing is written.
+pub async fn fetch_spec_bundle_from(
+    sources: &SpecSources<'_>,
+    root: &Path,
+    input: &str,
+    token: Option<&str>,
+) -> ImportResult<FetchedSpec> {
+    let location = parse_spec_target(input, root)?;
+    let token = token.map(str::trim).filter(|t| !t.is_empty());
+    let Some(path) = location.resolve_file(root) else {
+        return fetch_location_bundle(sources.fetcher, location, token).await;
+    };
+    if token.is_some() {
+        return Err(ImportError::SpecUnavailable(
+            "Tokens work with GitHub links only.".to_string(),
+        ));
+    }
+    let body = sources
+        .reader
+        .read(&path, DEFAULT_MAX_SPEC_BYTES)
+        .map_err(|f| {
+            ImportError::SpecUnavailable(fetch_failure_message(
+                &SpecFetchFailure::LocalFile(f),
+                false,
+            ))
+        })?;
+    let text = String::from_utf8(body)
+        .map_err(|_| ImportError::NotAnOpenApiSpec("the file is not text".to_string()))?;
+    let display_url = location.display_url();
+    let bundle = bundle_spec(sources.fetcher, &text, &location, None, &[]).await?;
+    Ok(FetchedSpec {
+        location,
+        display_url,
+        bundle,
+        etag: None,
+        last_modified: None,
+    })
+}
+
 /// Fetches the spec behind `link` and bundles its remote references. A token is sent to GitHub
 /// links only and is never stored. Nothing is written.
 pub async fn fetch_spec_bundle(
@@ -123,6 +181,14 @@ pub async fn fetch_spec_bundle(
 ) -> ImportResult<FetchedSpec> {
     let location = parse_spec_url(link)?;
     let token = token.map(str::trim).filter(|t| !t.is_empty());
+    fetch_location_bundle(fetcher, location, token).await
+}
+
+async fn fetch_location_bundle(
+    fetcher: &dyn SpecFetcher,
+    location: SpecLocation,
+    token: Option<&str>,
+) -> ImportResult<FetchedSpec> {
     if token.is_some() && !matches!(location, SpecLocation::Github { .. }) {
         return Err(ImportError::SpecUnavailable(
             "Tokens work with GitHub links only.".to_string(),
@@ -1059,6 +1125,127 @@ parameters:
         assert!(describe_fetch_failure(&limited).contains("60"));
         assert!(describe_fetch_failure(&SpecFetchFailure::TooLarge).contains("25 MB"));
         assert!(describe_fetch_failure(&SpecFetchFailure::NotHttps).contains("https"));
+    }
+
+    /// Serves one file, or a failure, and records the paths it was asked for.
+    struct FakeReader {
+        reply: Result<Vec<u8>, rocket_http::LocalReadFailure>,
+        asked: Mutex<Vec<std::path::PathBuf>>,
+    }
+
+    impl rocket_http::LocalSpecReader for FakeReader {
+        fn read(
+            &self,
+            path: &Path,
+            _max_bytes: usize,
+        ) -> Result<Vec<u8>, rocket_http::LocalReadFailure> {
+            self.asked.lock().expect("lock").push(path.to_path_buf());
+            self.reply.clone()
+        }
+    }
+
+    fn reader(reply: Result<Vec<u8>, rocket_http::LocalReadFailure>) -> FakeReader {
+        FakeReader {
+            reply,
+            asked: Mutex::new(Vec::new()),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_file_link_is_read_through_the_reader_and_never_fetched() {
+        let fetcher = FakeFetcher::new(Err(SpecFetchFailure::Network("must not be called".into())));
+        let reader = reader(Ok(fixture().into_bytes()));
+        let sources = SpecSources {
+            fetcher: &fetcher,
+            reader: &reader,
+        };
+        let fetched =
+            fetch_spec_bundle_from(&sources, Path::new("/work/shop"), "specs/api.json", None)
+                .await
+                .expect("fetched");
+        assert_eq!(
+            fetched.location,
+            SpecLocation::File {
+                path: "specs/api.json".to_string()
+            }
+        );
+        assert_eq!(fetched.display_url, "file://specs/api.json");
+        assert!(fetched.etag.is_none() && fetched.last_modified.is_none());
+        assert_eq!(
+            reader.asked.lock().expect("lock").as_slice(),
+            [std::path::PathBuf::from("/work/shop/specs/api.json")]
+        );
+        assert!(fetcher.last.lock().expect("lock").is_none());
+    }
+
+    #[tokio::test]
+    async fn a_token_is_refused_for_a_file_link() {
+        let fetcher = FakeFetcher::new(Err(SpecFetchFailure::NotFound));
+        let reader = reader(Ok(fixture().into_bytes()));
+        let sources = SpecSources {
+            fetcher: &fetcher,
+            reader: &reader,
+        };
+        let err =
+            fetch_spec_bundle_from(&sources, Path::new("/work/shop"), "api.json", Some("tok"))
+                .await
+                .err()
+                .expect("refused");
+        assert!(err.to_string().contains("GitHub"), "{err}");
+        assert!(reader.asked.lock().expect("lock").is_empty());
+    }
+
+    #[tokio::test]
+    async fn unreadable_files_give_fixed_sentences_without_a_path() {
+        let fetcher = FakeFetcher::new(Err(SpecFetchFailure::NotFound));
+        for (failure, want) in [
+            (
+                rocket_http::LocalReadFailure::NotFound,
+                "The spec file was not found on this computer.",
+            ),
+            (
+                rocket_http::LocalReadFailure::NotAFile,
+                "The path is not a file.",
+            ),
+            (
+                rocket_http::LocalReadFailure::Io,
+                "The spec file could not be read.",
+            ),
+        ] {
+            let reader = reader(Err(failure));
+            let sources = SpecSources {
+                fetcher: &fetcher,
+                reader: &reader,
+            };
+            let err =
+                fetch_spec_bundle_from(&sources, Path::new("/work/shop"), "secret/api.json", None)
+                    .await
+                    .err()
+                    .expect("failed");
+            let text = err.to_string();
+            assert!(text.contains(want), "{text}");
+            assert!(!text.contains("secret"), "{text}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_link_still_goes_to_the_fetcher() {
+        let fetcher = FakeFetcher::body(&fixture(), Some("\"e1\""));
+        let reader = reader(Err(rocket_http::LocalReadFailure::Io));
+        let sources = SpecSources {
+            fetcher: &fetcher,
+            reader: &reader,
+        };
+        let fetched = fetch_spec_bundle_from(
+            &sources,
+            Path::new("/work/shop"),
+            "https://example.com/api.json",
+            None,
+        )
+        .await
+        .expect("fetched");
+        assert_eq!(fetched.etag.as_deref(), Some("\"e1\""));
+        assert!(reader.asked.lock().expect("lock").is_empty());
     }
 
     #[test]

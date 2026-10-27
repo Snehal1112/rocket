@@ -12,7 +12,7 @@ pub use importer::{
     EnvironmentRepositoryFactory, ImportService, ImportedOperation, OpenApiImportOutcome,
 };
 pub use converter::openapi::{baseline_hash, CONVERTER_VERSION};
-pub use openapi::{fetch_spec_bundle, FetchedSpec};
+pub use openapi::{fetch_spec_bundle, fetch_spec_bundle_from, FetchedSpec, SpecSources};
 pub use openapi::{
     match_requests, normalise_path, AmbiguousGroup, MatchPair, MatchRequest, MatchResult,
 };

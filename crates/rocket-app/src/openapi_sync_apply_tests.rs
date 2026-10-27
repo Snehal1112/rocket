@@ -246,6 +246,22 @@ struct World {
     fetcher: Arc<FakeFetcher>,
     repo: rocket_infra::FsCollectionRepo,
     secret_reads: Arc<std::sync::atomic::AtomicUsize>,
+    /// How many spec files the service read, to show that nothing is read without approval.
+    reader_reads: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+/// The real file reader, counting its reads.
+struct CountingReader(Arc<std::sync::atomic::AtomicUsize>);
+
+impl rocket_http::LocalSpecReader for CountingReader {
+    fn read(
+        &self,
+        path: &Path,
+        max_bytes: usize,
+    ) -> Result<Vec<u8>, rocket_http::LocalReadFailure> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        rocket_http::LocalSpecReader::read(&rocket_infra::FsLocalSpecReader, path, max_bytes)
+    }
 }
 
 fn deps(ws: &Path, tx: Arc<dyn CollectionFileTxFactory>) -> ApplyDeps {
@@ -291,12 +307,14 @@ async fn world_from(
     let ws_path = ws.path().to_path_buf();
     let root = ws_path.join("collections").join(&imported.collection);
     let secret_reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let reader_reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let svc = OpenApiSyncService::new(
         Arc::new(SharedFetcher(Arc::clone(&fetcher))),
         Box::new(rocket_infra::FsOpenApiSourceRepo),
         Arc::new(NoSecrets(Arc::clone(&secret_reads))),
     )
     .with_consent(Arc::new(rocket_collection::InMemoryConsentStore::new()))
+    .with_reader(Arc::new(CountingReader(Arc::clone(&reader_reads))))
     .with_backups(Arc::new(rocket_infra::FsOpenApiBackupRepo))
     .with_apply(deps(&ws_path, tx));
     svc.grant_current(&root).expect("consent");
@@ -309,6 +327,7 @@ async fn world_from(
         svc,
         fetcher,
         secret_reads,
+        reader_reads,
     }
 }
 
@@ -1242,6 +1261,9 @@ mod reset_tests;
 
 #[path = "openapi_sync_skips_tests.rs"]
 mod skips_tests;
+
+#[path = "openapi_file_source_tests.rs"]
+mod file_source_tests;
 
 #[cfg(test)]
 #[path = "openapi_connect_tests.rs"]

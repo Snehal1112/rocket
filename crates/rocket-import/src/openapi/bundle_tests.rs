@@ -291,7 +291,7 @@ async fn a_spec_without_remote_refs_is_returned_unchanged() {
         .expect("bundle");
     assert_eq!(bundle.text, text);
     assert!(bundle.refs.is_empty() && bundle.notes.is_empty() && !bundle.incomplete);
-    assert!(fetcher.requests().is_empty());
+    assert!(fetcher.requests.lock().expect("lock").is_empty());
 }
 
 #[tokio::test]
@@ -840,7 +840,7 @@ async fn a_main_text_alias_bomb_returns_the_original_text() {
     assert_eq!(bundle.text, text);
     assert!(bundle.incomplete);
     assert_eq!(bundle.notes.len(), 1);
-    assert!(fetcher.requests().is_empty());
+    assert!(fetcher.requests.lock().expect("lock").is_empty());
 }
 
 #[tokio::test]
@@ -887,7 +887,7 @@ async fn a_main_spec_with_the_root_key_is_left_alone() {
     assert_eq!(bundle.text, text);
     assert_eq!(bundle.notes.len(), 1);
     assert!(!bundle.incomplete);
-    assert!(fetcher.requests().is_empty());
+    assert!(fetcher.requests.lock().expect("lock").is_empty());
 }
 
 #[tokio::test]
@@ -923,7 +923,7 @@ async fn a_stored_ref_to_a_blocked_address_is_never_fetched() {
         refs_unchanged(&fetcher, &location(), None, &previous).await,
         Ok(false)
     );
-    assert!(fetcher.requests().is_empty());
+    assert!(fetcher.requests.lock().expect("lock").is_empty());
 }
 
 #[tokio::test]
@@ -1030,4 +1030,20 @@ async fn unloaded_lists_a_failing_file_and_a_limit_skipped_file() {
     dedup.sort();
     dedup.dedup();
     assert_eq!(dedup.len(), bundle.unloaded.len());
+}
+
+#[tokio::test]
+async fn a_file_location_is_not_bundled_and_never_fetches() {
+    let fetcher = FakeFetcher::default();
+    let text = "openapi: 3.0.0\ninfo: {title: t, version: '1'}\npaths:\n  /a:\n    get:\n      responses:\n        '200':\n          description: ok\n          content:\n            application/json:\n              schema:\n                $ref: 'https://example.com/schemas/a.yaml'\n";
+    let location = SpecLocation::File {
+        path: "spec.yaml".to_string(),
+    };
+    let bundle = bundle_spec(&fetcher, text, &location, None, &[])
+        .await
+        .expect("bundle");
+    assert_eq!(bundle.text, text);
+    assert!(bundle.refs.is_empty());
+    assert_eq!(bundle.notes.len(), 1, "{:?}", bundle.notes);
+    assert!(fetcher.requests.lock().expect("lock").is_empty());
 }

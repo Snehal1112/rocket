@@ -65,13 +65,17 @@ pub enum SpecFetchOutcome {
 pub enum SpecFetchFailure {
     NotFound,
     Unauthorized,
-    RateLimited { retry_after_secs: Option<u64> },
+    RateLimited {
+        retry_after_secs: Option<u64>,
+    },
     TooLarge,
     NotHttps,
     TooManyRedirects,
     BlockedRedirect,
     Status(u16),
     Network(String),
+    /// A spec file on this computer could not be read.
+    LocalFile(LocalReadFailure),
 }
 
 impl fmt::Display for SpecFetchFailure {
@@ -103,6 +107,7 @@ impl fmt::Display for SpecFetchFailure {
             }
             Self::Status(code) => write!(f, "The server answered with status {code}."),
             Self::Network(message) => write!(f, "The file could not be fetched: {message}"),
+            Self::LocalFile(failure) => write!(f, "The spec file: {failure}."),
         }
     }
 }

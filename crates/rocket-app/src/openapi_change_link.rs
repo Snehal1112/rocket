@@ -6,7 +6,7 @@ use std::collections::HashSet;
 
 use rocket_collection::openapi_source::{OpenApiSource, SpecLocation, SyncStatus};
 use rocket_collection::CollectionRepository;
-use rocket_import::{fetch_spec_bundle, ParsedSpec};
+use rocket_import::{fetch_spec_bundle_from, ParsedSpec};
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::collection_lock::collection_lock;
@@ -104,7 +104,7 @@ impl OpenApiSyncService {
                 .map_err(infra_error)?
                 .ok_or_else(|| DomainError::Conflict(NOT_CONNECTED.to_string()))?
         };
-        let fetched = fetch_spec_bundle(self.fetcher.as_ref(), link, token)
+        let fetched = fetch_spec_bundle_from(&self.spec_sources(), &root, link, token)
             .await
             .map_err(|e| DomainError::InvalidInput(safe_import_message(e)))?;
         if fetched.location == source.location {
@@ -145,7 +145,7 @@ impl OpenApiSyncService {
         let repo: &dyn CollectionRepository =
             pinned.as_deref().unwrap_or(deps.collections.as_ref());
         let root = repo.collection_root_path(collection).map_err(infra_error)?;
-        let fetched = fetch_spec_bundle(self.fetcher.as_ref(), link, token)
+        let fetched = fetch_spec_bundle_from(&self.spec_sources(), &root, link, token)
             .await
             .map_err(|e| DomainError::InvalidInput(safe_import_message(e)))?;
         ParsedSpec::parse(&fetched.bundle.text)

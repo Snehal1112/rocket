@@ -20,7 +20,7 @@ pub use bundle::{
 };
 pub use source_url::{fetch_target, parse_spec_target, parse_spec_url, FetchTarget};
 pub use entry::{
-    check_spec_text, fetch_failure_message, fetch_spec_bundle, FetchedSpec, OpenApiImportResult,
+    check_spec_text, fetch_failure_message, fetch_spec_bundle, fetch_spec_bundle_from, SpecSources, FetchedSpec, OpenApiImportResult,
 };
 pub(crate) mod sync;
 pub use sync::{

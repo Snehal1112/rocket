@@ -214,6 +214,7 @@ pub(crate) fn make_sync_service(
     OpenApiSyncService::new(fetcher, Box::new(FsOpenApiSourceRepo), secrets)
         .with_local(Box::new(FsOpenApiLocalRepo))
         .with_consent(openapi_consent_store())
+        .with_reader(Arc::new(rocket_infra::FsLocalSpecReader))
         .with_backups(Arc::new(rocket_infra::FsOpenApiBackupRepo))
         .with_apply(rocket_app::ApplyDeps {
             collections: Box::new(SharedPathCollectionRepo::new(active_workspace_path)),

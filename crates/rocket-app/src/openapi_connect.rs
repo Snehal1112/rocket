@@ -11,10 +11,10 @@ use rocket_collection::openapi_source::SyncInterval;
 use rocket_collection::settings::CollectionVariable;
 use rocket_collection::CollectionRepository;
 use rocket_import::{
-    baseline_hash, build_apply, fetch_spec_bundle, item_digest, match_requests, plan_with_links,
-    source_record, variable_digest, ApplyInputs, ApprovedItem, FileChangeKind, GroupBy,
-    ImportError, ImportReport, ImportedOperation, MatchRequest, OpenApiImportOutcome, ParsedSpec,
-    Selection, SkipRequest, SpecOperationView, SyncInputs, SyncItem, VariableApproval,
+    baseline_hash, build_apply, fetch_spec_bundle_from, item_digest, match_requests,
+    plan_with_links, source_record, variable_digest, ApplyInputs, ApprovedItem, FileChangeKind,
+    GroupBy, ImportError, ImportReport, ImportedOperation, MatchRequest, OpenApiImportOutcome,
+    ParsedSpec, Selection, SkipRequest, SpecOperationView, SyncInputs, SyncItem, VariableApproval,
     CONVERTER_VERSION,
 };
 use rocket_shared::error::{DomainError, DomainResult};
@@ -210,7 +210,7 @@ impl OpenApiSyncService {
             }
             match_requests_of(repo, collection).map_err(infra_error)?
         };
-        let fetched = fetch_spec_bundle(self.fetcher.as_ref(), link, token)
+        let fetched = fetch_spec_bundle_from(&self.spec_sources(), &root, link, token)
             .await
             .map_err(|e| DomainError::InvalidInput(safe_import_message(e)))?;
         let spec = ParsedSpec::parse(&fetched.bundle.text)
@@ -275,7 +275,7 @@ impl OpenApiSyncService {
         let repo: &dyn CollectionRepository =
             pinned.as_deref().unwrap_or(deps.collections.as_ref());
         let root = repo.collection_root_path(collection).map_err(infra_error)?;
-        let fetched = fetch_spec_bundle(self.fetcher.as_ref(), link, token)
+        let fetched = fetch_spec_bundle_from(&self.spec_sources(), &root, link, token)
             .await
             .map_err(|e| DomainError::InvalidInput(safe_import_message(e)))?;
         let spec = ParsedSpec::parse(&fetched.bundle.text)

@@ -19,12 +19,13 @@ use rocket_collection::openapi_source::{
 };
 use rocket_environment::SecretStore;
 use rocket_http::spec_fetch::{
-    SpecFetchFailure, SpecFetchOutcome, SpecFetchRequest, SpecFetcher, DEFAULT_MAX_SPEC_BYTES,
+    LocalReadFailure, LocalSpecReader, SpecFetchFailure, SpecFetchOutcome, SpecFetchRequest,
+    SpecFetcher, DEFAULT_MAX_SPEC_BYTES,
 };
 use rocket_import::{
     bundle_spec, check_spec_text, fetch_failure_message, fetch_target, lost_refs_message,
-    parse_spec_url, ref_failure_message, refs_unchanged_labeled, whole_bundle_failed_message,
-    Bundle,
+    parse_spec_target, ref_failure_message, refs_unchanged_labeled, whole_bundle_failed_message,
+    Bundle, SpecSources,
 };
 use rocket_shared::error::{DomainError, DomainResult};
 use sha2::{Digest, Sha256};
@@ -81,6 +82,8 @@ type Clock = Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>;
 
 pub struct OpenApiSyncService {
     pub(crate) fetcher: Arc<dyn SpecFetcher>,
+    /// Reads spec files on this computer. Set by `with_reader`; the default reads nothing.
+    pub(crate) reader: Arc<dyn LocalSpecReader>,
     pub(crate) sources: Box<dyn OpenApiSourceRepository>,
     secrets: Arc<dyn SecretStore>,
     clock: Clock,
@@ -101,6 +104,15 @@ pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
         .collect()
 }
 
+/// The reader of a service that was not given one: every read fails.
+struct NoLocalFiles;
+
+impl LocalSpecReader for NoLocalFiles {
+    fn read(&self, _path: &Path, _max_bytes: usize) -> Result<Vec<u8>, LocalReadFailure> {
+        Err(LocalReadFailure::Io)
+    }
+}
+
 /// A short machine word for the failed status.
 fn failure_code(failure: &SpecFetchFailure) -> &'static str {
     match failure {
@@ -113,6 +125,9 @@ fn failure_code(failure: &SpecFetchFailure) -> &'static str {
         SpecFetchFailure::BlockedRedirect => "blocked_redirect",
         SpecFetchFailure::Status(_) => "status",
         SpecFetchFailure::Network(_) => "network",
+        SpecFetchFailure::LocalFile(LocalReadFailure::NotFound) => "file_missing",
+        SpecFetchFailure::LocalFile(LocalReadFailure::TooLarge) => "too_large",
+        SpecFetchFailure::LocalFile(_) => "file_unreadable",
     }
 }
 
@@ -129,6 +144,8 @@ pub fn safe_message(code: &str) -> &'static str {
         "blocked_redirect" => "The link redirected somewhere that is not allowed.",
         "status" => "The server answered with an error.",
         "network" => "The server could not be reached.",
+        "file_missing" => "The spec file was not found on this computer.",
+        "file_unreadable" => "The spec file could not be read.",
         "not_a_spec" => "The file is not a supported OpenAPI spec.",
         "ref_unavailable" => "A file the spec refers to could not be loaded.",
         "location_changed" => "The spec link changed since you approved it.",
@@ -168,6 +185,7 @@ impl OpenApiSyncService {
     ) -> Self {
         Self {
             fetcher,
+            reader: Arc::new(NoLocalFiles),
             sources,
             secrets,
             clock: Arc::new(Utc::now),
@@ -175,6 +193,20 @@ impl OpenApiSyncService {
             local: None,
             consent: None,
             backups: None,
+        }
+    }
+
+    /// Adds the reader of spec files on this computer. Without it a file source cannot be read.
+    pub fn with_reader(mut self, reader: Arc<dyn LocalSpecReader>) -> Self {
+        self.reader = reader;
+        self
+    }
+
+    /// The network and file sources as one pair.
+    pub(crate) fn spec_sources(&self) -> SpecSources<'_> {
+        SpecSources {
+            fetcher: self.fetcher.as_ref(),
+            reader: self.reader.as_ref(),
         }
     }
 
@@ -190,9 +222,9 @@ impl OpenApiSyncService {
     pub(crate) fn backup_repo(
         &self,
     ) -> DomainResult<&dyn rocket_collection::openapi_backup::OpenApiBackupRepository> {
-        self.backups.as_deref().ok_or_else(|| {
-            DomainError::Internal("Resetting requests is not set up.".to_string())
-        })
+        self.backups
+            .as_deref()
+            .ok_or_else(|| DomainError::Internal("Resetting requests is not set up.".to_string()))
     }
 
     /// Adds the repository of the local state, where the interval and the check timing live.
@@ -250,7 +282,11 @@ impl OpenApiSyncService {
                 "The spec link changed. Check the link and approve it again.".to_string(),
             ));
         }
-        if parse_spec_url(&source.location.display_url()).ok().as_ref() != Some(&source.location) {
+        if parse_spec_target(&source.location.display_url(), root)
+            .ok()
+            .as_ref()
+            != Some(&source.location)
+        {
             return Err(DomainError::InvalidInput(
                 "This spec location cannot be approved because its link is ambiguous.".to_string(),
             ));
@@ -261,7 +297,7 @@ impl OpenApiSyncService {
     /// Approves the link the user typed, for a collection just imported from it.
     pub fn grant_consent_for_link(&self, root: &Path, link: &str) -> DomainResult<()> {
         let location =
-            parse_spec_url(link).map_err(|e| DomainError::InvalidInput(e.to_string()))?;
+            parse_spec_target(link, root).map_err(|e| DomainError::InvalidInput(e.to_string()))?;
         let lock = collection_lock(root);
         let _guard = lock.lock();
         let source = self.load(root)?;
@@ -398,6 +434,19 @@ impl OpenApiSyncService {
     }
 
     /// Records a failed check in the local state and returns its outcome.
+    /// Reads a spec file and shapes the answer like a fetch, so the rest of the check is shared.
+    fn read_spec_file(&self, path: &Path) -> Result<SpecFetchOutcome, SpecFetchFailure> {
+        self.reader
+            .read(path, DEFAULT_MAX_SPEC_BYTES)
+            .map(|body| SpecFetchOutcome::Fetched {
+                body,
+                etag: None,
+                last_modified: None,
+                final_url: String::new(),
+            })
+            .map_err(SpecFetchFailure::LocalFile)
+    }
+
     fn fail(
         &self,
         root: &Path,
@@ -520,7 +569,11 @@ impl OpenApiSyncService {
             if_modified_since: source.last_modified.clone(),
             max_bytes: DEFAULT_MAX_SPEC_BYTES,
         };
-        let mut result = self.fetcher.fetch(request.clone()).await;
+        // A spec file is read by the reader. It has no validators and no redirects.
+        let mut result = match source.location.resolve_file(collection_root) {
+            Some(path) => self.read_spec_file(&path),
+            None => self.fetcher.fetch(request.clone()).await,
+        };
 
         // Rule 3 refinement: a 304 of the main spec says nothing about the files it refers to.
         // A failure of a stored file carries the file's label, so its message names that file.
@@ -870,7 +923,9 @@ impl OpenApiSyncService {
                 interval,
                 source_id: &source.source_id,
                 last_checked_at: local.last_checked_at.as_deref(),
-                last_failed: matches!(local.last_status, Some(SyncStatus::Failed { .. })),
+                // A file on this computer is cheap to read, so a failed read does not back off.
+                last_failed: matches!(local.last_status, Some(SyncStatus::Failed { .. }))
+                    && !matches!(source.location, SpecLocation::File { .. }),
                 consecutive_failures: local.consecutive_failures,
                 not_before: local.not_before.as_deref(),
                 now,

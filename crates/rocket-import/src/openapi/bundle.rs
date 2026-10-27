@@ -376,6 +376,28 @@ pub fn inline_refs(main: &mut Yaml, files: &[(String, Yaml)]) {
     inline_with_base(main, None, None, files.to_vec());
 }
 
+/// The bundle of a spec file: the text unchanged, with one note when it refers to other files.
+fn local_bundle(main_text: &str) -> Bundle {
+    let mut notes = Vec::new();
+    if !find_remote_refs(main_text, None).is_empty() {
+        notes.push(
+            "This spec refers to other files by link. They are not loaded for a spec file."
+                .to_string(),
+        );
+    }
+    Bundle {
+        text: main_text.to_string(),
+        refs: Vec::new(),
+        notes,
+        incomplete: false,
+        fetch_failed: false,
+        retry_after_secs: None,
+        unloaded: Vec::new(),
+        whole_failed: false,
+        scan_truncated: false,
+    }
+}
+
 /// The address relative references in the main spec resolve against.
 fn raw_address(location: &SpecLocation) -> String {
     fetch_target(location, false).url
@@ -551,6 +573,11 @@ pub async fn bundle_spec(
     token: Option<&str>,
     _previous: &[RemoteRefState],
 ) -> ImportResult<Bundle> {
+    // A spec file on this computer is taken as it is. Its references to other files are not
+    // followed, so a check of a file never touches the network.
+    if matches!(location, SpecLocation::File { .. }) {
+        return Ok(local_bundle(main_text));
+    }
     bundle_with_limit(
         fetcher,
         main_text,
