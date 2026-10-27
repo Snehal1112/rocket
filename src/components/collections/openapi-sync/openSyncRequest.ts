@@ -27,9 +27,9 @@ export async function openSyncRequest({
   try {
     full = await getRequest(collection, path);
   } catch {
-    // A Bruno file keeps its extension in the tree, and the sync page drops it.
+    // The sync page drops the extension, and a Bruno 3 request file ends in .yaml.
     try {
-      path = `${requestPath}.bru`;
+      path = `${requestPath}.yaml`;
       full = await getRequest(collection, path);
     } catch {
       return 'missing';

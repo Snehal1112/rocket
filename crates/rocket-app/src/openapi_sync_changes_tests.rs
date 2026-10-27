@@ -171,14 +171,20 @@ async fn modified_rows_carry_baseline_and_yours_values() {
     let row = &view.modified[0];
     let url = row.changes.iter().find(|c| c.field == "url").expect("url");
     assert_eq!(url.baseline.as_deref(), Some(original.as_str()));
-    assert_eq!(url.yours.as_deref(), Some("https://edited.example.com/pets"));
+    assert_eq!(
+        url.yours.as_deref(),
+        Some("https://edited.example.com/pets")
+    );
     let accept = row
         .changes
         .iter()
         .find(|c| c.field == "header:Accept")
         .expect("header");
     assert_eq!(accept.baseline, None);
-    assert!(accept.yours.as_deref().is_some_and(|v| v.contains("text/plain")));
+    assert!(accept
+        .yours
+        .as_deref()
+        .is_some_and(|v| v.contains("text/plain")));
     // The field names stay as they were.
     assert!(row.fields.contains(&"url".to_string()));
     assert_eq!(row.fields.len(), row.changes.len());
@@ -219,7 +225,9 @@ async fn added_and_deleted_rows_have_no_values() {
         rocket_shared::types::HttpMethod::Get,
         "https://x.example.com",
     );
-    w.repo.save_request(&w.name, "mine", &request).expect("save");
+    w.repo
+        .save_request(&w.name, "mine", &request)
+        .expect("save");
     let path = path_of(&w, "listPets");
     w.repo.delete_request(&w.name, &path).expect("delete");
     let view = w.svc.changes(&w.name).expect("changes");
@@ -606,4 +614,84 @@ async fn check_leaves_an_existing_applied_copy_alone() {
     assert_eq!(requests[0].if_none_match.as_deref(), Some("\"e1\""));
     drop(requests);
     assert_eq!(applied(&w).as_deref(), Some(v1().as_str()));
+}
+
+fn header(key: &str, value: &str) -> rocket_shared::types::Header {
+    rocket_shared::types::Header {
+        key: key.to_string(),
+        value: value.to_string(),
+        enabled: true,
+        description: None,
+    }
+}
+
+async fn changed_values(
+    edit: impl FnOnce(&mut rocket_collection::Request),
+) -> Vec<crate::ChangeValue> {
+    let w = world().await;
+    let path = path_of(&w, "getPet");
+    let mut request = w.repo.get_request(&w.name, &path).expect("get");
+    edit(&mut request);
+    w.repo.save_request(&w.name, &path, &request).expect("save");
+    w.svc
+        .changes(&w.name)
+        .expect("changes")
+        .modified
+        .remove(0)
+        .changes
+}
+
+#[tokio::test]
+async fn a_sensitive_header_value_is_masked() {
+    let changes = changed_values(|r| {
+        r.headers
+            .push(header("Authorization", "Bearer sk_live_abc"));
+        r.headers.push(header("x-api-key", "key-123"));
+        r.headers.push(header("Accept", "text/plain"));
+    })
+    .await;
+    let text = format!("{changes:?}");
+    assert!(!text.contains("sk_live_abc"), "{text}");
+    assert!(!text.contains("key-123"), "{text}");
+    let auth = changes
+        .iter()
+        .find(|c| c.field == "header:Authorization")
+        .expect("auth");
+    assert_eq!(auth.yours.as_deref(), Some("••••••"));
+    let accept = changes
+        .iter()
+        .find(|c| c.field == "header:Accept")
+        .expect("accept");
+    assert!(accept
+        .yours
+        .as_deref()
+        .unwrap_or_default()
+        .contains("text/plain"));
+}
+
+#[tokio::test]
+async fn url_credentials_and_key_parameters_are_masked() {
+    let changes = changed_values(|r| {
+        r.url = "https://user:pass@host/x?api_key=sekret&limit=5".to_string();
+    })
+    .await;
+    let url = changes.iter().find(|c| c.field == "url").expect("url");
+    let yours = url.yours.as_deref().expect("yours");
+    assert!(!yours.contains("pass"), "{yours}");
+    assert!(!yours.contains("sekret"), "{yours}");
+    assert!(yours.contains("limit=5"), "{yours}");
+}
+
+#[tokio::test]
+async fn a_sensitive_query_value_is_masked() {
+    let changes = changed_values(|r| {
+        r.query_params.push(rocket_shared::types::QueryParam {
+            key: "access_token".to_string(),
+            value: "tok-999".to_string(),
+            enabled: true,
+            description: None,
+        });
+    })
+    .await;
+    assert!(!format!("{changes:?}").contains("tok-999"));
 }

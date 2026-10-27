@@ -47,6 +47,91 @@ fn clip(text: &str) -> String {
     cut
 }
 
+const MASK: &str = "••••••";
+
+/// Header names whose value is a credential, the same set the Console masks.
+const SENSITIVE_HEADERS: [&str; 5] = [
+    "authorization",
+    "proxy-authorization",
+    "cookie",
+    "set-cookie",
+    "x-api-key",
+];
+
+/// Parameter names whose value is usually a credential.
+const SENSITIVE_PARAMS: [&str; 10] = [
+    "api_key",
+    "apikey",
+    "api-key",
+    "key",
+    "token",
+    "access_token",
+    "refresh_token",
+    "client_secret",
+    "secret",
+    "password",
+];
+
+fn is_sensitive_param(name: &str) -> bool {
+    SENSITIVE_PARAMS.contains(&name.to_ascii_lowercase().as_str())
+}
+
+/// Hides the user info and the credential parameters of a URL.
+fn mask_url(url: &str) -> String {
+    let (head, query) = match url.split_once('?') {
+        Some((head, query)) => (head, Some(query)),
+        None => (url, None),
+    };
+    let mut out = match head.split_once("://") {
+        Some((scheme, rest)) => {
+            let host_end = rest.find('/').unwrap_or(rest.len());
+            match rest[..host_end].rfind('@') {
+                Some(at) => format!("{scheme}://{MASK}@{}", &rest[at + 1..]),
+                None => head.to_string(),
+            }
+        }
+        None => head.to_string(),
+    };
+    if let Some(query) = query {
+        let pairs: Vec<String> = query
+            .split('&')
+            .map(|pair| match pair.split_once('=') {
+                Some((name, _)) if is_sensitive_param(name) => format!("{name}={MASK}"),
+                _ => pair.to_string(),
+            })
+            .collect();
+        out.push('?');
+        out.push_str(&pairs.join("&"));
+    }
+    out
+}
+
+/// Hides a credential before the value leaves the backend. The page is for review, so it
+/// follows the Console rule and never shows these in the clear.
+fn mask(field: &str, text: &str) -> String {
+    let hidden = if let Some(name) = field.strip_prefix("header:") {
+        SENSITIVE_HEADERS.contains(&name.to_ascii_lowercase().as_str())
+    } else if let Some(name) = field
+        .strip_prefix("query:")
+        .or_else(|| field.strip_prefix("form:"))
+    {
+        is_sensitive_param(name)
+    } else {
+        false
+    };
+    if hidden {
+        MASK.to_string()
+    } else if field == "url" {
+        mask_url(text)
+    } else {
+        text.to_string()
+    }
+}
+
+fn shown(field: &str, text: Option<&str>) -> Option<String> {
+    text.map(|t| clip(&mask(field, t)))
+}
+
 fn differences(
     base: &rocket_collection::Request,
     yours: &rocket_collection::Request,
@@ -56,9 +141,9 @@ fn differences(
         .changes
         .into_iter()
         .map(|c| ChangeValue {
+            baseline: shown(&c.field, c.baseline.as_deref()),
+            yours: shown(&c.field, c.spec.as_deref()),
             field: c.field,
-            baseline: c.baseline.as_deref().map(clip),
-            yours: c.spec.as_deref().map(clip),
         })
         .collect()
 }

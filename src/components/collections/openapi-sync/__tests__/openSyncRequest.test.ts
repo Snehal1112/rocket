@@ -56,12 +56,12 @@ describe('openSyncRequest', () => {
     expect(openTab).not.toHaveBeenCalled();
   });
 
-  it('a_bruno_file_is_found_with_its_extension', async () => {
+  it('a_yaml_file_is_found_with_its_extension', async () => {
     vi.mocked(getRequest).mockRejectedValueOnce('missing').mockResolvedValueOnce(FULL as never);
     await expect(openSyncRequest(ARGS)).resolves.toBe('opened');
-    expect(getRequest).toHaveBeenLastCalledWith('Orders', 'pets/list-pets.bru');
+    expect(getRequest).toHaveBeenLastCalledWith('Orders', 'pets/list-pets.yaml');
     expect(openTab).toHaveBeenCalledWith(
-      expect.objectContaining({ source: { collection: 'Orders', path: 'pets/list-pets.bru' } }),
+      expect.objectContaining({ source: { collection: 'Orders', path: 'pets/list-pets.yaml' } }),
     );
   });
 
