@@ -54,13 +54,16 @@ impl ReqwestSpecFetcher {
 
 impl ReqwestSpecFetcher {
     /// A client that never follows redirects itself, so every hop is checked here.
-    fn client(&self) -> Result<reqwest::Client, SpecFetchFailure> {
+    fn client(&self, direct: bool) -> Result<reqwest::Client, SpecFetchFailure> {
         let builder = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .timeout(FETCH_TIMEOUT);
-        let proxy = read_proxy(self.proxy.as_ref());
-        let builder =
-            apply_proxy(builder, &proxy).map_err(|e| SpecFetchFailure::Network(e.to_string()))?;
+        let builder = if direct {
+            builder.no_proxy()
+        } else {
+            let proxy = read_proxy(self.proxy.as_ref());
+            apply_proxy(builder, &proxy).map_err(|e| SpecFetchFailure::Network(e.to_string()))?
+        };
         builder
             .build()
             .map_err(|e| SpecFetchFailure::Network(e.without_url().to_string()))
@@ -77,7 +80,13 @@ impl SpecFetcher for ReqwestSpecFetcher {
         if self.strict && first.scheme() != "https" && !is_loopback_http(&first) {
             return Err(SpecFetchFailure::NotHttps);
         }
-        let client = self.client()?;
+        // A stored link must already be in its normalised form, so the text the user approved
+        // is the host that is reached. A form like `http://2130706433/` is refused.
+        if self.strict && first.scheme() == "http" && first.as_str() != request.url {
+            return Err(SpecFetchFailure::NotHttps);
+        }
+        // A request to this machine never goes through a proxy, which would send it elsewhere.
+        let client = self.client(self.strict && is_loopback_http(&first))?;
         let mut current = first.clone();
         for hop in 0..=MAX_SPEC_REDIRECTS {
             let mut call = client.get(current.clone()).header(USER_AGENT, "RocketAPI");
@@ -504,6 +513,44 @@ mod tests {
             .await
             .expect("a dev server on this machine is fetched in strict mode");
         assert!(matches!(outcome, SpecFetchOutcome::Fetched { .. }));
+    }
+
+    #[tokio::test]
+    async fn the_proxy_is_not_used_for_a_loopback_link() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("{}"))
+            .mount(&server)
+            .await;
+        // A proxy that nobody listens on: a request sent through it would fail.
+        let shared = rocket_http::new_shared_proxy();
+        shared.write().expect("lock").settings = rocket_http::ProxySettings {
+            mode: rocket_http::ProxyMode::Custom,
+            http_proxy: Some("http://127.0.0.1:1".to_string()),
+            ..Default::default()
+        };
+        let outcome = ReqwestSpecFetcher::new()
+            .with_proxy(shared)
+            .fetch(request(format!("{}/openapi.json", server.uri())))
+            .await
+            .expect("a local server is reached directly");
+        assert!(matches!(outcome, SpecFetchOutcome::Fetched { .. }));
+    }
+
+    #[tokio::test]
+    async fn a_loopback_link_that_is_not_normalised_is_refused() {
+        for url in [
+            "http://2130706433:8080/x",
+            "http://0x7f.1:8080/x",
+            "http://127.1:8080/x",
+            "http://LOCALHOST:8080/x",
+        ] {
+            let out = ReqwestSpecFetcher::new()
+                .fetch(request(url.to_string()))
+                .await
+                .expect_err(url);
+            assert_eq!(out, SpecFetchFailure::NotHttps, "{url}");
+        }
     }
 
     #[tokio::test]

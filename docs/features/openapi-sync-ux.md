@@ -81,7 +81,7 @@ The "N skipped, hidden from this list." line opens the Skipped list. Each row ha
 
 ## Localhost links
 
-A spec served by a dev server can be imported and followed over plain http: `http://localhost:PORT/...`, `http://127.0.0.1:PORT/...` or `http://[::1]:PORT/...`. Any other http link is refused (look-alike hosts such as `localhost.evil.com`, private addresses and links with user info too). A link with a secret-like query name is refused as for https. A redirect must still be https and not local, a token is never sent over http, and `$ref` files of a localhost spec are not followed. The link is approved on this machine like any other.
+A spec served by a dev server can be imported and followed over plain http: `http://localhost:PORT/...`, `http://127.0.0.1:PORT/...` or `http://[::1]:PORT/...`. Any other http link is refused (look-alike hosts such as `localhost.evil.com`, private addresses and links with user info too). A link with a secret-like query name is refused as for https. A redirect must still be https and not local, a token is never sent over http, and the app proxy is not used for a localhost link. A stored localhost link must be in its normalised form (for example `http://127.0.0.1:8080/x`, not `http://2130706433:8080/x`), or it is refused. `$ref` files of a localhost spec, including relative ones, are not followed, so a dev-server spec that splits into files shows those refs as not followed. The link is approved on this machine like any other.
 
 ## Notifications
 
