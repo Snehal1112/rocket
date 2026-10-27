@@ -10,6 +10,12 @@ describe('syncErrorMessage', () => {
     expect(text).not.toContain('consent_required');
   });
 
+  it('maps_the_unshowable_spec_sentence', () => {
+    expect(syncErrorMessage('Invalid input: The saved spec cannot be shown.')).toBe(
+      'The saved spec cannot be shown.',
+    );
+  });
+
   it('maps the disconnect busy sentence', () => {
     expect(
       syncErrorMessage('An apply is running on this collection. Try again when it finishes.'),

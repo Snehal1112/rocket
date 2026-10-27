@@ -28,6 +28,7 @@ vi.mock('@/lib/tauri-api', async () => {
     getOpenApiSyncPlan: vi.fn(),
     getOpenApiSyncOverview: vi.fn(),
     getOpenApiSyncChanges: vi.fn(),
+    getOpenApiSyncSpecView: vi.fn(),
     onOpenApiSyncChecked: vi.fn(() => Promise.resolve(() => undefined)),
     onOpenApiSyncApplied: vi.fn(() => Promise.resolve(() => undefined)),
     applyOpenApiSync: vi.fn(),
@@ -78,6 +79,46 @@ describe('OpenApiSyncTab', () => {
     expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('data-state', 'active');
     expect(screen.getByRole('tab', { name: 'Spec updates', hidden: true })).toBeInTheDocument();
     expect(tauriApi.getOpenApiSyncPlan).not.toHaveBeenCalled();
+  });
+
+  it('view_spec_opens_the_viewer_and_back_returns_to_the_same_tab', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(
+      makeStatus({ hasPending: false, lastStatus: { state: 'unchanged' } }),
+    );
+    vi.mocked(tauriApi.getOpenApiSyncSpecView).mockResolvedValue({
+      title: 'Pets API',
+      version: '1',
+      fetchedAt: null,
+      state: 'in_sync',
+      groups: [
+        {
+          tag: 'pets',
+          operations: [
+            {
+              key: 'listPets',
+              method: 'GET',
+              path: '/pets',
+              summary: null,
+              parameters: [],
+              responses: [],
+              isNew: false,
+            },
+          ],
+        },
+      ],
+    });
+    renderWithQuery(<TabWithListeners collection='c' />);
+    const user = userEvent.setup();
+    await screen.findByText('Spec updates waiting');
+    await user.click(screen.getByRole('tab', { name: 'Your changes' }));
+    await user.click(screen.getByRole('button', { name: 'View spec' }));
+    expect(await screen.findByText('pets (1)')).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Overview' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Back' }));
+    expect(await screen.findByRole('tab', { name: 'Your changes' })).toHaveAttribute(
+      'data-state',
+      'active',
+    );
   });
 
   it('trusts the plan when it says nothing is pending', async () => {

@@ -22,6 +22,8 @@ interface OpenApiSyncHeaderProps {
   status: OpenApiSyncStatus;
   /** Spec updates that wait, as counted from the plan. Null while the count is not known. */
   waiting: number | null;
+  /** Opens the read-only spec viewer. */
+  onViewSpec?: () => void;
 }
 
 const CHIP_VARIANT: Record<ChipState['kind'], 'warning' | 'destructive' | 'secondary' | 'outline'> =
@@ -34,7 +36,12 @@ const CHIP_VARIANT: Record<ChipState['kind'], 'warning' | 'destructive' | 'secon
   };
 
 /** The collection, its sync status chip, where the spec comes from and Check now. */
-export function OpenApiSyncHeader({ collection, status, waiting }: OpenApiSyncHeaderProps) {
+export function OpenApiSyncHeader({
+  collection,
+  status,
+  waiting,
+  onViewSpec,
+}: OpenApiSyncHeaderProps) {
   const [showFull, setShowFull] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
@@ -94,7 +101,14 @@ export function OpenApiSyncHeader({ collection, status, waiting }: OpenApiSyncHe
             <span>Check interval: {intervalLabel(status.interval)}</span>
           </div>
         </div>
-        <CheckNowButtonView runner={runner} />
+        <div className='flex items-center gap-2'>
+          {onViewSpec && (
+            <Button variant='outline' size='sm' onClick={onViewSpec}>
+              View spec
+            </Button>
+          )}
+          <CheckNowButtonView runner={runner} />
+        </div>
       </div>
       {failed && (
         <Alert variant='destructive'>

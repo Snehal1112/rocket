@@ -37,6 +37,7 @@ const KNOWN: Array<[string, string]> = [
   ['An apply is already running.', 'Another apply is still running. Wait for it to finish.'],
   ['Tokens work with GitHub links only.', 'Tokens work with GitHub links only.'],
   ['The token is empty.', 'Enter a token first.'],
+  ['The saved spec cannot be shown.', 'The saved spec cannot be shown.'],
 ];
 
 function rawText(error: unknown): string | null {

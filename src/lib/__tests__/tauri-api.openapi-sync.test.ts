@@ -10,6 +10,7 @@ import {
   getOpenApiSyncChanges,
   getOpenApiSyncOverview,
   getOpenApiSyncPlan,
+  getOpenApiSyncSpecView,
   getOpenApiSyncStatus,
   grantOpenApiSyncConsent,
   importOpenApiUrl,
@@ -39,6 +40,12 @@ describe('OpenAPI sync API', () => {
     vi.mocked(invoke).mockResolvedValue({});
     await getOpenApiSyncOverview('Orders');
     expect(invoke).toHaveBeenCalledWith('openapi_sync_overview', { collection: 'Orders' });
+  });
+
+  it('spec_view_calls_openapi_sync_spec_view_with_the_collection', async () => {
+    vi.mocked(invoke).mockResolvedValue({});
+    await getOpenApiSyncSpecView('Orders');
+    expect(invoke).toHaveBeenCalledWith('openapi_sync_spec_view', { collection: 'Orders' });
   });
 
   it('changes_calls_openapi_sync_changes', async () => {

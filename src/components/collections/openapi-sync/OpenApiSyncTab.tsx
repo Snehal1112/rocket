@@ -18,6 +18,7 @@ import { ApplyResultDialog } from './ApplyResultDialog';
 import { BulkConfirmDialog } from './BulkConfirmDialog';
 import { buildSelection } from './buildSelection';
 import { countOverwrites } from './bulkSelection';
+import { OpenApiSpecView } from './OpenApiSpecView';
 import { OpenApiSyncActionsBar } from './OpenApiSyncActionsBar';
 import { OpenApiSyncChanges } from './OpenApiSyncChanges';
 import { OpenApiSyncConsentBanner } from './OpenApiSyncConsentBanner';
@@ -54,6 +55,7 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
   const [checking, setChecking] = useState(false);
   const [tab, setTab] = useState<string | null>(null);
   const [settled, setSettled] = useState(false);
+  const [viewingSpec, setViewingSpec] = useState(false);
   const queryClient = useQueryClient();
   const changes = useOpenApiSyncChanges(collection);
   const apply = useApplySync(collection);
@@ -384,6 +386,7 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
         collection={collection}
         status={s}
         waiting={planData ? waiting : planEnabled ? null : 0}
+        onViewSpec={() => setViewingSpec(true)}
       />
       {s.consent !== 'granted' && (
         <OpenApiSyncConsentBanner
@@ -393,7 +396,9 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
           consent={s.consent}
         />
       )}
-      {choosing ? (
+      {viewingSpec ? (
+        <OpenApiSpecView collection={collection} onBack={() => setViewingSpec(false)} />
+      ) : choosing ? (
         <div className='p-4'>
           <StateBlock tone='loading'>Loading the plan...</StateBlock>
         </div>

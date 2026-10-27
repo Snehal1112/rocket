@@ -9,6 +9,7 @@ import {
   getOpenApiSyncChanges,
   getOpenApiSyncOverview,
   getOpenApiSyncPlan,
+  getOpenApiSyncSpecView,
   getOpenApiSyncStatus,
   grantOpenApiSyncConsent,
   type OpenApiApplyReport,
@@ -40,6 +41,7 @@ export const openApiSyncKeys = {
   planAll: (collection: string) => ['openapi-sync', 'plan', collection] as const,
   overview: (collection: string) => ['openapi-sync', 'overview', collection] as const,
   changes: (collection: string) => ['openapi-sync', 'changes', collection] as const,
+  specView: (collection: string) => ['openapi-sync', 'spec-view', collection] as const,
   /** The waiting counts of every collection, so it is not scoped to one. */
   badges: ['openapi-sync', 'badges'] as const,
   status: (collection: string, includeToken = false) =>
@@ -112,6 +114,18 @@ export function useOpenApiSyncChanges(collection: string | null | undefined) {
   });
 }
 
+/** The latest stored spec of a collection, for the read-only viewer. */
+export function useOpenApiSyncSpecView(collection: string | null | undefined) {
+  return useQuery({
+    networkMode: 'always',
+    queryKey: openApiSyncKeys.specView(collection ?? ''),
+    queryFn: () => getOpenApiSyncSpecView(collection ?? ''),
+    enabled: !!collection,
+    staleTime: 0,
+    retry: false,
+  });
+}
+
 /** How many updates wait in each collection that has a spec source. */
 export function useOpenApiSyncBadges() {
   return useQuery({
@@ -126,6 +140,7 @@ export function useOpenApiSyncBadges() {
 function invalidateSync(queryClient: QueryClient, collection: string): void {
   void queryClient.invalidateQueries({ queryKey: openApiSyncKeys.overview(collection) });
   void queryClient.invalidateQueries({ queryKey: openApiSyncKeys.changes(collection) });
+  void queryClient.invalidateQueries({ queryKey: openApiSyncKeys.specView(collection) });
   void queryClient.invalidateQueries({ queryKey: openApiSyncKeys.badges });
   void queryClient.invalidateQueries({ queryKey: openApiSyncKeys.statusAll(collection) });
   void queryClient.invalidateQueries({ queryKey: openApiSyncKeys.planAll(collection) });

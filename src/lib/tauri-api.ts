@@ -2110,6 +2110,45 @@ export interface OpenApiBadge {
   waiting: number;
 }
 
+export interface OpenApiSpecParam {
+  name: string;
+  /** `path`, `query`, `header` or `cookie`. */
+  location: string;
+  required: boolean;
+}
+
+export interface OpenApiSpecResponse {
+  status: string;
+  description: string;
+}
+
+export interface OpenApiSpecOperation {
+  key: string;
+  method: string;
+  path: string;
+  summary: string | null;
+  parameters: OpenApiSpecParam[];
+  responses: OpenApiSpecResponse[];
+  isNew: boolean;
+}
+
+export interface OpenApiSpecGroup {
+  tag: string;
+  operations: OpenApiSpecOperation[];
+}
+
+/** The latest stored spec for the read-only viewer. */
+export interface OpenApiSpecView {
+  title: string;
+  version: string | null;
+  fetchedAt: string | null;
+  state: 'in_sync' | 'updates_waiting' | 'no_copy';
+  groups: OpenApiSpecGroup[];
+}
+
+export const getOpenApiSyncSpecView = (collection: string) =>
+  invoke<OpenApiSpecView>('openapi_sync_spec_view', { collection });
+
 export const getOpenApiSyncOverview = (collection: string) =>
   invoke<OpenApiOverview>('openapi_sync_overview', { collection });
 

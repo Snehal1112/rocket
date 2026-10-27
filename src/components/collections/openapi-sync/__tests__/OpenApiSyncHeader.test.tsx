@@ -31,6 +31,20 @@ describe('OpenApiSyncHeader', () => {
     expect(screen.getByText('example.com/openapi.json')).toBeInTheDocument();
   });
 
+  it('view_spec_calls_the_handler', async () => {
+    const onViewSpec = vi.fn();
+    renderWithQuery(
+      <OpenApiSyncHeader
+        collection='c'
+        status={makeStatus()}
+        waiting={0}
+        onViewSpec={onViewSpec}
+      />,
+    );
+    await userEvent.setup().click(screen.getByRole('button', { name: 'View spec' }));
+    expect(onViewSpec).toHaveBeenCalledTimes(1);
+  });
+
   it('has a Check now button', () => {
     renderWithQuery(<OpenApiSyncHeader collection='c' status={makeStatus()} waiting={0} />);
     expect(screen.getByRole('button', { name: 'Check now' })).toBeEnabled();

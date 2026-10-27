@@ -19,6 +19,7 @@ import {
   useOpenApiSyncEvents,
   useOpenApiSyncGlobalEvents,
   useOpenApiSyncOverview,
+  useOpenApiSyncSpecView,
   useOpenApiSyncPlan,
   useOpenApiSyncStatus,
   useRevokeConsent,
@@ -34,6 +35,7 @@ vi.mock('@/lib/tauri-api', async () => {
     getOpenApiSyncPlan: vi.fn(),
     getOpenApiSyncOverview: vi.fn(),
     getOpenApiSyncChanges: vi.fn(),
+    getOpenApiSyncSpecView: vi.fn(),
     getOpenApiSyncBadges: vi.fn(),
     onOpenApiSyncChecked: vi.fn(),
     onOpenApiSyncApplied: vi.fn(),
@@ -532,6 +534,30 @@ describe('openapi sync queries', () => {
       await waitFor(() => expect(tauriApi.getOpenApiSyncOverview).toHaveBeenCalledTimes(2));
       await waitFor(() => expect(tauriApi.getOpenApiSyncChanges).toHaveBeenCalledTimes(2));
       await waitFor(() => expect(tauriApi.getOpenApiSyncBadges).toHaveBeenCalledTimes(2));
+    });
+
+    it('an_applied_event_refreshes_the_spec_view_of_that_collection', async () => {
+      renderHook(
+        () => {
+          useOpenApiSyncEvents();
+          useOpenApiSyncSpecView('A');
+          useOpenApiSyncSpecView('B');
+        },
+        { wrapper },
+      );
+      await waitFor(() => expect(tauriApi.getOpenApiSyncSpecView).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(tauriApi.onOpenApiSyncApplied).toHaveBeenCalled());
+      vi.mocked(tauriApi.onOpenApiSyncApplied).mock.calls[0]?.[0]({
+        collection: 'A',
+        applied: 1,
+        stale: 0,
+      });
+      await waitFor(() => expect(tauriApi.getOpenApiSyncSpecView).toHaveBeenCalledTimes(3));
+      expect(vi.mocked(tauriApi.getOpenApiSyncSpecView).mock.calls.map((c) => c[0])).toEqual([
+        'A',
+        'B',
+        'A',
+      ]);
     });
 
     it('a_checked_event_refreshes_overview_and_badges_but_not_other_collections', async () => {
