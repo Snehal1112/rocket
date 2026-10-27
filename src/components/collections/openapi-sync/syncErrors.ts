@@ -62,6 +62,10 @@ const KNOWN: Array<[string, string]> = [
   ],
   ['The file is larger than the 25 MB limit.', 'The file is larger than the 25 MB limit.'],
   [
+    'A newer spec is waiting but its copy is missing.',
+    'A newer spec is waiting but its copy is missing. Run Check now.',
+  ],
+  [
     'The collection changed. Run the preview again.',
     'The collection changed. Run the preview again.',
   ],

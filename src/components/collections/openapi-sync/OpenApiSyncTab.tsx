@@ -190,6 +190,10 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
         ? firstEntryId(planData)
         : null;
 
+  // The viewer must not wait to reopen by itself when the collection is disconnected and
+  // connected again in this tab.
+  if (viewingSpec && (status.isError || !status.data)) setViewingSpec(false);
+
   if (status.isError) {
     return (
       <div className='p-4'>

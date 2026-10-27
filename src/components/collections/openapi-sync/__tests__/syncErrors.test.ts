@@ -106,4 +106,9 @@ describe('syncErrorMessage', () => {
       expect(syncErrorMessage(sentence)).toBe(sentence);
     }
   });
+
+  it('maps_the_missing_pending_copy_sentence', () => {
+    const text = 'A newer spec is waiting but its copy is missing. Run Check now.';
+    expect(syncErrorMessage(`Invalid input: ${text}`)).toBe(text);
+  });
 });

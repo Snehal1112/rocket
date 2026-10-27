@@ -354,6 +354,37 @@ describe('OpenApiSyncTab', () => {
     expect(screen.queryByText('Loading the plan...')).toBeNull();
   });
 
+  it('the_viewer_does_not_reopen_by_itself_after_a_disconnect_and_a_reconnect', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(
+      makeStatus({ hasPending: false, lastStatus: { state: 'unchanged' } }),
+    );
+    vi.mocked(tauriApi.getOpenApiSyncSpecView).mockResolvedValue({
+      title: 'Pets API',
+      version: '1',
+      fetchedAt: null,
+      state: 'no_copy',
+      groups: [],
+    });
+    const user = userEvent.setup();
+    renderWithQuery(<TabWithListeners collection='vr1' />);
+    await user.click(await screen.findByRole('button', { name: 'View spec' }));
+    await screen.findByText(/No saved copy/i);
+    const handler = vi.mocked(tauriApi.onOpenApiSyncChecked).mock.calls[0]?.[0];
+    // The collection gets disconnected.
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(null);
+    act(() => handler?.({ collection: 'vr1' } as never));
+    expect(
+      await screen.findByText('This collection is not connected to an OpenAPI spec.'),
+    ).toBeInTheDocument();
+    // It gets connected again.
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(
+      makeStatus({ hasPending: false, lastStatus: { state: 'unchanged' } }),
+    );
+    act(() => handler?.({ collection: 'vr1' } as never));
+    expect(await screen.findByRole('tab', { name: 'Overview' })).toBeInTheDocument();
+    expect(screen.queryByText(/No saved copy/i)).toBeNull();
+  });
+
   it('after_disconnect_the_tab_shows_that_nothing_is_connected', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(null);
     renderWithQuery(<TabWithListeners collection='nc1' />);

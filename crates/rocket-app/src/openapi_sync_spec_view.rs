@@ -11,6 +11,9 @@ use crate::collection_lock::collection_lock;
 use crate::openapi_sync_service::OpenApiSyncService;
 use crate::openapi_sync_view::{SpecOpRow, SpecTagGroup, SpecView, SpecViewState};
 
+const PENDING_COPY_MISSING: &str =
+    "A newer spec is waiting but its copy is missing. Run Check now.";
+
 impl OpenApiSyncService {
     /// The bytes of the latest stored spec and whether they are the pending copy. A pending
     /// file counts only when the source holds its hash, since a leftover file is harmless.
@@ -42,13 +45,21 @@ impl OpenApiSyncService {
         let repo: &dyn CollectionRepository =
             pinned.as_deref().unwrap_or(deps.collections.as_ref());
         let root = repo.collection_root_path(collection)?;
-        let lock = collection_lock(&root);
-        let _guard = lock.lock();
-        let source = self.load(&root)?;
-        let (bytes, state) = match self.latest_spec_bytes(&root, &source)? {
-            Some((bytes, true)) => (bytes, SpecViewState::UpdatesWaiting),
-            Some((bytes, false)) => (bytes, SpecViewState::InSync),
-            None => return Ok(no_copy()),
+        // Only the reads need the lock, so a request save never waits for the parse below.
+        let (source, bytes, state) = {
+            let lock = collection_lock(&root);
+            let _guard = lock.lock();
+            let source = self.load(&root)?;
+            // The source says a newer spec waits, but its copy is git-ignored and may not
+            // have come with a pull. Showing the old spec as in sync would contradict the header.
+            if source.pending_sha256.is_some() && !self.pending_is_sound(&root, &source) {
+                return Err(DomainError::InvalidInput(PENDING_COPY_MISSING.to_string()));
+            }
+            match self.latest_spec_bytes(&root, &source)? {
+                Some((bytes, true)) => (source, bytes, SpecViewState::UpdatesWaiting),
+                Some((bytes, false)) => (source, bytes, SpecViewState::InSync),
+                None => return Ok(no_copy()),
+            }
         };
         let spec = String::from_utf8(bytes)
             .ok()
@@ -77,11 +88,15 @@ impl OpenApiSyncService {
                 }),
             }
         }
-        let local = self.local_state(collection)?;
+        // The time is a nicety, so a damaged local state file must not hide the spec.
+        let last_checked = self
+            .local_state(collection)
+            .ok()
+            .and_then(|local| local.last_checked_at);
         Ok(SpecView {
             title: spec.title().to_string(),
             version: spec.version().map(str::to_string),
-            fetched_at: local.last_checked_at.or(source.last_checked_at),
+            fetched_at: last_checked.or(source.last_checked_at),
             state,
             groups,
         })

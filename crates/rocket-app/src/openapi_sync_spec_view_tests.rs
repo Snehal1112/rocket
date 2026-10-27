@@ -128,6 +128,30 @@ async fn a_pending_file_that_does_not_match_its_hash_is_not_shown() {
     let w = world().await;
     w.check_with(v2()).await;
     std::fs::write(w.root.join(".rocket/openapi-pending.spec"), "{}").expect("tamper");
+    // The source says a newer spec waits, so showing the old one as in sync would mislead.
+    let err = w.svc.spec_view(&w.name).expect_err("must not show in sync");
+    assert!(
+        err.to_string().contains("A newer spec is waiting but its copy is missing"),
+        "{err}"
+    );
+}
+
+#[tokio::test]
+async fn a_missing_pending_file_gives_the_same_fixed_sentence() {
+    let w = world().await;
+    w.check_with(v2()).await;
+    std::fs::remove_file(w.root.join(".rocket/openapi-pending.spec")).expect("remove");
+    let err = w.svc.spec_view(&w.name).expect_err("must not show in sync");
+    assert!(
+        err.to_string().contains("A newer spec is waiting but its copy is missing"),
+        "{err}"
+    );
+}
+
+#[tokio::test]
+async fn a_damaged_local_state_does_not_break_the_viewer() {
+    let w = world().await;
+    std::fs::write(w.root.join(".rocket/openapi-local.json"), "{ not json").expect("damage");
     let view = w.svc.spec_view(&w.name).expect("view");
     assert_eq!(view.state, SpecViewState::InSync);
 }
