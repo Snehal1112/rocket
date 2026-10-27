@@ -852,4 +852,126 @@ describe('OpenApiSyncTab actions', () => {
     expect(screen.getByRole('button', { name: 'Confirm and sync (0)' })).toBeDisabled();
     expect(tauriApi.applyOpenApiSync).not.toHaveBeenCalled();
   });
+
+  it('keep_current_resets_take_spec_choices', async () => {
+    mockSync();
+    vi.mocked(tauriApi.applyOpenApiSync).mockResolvedValue(report);
+    renderWithQuery(<OpenApiSyncTab collection='bulk6' />);
+    const user = userEvent.setup();
+    await screen.findByText('Add pet');
+    await user.click(screen.getByRole('button', { name: 'Accept all' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Accept all' }));
+    await user.click(screen.getByRole('button', { name: 'Keep current' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Include Add pet in apply' }));
+    await user.click(screen.getByRole('button', { name: 'Confirm and sync (1)' }));
+    await user.click(screen.getByRole('button', { name: 'Apply now' }));
+    await waitFor(() => expect(tauriApi.applyOpenApiSync).toHaveBeenCalledTimes(1));
+    const items = vi.mocked(tauriApi.applyOpenApiSync).mock.calls[0]?.[1].items ?? [];
+    expect(items.find((i) => i.key === 'POST /pets')?.choices).toEqual({ url: 'yours' });
+  });
+
+  it('accept_all_dialog_counts_new_and_changed_only', async () => {
+    mockSync();
+    renderWithQuery(<OpenApiSyncTab collection='bulk7' />);
+    const user = userEvent.setup();
+    await screen.findByText('Add pet');
+    await user.click(screen.getByRole('button', { name: 'Accept all' }));
+    expect(within(screen.getByRole('alertdialog')).getByText(/selects 2 requests/)).toBeInTheDocument();
+  });
+
+  it('a_variables_only_plan_is_accepted_but_cannot_be_skipped', async () => {
+    mockSync(
+      makePlan({
+        items: [],
+        variableChanges: [{ name: 'baseUrl', kind: 'baseUrl', digest: 'dv' }],
+      }),
+    );
+    renderWithQuery(<OpenApiSyncTab collection='bulk8' />);
+    const user = userEvent.setup();
+    await screen.findByRole('button', { name: 'Accept all' });
+    expect(screen.getByRole('button', { name: 'Skip all' })).toBeDisabled();
+    expect(screen.getByText(/· 0 selected$/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Accept all' }));
+    expect(screen.getByText(/· 1 selected$/)).toBeInTheDocument();
+  });
+
+  it('accept_all_on_a_mixed_plan_includes_variables', async () => {
+    mockSync(
+      makePlan({
+        items: [newItem],
+        variableChanges: [{ name: 'baseUrl', kind: 'baseUrl', digest: 'dv' }],
+      }),
+    );
+    renderWithQuery(<OpenApiSyncTab collection='bulk9' />);
+    const user = userEvent.setup();
+    await screen.findByRole('button', { name: 'Accept all' });
+    expect(screen.getByText(/· 1 selected$/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Accept all' }));
+    expect(screen.getByText(/· 2 selected$/)).toBeInTheDocument();
+  });
+
+  it('skip_selected_skips_only_the_selected_requests', async () => {
+    mockSync();
+    vi.mocked(tauriApi.applyOpenApiSync).mockResolvedValue({ ...report, applied: [], skipped: 1 });
+    renderWithQuery(<OpenApiSyncTab collection='bulk10' />);
+    const user = userEvent.setup();
+    await screen.findByText('Add pet');
+    await user.click(screen.getByRole('button', { name: 'Skip selected (1)' }));
+    await waitFor(() =>
+      expect(tauriApi.applyOpenApiSync).toHaveBeenCalledWith('bulk10', {
+        items: [],
+        skips: [{ key: 'GET /pets', fingerprint: 'f1' }],
+        variables: [],
+        renameLinks: [],
+      }),
+    );
+  });
+
+  it('select_matches_never_selects_a_removed_item_and_keeps_other_selections', async () => {
+    const cleanRemoved = { ...removedItem, edited: false } as OpenApiSyncItem;
+    const editedRemoved = { ...removedItem, key: 'DELETE /e', name: 'Delete edited', digest: 'de', fingerprint: 'fe', edited: true } as OpenApiSyncItem;
+    mockSync(makePlan({ items: [cleanRemoved, editedRemoved, changedItem, newItem] }));
+    renderWithQuery(<OpenApiSyncTab collection='bulk11' />);
+    const user = userEvent.setup();
+    await screen.findByRole('button', { name: /^Select matches/ });
+    // The new request is selected already and stays selected through a narrower search.
+    await user.type(screen.getByRole('searchbox', { name: 'Search changes' }), 'Delete');
+    expect(screen.getByRole('button', { name: 'Select matches (0)' })).toBeDisabled();
+    await user.clear(screen.getByRole('searchbox', { name: 'Search changes' }));
+    await user.type(screen.getByRole('searchbox', { name: 'Search changes' }), 'e');
+    await user.click(screen.getByRole('button', { name: 'Select matches (2)' }));
+    // New and changed are selected, neither removed request is.
+    expect(screen.getByText(/· 2 selected$/)).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Include Delete pet in apply' })).not.toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Include Delete edited in apply' })).not.toBeChecked();
+  });
+
+  it('the_bulk_dialog_closes_when_the_plan_changes', async () => {
+    mockSync();
+    renderWithQuery(<OpenApiSyncTab collection='bulk12' />);
+    const user = userEvent.setup();
+    await screen.findByText('Add pet');
+    await user.click(screen.getByRole('button', { name: 'Skip all' }));
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
+    vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(
+      makePlan({ items: [{ ...newItem, digest: 'zz' }] }),
+    );
+    const onChecked = vi.mocked(tauriApi.onOpenApiSyncChecked).mock.calls[0]?.[0];
+    await act(async () => onChecked?.({ collection: 'bulk12' } as never));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    expect(tauriApi.applyOpenApiSync).not.toHaveBeenCalled();
+  });
+
+  it('a_failed_skip_all_restores_the_selection', async () => {
+    mockSync();
+    vi.mocked(tauriApi.applyOpenApiSync).mockRejectedValue('Conflict: an earlier apply is not finished yet');
+    renderWithQuery(<OpenApiSyncTab collection='bulk13' />);
+    const user = userEvent.setup();
+    await screen.findByText('Add pet');
+    expect(screen.getByText(/· 1 selected$/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Skip all' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Skip all' }));
+    await waitFor(() => expect(tauriApi.applyOpenApiSync).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByText(/· 1 selected$/)).toBeInTheDocument());
+  });
 });

@@ -7,11 +7,19 @@ interface OpenApiSyncActionsBarProps {
   onQueryChange: (query: string) => void;
   /** Requests and variables the spec changed. */
   updateCount: number;
+  /** Requests only. Variables cannot be skipped. */
+  itemCount: number;
   /** Selected requests and variables. */
   selectedCount: number;
+  /** Selected requests only. */
+  itemSelectedCount: number;
+  /** Requests and variables that match the search, removed ones left out. */
+  filteredCount: number;
   busy: boolean;
   /** True while the plan is a placeholder, so selecting would act on stale rows. */
   locked: boolean;
+  onSelectMatches: () => void;
+  onSkipSelected: () => void;
   onConfirm: () => void;
   onAcceptAll: () => void;
   onSkipAll: () => void;
@@ -23,9 +31,14 @@ export function OpenApiSyncActionsBar({
   query,
   onQueryChange,
   updateCount,
+  itemCount,
   selectedCount,
+  itemSelectedCount,
+  filteredCount,
   busy,
   locked,
+  onSelectMatches,
+  onSkipSelected,
   onConfirm,
   onAcceptAll,
   onSkipAll,
@@ -45,6 +58,14 @@ export function OpenApiSyncActionsBar({
           className='h-9 pl-8'
         />
       </div>
+      <Button
+        variant='outline'
+        size='sm'
+        onClick={onSelectMatches}
+        disabled={busy || locked || filteredCount === 0}
+      >
+        {`Select matches (${filteredCount})`}
+      </Button>
       <span className='text-xs text-muted-foreground'>
         {`${updateCount} ${updateCount === 1 ? 'update' : 'updates'} from the spec · ${selectedCount} selected`}
       </span>
@@ -52,7 +73,20 @@ export function OpenApiSyncActionsBar({
         <Button variant='outline' size='sm' onClick={onAcceptAll} disabled={bulkOff}>
           Accept all
         </Button>
-        <Button variant='outline' size='sm' onClick={onSkipAll} disabled={bulkOff}>
+        <Button
+          variant='outline'
+          size='sm'
+          onClick={onSkipSelected}
+          disabled={busy || itemSelectedCount === 0}
+        >
+          {`Skip selected (${itemSelectedCount})`}
+        </Button>
+        <Button
+          variant='outline'
+          size='sm'
+          onClick={onSkipAll}
+          disabled={bulkOff || itemCount === 0}
+        >
           Skip all
         </Button>
         <Button variant='outline' size='sm' onClick={onKeepCurrent} disabled={busy || locked}>

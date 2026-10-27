@@ -264,4 +264,39 @@ describe('useSyncSelection defaults and bulk actions', () => {
     expect(result.current.approved.has('GET /pets')).toBe(false);
     expect(result.current.choices.get('POST /pets')).toEqual({ url: 'spec' });
   });
+
+  it('keep_current_resets_take_spec_choices_in_the_hook', () => {
+    const { result } = setup(bulkPlan());
+    act(() => {
+      result.current.acceptAll();
+    });
+    expect(result.current.choices.get('POST /pets')).toEqual({ url: 'spec' });
+    act(() => result.current.keepCurrent());
+    expect(result.current.choices.get('POST /pets')).toEqual({ url: 'yours' });
+  });
+
+  it('accept_all_also_selects_variable_changes', () => {
+    const plan = makePlan({
+      items: [newItem],
+      variableChanges: [{ name: 'baseUrl', kind: 'baseUrl', digest: 'dv' }],
+    });
+    const { result } = setup(plan);
+    expect(result.current.variables.size).toBe(0);
+    act(() => {
+      result.current.acceptAll();
+    });
+    expect(result.current.selection.variables).toEqual([{ name: 'baseUrl', digest: 'dv' }]);
+  });
+
+  it('skip_all_returns_an_undo_that_restores_the_selection', () => {
+    const { result } = setup(bulkPlan());
+    let undo = () => {};
+    act(() => {
+      undo = result.current.skipAll();
+    });
+    expect(result.current.selectedCount).toBe(0);
+    act(() => undo());
+    expect([...result.current.approved].sort()).toEqual(['GET /pets', 'PUT /pets']);
+    expect(result.current.skips.size).toBe(0);
+  });
 });

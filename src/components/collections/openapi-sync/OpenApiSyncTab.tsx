@@ -25,7 +25,13 @@ import { OpenApiSyncDetail } from './OpenApiSyncDetail';
 import { OpenApiSyncHeader } from './OpenApiSyncHeader';
 import { OpenApiSyncList } from './OpenApiSyncList';
 import { OpenApiSyncOverview } from './OpenApiSyncOverview';
-import { findEntry, firstEntryId, isPendingChangedError } from './openApiSyncView';
+import {
+  filterItems,
+  filterVariables,
+  findEntry,
+  firstEntryId,
+  isPendingChangedError,
+} from './openApiSyncView';
 import { GENERIC_SYNC_ERROR, syncErrorMessage } from './syncErrors';
 import { useSyncSelection } from './useSyncSelection';
 
@@ -59,12 +65,18 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
   const planData = plan.data;
   const sel = useSyncSelection(planData, links, setLinks);
   const { toggle, toggleVariable, approved, variables } = sel;
-  const [bulk, setBulk] = useState<'accept' | 'skip' | null>(null);
+  // The dialog remembers the plan it was opened for, so it never acts on another one.
+  const [bulk, setBulk] = useState<{ kind: 'accept' | 'skip'; plan: unknown } | null>(null);
+  const locked = plan.isPlaceholderData;
+  const busy = apply.isPending || applyingAnywhere || plan.isFetching;
 
   const approvedItems = useMemo(
     () => (planData ? planData.items.filter((i) => approved.has(i.key)) : []),
     [planData, approved],
   );
+
+  // A new plan, a locked tab or a running apply closes the bulk dialog for good.
+  if (bulk && (bulk.plan !== planData || locked || busy)) setBulk(null);
 
   // An emptied selection, for example after a plan change, closes the dialog for good.
   if (confirmOpen && approvedItems.length + variables.size === 0) setConfirmOpen(false);
@@ -86,6 +98,41 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
       },
     });
   };
+  const skipSelected = () => {
+    if (!planData) return;
+    const keys = approvedItems.map((i) => i.key);
+    if (keys.length === 0) return;
+    if (isApplying(collection)) {
+      setBusyNotice(true);
+      return;
+    }
+    // Only the skips go out, with no links. Other approvals wait for Confirm and sync.
+    const selection = buildSelection(planData, {
+      approved: new Set(),
+      choices: new Map(),
+      skips: new Set(keys),
+      variables: new Set(),
+      links: [],
+    });
+    sel.skip(keys);
+    apply.mutate(selection, { onError: () => sel.unskip(keys) });
+  };
+  // Removed requests are left out, so a search never selects a deletion.
+  const selectMatches = () => {
+    if (!planData) return;
+    const keys = filterItems(planData.items, query)
+      .filter((i) => i.kind !== 'removed')
+      .map((i) => i.key);
+    sel.setMany(keys, true);
+    sel.setManyVariables(
+      filterVariables(planData.variableChanges, query).map((v) => v.name),
+      true,
+    );
+  };
+  const matchCount = planData
+    ? filterItems(planData.items, query).filter((i) => i.kind !== 'removed').length +
+      filterVariables(planData.variableChanges, query).length
+    : 0;
   const skipAll = () => {
     setBulk(null);
     if (!planData) return;
@@ -103,13 +150,14 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
       variables: new Set(),
       links: [],
     });
-    sel.skipAll();
-    apply.mutate(selection, { onError: () => sel.unskip(keys) });
+    // A failed skip puts the earlier selection back.
+    const undo = sel.skipAll();
+    apply.mutate(selection, { onError: undo });
   };
   // A warning comes first when Accept all would overwrite edits. Skip all always asks first.
   const requestAcceptAll = () => {
     if (!planData) return;
-    if (countOverwrites(planData) > 0) setBulk('accept');
+    if (countOverwrites(planData) > 0) setBulk({ kind: 'accept', plan: planData });
     else sel.acceptAll();
   };
   const acceptAll = () => {
@@ -204,11 +252,16 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
           onQueryChange={setQuery}
           updateCount={planData.items.length + planData.variableChanges.length}
           selectedCount={sel.selectedCount}
-          locked={plan.isPlaceholderData}
-          busy={apply.isPending || applyingAnywhere || plan.isFetching}
+          itemCount={planData.items.length}
+          filteredCount={matchCount}
+          itemSelectedCount={approvedItems.length}
+          locked={locked}
+          busy={busy}
+          onSelectMatches={selectMatches}
+          onSkipSelected={skipSelected}
           onConfirm={() => setConfirmOpen(true)}
           onAcceptAll={requestAcceptAll}
-          onSkipAll={() => setBulk('skip')}
+          onSkipAll={() => setBulk({ kind: 'skip', plan: planData })}
           onKeepCurrent={sel.keepCurrent}
         />
         {(busyNotice || (last !== null && last.report === undefined)) && (
@@ -247,10 +300,14 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
         </div>
         {bulk && (
           <BulkConfirmDialog
-            kind={bulk}
-            count={planData.items.length}
-            overwritten={bulk === 'accept' ? countOverwrites(planData) : undefined}
-            onConfirm={bulk === 'accept' ? acceptAll : skipAll}
+            kind={bulk.kind}
+            count={
+              bulk.kind === 'accept'
+                ? planData.items.filter((i) => i.kind !== 'removed').length
+                : planData.items.length
+            }
+            overwritten={bulk.kind === 'accept' ? countOverwrites(planData) : undefined}
+            onConfirm={bulk.kind === 'accept' ? acceptAll : skipAll}
             onCancel={() => setBulk(null)}
           />
         )}

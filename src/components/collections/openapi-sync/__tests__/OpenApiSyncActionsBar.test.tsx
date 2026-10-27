@@ -8,9 +8,14 @@ function props(overrides: Partial<React.ComponentProps<typeof OpenApiSyncActions
     query: '',
     onQueryChange: vi.fn(),
     updateCount: 5,
+    itemCount: 5,
     selectedCount: 2,
+    itemSelectedCount: 2,
+    filteredCount: 4,
     busy: false,
     locked: false,
+    onSelectMatches: vi.fn(),
+    onSkipSelected: vi.fn(),
     onConfirm: vi.fn(),
     onAcceptAll: vi.fn(),
     onSkipAll: vi.fn(),
@@ -53,7 +58,14 @@ describe('OpenApiSyncActionsBar', () => {
 
   it('disables_every_action_while_busy', () => {
     render(<OpenApiSyncActionsBar {...props({ busy: true })} />);
-    for (const name of ['Accept all', 'Skip all', 'Keep current', 'Confirm and sync (2)']) {
+    for (const name of [
+      'Accept all',
+      'Skip all',
+      'Keep current',
+      'Confirm and sync (2)',
+      'Skip selected (2)',
+      'Select matches (4)',
+    ]) {
       expect(screen.getByRole('button', { name })).toBeDisabled();
     }
   });
@@ -70,5 +82,21 @@ describe('OpenApiSyncActionsBar', () => {
     render(<OpenApiSyncActionsBar {...p} />);
     await userEvent.setup().type(screen.getByRole('searchbox', { name: 'Search changes' }), 'p');
     expect(p.onQueryChange).toHaveBeenCalledWith('p');
+  });
+
+  it('skip_all_is_disabled_without_request_items', () => {
+    render(<OpenApiSyncActionsBar {...props({ itemCount: 0, updateCount: 2 })} />);
+    expect(screen.getByRole('button', { name: 'Skip all' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Accept all' })).toBeEnabled();
+  });
+
+  it('calls_back_for_the_two_secondary_actions', async () => {
+    const p = props();
+    render(<OpenApiSyncActionsBar {...p} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Select matches (4)' }));
+    await user.click(screen.getByRole('button', { name: 'Skip selected (2)' }));
+    expect(p.onSelectMatches).toHaveBeenCalled();
+    expect(p.onSkipSelected).toHaveBeenCalled();
   });
 });

@@ -157,24 +157,45 @@ export function useSyncSelection(
       setState((s) => {
         const next = acceptAllSelection(plan, s.approved, s.choices);
         // The accepted items must not stay skipped.
-        return { ...s, ...next, skips: withKeys(s.skips, next.approved, false) };
+        return {
+          ...s,
+          ...next,
+          // Variable changes are safe to take: a value the user changed is kept.
+          variables: new Set(plan.variableChanges.map((v) => v.name)),
+          skips: withKeys(s.skips, next.approved, false),
+        };
       });
     }
     return { overwritten };
   }, [plan]);
 
   const keepCurrent = useCallback(() => {
-    setState((s) => ({ ...s, approved: new Set(), variables: new Set() }));
-  }, []);
+    // The conflict choices go back to keeping the user's version.
+    setState((s) => ({
+      ...s,
+      approved: new Set(),
+      variables: new Set(),
+      choices: plan ? defaultSelection(plan).choices : new Map(),
+    }));
+  }, [plan]);
 
-  const skipAll = useCallback(() => {
+  const skipAll = useCallback((): (() => void) => {
+    const before = state;
     setState((s) => ({
       ...s,
       approved: new Set(),
       variables: new Set(),
       skips: new Set(plan ? plan.items.map((i) => i.key) : []),
     }));
-  }, [plan]);
+    // The undo puts back the selection and the skips from before.
+    return () =>
+      setState((s) => ({
+        ...s,
+        approved: before.approved,
+        variables: before.variables,
+        skips: before.skips,
+      }));
+  }, [plan, state]);
 
   const reset = useCallback(() => setState(emptyState()), []);
 
