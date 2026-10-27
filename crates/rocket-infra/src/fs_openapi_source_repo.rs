@@ -109,14 +109,25 @@ impl OpenApiSourceRepository for FsOpenApiSourceRepo {
         }
     }
 
-    fn has_applied(&self, collection_root: &Path) -> DomainResult<bool> {
-        match std::fs::metadata(applied_path(collection_root)) {
-            Ok(meta) => Ok(meta.is_file()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
-            Err(e) => Err(DomainError::Internal(format!(
-                "{APPLIED_FILE} could not be read: {e}"
-            ))),
-        }
+    fn applied_matches(&self, collection_root: &Path, expected_sha256: &str) -> DomainResult<bool> {
+        use sha2::{Digest, Sha256};
+        let unreadable = |e: std::io::Error| {
+            DomainError::Internal(format!("{APPLIED_FILE} could not be read: {e}"))
+        };
+        let mut file = match std::fs::File::open(applied_path(collection_root)) {
+            Ok(file) => file,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(e) => return Err(unreadable(e)),
+        };
+        let mut hasher = Sha256::new();
+        // A directory opens on Linux and fails on the first read, so it reads as damaged.
+        std::io::copy(&mut file, &mut hasher).map_err(unreadable)?;
+        let actual: String = hasher
+            .finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        Ok(actual.eq_ignore_ascii_case(expected_sha256))
     }
 
     fn clear_pending(&self, collection_root: &Path) -> DomainResult<()> {
@@ -156,13 +167,28 @@ mod tests {
     }
 
     #[test]
-    fn has_applied_is_true_only_when_the_copy_is_a_file() {
+    fn applied_matches_only_a_file_with_the_expected_hash() {
+        use sha2::{Digest, Sha256};
         let dir = tempdir().expect("tempdir");
-        assert!(!FsOpenApiSourceRepo.has_applied(dir.path()).expect("has"));
+        let hash = |bytes: &[u8]| {
+            Sha256::digest(bytes)
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>()
+        };
+        let spec = b"openapi: 3.0.3";
+        assert!(!FsOpenApiSourceRepo
+            .applied_matches(dir.path(), &hash(spec))
+            .expect("matches"));
         FsOpenApiSourceRepo
-            .save_applied(dir.path(), b"openapi: 3.0.3")
+            .save_applied(dir.path(), spec)
             .expect("save");
-        assert!(FsOpenApiSourceRepo.has_applied(dir.path()).expect("has"));
+        assert!(FsOpenApiSourceRepo
+            .applied_matches(dir.path(), &hash(spec))
+            .expect("matches"));
+        assert!(!FsOpenApiSourceRepo
+            .applied_matches(dir.path(), &hash(b"another spec"))
+            .expect("matches"));
     }
 
     #[test]

@@ -457,6 +457,15 @@ async fn check_stores_the_applied_copy_when_the_hash_matches() {
 }
 
 #[tokio::test]
+async fn check_replaces_an_applied_copy_that_does_not_match_the_source() {
+    let w = world().await;
+    // A pull or a branch switch can leave the git-ignored copy behind the tracked source file.
+    std::fs::write(w.root.join(".rocket/openapi-applied.spec"), v2()).expect("write");
+    w.check_with(v1()).await;
+    assert_eq!(applied(&w).as_deref(), Some(v1().as_str()));
+}
+
+#[tokio::test]
 async fn check_does_not_store_an_applied_copy_when_the_hash_differs() {
     let w = world().await;
     drop_applied(&w);

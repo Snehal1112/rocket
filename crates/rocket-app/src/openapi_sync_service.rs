@@ -499,7 +499,10 @@ impl OpenApiSyncService {
         // An import from before the saved copy existed has none. With nothing pending, one
         // fetch without validators can store it.
         let heal = source.pending_sha256.is_none()
-            && matches!(self.sources.has_applied(collection_root), Ok(false));
+            && !self
+                .sources
+                .applied_matches(collection_root, &source.spec_sha256)
+                .unwrap_or(false);
         if heal || !self.pending_is_sound(collection_root, &source) {
             source.etag = None;
             source.last_modified = None;
@@ -1100,6 +1103,9 @@ mod tests {
         fn load_applied(&self, root: &Path) -> DomainResult<Option<Vec<u8>>> {
             FsOpenApiSourceRepo.load_applied(root)
         }
+        fn applied_matches(&self, root: &Path, sha256: &str) -> DomainResult<bool> {
+            FsOpenApiSourceRepo.applied_matches(root, sha256)
+        }
     }
 
     impl SecretStore for MemSecrets {
@@ -1191,9 +1197,10 @@ mod tests {
         fn new(src: OpenApiSource) -> Self {
             let dir = TempDir::new().expect("tempdir");
             FsOpenApiSourceRepo.save(dir.path(), &src).expect("seed");
-            // The saved copy exists, so a check keeps sending the stored validators.
+            // The saved copy matches the default source hash, so a check keeps sending the
+            // stored validators.
             FsOpenApiSourceRepo
-                .save_applied(dir.path(), b"openapi: 3.0.3")
+                .save_applied(dir.path(), &fixture())
                 .expect("seed applied copy");
             let fetcher = Arc::new(FakeFetcher::default());
             let secrets = Arc::new(MemSecrets::default());

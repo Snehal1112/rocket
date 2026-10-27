@@ -393,6 +393,9 @@ mod tests {
         fn load_applied(&self, _root: &Path) -> DomainResult<Option<Vec<u8>>> {
             Ok(None)
         }
+        fn applied_matches(&self, _root: &Path, _sha256: &str) -> DomainResult<bool> {
+            Ok(false)
+        }
     }
 
     /// Delegates to the file repo, but cannot write the applied copy.
@@ -422,6 +425,9 @@ mod tests {
         }
         fn load_applied(&self, root: &Path) -> DomainResult<Option<Vec<u8>>> {
             FsOpenApiSourceRepo.load_applied(root)
+        }
+        fn applied_matches(&self, root: &Path, sha256: &str) -> DomainResult<bool> {
+            FsOpenApiSourceRepo.applied_matches(root, sha256)
         }
     }
 

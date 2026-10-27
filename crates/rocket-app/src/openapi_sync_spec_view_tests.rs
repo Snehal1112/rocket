@@ -60,6 +60,15 @@ async fn reports_no_copy_for_an_old_import() {
 }
 
 #[tokio::test]
+async fn ignores_an_applied_copy_that_does_not_match_the_source() {
+    let w = world().await;
+    std::fs::write(w.root.join(".rocket/openapi-applied.spec"), v2()).expect("write");
+    let view = w.svc.spec_view(&w.name).expect("view");
+    assert_eq!(view.state, SpecViewState::NoCopy);
+    assert!(view.groups.is_empty());
+}
+
+#[tokio::test]
 async fn never_touches_the_network() {
     let w = world().await;
     w.fetcher.requests.lock().expect("lock").clear();
@@ -71,11 +80,14 @@ async fn never_touches_the_network() {
 #[tokio::test]
 async fn an_unparsable_copy_gives_a_fixed_sentence() {
     let w = world().await;
-    std::fs::write(
-        w.root.join(".rocket/openapi-applied.spec"),
-        "C:\\secret\\path <html>",
-    )
-    .expect("write");
+    let junk = "C:\\secret\\path <html>";
+    std::fs::write(w.root.join(".rocket/openapi-applied.spec"), junk).expect("write");
+    // The source says this is the applied spec, so the copy is trusted and fails to parse.
+    let mut source = w.source();
+    source.spec_sha256 = crate::openapi_sync_service::sha256_hex(junk.as_bytes());
+    rocket_infra::FsOpenApiSourceRepo
+        .save(&w.root, &source)
+        .expect("save source");
     let err = w.svc.spec_view(&w.name).expect_err("must fail");
     assert!(
         err.to_string().contains("The saved spec cannot be shown."),

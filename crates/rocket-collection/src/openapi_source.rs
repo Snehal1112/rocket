@@ -159,11 +159,10 @@ pub trait OpenApiSourceRepository: Send + Sync {
     fn save_applied(&self, collection_root: &Path, spec: &[u8]) -> DomainResult<()>;
     /// `Ok(None)` when there is no applied copy.
     fn load_applied(&self, collection_root: &Path) -> DomainResult<Option<Vec<u8>>>;
-    /// Whether an applied copy exists. Implementations should not read the file (it can be
-    /// 25 MB); the default only keeps small test doubles short.
-    fn has_applied(&self, collection_root: &Path) -> DomainResult<bool> {
-        Ok(self.load_applied(collection_root)?.is_some())
-    }
+    /// True when an applied copy exists and its SHA-256 (lower-case hex) equals `expected`.
+    /// The copy is git-ignored while the source file is tracked, so a pull or a branch switch
+    /// can leave it behind. Implementations hash the file as a stream (it can be 25 MB).
+    fn applied_matches(&self, collection_root: &Path, expected_sha256: &str) -> DomainResult<bool>;
 }
 
 /// The validators of one file a spec refers to, kept so a check can ask "has it changed?"

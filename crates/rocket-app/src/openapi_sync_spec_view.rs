@@ -25,7 +25,13 @@ impl OpenApiSyncService {
                 return Ok(Some((bytes, true)));
             }
         }
-        Ok(self.sources.load_applied(root)?.map(|bytes| (bytes, false)))
+        // A copy that does not match the source is from another branch or an older pull, so
+        // it is not shown as the synced spec.
+        Ok(self
+            .sources
+            .load_applied(root)?
+            .filter(|bytes| crate::openapi_sync_service::sha256_hex(bytes) == source.spec_sha256)
+            .map(|bytes| (bytes, false)))
     }
 
     /// The latest stored spec: the pending copy when one waits, else the applied copy. The
