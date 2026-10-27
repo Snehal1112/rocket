@@ -5,6 +5,7 @@ import { CollapsibleSection } from '@/components/ui/collapsible-section';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { OpenApiSyncPlan } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
+import { OpenApiSkippedList } from './OpenApiSkippedList';
 import {
   filterItems,
   filterVariables,
@@ -19,6 +20,7 @@ import {
 export const MAX_ROWS_PER_GROUP = 500;
 
 interface OpenApiSyncListProps {
+  collection: string;
   plan: OpenApiSyncPlan;
   selectedId: string | null;
   onSelect: (id: string) => void;
@@ -89,6 +91,7 @@ interface RowData {
 
 /** The grouped list of pending changes. Each group collapses. */
 export function OpenApiSyncList({
+  collection,
   plan,
   selectedId,
   onSelect,
@@ -99,6 +102,7 @@ export function OpenApiSyncList({
   onToggle,
   onToggleVariable,
 }: OpenApiSyncListProps) {
+  const [showSkipped, setShowSkipped] = useState(false);
   // Extra pages of rows per group, added by Show more. A query shows every match instead.
   const [pages, setPages] = useState<Record<string, number>>({});
   const searching = query.trim().length > 0;
@@ -234,9 +238,18 @@ export function OpenApiSyncList({
           </CollapsibleSection>
         )}
         {plan.skippedHidden > 0 && (
-          <p className='px-1 text-xs text-muted-foreground'>
-            {plan.skippedHidden} skipped, hidden from this list.
-          </p>
+          <div className='flex flex-col gap-1'>
+            <Button
+              variant='link'
+              size='sm'
+              className='h-auto justify-start px-1 py-0 text-xs text-muted-foreground'
+              aria-expanded={showSkipped}
+              onClick={() => setShowSkipped((v) => !v)}
+            >
+              {`${plan.skippedHidden} skipped, hidden from this list.`}
+            </Button>
+            {showSkipped && <OpenApiSkippedList collection={collection} />}
+          </div>
         )}
         {plan.deletedByUser.length > 0 && (
           <p className='px-1 text-xs text-muted-foreground'>

@@ -426,6 +426,13 @@ export function ImportCollectionDialog({
                 </div>
               )}
 
+              {importSource === 'openapi' && openapiMode === 'file' && (
+                <p className='text-[11px] text-muted-foreground'>
+                  A spec imported from a file is not kept in sync. Import from a link to get
+                  updates.
+                </p>
+              )}
+
               {/* Drop zone */}
               {!isOpenApiLink && (
                 <div

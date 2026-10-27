@@ -2,11 +2,14 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { OpenApiSyncItem } from '@/lib/tauri-api';
+import * as tauriApi from '@/lib/tauri-api';
 import { OpenApiSyncList } from '../OpenApiSyncList';
+import { renderWithQuery } from '@/test/trust-fixtures';
 import { changedItem, makePlan } from './fixtures';
 
 function props(overrides: Partial<React.ComponentProps<typeof OpenApiSyncList>> = {}) {
   return {
+    collection: 'c',
     plan: makePlan(),
     selectedId: null,
     onSelect: vi.fn(),
@@ -30,6 +33,11 @@ function manyItems(count: number): OpenApiSyncItem[] {
 
 // The big-plan tests render hundreds of rows, which is slow when the machine is busy.
 vi.setConfig({ testTimeout: 30000 });
+
+vi.mock('@/lib/tauri-api', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/tauri-api')>('@/lib/tauri-api');
+  return { ...actual, getOpenApiSyncSkipped: vi.fn(), unskipOpenApiSync: vi.fn() };
+});
 
 describe('OpenApiSyncList', () => {
   it('shows the groups with counts and calls back on select', async () => {
@@ -125,5 +133,18 @@ describe('OpenApiSyncList', () => {
   it('says when nothing matches the query', () => {
     render(<OpenApiSyncList {...props({ query: 'zzz' })} />);
     expect(screen.getAllByText('Nothing here.').length).toBeGreaterThan(0);
+  });
+
+  it('the_skipped_line_opens_the_list', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncSkipped).mockResolvedValue([
+      { key: 'listPets', name: 'Hidden pets', method: 'GET', path: '/pets' },
+    ]);
+    renderWithQuery(<OpenApiSyncList {...props({ plan: makePlan({ skippedHidden: 1 }) })} />);
+    expect(tauriApi.getOpenApiSyncSkipped).not.toHaveBeenCalled();
+    const line = screen.getByRole('button', { name: '1 skipped, hidden from this list.' });
+    await userEvent.setup().click(line);
+    expect(await screen.findByText('Hidden pets')).toBeInTheDocument();
+    await userEvent.setup().click(line);
+    expect(screen.queryByText('Hidden pets')).toBeNull();
   });
 });

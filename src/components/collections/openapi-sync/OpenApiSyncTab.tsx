@@ -257,6 +257,7 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
         <div className='flex min-h-0 flex-1'>
           <div className='w-72 shrink-0 border-r border-border'>
             <OpenApiSyncList
+              collection={collection}
               plan={planData}
               selectedId={null}
               onSelect={setSelectedId}
@@ -322,6 +323,7 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
         <div className='flex min-h-0 flex-1'>
           <div className='w-72 shrink-0 border-r border-border'>
             <OpenApiSyncList
+              collection={collection}
               plan={planData}
               selectedId={activeId}
               onSelect={setSelectedId}

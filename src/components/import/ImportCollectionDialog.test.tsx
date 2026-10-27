@@ -128,6 +128,23 @@ describe('ImportCollectionDialog OpenAPI source', () => {
     expect(screen.getByRole('button', { name: 'Import' })).toBeEnabled();
   });
 
+  it('file_mode_says_the_import_is_not_kept_in_sync', async () => {
+    renderDialog();
+    await openOpenApiTab();
+    await userEvent.click(screen.getByRole('button', { name: 'File' }));
+    expect(
+      screen.getByText(
+        'A spec imported from a file is not kept in sync. Import from a link to get updates.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('link_mode_does_not_show_the_note', async () => {
+    renderDialog();
+    await openOpenApiTab();
+    expect(screen.queryByText(/not kept in sync/)).toBeNull();
+  });
+
   it('imports a pasted link with the default tag layout', async () => {
     mockImportOpenApiUrl.mockResolvedValue(openApiResult);
     renderDialog();
