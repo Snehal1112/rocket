@@ -52,6 +52,8 @@ interface OpenApiSyncConnectionDialogProps {
   status: OpenApiSyncStatus;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Puts the cursor in the access token field when the dialog opens. */
+  focus?: 'token';
 }
 
 function ConnectionBody({
@@ -367,6 +369,7 @@ export function OpenApiSyncConnectionDialog({
   status,
   open,
   onOpenChange,
+  focus,
 }: OpenApiSyncConnectionDialogProps) {
   // A link change cannot be cancelled once sent, so the dialog stays until it answers.
   const [changing, setChanging] = useState(false);
@@ -376,7 +379,16 @@ export function OpenApiSyncConnectionDialog({
   };
   return (
     <Dialog open={open} onOpenChange={requestClose}>
-      <DialogContent>
+      <DialogContent
+        onOpenAutoFocus={(event) => {
+          if (focus !== 'token') return;
+          const input = document.getElementById('openapi-sync-token');
+          if (!input) return;
+          event.preventDefault();
+          input.scrollIntoView?.({ block: 'center' });
+          input.focus();
+        }}
+      >
         <DialogHeader>
           <DialogTitle>Edit connection settings</DialogTitle>
           <DialogDescription>

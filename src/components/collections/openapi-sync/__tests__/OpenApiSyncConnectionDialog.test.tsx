@@ -28,13 +28,14 @@ vi.mock('@/lib/tauri-api', async () => {
 
 type Status = ReturnType<typeof makeStatus>;
 
-function renderDialog(collection: string, status: Status) {
+function renderDialog(collection: string, status: Status, focus?: 'token') {
   renderWithQuery(
     <OpenApiSyncConnectionDialog
       collection={collection}
       status={status}
       open
       onOpenChange={vi.fn()}
+      focus={focus}
     />,
   );
   return userEvent.setup();
@@ -75,6 +76,21 @@ describe('OpenApiSyncConnectionDialog', () => {
     view.rerender(tree(true));
     expect(await screen.findByText('Edit connection settings')).toBeInTheDocument();
     await waitFor(() => expect(tauriApi.getOpenApiSyncStatus).toHaveBeenCalledWith('d0', true));
+  });
+
+  it('focus_token_scrolls_to_the_access_section', async () => {
+    const github = makeStatus({ location: 'https://github.com/acme/api/blob/main/o.yaml' });
+    renderDialog('d30', github, 'token');
+    const input = await screen.findByLabelText('Access token');
+    await waitFor(() => expect(input).toHaveFocus());
+    expect(screen.getByRole('switch', { name: SWITCH })).toBeInTheDocument();
+  });
+
+  it('without_focus_the_token_field_is_not_focused', async () => {
+    const github = makeStatus({ location: 'https://github.com/acme/api/blob/main/o.yaml' });
+    renderDialog('d31', github);
+    const input = await screen.findByLabelText('Access token');
+    expect(input).not.toHaveFocus();
   });
 
   it('turning the switch on sets 5 minutes', async () => {
