@@ -258,6 +258,7 @@ async fn confirm(
             GroupBy::Tags,
             interval,
             &preview.digest,
+            &preview.spec_sha256,
         )
         .await
 }
@@ -492,6 +493,7 @@ async fn confirm_refuses_a_stale_digest() {
             GroupBy::Tags,
             None,
             &preview.digest,
+            &preview.spec_sha256,
         )
         .await
         .expect_err("stale");
@@ -555,6 +557,7 @@ async fn a_failed_consent_adds_a_warning_and_keeps_the_files() {
             GroupBy::Tags,
             Some(SyncInterval::Hourly),
             &preview.digest,
+            &preview.spec_sha256,
         )
         .await
         .expect("confirm still succeeds");
@@ -590,7 +593,16 @@ async fn confirm_refuses_a_collection_that_already_has_a_source() {
     let w = world().await;
     let err = w
         .svc
-        .confirm(&w.name, LINK, None, Vec::new(), GroupBy::Tags, None, "x")
+        .confirm(
+            &w.name,
+            LINK,
+            None,
+            Vec::new(),
+            GroupBy::Tags,
+            None,
+            "x",
+            "y",
+        )
         .await
         .expect_err("refused");
     assert!(matches!(err, DomainError::Conflict(_)), "{err:?}");
@@ -648,4 +660,210 @@ async fn confirm_rejects_an_operation_or_request_chosen_twice() {
     let err = confirm(&w, rows, None).await.expect_err("twice");
     assert!(matches!(err, DomainError::InvalidInput(_)), "{err:?}");
     assert!(!hand_root(&w).join(".rocket").exists());
+}
+
+#[tokio::test]
+async fn confirm_refuses_a_spec_that_changed_since_the_preview() {
+    let w = world().await;
+    hand_made(&w, &[("List pets", "GET", "{{baseUrl}}/pets")]);
+    let preview = w.svc.preview(HAND, LINK, None).await.expect("preview");
+    // The spec gains an operation the user never saw.
+    *w.fetcher.body.lock().expect("lock") = v2();
+    let before = snapshot(&hand_root(&w));
+    let err = w
+        .svc
+        .confirm(
+            HAND,
+            LINK,
+            None,
+            vec![ConnectRow::Add {
+                key: "listPets".into(),
+            }],
+            GroupBy::Tags,
+            None,
+            &preview.digest,
+            &preview.spec_sha256,
+        )
+        .await
+        .expect_err("stale spec");
+    assert!(
+        err.to_string()
+            .contains("The spec changed. Run the preview again."),
+        "{err}"
+    );
+    assert_eq!(snapshot(&hand_root(&w)), before);
+}
+
+#[tokio::test]
+async fn a_link_only_connect_still_gets_the_base_url_variable() {
+    let w = world().await;
+    w.repo.create(HAND).expect("create");
+    save_hand(&w, "list-pets", &spec_request("listPets"));
+    let rows = vec![
+        link(&w, "list-pets", "listPets"),
+        ConnectRow::Skip {
+            key: "getPet".into(),
+        },
+        ConnectRow::Skip {
+            key: "getInventory".into(),
+        },
+    ];
+    confirm(&w, rows, None).await.expect("confirm");
+    let settings = w.repo.get_settings(HAND).expect("settings");
+    let base = settings
+        .variables
+        .iter()
+        .find(|v| v.key == "baseUrl")
+        .expect("baseUrl");
+    assert_eq!(base.value, "https://api.example.com");
+}
+
+#[tokio::test]
+async fn an_existing_base_url_variable_is_left_alone() {
+    let w = world().await;
+    w.repo.create(HAND).expect("create");
+    let mut settings = w.repo.get_settings(HAND).expect("settings");
+    settings
+        .variables
+        .push(rocket_collection::settings::CollectionVariable {
+            key: "baseUrl".into(),
+            value: "https://mine.example.com".into(),
+            initial_value: String::new(),
+            enabled: true,
+            secret: false,
+        });
+    w.repo.save_settings(HAND, &settings).expect("save");
+    save_hand(&w, "list-pets", &spec_request("listPets"));
+    let rows = vec![
+        link(&w, "list-pets", "listPets"),
+        ConnectRow::Skip {
+            key: "getPet".into(),
+        },
+        ConnectRow::Skip {
+            key: "getInventory".into(),
+        },
+    ];
+    confirm(&w, rows, None).await.expect("confirm");
+    let after = w.repo.get_settings(HAND).expect("settings");
+    let base = after
+        .variables
+        .iter()
+        .find(|v| v.key == "baseUrl")
+        .expect("baseUrl");
+    assert_eq!(base.value, "https://mine.example.com");
+}
+
+/// Fails to open a transaction with a message that holds a path, like the real one can.
+struct LeakyBegin(rocket_infra::FsFileTxFactory);
+
+impl CollectionFileTxFactory for LeakyBegin {
+    fn begin(&self, _: &Path) -> DomainResult<Box<dyn CollectionFileTx>> {
+        Err(DomainError::InvalidInput(
+            "\"/home/me/secret/x.yml\" goes through a symbolic link".into(),
+        ))
+    }
+    fn recover(&self, root: &Path) -> DomainResult<RecoveryOutcome> {
+        self.0.recover(root)
+    }
+    fn list_files(&self, root: &Path) -> DomainResult<std::collections::HashSet<String>> {
+        self.0.list_files(root)
+    }
+}
+
+#[tokio::test]
+async fn an_infrastructure_failure_gives_a_fixed_sentence() {
+    let w = world_with(Arc::new(LeakyBegin(rocket_infra::FsFileTxFactory::new()))).await;
+    hand_made(&w, &[]);
+    let err = confirm(&w, Vec::new(), None).await.expect_err("fails");
+    let text = err.to_string();
+    assert!(
+        !text.contains("secret") && !text.contains("symbolic"),
+        "{text}"
+    );
+    assert!(
+        text.contains("Connecting failed. Nothing was changed."),
+        "{text}"
+    );
+}
+
+#[tokio::test]
+async fn consent_uses_the_typed_link_structure_for_a_contents_api_link() {
+    let w = world().await;
+    hand_made(&w, &[]);
+    let github = "https://github.com/acme/api/blob/main/openapi.yaml";
+    let preview = w.svc.preview(HAND, github, None).await.expect("preview");
+    w.svc
+        .confirm(
+            HAND,
+            github,
+            None,
+            Vec::new(),
+            GroupBy::Tags,
+            None,
+            &preview.digest,
+            &preview.spec_sha256,
+        )
+        .await
+        .expect("confirm");
+    let status = w.svc.status(&hand_root(&w), false).expect("status");
+    assert_eq!(status.consent, ConsentState::Granted);
+}
+
+#[tokio::test]
+async fn a_failed_token_save_adds_a_warning_and_keeps_the_files() {
+    let w = world().await;
+    hand_made(&w, &[]);
+    let github = "https://github.com/acme/api/blob/main/openapi.yaml";
+    let svc = OpenApiSyncService::new(
+        Arc::new(SharedFetcher(Arc::clone(&w.fetcher))),
+        Box::new(rocket_infra::FsOpenApiSourceRepo),
+        Arc::new(FailingSecrets),
+    )
+    .with_consent(Arc::new(rocket_collection::InMemoryConsentStore::new()))
+    .with_backups(Arc::new(rocket_infra::FsOpenApiBackupRepo))
+    .with_apply(deps(
+        &w.ws_path,
+        Arc::new(rocket_infra::FsFileTxFactory::new()),
+    ));
+    let preview = svc
+        .preview(HAND, github, Some("ghp_x"))
+        .await
+        .expect("preview");
+    let outcome = svc
+        .confirm(
+            HAND,
+            github,
+            Some("ghp_x"),
+            Vec::new(),
+            GroupBy::Tags,
+            None,
+            &preview.digest,
+            &preview.spec_sha256,
+        )
+        .await
+        .expect("confirm");
+    assert!(
+        outcome
+            .warnings
+            .contains(&"The token was not saved.".to_string()),
+        "{:?}",
+        outcome.warnings
+    );
+    assert!(hand_root(&w).join(".rocket/openapi-source.yml").exists());
+}
+
+struct FailingSecrets;
+
+impl SecretStore for FailingSecrets {
+    fn get(&self, _: &str, _: &str) -> DomainResult<Option<String>> {
+        Ok(None)
+    }
+    fn set(&self, _: &str, _: &str, _: &str) -> DomainResult<()> {
+        Err(DomainError::Internal(
+            "keychain locked at /home/me/secret".into(),
+        ))
+    }
+    fn delete(&self, _: &str, _: &str) -> DomainResult<()> {
+        Ok(())
+    }
 }

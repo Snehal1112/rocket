@@ -527,6 +527,7 @@ pub struct ConnectPreviewDto {
     pub spec_title: String,
     pub spec_version: Option<String>,
     pub digest: String,
+    pub spec_sha256: String,
     pub matched: Vec<ConnectPairDto>,
     pub suggested: Vec<ConnectPairDto>,
     pub in_spec_only: Vec<ConnectOperationDto>,
@@ -566,6 +567,7 @@ fn connect_preview_dto(p: ConnectPreview) -> ConnectPreviewDto {
         spec_title: p.spec_title,
         spec_version: p.spec_version,
         digest: p.digest,
+        spec_sha256: p.spec_sha256,
         matched: p.matched.into_iter().map(connect_pair_dto).collect(),
         suggested: p.suggested.into_iter().map(connect_pair_dto).collect(),
         in_spec_only: p.in_spec_only.into_iter().map(connect_operation_dto).collect(),
@@ -644,6 +646,7 @@ pub async fn openapi_connect_confirm(
     group_by: String,
     interval: Option<String>,
     digest: String,
+    spec_sha256: String,
     workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
     fetcher: State<'_, Arc<dyn SpecFetcher>>,
 ) -> Result<ConnectOutcomeDto, String> {
@@ -666,6 +669,7 @@ pub async fn openapi_connect_confirm(
             group_by,
             interval,
             &digest,
+            &spec_sha256,
         ))
     })
     .await
@@ -1883,6 +1887,7 @@ mod tests {
             spec_title: "Pets".to_string(),
             spec_version: Some("1".to_string()),
             digest: "abc".to_string(),
+            spec_sha256: "def".to_string(),
             matched: vec![rocket_app::ConnectPair {
                 request: request.clone(),
                 operation: operation.clone(),
@@ -1894,6 +1899,7 @@ mod tests {
         }))
         .expect("json");
         assert_eq!(json["specTitle"], "Pets");
+        assert_eq!(json["specSha256"], "def");
         assert_eq!(json["matched"][0]["request"]["requestPath"], "pets/list");
         assert_eq!(json["matched"][0]["operation"]["key"], "listPets");
         assert_eq!(json["inSpecOnly"][0]["tag"], "pets");

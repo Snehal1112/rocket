@@ -65,6 +65,9 @@ pub struct ConnectPreview {
     pub spec_version: Option<String>,
     /// `request_digest` of the collection as the preview saw it. Confirm sends it back.
     pub digest: String,
+    /// Hash of the bundled spec the preview matched. Confirm sends it back, so a spec that
+    /// changed in between asks for a new preview.
+    pub spec_sha256: String,
     pub matched: Vec<ConnectPair>,
     pub suggested: Vec<ConnectPair>,
     pub in_spec_only: Vec<ConnectOperationRow>,
@@ -107,6 +110,18 @@ pub struct ConnectOutcome {
     pub warnings: Vec<String>,
 }
 
+/// A fixed error for a failure of the collection files or the transaction, whose own message
+/// can carry a path.
+fn infra_error(error: DomainError) -> DomainError {
+    match error {
+        DomainError::NotFound(_) => {
+            DomainError::NotFound("The collection was not found.".to_string())
+        }
+        DomainError::Conflict(_) => DomainError::Conflict(APPLY_RUNNING.to_string()),
+        _ => DomainError::Internal(FAILED.to_string()),
+    }
+}
+
 /// A fixed sentence for a failed fetch or bundle. The fetch messages are already fixed, and
 /// anything else (a parse error with a path, say) becomes a general sentence.
 fn safe_import_message(error: ImportError) -> String {
@@ -133,17 +148,19 @@ pub(crate) fn match_requests_of(
     repo: &dyn CollectionRepository,
     collection: &str,
 ) -> DomainResult<Vec<MatchRequest>> {
-    Ok(flatten_requests(&repo.get(collection)?.root)
-        .into_iter()
-        .map(|c| MatchRequest {
-            uid: c.uid,
-            request_path: c.request_path,
-            method: c.request.method.to_string(),
-            url: c.request.url,
-            name: c.request.name,
-            http: true,
-        })
-        .collect())
+    Ok(
+        flatten_requests(&repo.get(collection).map_err(infra_error)?.root)
+            .into_iter()
+            .map(|c| MatchRequest {
+                uid: c.uid,
+                request_path: c.request_path,
+                method: c.request.method.to_string(),
+                url: c.request.url,
+                name: c.request.name,
+                http: true,
+            })
+            .collect(),
+    )
 }
 
 fn request_row(r: &MatchRequest) -> ConnectRequestRow {
@@ -184,14 +201,14 @@ impl OpenApiSyncService {
         let pinned = deps.collections.pinned();
         let repo: &dyn CollectionRepository =
             pinned.as_deref().unwrap_or(deps.collections.as_ref());
-        let root = repo.collection_root_path(collection)?;
+        let root = repo.collection_root_path(collection).map_err(infra_error)?;
         let requests = {
             let lock = collection_lock(&root);
             let _guard = lock.lock();
-            if self.sources.load(&root)?.is_some() {
+            if self.sources.load(&root).map_err(infra_error)?.is_some() {
                 return Err(DomainError::Conflict(ALREADY_CONNECTED.to_string()));
             }
-            match_requests_of(repo, collection)?
+            match_requests_of(repo, collection).map_err(infra_error)?
         };
         let fetched = fetch_spec_bundle(self.fetcher.as_ref(), link, token)
             .await
@@ -217,6 +234,7 @@ impl OpenApiSyncService {
             spec_title: spec.title().to_string(),
             spec_version: spec.version().map(str::to_string),
             digest: request_digest(&requests),
+            spec_sha256: sha256_hex(fetched.bundle.text.as_bytes()),
             matched: pairs(&result.matched),
             suggested: pairs(&result.suggested),
             in_spec_only: result.in_spec_only.iter().filter_map(|k| op(k)).collect(),
@@ -246,6 +264,7 @@ impl OpenApiSyncService {
         group_by: GroupBy,
         interval: Option<SyncInterval>,
         digest: &str,
+        spec_sha256: &str,
     ) -> DomainResult<ConnectOutcome> {
         let link = link.trim();
         if link.is_empty() {
@@ -255,24 +274,33 @@ impl OpenApiSyncService {
         let pinned = deps.collections.pinned();
         let repo: &dyn CollectionRepository =
             pinned.as_deref().unwrap_or(deps.collections.as_ref());
-        let root = repo.collection_root_path(collection)?;
+        let root = repo.collection_root_path(collection).map_err(infra_error)?;
         let fetched = fetch_spec_bundle(self.fetcher.as_ref(), link, token)
             .await
             .map_err(|e| DomainError::InvalidInput(safe_import_message(e)))?;
         let spec = ParsedSpec::parse(&fetched.bundle.text)
             .map_err(|_| DomainError::InvalidInput(NOT_A_SPEC.to_string()))?;
 
+        if sha256_hex(fetched.bundle.text.as_bytes()) != spec_sha256 {
+            return Err(DomainError::Conflict(STALE_SPEC.to_string()));
+        }
+
         let mut outcome = ConnectOutcome::default();
-        let display_url = {
+        {
             let lock = collection_lock(&root);
             let _guard = lock.lock();
-            if self.sources.load(&root)?.is_some() {
+            if self.sources.load(&root).map_err(infra_error)?.is_some() {
                 return Err(DomainError::Conflict(ALREADY_CONNECTED.to_string()));
             }
-            if deps.tx.recover_if_idle(&root)?.is_none() {
+            if deps
+                .tx
+                .recover_if_idle(&root)
+                .map_err(infra_error)?
+                .is_none()
+            {
                 return Err(DomainError::Conflict(APPLY_RUNNING.to_string()));
             }
-            let requests = match_requests_of(repo, collection)?;
+            let requests = match_requests_of(repo, collection).map_err(infra_error)?;
             if request_digest(&requests) != digest {
                 return Err(DomainError::Conflict(STALE_COLLECTION.to_string()));
             }
@@ -318,7 +346,7 @@ impl OpenApiSyncService {
                 }
             }
 
-            let current = flatten_requests(&repo.get(collection)?.root);
+            let current = flatten_requests(&repo.get(collection).map_err(infra_error)?.root);
             let mut operations = Vec::new();
             for (uid, key) in &links {
                 let (Some(cur), Some(request)) = (
@@ -366,10 +394,12 @@ impl OpenApiSyncService {
                     .collect(),
             };
 
-            // Added requests point at {{baseUrl}}, so the variable has to exist.
-            let mut settings = repo.get_settings(collection)?;
+            // Added requests and linked baselines point at {{baseUrl}}, so the variable has to exist.
+            let mut settings = repo.get_settings(collection).map_err(infra_error)?;
             let mut settings_changed = false;
-            if !adds.is_empty() && settings.variables.iter().all(|v| v.key != BASE_URL_KEY) {
+            if (!adds.is_empty() || !links.is_empty())
+                && settings.variables.iter().all(|v| v.key != BASE_URL_KEY)
+            {
                 settings.variables.push(CollectionVariable {
                     key: BASE_URL_KEY.to_string(),
                     value: base_url.clone(),
@@ -427,7 +457,7 @@ impl OpenApiSyncService {
                 })
                 .collect();
             let renderer = (deps.renderer)(&root);
-            let existing_paths = deps.tx.list_files(&root)?;
+            let existing_paths = deps.tx.list_files(&root).map_err(infra_error)?;
             let out = build_apply(&ApplyInputs {
                 plan_inputs: inputs,
                 pending_sha256: sha256_hex(fetched.bundle.text.as_bytes()),
@@ -441,7 +471,7 @@ impl OpenApiSyncService {
                 return Err(DomainError::Internal(FAILED.to_string()));
             }
 
-            let mut tx = deps.tx.begin(&root)?;
+            let mut tx = deps.tx.begin(&root).map_err(infra_error)?;
             let staged = (|| -> DomainResult<()> {
                 for file in &out.files {
                     match &file.kind {
@@ -473,13 +503,12 @@ impl OpenApiSyncService {
             outcome.linked = u32::try_from(links.len()).unwrap_or(u32::MAX);
             outcome.added = u32::try_from(out.report.applied.len()).unwrap_or(u32::MAX);
             outcome.skipped = u32::try_from(selection.skips.len()).unwrap_or(u32::MAX);
-            out.source.location.display_url()
         };
 
         // The files are committed. What follows only adds warnings, and consent comes last of
         // the three that need it, so a failed step never leaves a half-enabled check.
         let mut consented = false;
-        if self.grant_consent(&root, &display_url).is_ok() {
+        if self.grant_consent_for_link(&root, link).is_ok() {
             consented = true;
             if let Some(interval) = interval.filter(|i| *i != SyncInterval::Off) {
                 if self.set_interval(&root, interval).is_err() {
