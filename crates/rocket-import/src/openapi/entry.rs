@@ -10,7 +10,7 @@ use crate::report::ImportReport;
 use rocket_collection::openapi_baseline::{
     BaselineOperation, OpenApiBaseline, OpenApiBaselineRepository, BASELINE_FILE_VERSION,
 };
-use rocket_collection::openapi_source::{OpenApiSourceRepository, SpecLocation};
+use rocket_collection::openapi_source::{OpenApiSourceRepository, RemoteRefState, SpecLocation};
 use rocket_http::spec_fetch::{
     LocalReadFailure, LocalSpecReader, SpecFetchFailure, SpecFetchOutcome, SpecFetchRequest,
     SpecFetcher, DEFAULT_MAX_SPEC_BYTES,
@@ -233,6 +233,98 @@ async fn fetch_location_bundle(
     })
 }
 
+/// What a fetch learned about a spec besides its text.
+#[derive(Default)]
+struct SpecValidators {
+    etag: Option<String>,
+    last_modified: Option<String>,
+    refs: Vec<RemoteRefState>,
+    fetch_failed: bool,
+}
+
+/// Reads a spec file from disk as text, with the size cap. A path that is not a regular file is
+/// refused.
+fn read_spec_file_text(path: &Path) -> ImportResult<String> {
+    let file = std::fs::File::open(path)?;
+    let meta = file.metadata()?;
+    if !meta.is_file() {
+        return Err(ImportError::SpecUnavailable(
+            "That path is not a regular file.".to_string(),
+        ));
+    }
+    if meta.len() > DEFAULT_MAX_SPEC_BYTES as u64 {
+        return Err(ImportError::SpecUnavailable(
+            "The file is larger than the 25 MB limit.".to_string(),
+        ));
+    }
+    let bytes = read_capped(file, DEFAULT_MAX_SPEC_BYTES as u64)?;
+    String::from_utf8(bytes)
+        .map_err(|_| ImportError::NotAnOpenApiSpec("the file is not text".to_string()))
+}
+
+fn file_label_of(path: &Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "openapi".to_string())
+}
+
+/// Writes the source file, the saved copy and the baseline of an imported collection. A write
+/// that fails becomes a warning. It returns the id written to the source file.
+#[allow(clippy::too_many_arguments)]
+fn write_sync_state(
+    sources: &dyn OpenApiSourceRepository,
+    baselines: &dyn OpenApiBaselineRepository,
+    root: &Path,
+    location: &SpecLocation,
+    group_by: GroupBy,
+    text: &str,
+    validators: SpecValidators,
+    imported: &crate::importer::OpenApiImportOutcome,
+    warnings: &mut Vec<String>,
+) -> String {
+    let record = source_record(
+        location,
+        group_by,
+        text.as_bytes(),
+        validators.etag,
+        validators.last_modified,
+        validators.refs,
+        validators.fetch_failed,
+        imported,
+    );
+    match sources.save(root, &record) {
+        // The saved copy lets the spec be shown offline. It is only useful next to a source.
+        Ok(()) => {
+            if let Err(e) = sources.save_applied(root, text.as_bytes()) {
+                tracing::debug!(error = %e, "the saved spec copy could not be written");
+                warnings.push("The saved copy of the spec could not be written.".to_string());
+            }
+        }
+        Err(e) => warnings.push(format!("Sync could not be set up: {e}")),
+    }
+    let baseline = OpenApiBaseline {
+        version: BASELINE_FILE_VERSION,
+        converter_version: CONVERTER_VERSION,
+        base_url: imported.base_url.clone(),
+        operations: imported
+            .operations
+            .iter()
+            .map(|op| BaselineOperation {
+                key: op.key.clone(),
+                request: op.baseline.clone(),
+            })
+            .collect(),
+    };
+    if baselines.save(root, &baseline).is_err() {
+        warnings.push(
+            "The baseline snapshot could not be saved. \
+             The review will be cautious until the next sync."
+                .to_string(),
+        );
+    }
+    record.source_id
+}
+
 impl ImportService {
     /// Import a spec file from disk as a new collection. No source file is written, because
     /// there is no link to sync from.
@@ -242,25 +334,8 @@ impl ImportService {
         group_by: GroupBy,
         workspace_id: &str,
     ) -> ImportResult<OpenApiImportResult> {
-        let file = std::fs::File::open(path)?;
-        let meta = file.metadata()?;
-        if !meta.is_file() {
-            return Err(ImportError::SpecUnavailable(
-                "That path is not a regular file.".to_string(),
-            ));
-        }
-        if meta.len() > DEFAULT_MAX_SPEC_BYTES as u64 {
-            return Err(ImportError::SpecUnavailable(
-                "The file is larger than the 25 MB limit.".to_string(),
-            ));
-        }
-        let bytes = read_capped(file, DEFAULT_MAX_SPEC_BYTES as u64)?;
-        let text = String::from_utf8(bytes)
-            .map_err(|_| ImportError::NotAnOpenApiSpec("the file is not text".to_string()))?;
-        let label = path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| "openapi".to_string());
+        let text = read_spec_file_text(path)?;
+        let label = file_label_of(path);
         let outcome = self.import_openapi_text(&text, &label, group_by, workspace_id)?;
         Ok(OpenApiImportResult {
             report: outcome.report,
@@ -268,6 +343,45 @@ impl ImportService {
             source_url: None,
             source_id: None,
             warnings: Vec::new(),
+        })
+    }
+
+    /// Import a spec file from disk as a new collection and keep the file as its source, so
+    /// later checks read it again. The source file, the baseline and the saved copy are written
+    /// like for a link import. A path inside or beside the new collection is stored relative to
+    /// it, any other as an absolute path. A source that cannot be written is a warning.
+    pub fn import_openapi_file_linked(
+        &self,
+        sources: &dyn OpenApiSourceRepository,
+        baselines: &dyn OpenApiBaselineRepository,
+        path: &Path,
+        group_by: GroupBy,
+        workspace_id: &str,
+    ) -> ImportResult<OpenApiImportResult> {
+        let text = read_spec_file_text(path)?;
+        let imported =
+            self.import_openapi_text(&text, &file_label_of(path), group_by, workspace_id)?;
+        let root = self.collections_root().join(&imported.collection);
+        let location = parse_spec_target(&path.to_string_lossy(), &root)?;
+        let display_url = location.display_url();
+        let mut warnings = Vec::new();
+        let source_id = write_sync_state(
+            sources,
+            baselines,
+            &root,
+            &location,
+            group_by,
+            &text,
+            SpecValidators::default(),
+            &imported,
+            &mut warnings,
+        );
+        Ok(OpenApiImportResult {
+            report: imported.report,
+            collection: imported.collection,
+            source_url: Some(display_url),
+            source_id: Some(source_id),
+            warnings,
         })
     }
 
@@ -300,47 +414,23 @@ impl ImportService {
         )?;
 
         let mut warnings = bundle.notes.clone();
-        let record = source_record(
+        let root = self.collections_root().join(&imported.collection);
+        let source_id = write_sync_state(
+            sources,
+            baselines,
+            &root,
             &location,
             group_by,
-            bundle.text.as_bytes(),
-            etag,
-            last_modified,
-            bundle.refs.clone(),
-            bundle.fetch_failed,
+            &bundle.text,
+            SpecValidators {
+                etag,
+                last_modified,
+                refs: bundle.refs.clone(),
+                fetch_failed: bundle.fetch_failed,
+            },
             &imported,
+            &mut warnings,
         );
-        let root = self.collections_root().join(&imported.collection);
-        match sources.save(&root, &record) {
-            // The saved copy lets the spec be shown offline. It is only useful next to a source.
-            Ok(()) => {
-                if let Err(e) = sources.save_applied(&root, bundle.text.as_bytes()) {
-                    tracing::debug!(error = %e, "the saved spec copy could not be written");
-                    warnings.push("The saved copy of the spec could not be written.".to_string());
-                }
-            }
-            Err(e) => warnings.push(format!("Sync could not be set up: {e}")),
-        }
-        let baseline = OpenApiBaseline {
-            version: BASELINE_FILE_VERSION,
-            converter_version: CONVERTER_VERSION,
-            base_url: imported.base_url.clone(),
-            operations: imported
-                .operations
-                .iter()
-                .map(|op| BaselineOperation {
-                    key: op.key.clone(),
-                    request: op.baseline.clone(),
-                })
-                .collect(),
-        };
-        if baselines.save(&root, &baseline).is_err() {
-            warnings.push(
-                "The baseline snapshot could not be saved. \
-                 The review will be cautious until the next sync."
-                    .to_string(),
-            );
-        }
         match commit_ref(&location) {
             Some(CommitRef::Certain) => warnings.push(
                 "This link points to a commit, so the file will never change and \
@@ -358,7 +448,7 @@ impl ImportService {
             report: imported.report,
             collection: imported.collection,
             source_url: Some(display_url),
-            source_id: Some(record.source_id.clone()),
+            source_id: Some(source_id),
             warnings,
         })
     }
@@ -841,6 +931,92 @@ parameters:
                 other => panic!("unexpected reason {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn a_linked_file_import_writes_source_baseline_and_applied_copy() {
+        let ws = TempDir::new().expect("tempdir");
+        let service = ImportService::new_with_workspace_path(ws.path());
+        let file = ws.path().join("orders.json");
+        std::fs::write(&file, fixture()).expect("write");
+        let result = service
+            .import_openapi_file_linked(
+                &FsOpenApiSourceRepo,
+                &FsOpenApiBaselineRepo,
+                &file,
+                GroupBy::Tags,
+                "ws",
+            )
+            .expect("import");
+        let root = ws.path().join("collections").join(&result.collection);
+        let source = FsOpenApiSourceRepo
+            .load(&root)
+            .expect("load")
+            .expect("source file");
+        // The file is outside the collection, so its absolute path is kept.
+        assert_eq!(
+            source.location,
+            SpecLocation::File {
+                path: file.to_string_lossy().replace('\\', "/")
+            }
+        );
+        assert_eq!(source.spec_sha256.len(), 64);
+        assert!(source.etag.is_none() && source.remote_refs.is_empty());
+        assert!(!source.operations.is_empty());
+        assert!(FsOpenApiBaselineRepo
+            .load(&root)
+            .expect("baseline")
+            .is_some());
+        assert!(FsOpenApiSourceRepo
+            .applied_matches(&root, &source.spec_sha256)
+            .expect("applied"));
+        assert!(result
+            .source_url
+            .as_deref()
+            .is_some_and(|u| u.starts_with("file://")));
+        assert_eq!(result.source_id.as_deref(), Some(source.source_id.as_str()));
+        // The source file is written as version 2.
+        let bytes =
+            std::fs::read_to_string(root.join(".rocket/openapi-source.yml")).expect("bytes");
+        assert!(bytes.contains("version: 2"), "{bytes}");
+    }
+
+    #[test]
+    fn an_unlinked_file_import_still_writes_nothing() {
+        let ws = TempDir::new().expect("tempdir");
+        let service = ImportService::new_with_workspace_path(ws.path());
+        let file = ws.path().join("orders.json");
+        std::fs::write(&file, fixture()).expect("write");
+        let result = service
+            .import_openapi_file(&file, GroupBy::Tags, "ws")
+            .expect("import");
+        let root = ws.path().join("collections").join(&result.collection);
+        assert!(result.source_url.is_none() && result.source_id.is_none());
+        assert!(!root.join(".rocket").exists());
+    }
+
+    #[test]
+    fn a_linked_import_of_a_bad_file_creates_nothing() {
+        let ws = TempDir::new().expect("tempdir");
+        let service = ImportService::new_with_workspace_path(ws.path());
+        let file = ws.path().join("notes.txt");
+        std::fs::write(&file, "hello").expect("write");
+        assert!(service
+            .import_openapi_file_linked(
+                &FsOpenApiSourceRepo,
+                &FsOpenApiBaselineRepo,
+                &file,
+                GroupBy::Tags,
+                "ws",
+            )
+            .is_err());
+        assert!(
+            !ws.path().join("collections").exists()
+                || std::fs::read_dir(ws.path().join("collections"))
+                    .expect("dir")
+                    .count()
+                    == 0
+        );
     }
 
     #[tokio::test]

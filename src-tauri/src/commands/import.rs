@@ -323,17 +323,44 @@ pub async fn import_openapi_file(
     path: String,
     group_by: String,
     target_workspace_id: String,
+    keep_synced: Option<bool>,
     workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
+    fetcher: State<'_, Arc<dyn SpecFetcher>>,
 ) -> Result<OpenApiImportDto, String> {
     let group_by = parse_group_by(&group_by)?;
     let base = workspace_path
         .lock()
         .map_err(|_| "workspace path lock poisoned".to_string())?
         .clone();
-    make_import_service(base)
-        .import_openapi_file(&PathBuf::from(&path), group_by, &target_workspace_id)
+    let service = make_import_service(base.clone());
+    let file = PathBuf::from(&path);
+    if keep_synced != Some(true) {
+        return service
+            .import_openapi_file(&file, group_by, &target_workspace_id)
+            .map(OpenApiImportDto::from)
+            .map_err(|e| e.to_string());
+    }
+    let mut dto = service
+        .import_openapi_file_linked(
+            &FsOpenApiSourceRepo,
+            &FsOpenApiBaselineRepo,
+            &file,
+            group_by,
+            &target_workspace_id,
+        )
         .map(OpenApiImportDto::from)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    // The user chose this file on this machine, so it is approved for the new collection.
+    let root = base.join("collections").join(&dto.collection);
+    let approver = OpenApiSyncService::new(
+        Arc::clone(fetcher.inner()),
+        Box::new(FsOpenApiSourceRepo),
+        Arc::new(KeyringSecretStore::new_openapi_sync()),
+    )
+    .with_local(Box::new(FsOpenApiLocalRepo))
+    .with_consent(openapi_consent_store());
+    approve_new_source(&approver, &root, &path, Some(true), &mut dto);
+    Ok(dto)
 }
 
 /// Turns on checks every 5 minutes when the user asked for them. It runs only after the
@@ -350,6 +377,26 @@ fn enable_checks(
     service
         .set_interval(root, rocket_collection::openapi_source::SyncInterval::Min5)
         .is_ok()
+}
+
+/// Approves the link or path the user typed for the new collection, and turns checks on when
+/// asked. A failure becomes a warning and never undoes the import.
+fn approve_new_source(
+    approver: &OpenApiSyncService,
+    root: &std::path::Path,
+    typed: &str,
+    check_for_updates: Option<bool>,
+    dto: &mut OpenApiImportDto,
+) {
+    let approval = approver.grant_consent_for_link(root, typed);
+    if approval.is_err() {
+        dto.warnings.push(CONSENT_NOT_SAVED.to_string());
+        if check_for_updates == Some(true) {
+            dto.warnings.push(CHECKS_NOT_ENABLED.to_string());
+        }
+    } else if !enable_checks(approver, root, check_for_updates) {
+        dto.warnings.push(CHECKS_NOT_ENABLED.to_string());
+    }
 }
 
 /// Import an OpenAPI or Swagger spec from a link as a new collection.
@@ -391,15 +438,7 @@ pub async fn import_openapi_url(
     )
     .with_local(Box::new(FsOpenApiLocalRepo))
     .with_consent(openapi_consent_store());
-    let approval = approver.grant_consent_for_link(&root, &link);
-    if approval.is_err() {
-        dto.warnings.push(CONSENT_NOT_SAVED.to_string());
-        if check_for_updates == Some(true) {
-            dto.warnings.push(CHECKS_NOT_ENABLED.to_string());
-        }
-    } else if !enable_checks(&approver, &root, check_for_updates) {
-        dto.warnings.push(CHECKS_NOT_ENABLED.to_string());
-    }
+    approve_new_source(&approver, &root, &link, check_for_updates, &mut dto);
     if let Some(token) = token.as_deref() {
         let secrets: Arc<dyn SecretStore> = Arc::new(KeyringSecretStore::new_openapi_sync());
         if !store_token(fetcher.inner(), secrets, &root, token) {
@@ -545,6 +584,74 @@ mod tests {
             assert!(svc.grant_consent_for_link(dir.path(), LINK).is_ok());
             assert!(enable_checks(&svc, dir.path(), Some(false)));
             assert!(enable_checks(&svc, dir.path(), None));
+            assert_eq!(interval(dir.path()), SyncInterval::Off);
+        }
+
+        const FILE_PATH: &str = "/srv/specs/api.yaml";
+
+        fn seed_file(root: &std::path::Path) {
+            let mut source = OpenApiSource {
+                version: 2,
+                location: SpecLocation::File {
+                    path: FILE_PATH.into(),
+                },
+                group_by: "tags".into(),
+                spec_sha256: String::new(),
+                etag: None,
+                last_modified: None,
+                operations: Vec::new(),
+                source_id: "src-file".into(),
+                sync_interval: SyncInterval::Off,
+                last_checked_at: None,
+                last_status: None,
+                pending_sha256: None,
+                remote_refs: Vec::new(),
+                remote_refs_incomplete: false,
+            };
+            source.version = source.write_version();
+            FsOpenApiSourceRepo.save(root, &source).expect("source");
+        }
+
+        fn dto() -> OpenApiImportDto {
+            OpenApiImportDto {
+                report: Default::default(),
+                collection: "c".into(),
+                source_url: Some(format!("file://{FILE_PATH}")),
+                source_id: Some("src-file".into()),
+                warnings: Vec::new(),
+            }
+        }
+
+        #[test]
+        fn the_command_grants_consent_when_keep_synced() {
+            let dir = tempfile::tempdir().expect("dir");
+            seed_file(dir.path());
+            let svc = service();
+            let mut out = dto();
+            approve_new_source(&svc, dir.path(), FILE_PATH, Some(true), &mut out);
+            assert!(out.warnings.is_empty(), "{:?}", out.warnings);
+            assert_eq!(
+                svc.consent_state(dir.path()).expect("state"),
+                rocket_collection::ConsentState::Granted
+            );
+            assert_eq!(interval(dir.path()), SyncInterval::Min5);
+        }
+
+        #[test]
+        fn the_command_warns_when_consent_cannot_be_saved() {
+            let dir = tempfile::tempdir().expect("dir");
+            seed_file(dir.path());
+            // No approval store is set, so the approval cannot be saved.
+            let svc = OpenApiSyncService::new(
+                Arc::new(NoFetch),
+                Box::new(FsOpenApiSourceRepo),
+                Arc::new(KeyringSecretStore::new_openapi_sync()),
+            )
+            .with_local(Box::new(FsOpenApiLocalRepo));
+            let mut out = dto();
+            approve_new_source(&svc, dir.path(), FILE_PATH, Some(true), &mut out);
+            assert!(out.warnings.contains(&CONSENT_NOT_SAVED.to_string()));
+            assert!(out.warnings.contains(&CHECKS_NOT_ENABLED.to_string()));
             assert_eq!(interval(dir.path()), SyncInterval::Off);
         }
 

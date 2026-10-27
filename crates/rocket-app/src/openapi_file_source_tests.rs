@@ -182,3 +182,28 @@ async fn disconnect_never_writes_the_spec_file() {
     assert!(!w.root.join(".rocket/openapi-source.yml").exists());
     let _ = snapshot(&w.root);
 }
+
+#[tokio::test]
+async fn a_linked_import_then_a_changed_file_gives_a_pending_update() {
+    let w = world().await;
+    let file = w.ws_path.join("orders-spec.yaml");
+    std::fs::write(&file, v1()).expect("write");
+    let imported = import_service(&w.ws_path)
+        .import_openapi_file_linked(
+            &rocket_infra::FsOpenApiSourceRepo,
+            &rocket_infra::FsOpenApiBaselineRepo,
+            &file,
+            GroupBy::Tags,
+            "ws",
+        )
+        .expect("import");
+    let root = w.ws_path.join("collections").join(&imported.collection);
+    w.svc
+        .grant_consent_for_link(&root, &file.to_string_lossy())
+        .expect("consent");
+    let first = w.svc.check(&root).await.expect("check");
+    assert!(matches!(first, CheckOutcome::Unchanged), "{first:?}");
+    std::fs::write(&file, v2()).expect("rewrite");
+    let second = w.svc.check(&root).await.expect("check");
+    assert!(matches!(second, CheckOutcome::Changed { .. }), "{second:?}");
+}
