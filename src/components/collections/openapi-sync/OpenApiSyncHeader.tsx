@@ -1,6 +1,7 @@
 import { MoreHorizontal } from 'lucide-react';
 import { useState } from 'react';
 import { Alert } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -11,19 +12,34 @@ import {
 import { formatRelativeTime } from '@/lib/relative-time';
 import type { OpenApiSyncStatus } from '@/lib/tauri-api';
 import { CheckNowButtonView, useCheckRunner } from './CheckNowButton';
+import { type ChipState, chipState } from './chipState';
+import { DisconnectSyncDialog } from './DisconnectSyncDialog';
 import { OpenApiSyncConnectionDialog } from './OpenApiSyncConnectionDialog';
 import { intervalLabel, splitLocation } from './openApiSyncView';
 
 interface OpenApiSyncHeaderProps {
   collection: string;
   status: OpenApiSyncStatus;
+  /** Spec updates that wait, as counted from the plan. */
+  waiting: number;
 }
 
-/** Where the spec comes from, when it was last checked and how often, with Check now. */
-export function OpenApiSyncHeader({ collection, status }: OpenApiSyncHeaderProps) {
+const CHIP_VARIANT: Record<ChipState['kind'], 'warning' | 'destructive' | 'secondary' | 'outline'> =
+  {
+    'needs-approval': 'warning',
+    failed: 'destructive',
+    updates: 'warning',
+    off: 'secondary',
+    connected: 'outline',
+  };
+
+/** The collection, its sync status chip, where the spec comes from and Check now. */
+export function OpenApiSyncHeader({ collection, status, waiting }: OpenApiSyncHeaderProps) {
   const [showFull, setShowFull] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [disconnectOpen, setDisconnectOpen] = useState(false);
   const runner = useCheckRunner(collection, status.consent);
+  const chip = chipState(status, waiting);
   const failed = status.lastStatus?.state === 'failed';
   const { short, full } = splitLocation(status.location);
   return (
@@ -31,7 +47,10 @@ export function OpenApiSyncHeader({ collection, status }: OpenApiSyncHeaderProps
       <div className='flex flex-wrap items-start justify-between gap-3'>
         <div className='flex min-w-0 flex-col gap-1'>
           <div className='flex items-center gap-1'>
-            <h2 className='text-sm font-semibold'>OpenAPI sync</h2>
+            <h2 className='truncate text-sm font-semibold'>{collection}</h2>
+            <Badge variant={CHIP_VARIANT[chip.kind]} title={chip.detail}>
+              {chip.label}
+            </Badge>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -47,11 +66,8 @@ export function OpenApiSyncHeader({ collection, status }: OpenApiSyncHeaderProps
                 <DropdownMenuItem onSelect={() => setDialogOpen(true)}>
                   Edit connection settings
                 </DropdownMenuItem>
-                <DropdownMenuItem
-                  disabled={!runner.granted || runner.pending}
-                  onSelect={runner.run}
-                >
-                  Check now
+                <DropdownMenuItem onSelect={() => setDisconnectOpen(true)}>
+                  Disconnect
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -88,6 +104,11 @@ export function OpenApiSyncHeader({ collection, status }: OpenApiSyncHeaderProps
           </p>
         </Alert>
       )}
+      <DisconnectSyncDialog
+        collection={collection}
+        open={disconnectOpen}
+        onOpenChange={setDisconnectOpen}
+      />
       <OpenApiSyncConnectionDialog
         collection={collection}
         status={status}

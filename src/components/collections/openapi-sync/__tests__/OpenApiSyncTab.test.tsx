@@ -41,13 +41,14 @@ describe('OpenApiSyncTab', () => {
     expect(screen.getByText('Loading OpenAPI sync...')).toBeInTheDocument();
   });
 
-  it('says no changes were found when nothing is pending, without asking for a plan', async () => {
+  it('defaults_to_overview_otherwise', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(
       makeStatus({ hasPending: false, lastStatus: { state: 'unchanged' } }),
     );
     renderWithQuery(<OpenApiSyncTab collection='c' />);
-    expect(await screen.findByText('No changes found')).toBeInTheDocument();
-    expect(screen.getByText('Last checked 2h ago.')).toBeInTheDocument();
+    expect(await screen.findByText('Nothing to show yet')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('data-state', 'active');
+    expect(screen.queryByRole('tab', { name: /^Spec updates/ })).toBeNull();
     expect(tauriApi.getOpenApiSyncPlan).not.toHaveBeenCalled();
   });
 
@@ -55,7 +56,56 @@ describe('OpenApiSyncTab', () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
     vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(makePlan({ pending: false }));
     renderWithQuery(<OpenApiSyncTab collection='c' />);
-    expect(await screen.findByText('No changes found')).toBeInTheDocument();
+    expect(await screen.findByText('Nothing to show yet')).toBeInTheDocument();
+  });
+
+  it('defaults_to_spec_updates_when_updates_wait', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
+    vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(
+      makePlan({ items: [changedItem, newItem] }),
+    );
+    renderWithQuery(<OpenApiSyncTab collection='c' />);
+    expect(await screen.findByText('Folder: pets / read')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Spec updates (2)' })).toHaveAttribute(
+      'data-state',
+      'active',
+    );
+  });
+
+  it('shows_the_consent_banner_when_not_granted', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(
+      makeStatus({ consent: 'missing', hasPending: false }),
+    );
+    renderWithQuery(<OpenApiSyncTab collection='cb1' />);
+    expect(await screen.findByText('Trust this spec link')).toBeInTheDocument();
+  });
+
+  it('inner_tabs_switch', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
+    vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(makePlan());
+    renderWithQuery(<OpenApiSyncTab collection='c' />);
+    await screen.findByText('Folder: pets / read');
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('tab', { name: 'Your changes' }));
+    expect(screen.queryByText('Folder: pets / read')).toBeNull();
+    await user.click(screen.getByRole('tab', { name: 'Spec updates (3)' }));
+    expect(await screen.findByText('Folder: pets / read')).toBeInTheDocument();
+  });
+
+  it('overview_and_changes_show_the_empty_state', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus({ hasPending: false }));
+    renderWithQuery(<OpenApiSyncTab collection='c' />);
+    expect(await screen.findByText('Nothing to show yet')).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('tab', { name: 'Your changes' }));
+    expect(screen.getByText('Nothing to show yet')).toBeInTheDocument();
+  });
+
+  it('after_disconnect_the_tab_shows_that_nothing_is_connected', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(null);
+    renderWithQuery(<OpenApiSyncTab collection='nc1' />);
+    expect(
+      await screen.findByText('This collection is not connected to an OpenAPI spec.'),
+    ).toBeInTheDocument();
   });
 
   it('shows the list with the first item selected and switches the detail', async () => {
@@ -68,7 +118,7 @@ describe('OpenApiSyncTab', () => {
     expect(tauriApi.getOpenApiSyncPlan).toHaveBeenCalledWith('c', []);
   });
 
-  it('shows a fixed sentence for a state file error, never the path', async () => {
+  it('shows_a_fixed_sentence_for_an_unreadable_state', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockRejectedValue(
       'bad yaml in /home/me/proj/.rocket/openapi-source.yml at line 3',
     );
@@ -105,15 +155,6 @@ describe('OpenApiSyncTab', () => {
     expect(await screen.findByText('The pending spec changed, check again')).toBeInTheDocument();
   });
 
-  it('shows the counts strip above the list', async () => {
-    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
-    vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(makePlan());
-    renderWithQuery(<OpenApiSyncTab collection='c' />);
-    await screen.findByText('Folder: pets / read');
-    expect(screen.getByText('Spec updates pending')).toBeInTheDocument();
-    expect(screen.getByTestId('overview-pending')).toHaveTextContent('3');
-  });
-
   it('no longer has the folded Settings section', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
     vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(makePlan());
@@ -139,7 +180,9 @@ describe('OpenApiSyncTab', () => {
     await user.click(await screen.findByRole('button', { name: 'Disconnect' }));
     const confirm = await screen.findByRole('alertdialog');
     await user.click(within(confirm).getByRole('button', { name: 'Disconnect' }));
-    await waitFor(() => expect(screen.queryByText('OpenAPI sync')).toBeNull());
+    expect(
+      await screen.findByText('This collection is not connected to an OpenAPI spec.'),
+    ).toBeInTheDocument();
     expect(tauriApi.disconnectOpenApiSync).toHaveBeenCalledTimes(1);
   });
 
@@ -181,7 +224,7 @@ describe('OpenApiSyncTab', () => {
       }),
     );
     renderWithQuery(<OpenApiSyncTab collection='cons2' />);
-    expect(await screen.findByText(/Approve the spec link first/)).toBeInTheDocument();
+    expect(await screen.findByText('Trust this spec link')).toBeInTheDocument();
   });
 });
 

@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { type ReactNode, useCallback, useMemo, useState } from 'react';
-import { EmptyState } from '@/components/ui/empty-state';
 import { StateBlock } from '@/components/ui/state-block';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   isApplying,
   openApiSyncKeys,
@@ -12,7 +12,6 @@ import {
   useOpenApiSyncPlan,
   useOpenApiSyncStatus,
 } from '@/lib/queries/openapi-sync-queries';
-import { formatRelativeTime } from '@/lib/relative-time';
 import { ApplyConfirmDialog } from './ApplyConfirmDialog';
 import { ApplyResultDialog } from './ApplyResultDialog';
 import { buildSelection } from './buildSelection';
@@ -21,7 +20,6 @@ import { OpenApiSyncConsentBanner } from './OpenApiSyncConsentBanner';
 import { OpenApiSyncDetail } from './OpenApiSyncDetail';
 import { OpenApiSyncHeader } from './OpenApiSyncHeader';
 import { OpenApiSyncList } from './OpenApiSyncList';
-import { OpenApiSyncOverview } from './OpenApiSyncOverview';
 import {
   filterItems,
   filterVariables,
@@ -50,6 +48,7 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [busyNotice, setBusyNotice] = useState(false);
   const [checking, setChecking] = useState(false);
+  const [tab, setTab] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const apply = useApplySync(collection);
   const applyingAnywhere = useIsApplying(collection);
@@ -160,26 +159,17 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
     );
   }
   const s = status.data;
-  if (!s) return null;
-
-  const noChanges = (
-    <EmptyState
-      cause='none-yet'
-      size='compact'
-      title='No changes found'
-      reason={
-        s.consent !== 'granted'
-          ? 'Approve the spec link first, then check for changes.'
-          : s.lastCheckedAt
-            ? `Last checked ${formatRelativeTime(s.lastCheckedAt)}.`
-            : 'The spec has not been checked yet.'
-      }
-    />
-  );
+  if (!s) {
+    return (
+      <div className='p-4'>
+        <StateBlock tone='empty'>This collection is not connected to an OpenAPI spec.</StateBlock>
+      </div>
+    );
+  }
 
   let body: ReactNode;
   if (!planEnabled) {
-    body = noChanges;
+    body = null;
   } else if (plan.isError) {
     body = (
       <div className='p-4'>
@@ -203,7 +193,7 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
     );
   } else if (!planData.pending) {
     // The plan is the truth when it disagrees with the status flag.
-    body = noChanges;
+    body = null;
   } else {
     body = (
       <div className='flex min-h-0 flex-1 flex-col'>
@@ -213,7 +203,6 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
             machine.
           </p>
         )}
-        <OpenApiSyncOverview plan={planData} status={s} />
         <OpenApiSyncActionsBar
           query={query}
           onQueryChange={setQuery}
@@ -272,9 +261,14 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
     );
   }
 
+  const waiting = planData?.pending ? planData.items.length + planData.variableChanges.length : 0;
+  const showUpdates = waiting > 0 || (planEnabled && plan.isError);
+  const wanted = tab ?? (showUpdates ? 'updates' : 'overview');
+  const active = wanted === 'updates' && !showUpdates ? 'overview' : wanted;
+
   return (
     <div className='flex h-full flex-col overflow-hidden'>
-      <OpenApiSyncHeader collection={collection} status={s} />
+      <OpenApiSyncHeader collection={collection} status={s} waiting={waiting} />
       {s.consent !== 'granted' && (
         <OpenApiSyncConsentBanner
           key={collection}
@@ -283,7 +277,26 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
           consent={s.consent}
         />
       )}
-      <div className='flex min-h-0 flex-1 flex-col'>{body}</div>
+      <Tabs value={active} onValueChange={setTab} className='flex min-h-0 flex-1 flex-col'>
+        <TabsList className='mx-4 mt-3 self-start'>
+          <TabsTrigger value='overview'>Overview</TabsTrigger>
+          {showUpdates && (
+            <TabsTrigger value='updates'>
+              {waiting > 0 ? `Spec updates (${waiting})` : 'Spec updates'}
+            </TabsTrigger>
+          )}
+          <TabsTrigger value='changes'>Your changes</TabsTrigger>
+        </TabsList>
+        <TabsContent value='overview' className='p-4'>
+          <StateBlock tone='empty'>Nothing to show yet</StateBlock>
+        </TabsContent>
+        <TabsContent value='updates' className='flex min-h-0 flex-1 flex-col'>
+          {body}
+        </TabsContent>
+        <TabsContent value='changes' className='p-4'>
+          <StateBlock tone='empty'>Nothing to show yet</StateBlock>
+        </TabsContent>
+      </Tabs>
       <ApplyResultDialog
         report={last?.report ?? null}
         variableCount={last?.variableCount ?? 0}
