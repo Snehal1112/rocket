@@ -1,5 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { type ReactNode, useMemo, useState } from 'react';
+import { EmptyState } from '@/components/ui/empty-state';
 import { StateBlock } from '@/components/ui/state-block';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -209,9 +210,17 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
     );
   }
 
+  const noUpdates = (
+    <EmptyState
+      cause='none-yet'
+      size='compact'
+      title='No spec updates waiting'
+      reason='When the spec changes, the changes show up here for you to review.'
+    />
+  );
   let body: ReactNode;
   if (!planEnabled) {
-    body = null;
+    body = noUpdates;
   } else if (plan.isError) {
     body = (
       <div className='p-4'>
@@ -235,7 +244,41 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
     );
   } else if (!planData.pending) {
     // The plan is the truth when it disagrees with the status flag.
-    body = null;
+    body = noUpdates;
+  } else if (planData.items.length + planData.variableChanges.length === 0) {
+    // Everything was skipped. The notes about skips, deletions and warnings stay reachable.
+    body = (
+      <div className='flex min-h-0 flex-1 flex-col'>
+        {noUpdates}
+        <div className='flex min-h-0 flex-1'>
+          <div className='w-72 shrink-0 border-r border-border'>
+            <OpenApiSyncList
+              plan={planData}
+              selectedId={null}
+              onSelect={setSelectedId}
+              query=''
+              approved={sel.approved}
+              skips={sel.skips}
+              variables={sel.variables}
+              onToggle={toggle}
+              onToggleVariable={toggleVariable}
+            />
+          </div>
+          <div className='min-w-0 flex-1'>
+            <OpenApiSyncDetail
+              plan={planData}
+              selectedId={null}
+              choices={sel.choices}
+              links={links}
+              onChoose={sel.setChoice}
+              onLink={sel.linkRename}
+              onUnlink={sel.unlink}
+              linksLocked={plan.isPlaceholderData}
+            />
+          </div>
+        </div>
+      </div>
+    );
   } else {
     body = (
       <div className='flex min-h-0 flex-1 flex-col'>
@@ -333,11 +376,15 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
     setTab(showUpdates ? 'updates' : 'overview');
   }
   const wanted = tab ?? (showUpdates ? 'updates' : 'overview');
-  const active = wanted === 'updates' && !showUpdates ? 'overview' : wanted;
+  const active = wanted;
 
   return (
     <div className='flex h-full flex-col overflow-hidden'>
-      <OpenApiSyncHeader collection={collection} status={s} waiting={waiting} />
+      <OpenApiSyncHeader
+        collection={collection}
+        status={s}
+        waiting={planData ? waiting : planEnabled ? null : 0}
+      />
       {s.consent !== 'granted' && (
         <OpenApiSyncConsentBanner
           key={collection}
@@ -354,11 +401,9 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
         <Tabs value={active} onValueChange={setTab} className='flex min-h-0 flex-1 flex-col'>
           <TabsList className='mx-4 mt-3 self-start'>
             <TabsTrigger value='overview'>Overview</TabsTrigger>
-            {showUpdates && (
-              <TabsTrigger value='updates'>
-                {waiting > 0 ? `Spec updates (${waiting})` : 'Spec updates'}
-              </TabsTrigger>
-            )}
+            <TabsTrigger value='updates'>
+              {waiting > 0 ? `Spec updates (${waiting})` : 'Spec updates'}
+            </TabsTrigger>
             <TabsTrigger value='changes'>
               {changeCount > 0 ? `Your changes (${changeCount})` : 'Your changes'}
             </TabsTrigger>

@@ -1,4 +1,4 @@
-//! Commands for the Spec sync tab: the status and the plan (read-only), and the actions: check
+//! Commands for the OpenAPI sync tab: the status and the plan (read-only), and the actions: check
 //! now, interval, token, consent and apply. Each runs on a blocking task.
 
 use std::path::PathBuf;

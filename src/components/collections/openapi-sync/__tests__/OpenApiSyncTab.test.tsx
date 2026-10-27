@@ -76,7 +76,7 @@ describe('OpenApiSyncTab', () => {
     renderWithQuery(<TabWithListeners collection='c' />);
     expect(await screen.findByText('Spec updates waiting')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('data-state', 'active');
-    expect(screen.queryByRole('tab', { name: /^Spec updates/ })).toBeNull();
+    expect(screen.getByRole('tab', { name: 'Spec updates', hidden: true })).toBeInTheDocument();
     expect(tauriApi.getOpenApiSyncPlan).not.toHaveBeenCalled();
   });
 
@@ -84,7 +84,57 @@ describe('OpenApiSyncTab', () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
     vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(makePlan({ pending: false }));
     renderWithQuery(<TabWithListeners collection='c' />);
-    expect(await screen.findByText('Spec updates waiting')).toBeInTheDocument();
+    await screen.findByText('Spec updates waiting');
+    await userEvent.setup().click(screen.getByRole('tab', { name: 'Spec updates' }));
+    expect(await screen.findByText('No spec updates waiting')).toBeInTheDocument();
+    expect(screen.queryByText('Add pet')).toBeNull();
+  });
+
+  it('keeps_the_notes_reachable_after_everything_is_skipped', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
+    vi.mocked(tauriApi.getOpenApiSyncPlan)
+      .mockResolvedValueOnce(makePlan())
+      .mockResolvedValue(
+        makePlan({ items: [], skippedHidden: 3, warnings: ['One path was ignored.'] }),
+      );
+    vi.mocked(tauriApi.applyOpenApiSync).mockResolvedValue({
+      applied: [],
+      stale: [],
+      notRewritable: [],
+      deleted: [],
+      detached: [],
+      skipped: 3,
+      remaining: 0,
+    });
+    renderWithQuery(<TabWithListeners collection='skipnotes' />);
+    const user = userEvent.setup();
+    await screen.findByText('Add pet');
+    await user.click(screen.getByRole('button', { name: 'Skip all' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Skip all' }));
+    expect(await screen.findByText('No spec updates waiting')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Spec updates', hidden: true })).toBeInTheDocument();
+    expect(screen.getByText('3 skipped, hidden from this list.')).toBeInTheDocument();
+    expect(screen.getByText('One path was ignored.')).toBeInTheDocument();
+  });
+
+  it('disconnects_from_the_menu_to_the_end', async () => {
+    let connected = true;
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockImplementation(async () =>
+      connected ? makeStatus({ hasPending: false }) : null,
+    );
+    vi.mocked(tauriApi.disconnectOpenApiSync).mockImplementation(async () => {
+      connected = false;
+    });
+    renderWithQuery(<TabWithListeners collection='dis2' />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'OpenAPI sync actions' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Disconnect' }));
+    await user.click(
+      within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Disconnect' }),
+    );
+    expect(
+      await screen.findByText('This collection is not connected to an OpenAPI spec.'),
+    ).toBeInTheDocument();
   });
 
   it('defaults_to_spec_updates_when_updates_wait', async () => {

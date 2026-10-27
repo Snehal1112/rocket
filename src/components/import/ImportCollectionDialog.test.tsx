@@ -345,7 +345,7 @@ describe('ImportCollectionDialog OpenAPI source', () => {
   it('shows the warning when update checks could not be turned on', async () => {
     mockImportOpenApiUrl.mockResolvedValue({
       ...openApiResult,
-      warnings: ['Update checks could not be turned on. Turn them on in OpenAPI sync.'],
+      warnings: ['Update checks could not be turned on. Open the collection menu, then OpenAPI sync, then ··· and Edit connection settings.'],
     });
     renderDialog();
     await openOpenApiTab();

@@ -67,22 +67,6 @@ export function useOpenApiSyncStatus(
   });
 }
 
-/**
- * Whether the OpenAPI sync section is offered for a collection. It is true when the status
- * resolved to a source, or errored, so an unreadable state file still shows its message.
- * `pending` is true while the status loads.
- */
-export function useOpenApiSyncAvailability(collection: string | null | undefined): {
-  available: boolean;
-  pending: boolean;
-} {
-  const { data, isError, isPending, fetchStatus } = useOpenApiSyncStatus(collection);
-  return {
-    available: !!data || isError,
-    pending: !!collection && isPending && fetchStatus !== 'idle',
-  };
-}
-
 /** The plan of the pending spec. It only runs while enabled, and a new link set refetches. */
 export function useOpenApiSyncPlan(
   collection: string | null | undefined,

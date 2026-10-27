@@ -30,6 +30,15 @@ describe('chipState', () => {
       'Connected',
     ],
   ];
+  it('shows updates waiting when the count is not known', () => {
+    expect(chipState(makeStatus({ lastStatus: { state: 'unchanged' } }), null)).toMatchObject({
+      kind: 'updates',
+      label: 'Updates waiting',
+    });
+    expect(chipState(makeStatus({ hasPending: false }), null).kind).toBe('connected');
+    expect(chipState(makeStatus({ consent: 'missing' }), null).kind).toBe('needs-approval');
+  });
+
   it.each(cases)('%s', (_name, overrides, waiting, kind, label) => {
     const chip = chipState(makeStatus(overrides), waiting);
     expect(chip.kind).toBe(kind);

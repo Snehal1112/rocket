@@ -184,7 +184,7 @@ fn token_arg(token: Option<String>) -> Option<String> {
 
 /// Shown when the user asked for update checks and they could not be turned on.
 const CHECKS_NOT_ENABLED: &str =
-    "Update checks could not be turned on. You can turn them on in the Spec sync settings.";
+    "Update checks could not be turned on. Open the collection menu, then OpenAPI sync, then ··· and Edit connection settings.";
 const CONSENT_NOT_SAVED: &str =
     "The link could not be approved on this machine, so it will not be checked until you approve it.";
 
@@ -452,6 +452,14 @@ mod tests {
         assert_eq!(
             token_arg(Some(" abc ".to_string())),
             Some("abc".to_string())
+        );
+    }
+
+    #[test]
+    fn checks_not_enabled_points_at_the_real_settings_place() {
+        assert_eq!(
+            CHECKS_NOT_ENABLED,
+            "Update checks could not be turned on. Open the collection menu, then OpenAPI sync, then ··· and Edit connection settings."
         );
     }
 

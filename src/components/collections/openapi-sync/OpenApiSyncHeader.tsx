@@ -20,8 +20,8 @@ import { intervalLabel, splitLocation } from './openApiSyncView';
 interface OpenApiSyncHeaderProps {
   collection: string;
   status: OpenApiSyncStatus;
-  /** Spec updates that wait, as counted from the plan. */
-  waiting: number;
+  /** Spec updates that wait, as counted from the plan. Null while the count is not known. */
+  waiting: number | null;
 }
 
 const CHIP_VARIANT: Record<ChipState['kind'], 'warning' | 'destructive' | 'secondary' | 'outline'> =
