@@ -52,7 +52,7 @@ pub use script_cookie::{
     build_cookie, cookie_id, matching_cookies, to_entry, CookieEntry, CookieInput, UrlScope,
 };
 pub use spec_fetch::{
-    is_loopback_http, redirect_target_allowed, same_origin, SpecFetchFailure, SpecFetchOutcome, SpecFetchRequest,
+    is_loopback_http, redirect_target_allowed, LocalReadFailure, LocalSpecReader, same_origin, SpecFetchFailure, SpecFetchOutcome, SpecFetchRequest,
     SpecFetcher, DEFAULT_MAX_SPEC_BYTES, MAX_SPEC_REDIRECTS,
 };
 pub use token_client::TokenClientProvider;

@@ -23,7 +23,7 @@ pub use openapi::{
     ApprovedItem, FileChange, FileChangeKind, ParsedSpec, RequestRenderer, Selection, SkipRequest, SpecOperationView, SpecParamView, SpecResponseView, reset_spec_owned_fields, RESET_FIELD_NAMES,
     VariableApproval, variable_digest,
     build_sync_plan, check_spec_text, fetch_failure_message, fetch_target, fingerprint,
-    merge_item, merge_request, parse_spec_url, request_is_edited, source_record, Choice,
+    merge_item, merge_request, parse_spec_target, parse_spec_url, request_is_edited, source_record, Choice,
     CurrentRequest, FetchTarget, FieldChange, FieldOutcome, GroupBy, MergeOutcome, OpenApiImportResult,
     SyncInputs, SyncItem, SyncPlan, VariableChange, VariableKind,
 };

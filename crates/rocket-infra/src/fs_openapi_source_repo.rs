@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use rocket_collection::openapi_source::{
-    OpenApiSource, OpenApiSourceRepository, SOURCE_FILE_VERSION,
+    OpenApiSource, OpenApiSourceRepository, SOURCE_FILE_MAX_VERSION,
 };
 use rocket_shared::error::{DomainError, DomainResult};
 
@@ -47,9 +47,9 @@ impl OpenApiSourceRepository for FsOpenApiSourceRepo {
         let value: serde_yaml::Value = serde_yaml::from_str(&text)
             .map_err(|e| DomainError::Internal(format!("{SOURCE_FILE} cannot be parsed: {e}")))?;
         let version = value.get("version").and_then(serde_yaml::Value::as_u64);
-        if version.is_some_and(|v| v > u64::from(SOURCE_FILE_VERSION)) {
+        if version.is_some_and(|v| v > u64::from(SOURCE_FILE_MAX_VERSION)) {
             return Err(DomainError::Internal(format!(
-                "{SOURCE_FILE} was written by a newer version of Rocket (it reads up to version {SOURCE_FILE_VERSION})"
+                "{SOURCE_FILE} was written by a newer version of Rocket (it reads up to version {SOURCE_FILE_MAX_VERSION})"
             )));
         }
         let source: OpenApiSource = serde_yaml::from_value(value)
@@ -58,7 +58,10 @@ impl OpenApiSourceRepository for FsOpenApiSourceRepo {
     }
 
     fn save(&self, collection_root: &Path, source: &OpenApiSource) -> DomainResult<()> {
-        let yaml = serde_yaml::to_string(source).map_err(|e| {
+        // A local file source is written as version 2, so an older build refuses it.
+        let mut source = source.clone();
+        source.version = source.write_version();
+        let yaml = serde_yaml::to_string(&source).map_err(|e| {
             DomainError::Internal(format!("{SOURCE_FILE} could not be written: {e}"))
         })?;
         atomic_write(&source_path(collection_root), yaml.as_bytes())?;
@@ -318,6 +321,54 @@ mod tests {
         let err = FsOpenApiSourceRepo
             .load(dir.path())
             .expect_err("a newer file must not load");
+        assert!(err.to_string().contains("newer"), "{err}");
+    }
+
+    fn written_version(root: &Path) -> u64 {
+        let text = std::fs::read_to_string(root.join(".rocket/openapi-source.yml")).expect("read");
+        let value: serde_yaml::Value = serde_yaml::from_str(&text).expect("yaml");
+        value
+            .get("version")
+            .and_then(serde_yaml::Value::as_u64)
+            .expect("version")
+    }
+
+    #[test]
+    fn a_file_source_is_written_as_version_2() {
+        let dir = tempdir().expect("tempdir");
+        let location = SpecLocation::File {
+            path: "specs/api.yaml".to_string(),
+        };
+        FsOpenApiSourceRepo
+            .save(dir.path(), &sample(location.clone()))
+            .expect("save");
+        assert_eq!(written_version(dir.path()), 2);
+        let loaded = FsOpenApiSourceRepo
+            .load(dir.path())
+            .expect("load")
+            .expect("some");
+        assert_eq!(loaded.location, location);
+    }
+
+    #[test]
+    fn a_github_source_stays_version_1() {
+        let dir = tempdir().expect("tempdir");
+        FsOpenApiSourceRepo
+            .save(dir.path(), &sample(github()))
+            .expect("save");
+        assert_eq!(written_version(dir.path()), 1);
+    }
+
+    #[test]
+    fn a_version_3_source_is_refused() {
+        let dir = tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join(".rocket")).expect("mkdir");
+        std::fs::write(
+            dir.path().join(".rocket/openapi-source.yml"),
+            "version: 3\nlocation:\n  kind: file\n  path: a.yaml\n",
+        )
+        .expect("write");
+        let err = FsOpenApiSourceRepo.load(dir.path()).expect_err("too new");
         assert!(err.to_string().contains("newer"), "{err}");
     }
 

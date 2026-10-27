@@ -483,7 +483,8 @@ impl OpenApiSyncService {
         let approved_id = source.source_id.clone();
         let read = match source.location {
             SpecLocation::Github { .. } => self.read_token(collection_root, &source),
-            SpecLocation::Https { .. } => TokenRead::None,
+            // A link on another host or a file never gets a token.
+            SpecLocation::Https { .. } | SpecLocation::File { .. } => TokenRead::None,
         };
         let keychain_failed = matches!(read, TokenRead::Unreadable);
         let token = match read {

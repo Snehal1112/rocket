@@ -112,7 +112,10 @@ fn stage_all(
 }
 
 pub(crate) fn to_yaml(source: &OpenApiSource) -> DomainResult<Vec<u8>> {
-    serde_yaml::to_string(source)
+    // A local file source is written as version 2, so an older build refuses it.
+    let mut source = source.clone();
+    source.version = source.write_version();
+    serde_yaml::to_string(&source)
         .map(String::into_bytes)
         .map_err(|e| DomainError::Internal(format!("the source file could not be written: {e}")))
 }

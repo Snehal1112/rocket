@@ -2,6 +2,7 @@
 
 use crate::error::{ImportError, ImportResult};
 use rocket_collection::openapi_source::SpecLocation;
+use std::path::{Path, PathBuf};
 
 /// What to request for a `SpecLocation`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -138,6 +139,81 @@ fn parse_loopback_http(text: &str) -> ImportResult<Option<SpecLocation>> {
     }))
 }
 
+/// Reads what the user typed or chose: a link (see `parse_spec_url`), a `file://` URL, or a
+/// path to a spec file. A file path is stored relative to `root` when the file is inside the
+/// collection folder or beside it (in its parent folder), and as an absolute path otherwise.
+/// Any other scheme is refused.
+pub fn parse_spec_target(input: &str, root: &Path) -> ImportResult<SpecLocation> {
+    let text = input.trim();
+    if text.is_empty() {
+        return Err(reject("paste a link or choose a file"));
+    }
+    let lower = text.to_ascii_lowercase();
+    if lower.starts_with("http://") || lower.starts_with("https://") {
+        return parse_spec_url(text);
+    }
+    let path_text = if lower.starts_with("file://") {
+        &text[7..]
+    } else if has_scheme(text) {
+        return Err(reject(
+            "only https links, localhost links and files are supported",
+        ));
+    } else {
+        text
+    };
+    if path_text.is_empty() || path_text.contains('\0') {
+        return Err(reject("that is not a link or a file path"));
+    }
+    Ok(SpecLocation::File {
+        path: stored_path(path_text, root),
+    })
+}
+
+/// True for `name:` or `name://` with a scheme name longer than one letter, so a Windows drive
+/// such as `C:\specs\api.yaml` is a path and `javascript:x` is not.
+fn has_scheme(text: &str) -> bool {
+    let Some((scheme, _)) = text.split_once(':') else {
+        return false;
+    };
+    scheme.len() > 1
+        && scheme
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic())
+        && scheme
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+}
+
+/// The form of a typed path that is kept in the source file.
+fn stored_path(text: &str, root: &Path) -> String {
+    let path = normalise(Path::new(text));
+    if path.is_absolute() {
+        if let Ok(inside) = path.strip_prefix(root) {
+            return slashes(inside);
+        }
+        if let Some(beside) = root
+            .parent()
+            .and_then(|parent| path.strip_prefix(parent).ok())
+        {
+            return format!("../{}", slashes(beside));
+        }
+    }
+    slashes(&path)
+}
+
+fn slashes(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+/// Drops `.` parts and a doubled separator. `..` parts are kept, because they are meaningful
+/// against the collection folder.
+fn normalise(path: &Path) -> PathBuf {
+    path.components()
+        .filter(|c| !matches!(c, std::path::Component::CurDir))
+        .collect()
+}
+
 /// Builds a `Github` location after checking every part. A `.` or `..` segment (even one that
 /// arrived percent-encoded), an empty part, or a slash inside an owner, repo or path segment
 /// could send a token-carrying request to a different API path, so it is refused. A ref may
@@ -223,6 +299,13 @@ pub fn fetch_target(location: &SpecLocation, with_token: bool) -> FetchTarget {
             url: url.clone(),
             accept: None,
             origin: origin_of(url),
+        },
+        // A file is read by the local reader, never fetched. This target is refused by the
+        // fetcher because its scheme is not http or https.
+        SpecLocation::File { .. } => FetchTarget {
+            url: location.display_url(),
+            accept: None,
+            origin: String::new(),
         },
     }
 }
@@ -536,5 +619,84 @@ mod tests {
         let target = fetch_target(&location, false);
         assert_eq!(target.url, "http://localhost:3000/openapi.json");
         assert_eq!(target.origin, "http://localhost:3000");
+    }
+
+    fn file_location(path: &str) -> SpecLocation {
+        SpecLocation::File {
+            path: path.to_string(),
+        }
+    }
+
+    #[test]
+    fn parse_spec_target_stores_a_relative_path_inside_or_beside_the_collection() {
+        let root = Path::new("/work/shop");
+        // Inside the collection.
+        assert_eq!(
+            parse_spec_target("/work/shop/specs/api.yaml", root).expect("inside"),
+            file_location("specs/api.yaml")
+        );
+        // Beside the collection, in its parent folder.
+        assert_eq!(
+            parse_spec_target("/work/api.yaml", root).expect("beside"),
+            file_location("../api.yaml")
+        );
+        // A file URL and a typed relative path.
+        assert_eq!(
+            parse_spec_target("file:///work/shop/api.json", root).expect("file url"),
+            file_location("api.json")
+        );
+        assert_eq!(
+            parse_spec_target("  specs/./api.yaml ", root).expect("relative"),
+            file_location("specs/api.yaml")
+        );
+        // The stored display form is accepted again.
+        let shown = file_location("specs/api.yaml").display_url();
+        assert_eq!(
+            parse_spec_target(&shown, root).expect("round trip"),
+            file_location("specs/api.yaml")
+        );
+    }
+
+    #[test]
+    fn parse_spec_target_keeps_an_absolute_path_when_no_relative_form_exists() {
+        let root = Path::new("/work/shop");
+        assert_eq!(
+            parse_spec_target("/srv/specs/api.yaml", root).expect("absolute"),
+            file_location("/srv/specs/api.yaml")
+        );
+    }
+
+    #[test]
+    fn parse_spec_target_refuses_other_schemes() {
+        let root = Path::new("/work/shop");
+        for input in [
+            "ftp://example.com/x",
+            "javascript:alert(1)",
+            "data:text/plain,hi",
+            "ssh://host/x",
+            "",
+            "   ",
+        ] {
+            assert!(parse_spec_target(input, root).is_err(), "{input}");
+        }
+    }
+
+    #[test]
+    fn parse_spec_target_sends_links_to_the_url_parser() {
+        let root = Path::new("/work/shop");
+        assert_eq!(
+            parse_spec_target("https://example.com/api.json", root).expect("https"),
+            SpecLocation::Https {
+                url: "https://example.com/api.json".to_string()
+            }
+        );
+        assert_eq!(
+            parse_spec_target("http://localhost:3000/o.json", root).expect("localhost"),
+            SpecLocation::Https {
+                url: "http://localhost:3000/o.json".to_string()
+            }
+        );
+        // Plain http elsewhere is still refused, not read as a file name.
+        assert!(parse_spec_target("http://example.com/o.json", root).is_err());
     }
 }

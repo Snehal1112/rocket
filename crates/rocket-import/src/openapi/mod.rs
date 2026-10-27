@@ -18,7 +18,7 @@ pub use bundle::{
     bundle_spec, find_remote_refs, inline_refs, lost_refs_message, ref_failure_message, whole_bundle_failed_message, refs_unchanged,
     refs_unchanged_labeled, Bundle, RemoteRefState,
 };
-pub use source_url::{fetch_target, parse_spec_url, FetchTarget};
+pub use source_url::{fetch_target, parse_spec_target, parse_spec_url, FetchTarget};
 pub use entry::{
     check_spec_text, fetch_failure_message, fetch_spec_bundle, FetchedSpec, OpenApiImportResult,
 };

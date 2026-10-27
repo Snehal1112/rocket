@@ -2,10 +2,17 @@
 
 use rocket_shared::error::DomainResult;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-/// Version written into the source file. A file with a higher version is refused.
+/// Version written into the source file of a link source. Older builds read it.
 pub const SOURCE_FILE_VERSION: u32 = 1;
+
+/// Version written when the location is a local file. A build that reads only version 1
+/// refuses such a file instead of misreading the location.
+pub const SOURCE_FILE_VERSION_WITH_FILES: u32 = 2;
+
+/// The highest version this build reads. A file with a higher version is refused.
+pub const SOURCE_FILE_MAX_VERSION: u32 = SOURCE_FILE_VERSION_WITH_FILES;
 
 /// What a collection remembers about its OpenAPI import: where the spec came from, how it was
 /// laid out, what the spec looked like, and which request came from which operation.
@@ -51,6 +58,16 @@ pub struct OpenApiSource {
 }
 
 impl OpenApiSource {
+    /// The version to write: 2 for a local file source, so older builds refuse it, and 1 for
+    /// every other source. A higher version already on the record is kept.
+    pub fn write_version(&self) -> u32 {
+        let needed = match self.location {
+            SpecLocation::File { .. } => SOURCE_FILE_VERSION_WITH_FILES,
+            _ => SOURCE_FILE_VERSION,
+        };
+        self.version.max(needed)
+    }
+
     /// A fresh random id for a new source.
     pub fn new_source_id() -> String {
         uuid::Uuid::new_v4().to_string()
@@ -187,8 +204,10 @@ pub enum SpecLocation {
         git_ref: String,
         path: String,
     },
-    /// Any other `https` URL.
+    /// Any other `https` URL, or `http` to this machine.
     Https { url: String },
+    /// A spec file on this computer. A relative path is relative to the collection folder.
+    File { path: String },
 }
 
 impl SpecLocation {
@@ -202,6 +221,22 @@ impl SpecLocation {
                 path,
             } => format!("https://github.com/{owner}/{repo}/blob/{git_ref}/{path}"),
             SpecLocation::Https { url } => url.clone(),
+            SpecLocation::File { path } => format!("file://{path}"),
+        }
+    }
+
+    /// The file to read for a `File` location, with a relative path joined to `root`.
+    pub fn resolve_file(&self, root: &Path) -> Option<PathBuf> {
+        match self {
+            SpecLocation::File { path } => {
+                let path = Path::new(path);
+                Some(if path.is_absolute() {
+                    path.to_path_buf()
+                } else {
+                    root.join(path)
+                })
+            }
+            _ => None,
         }
     }
 
@@ -211,7 +246,7 @@ impl SpecLocation {
             SpecLocation::Github { git_ref, .. } => {
                 git_ref.len() == 40 && git_ref.chars().all(|c| c.is_ascii_hexdigit())
             }
-            SpecLocation::Https { .. } => false,
+            SpecLocation::Https { .. } | SpecLocation::File { .. } => false,
         }
     }
 }
@@ -311,5 +346,68 @@ mod tests {
             OpenApiSource::new_source_id(),
             OpenApiSource::new_source_id()
         );
+    }
+
+    fn file(path: &str) -> SpecLocation {
+        SpecLocation::File {
+            path: path.to_string(),
+        }
+    }
+
+    #[test]
+    fn file_location_round_trips_through_yaml() {
+        let yaml = "version: 2\nlocation:\n  kind: file\n  path: specs/api.yaml\n";
+        let source: OpenApiSource = serde_yaml::from_str(yaml).expect("parse");
+        assert_eq!(source.location, file("specs/api.yaml"));
+        let out = serde_yaml::to_string(&source).expect("write");
+        assert!(out.contains("kind: file"), "{out}");
+        let again: OpenApiSource = serde_yaml::from_str(&out).expect("again");
+        assert_eq!(again.location, source.location);
+    }
+
+    #[test]
+    fn a_file_location_needs_version_2_and_others_stay_at_1() {
+        let mut source: OpenApiSource =
+            serde_yaml::from_str("version: 1\nlocation:\n  kind: file\n  path: a.yaml\n")
+                .expect("parse");
+        assert_eq!(source.write_version(), 2);
+        source.location = SpecLocation::Https {
+            url: "https://example.com/a.json".to_string(),
+        };
+        assert_eq!(source.write_version(), 1);
+        // A higher version is never lowered.
+        source.version = 7;
+        assert_eq!(source.write_version(), 7);
+    }
+
+    #[test]
+    fn display_url_of_a_file_is_a_file_url() {
+        assert_eq!(
+            file("specs/api.yaml").display_url(),
+            "file://specs/api.yaml"
+        );
+        assert_eq!(file("/srv/api.yaml").display_url(), "file:///srv/api.yaml");
+        assert!(!file("/srv/api.yaml").ref_is_immutable());
+    }
+
+    #[test]
+    fn resolve_file_joins_the_collection_root() {
+        let root = Path::new("/work/shop");
+        assert_eq!(
+            file("specs/api.yaml").resolve_file(root),
+            Some(PathBuf::from("/work/shop/specs/api.yaml"))
+        );
+        assert_eq!(
+            file("../api.yaml").resolve_file(root),
+            Some(PathBuf::from("/work/shop/../api.yaml"))
+        );
+        assert_eq!(
+            file("/srv/api.yaml").resolve_file(root),
+            Some(PathBuf::from("/srv/api.yaml"))
+        );
+        let https = SpecLocation::Https {
+            url: "https://example.com/a.json".to_string(),
+        };
+        assert_eq!(https.resolve_file(root), None);
     }
 }

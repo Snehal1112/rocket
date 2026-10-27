@@ -114,6 +114,36 @@ pub trait SpecFetcher: Send + Sync {
     async fn fetch(&self, request: SpecFetchRequest) -> Result<SpecFetchOutcome, SpecFetchFailure>;
 }
 
+/// Why a spec file on this computer could not be read. It carries no path and no system
+/// message, so it is safe to turn into a fixed sentence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LocalReadFailure {
+    NotFound,
+    /// The path is a directory, a device or another thing that is not a regular file.
+    NotAFile,
+    TooLarge,
+    Io,
+}
+
+impl fmt::Display for LocalReadFailure {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            LocalReadFailure::NotFound => "the file was not found",
+            LocalReadFailure::NotAFile => "the path is not a file",
+            LocalReadFailure::TooLarge => "the file is too large",
+            LocalReadFailure::Io => "the file could not be read",
+        })
+    }
+}
+
+impl std::error::Error for LocalReadFailure {}
+
+/// Reads a spec file from this computer. Implementations read a regular file only and stop at
+/// `max_bytes`.
+pub trait LocalSpecReader: Send + Sync {
+    fn read(&self, path: &std::path::Path, max_bytes: usize) -> Result<Vec<u8>, LocalReadFailure>;
+}
+
 /// True for a plain `http` link to this machine: the host is exactly `localhost`, `127.0.0.1`
 /// or `::1`, with no user info. Anything else on `http` stays refused, and a host that only
 /// starts with one of these names is another host.
