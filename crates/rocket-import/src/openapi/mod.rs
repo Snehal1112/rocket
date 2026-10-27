@@ -22,7 +22,7 @@ pub use entry::{check_spec_text, fetch_failure_message, OpenApiImportResult};
 pub(crate) mod sync;
 pub use sync::{
     build_apply, item_digest, plan_with_links, AppliedItem, AppliedKind, ApplyInputs, ApplyOutput, ApplyReport,
-    ApprovedItem, FileChange, FileChangeKind, ParsedSpec, RequestRenderer, Selection, SkipRequest, SpecOperationView, SpecParamView, SpecResponseView,
+    ApprovedItem, FileChange, FileChangeKind, ParsedSpec, RequestRenderer, Selection, SkipRequest, SpecOperationView, SpecParamView, SpecResponseView, reset_spec_owned_fields, RESET_FIELD_NAMES,
     VariableApproval, variable_digest,
     build_sync_plan, fingerprint, merge_item, merge_request, request_is_edited, Choice,
     CurrentRequest, FieldChange, FieldOutcome, MergeOutcome, SyncInputs, SyncItem, SyncPlan,
