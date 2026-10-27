@@ -242,6 +242,30 @@ describe('OpenApiSyncConnectionDialog', () => {
     expect(screen.queryByLabelText('Access token')).toBeNull();
   });
 
+  it('shows_that_the_link_is_approved_on_this_machine', () => {
+    renderDialog('d30', makeStatus({ consent: 'granted' }));
+    expect(screen.getByText('Approved on this machine')).toBeInTheDocument();
+    expect(screen.queryByText('Not approved yet')).toBeNull();
+  });
+
+  it('shows_that_the_link_is_not_approved_yet', () => {
+    renderDialog('d31', makeStatus({ consent: 'missing' }));
+    expect(screen.getByText('Not approved yet')).toBeInTheDocument();
+    expect(screen.queryByText('Approved on this machine')).toBeNull();
+  });
+
+  it('says_what_stop_trusting_and_disconnect_each_do', () => {
+    renderDialog('d32', makeStatus());
+    expect(
+      screen.getByText(
+        'Stops background checks and token use until you approve the link again.',
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Removes the sync link from this collection. Your requests stay.'),
+    ).toBeInTheDocument();
+  });
+
   it('stops trusting the link', async () => {
     vi.mocked(tauriApi.revokeOpenApiSyncConsent).mockResolvedValue(undefined);
     const user = renderDialog('d15', makeStatus());

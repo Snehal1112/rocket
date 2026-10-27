@@ -1,4 +1,6 @@
+import { ShieldAlert, ShieldCheck } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -123,8 +125,23 @@ function ConnectionBody({
 
   return (
     <>
-      <div className='flex flex-col gap-1.5'>
-        <p className='break-all text-sm font-medium'>{full && showFull ? full : short}</p>
+      <section
+        aria-label='Spec link'
+        className='flex flex-col gap-2 rounded-lg border border-border/70 bg-muted/30 p-3'
+      >
+        <div className='flex items-start justify-between gap-3'>
+          <p className='min-w-0 break-all text-sm font-medium leading-snug'>
+            {full && showFull ? full : short}
+          </p>
+          <Badge variant={granted ? 'outline' : 'warning'} className='shrink-0 gap-1'>
+            {granted ? (
+              <ShieldCheck aria-hidden='true' className='h-3 w-3' />
+            ) : (
+              <ShieldAlert aria-hidden='true' className='h-3 w-3' />
+            )}
+            {granted ? 'Approved on this machine' : 'Not approved yet'}
+          </Badge>
+        </div>
         {full && (
           <div>
             <Button
@@ -137,7 +154,7 @@ function ConnectionBody({
             </Button>
           </div>
         )}
-      </div>
+      </section>
 
       {needConsent && status.consent !== 'granted' && (
         <OpenApiSyncConsentBanner
@@ -148,39 +165,50 @@ function ConnectionBody({
         />
       )}
 
-      <div className='flex flex-col gap-3'>
-        <div className='flex items-center gap-2'>
+      <section aria-label='Automatic checks' className='flex flex-col gap-3'>
+        <div className='flex items-center justify-between gap-4'>
+          <div className='flex min-w-0 flex-col gap-0.5'>
+            <Label htmlFor='openapi-sync-auto' className='text-sm font-medium'>
+              Check for spec updates automatically
+            </Label>
+            <p className='text-xs text-muted-foreground'>
+              Rocket asks the link for changes in the background.
+            </p>
+          </div>
           <Switch
             id='openapi-sync-auto'
             checked={autoOn}
             onCheckedChange={toggleAuto}
             disabled={interval.isPending}
           />
-          <Label htmlFor='openapi-sync-auto'>Check for spec updates automatically</Label>
         </div>
         <div className='flex flex-col gap-1.5'>
-          <Label htmlFor='openapi-sync-interval'>Check frequency</Label>
-          <Select
-            value={unknown ? '' : lastChosen}
-            onValueChange={(v) => pickFrequency(v as OpenApiSyncInterval)}
-            disabled={(!autoOn && !unknown) || !granted || interval.isPending}
-          >
-            <SelectTrigger
-              id='openapi-sync-interval'
-              aria-label='Check frequency'
-              aria-describedby={describedBy}
-              className='w-48'
+          <div className='flex items-center justify-between gap-4'>
+            <Label htmlFor='openapi-sync-interval' className='text-sm'>
+              Check frequency
+            </Label>
+            <Select
+              value={unknown ? '' : lastChosen}
+              onValueChange={(v) => pickFrequency(v as OpenApiSyncInterval)}
+              disabled={(!autoOn && !unknown) || !granted || interval.isPending}
             >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {FREQUENCIES.map((i) => (
-                <SelectItem key={i} value={i}>
-                  {intervalLabel(i)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+              <SelectTrigger
+                id='openapi-sync-interval'
+                aria-label='Check frequency'
+                aria-describedby={describedBy}
+                className='w-48'
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {FREQUENCIES.map((i) => (
+                  <SelectItem key={i} value={i}>
+                    {intervalLabel(i)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           {unknown && (
             <p id='openapi-sync-unknown' className='text-xs text-muted-foreground'>
               This setting is not understood. Pick a frequency.
@@ -198,87 +226,109 @@ function ConnectionBody({
             </p>
           )}
         </div>
-      </div>
+      </section>
 
-      {github ? (
-        <div className='flex flex-col gap-1.5'>
-          <Label htmlFor='openapi-sync-token'>Access token</Label>
-          <p className='text-xs text-muted-foreground'>
-            Tokens work with GitHub links only. The token is kept in the keychain and never shown.
-          </p>
-          {hasToken && (
+      <section aria-label='Access' className='flex flex-col gap-2 border-t border-border/70 pt-4'>
+        {github ? (
+          <>
+            <div className='flex items-center justify-between gap-3'>
+              <Label htmlFor='openapi-sync-token' className='text-sm font-medium'>
+                Access token
+              </Label>
+              {hasToken && (
+                <div className='flex items-center gap-2'>
+                  <SavedPill persistent>A token is stored</SavedPill>
+                  <Button
+                    size='sm'
+                    variant='outline'
+                    className='h-7'
+                    onClick={() => clearToken.mutate()}
+                    disabled={clearToken.isPending}
+                  >
+                    Clear
+                  </Button>
+                </div>
+              )}
+            </div>
+            <p className='text-xs text-muted-foreground'>
+              Tokens work with GitHub links only. The token is kept in the keychain and never shown.
+            </p>
             <div className='flex items-center gap-2'>
-              <SavedPill persistent>A token is stored</SavedPill>
+              <Input
+                id='openapi-sync-token'
+                type='password'
+                autoComplete='new-password'
+                aria-describedby={tokenError ? 'openapi-sync-token-error' : undefined}
+                value={token}
+                onChange={(e) => setTokenText(e.target.value)}
+                placeholder={hasToken ? 'Paste a new token to replace it' : 'Paste the token'}
+                className='h-8 flex-1 text-sm'
+              />
+              <Button
+                size='sm'
+                onClick={saveToken}
+                disabled={token.trim() === '' || setToken.isPending}
+              >
+                Save token
+              </Button>
+            </div>
+            {tokenError && (
+              <p id='openapi-sync-token-error' role='alert' className='text-xs text-destructive'>
+                {tokenError}
+              </p>
+            )}
+            {clearError && (
+              <p role='alert' className='text-xs text-destructive'>
+                {clearError}
+              </p>
+            )}
+          </>
+        ) : (
+          <p className='text-xs text-muted-foreground'>Tokens work with GitHub links only.</p>
+        )}
+      </section>
+
+      <section
+        aria-label='Stop or remove'
+        className='flex flex-col gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3'
+      >
+        {granted && (
+          <div className='flex flex-col gap-1.5'>
+            <div className='flex items-center justify-between gap-4'>
+              <p className='min-w-0 text-xs text-muted-foreground'>
+                Stops background checks and token use until you approve the link again.
+              </p>
               <Button
                 size='sm'
                 variant='outline'
-                className='h-7'
-                onClick={() => clearToken.mutate()}
-                disabled={clearToken.isPending}
+                className='shrink-0'
+                onClick={() => revoke.mutate()}
+                disabled={revoke.isPending}
               >
-                Clear
+                Stop trusting this link
               </Button>
             </div>
-          )}
-          <div className='flex items-center gap-2'>
-            <Input
-              id='openapi-sync-token'
-              type='password'
-              autoComplete='new-password'
-              aria-describedby={tokenError ? 'openapi-sync-token-error' : undefined}
-              value={token}
-              onChange={(e) => setTokenText(e.target.value)}
-              placeholder={hasToken ? 'Paste a new token to replace it' : 'Paste the token'}
-              className='h-8 max-w-sm text-sm'
-            />
-            <Button
-              size='sm'
-              onClick={saveToken}
-              disabled={token.trim() === '' || setToken.isPending}
-            >
-              Save token
-            </Button>
+            {revokeError && (
+              <p role='alert' className='text-xs text-destructive'>
+                {revokeError}
+              </p>
+            )}
           </div>
-          {tokenError && (
-            <p id='openapi-sync-token-error' role='alert' className='text-xs text-destructive'>
-              {tokenError}
-            </p>
-          )}
-          {clearError && (
-            <p role='alert' className='text-xs text-destructive'>
-              {clearError}
-            </p>
-          )}
+        )}
+        <div className='flex items-center justify-between gap-4'>
+          <p className='min-w-0 text-xs text-muted-foreground'>
+            Removes the sync link from this collection. Your requests stay.
+          </p>
+          <Button
+            size='sm'
+            variant='destructive'
+            className='shrink-0'
+            onClick={() => setDisconnectOpen(true)}
+          >
+            Disconnect
+          </Button>
         </div>
-      ) : (
-        <p className='text-xs text-muted-foreground'>Tokens work with GitHub links only.</p>
-      )}
-
-      {granted && (
-        <div className='flex flex-col gap-1.5'>
-          <div>
-            <Button
-              size='sm'
-              variant='outline'
-              onClick={() => revoke.mutate()}
-              disabled={revoke.isPending}
-            >
-              Stop trusting this link
-            </Button>
-          </div>
-          {revokeError && (
-            <p role='alert' className='text-xs text-destructive'>
-              {revokeError}
-            </p>
-          )}
-        </div>
-      )}
-
-      <div className='border-t border-border/70 pt-3'>
-        <Button size='sm' variant='destructive' onClick={() => setDisconnectOpen(true)}>
-          Disconnect
-        </Button>
-      </div>
+      </section>
       <DisconnectSyncDialog
         collection={collection}
         open={disconnectOpen}
@@ -305,7 +355,7 @@ export function OpenApiSyncConnectionDialog({
             How Rocket follows the spec this collection came from.
           </DialogDescription>
         </DialogHeader>
-        <DialogBody className='flex flex-col gap-4'>
+        <DialogBody className='flex flex-col gap-5'>
           <ConnectionBody
             collection={collection}
             status={status}
