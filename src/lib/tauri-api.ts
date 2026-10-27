@@ -2098,11 +2098,30 @@ export interface OpenApiChangeRow {
   fields: string[];
 }
 
+/** A request the user reset to the spec, with the version they can restore. */
+export interface OpenApiBackupRow {
+  key: string;
+  name: string;
+  method: string;
+  url: string;
+  requestPath: string;
+  savedAt: string;
+  fields: string[];
+}
+
 export interface OpenApiChanges {
   baselineTrusted: boolean;
   modified: OpenApiChangeRow[];
   added: OpenApiChangeRow[];
   deleted: OpenApiChangeRow[];
+  backups: OpenApiBackupRow[];
+  /** False when the sync data is too old for a reset. */
+  resetAvailable: boolean;
+}
+
+export interface OpenApiResetReport {
+  reset: string[];
+  skipped: string[];
 }
 
 export interface OpenApiBadge {
@@ -2154,6 +2173,15 @@ export const getOpenApiSyncOverview = (collection: string) =>
 
 export const getOpenApiSyncChanges = (collection: string) =>
   invoke<OpenApiChanges>('openapi_sync_changes', { collection });
+
+export const resetOpenApiSync = (collection: string, keys: string[]) =>
+  invoke<OpenApiResetReport>('openapi_sync_reset', { collection, keys });
+
+export const restoreOpenApiSync = (collection: string, key: string) =>
+  invoke<void>('openapi_sync_restore', { collection, key });
+
+export const discardOpenApiSyncBackup = (collection: string, key: string) =>
+  invoke<void>('openapi_sync_discard_backup', { collection, key });
 
 export const getOpenApiSyncBadges = () => invoke<OpenApiBadge[]>('openapi_sync_badges');
 

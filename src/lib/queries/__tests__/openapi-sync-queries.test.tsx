@@ -10,6 +10,7 @@ import {
   useApplySync,
   useCheckNow,
   useClearToken,
+  useDiscardOpenApiBackup,
   useDisconnectSync,
   useGrantConsent,
   useIsApplying,
@@ -22,6 +23,8 @@ import {
   useOpenApiSyncSpecView,
   useOpenApiSyncPlan,
   useOpenApiSyncStatus,
+  useResetOpenApiSync,
+  useRestoreOpenApiSync,
   useRevokeConsent,
   useSetInterval,
   useSetToken,
@@ -46,6 +49,9 @@ vi.mock('@/lib/tauri-api', async () => {
     grantOpenApiSyncConsent: vi.fn(),
     revokeOpenApiSyncConsent: vi.fn(),
     disconnectOpenApiSync: vi.fn(),
+    resetOpenApiSync: vi.fn(),
+    restoreOpenApiSync: vi.fn(),
+    discardOpenApiSyncBackup: vi.fn(),
     applyOpenApiSync: vi.fn(),
   };
 });
@@ -391,6 +397,49 @@ describe('openapi sync queries', () => {
       expectSyncKeysOnly(spy);
     });
 
+    it('a_reset_refreshes_changes_overview_plan_status_and_badges', async () => {
+      vi.mocked(tauriApi.resetOpenApiSync).mockResolvedValue({ reset: ['k'], skipped: [] });
+      const spy = vi.spyOn(client, 'invalidateQueries');
+      const { result } = renderHook(() => useResetOpenApiSync('A'), { wrapper });
+      await act(async () => {
+        await result.current.mutateAsync(['k']);
+      });
+      expect(tauriApi.resetOpenApiSync).toHaveBeenCalledWith('A', ['k']);
+      const keys = invalidatedKeys(spy);
+      expect(keys).toContainEqual(openApiSyncKeys.changes('A'));
+      expect(keys).toContainEqual(openApiSyncKeys.overview('A'));
+      expect(keys).toContainEqual(openApiSyncKeys.planAll('A'));
+      expect(keys).toContainEqual(openApiSyncKeys.statusAll('A'));
+      expect(keys).toContainEqual(openApiSyncKeys.badges);
+      // The request files changed, so the tree and open requests reload.
+      expect(keys).toContainEqual(collectionKeys.all);
+    });
+
+    it('a_failed_reset_still_refreshes', async () => {
+      vi.mocked(tauriApi.resetOpenApiSync).mockRejectedValue(new Error('x'));
+      const spy = vi.spyOn(client, 'invalidateQueries');
+      const { result } = renderHook(() => useResetOpenApiSync('A'), { wrapper });
+      await act(async () => {
+        await result.current.mutateAsync(['k']).catch(() => undefined);
+      });
+      expect(invalidatedKeys(spy)).toContainEqual(openApiSyncKeys.changes('A'));
+    });
+
+    it('restore_and_discard_call_their_commands_and_refresh', async () => {
+      vi.mocked(tauriApi.restoreOpenApiSync).mockResolvedValue(undefined);
+      vi.mocked(tauriApi.discardOpenApiSyncBackup).mockResolvedValue(undefined);
+      const spy = vi.spyOn(client, 'invalidateQueries');
+      const restore = renderHook(() => useRestoreOpenApiSync('A'), { wrapper });
+      const discard = renderHook(() => useDiscardOpenApiBackup('A'), { wrapper });
+      await act(async () => {
+        await restore.result.current.mutateAsync('k');
+        await discard.result.current.mutateAsync('k2');
+      });
+      expect(tauriApi.restoreOpenApiSync).toHaveBeenCalledWith('A', 'k');
+      expect(tauriApi.discardOpenApiSyncBackup).toHaveBeenCalledWith('A', 'k2');
+      expect(invalidatedKeys(spy)).toContainEqual(openApiSyncKeys.changes('A'));
+    });
+
     it('useDisconnectSync invalidates sync keys and the tree, and clears the last apply', async () => {
       vi.mocked(tauriApi.applyOpenApiSync).mockRejectedValue(new Error('x'));
       vi.mocked(tauriApi.disconnectOpenApiSync).mockResolvedValue(undefined);
@@ -498,7 +547,14 @@ describe('openapi sync queries', () => {
       lastSyncedAt: null,
       lastSyncedUpdated: 0,
     };
-    const changes = { baselineTrusted: true, modified: [], added: [], deleted: [] };
+    const changes = {
+      baselineTrusted: true,
+      modified: [],
+      added: [],
+      deleted: [],
+      backups: [],
+      resetAvailable: true,
+    };
 
     beforeEach(() => {
       vi.mocked(tauriApi.getOpenApiSyncOverview).mockResolvedValue(overview);

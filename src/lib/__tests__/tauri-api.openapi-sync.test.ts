@@ -6,6 +6,7 @@ import {
   checkOpenApiSyncNow,
   clearOpenApiSyncToken,
   disconnectOpenApiSync,
+  discardOpenApiSyncBackup,
   getOpenApiSyncBadges,
   getOpenApiSyncChanges,
   getOpenApiSyncOverview,
@@ -16,6 +17,8 @@ import {
   importOpenApiUrl,
   onOpenApiSyncApplied,
   onOpenApiSyncChecked,
+  resetOpenApiSync,
+  restoreOpenApiSync,
   revokeOpenApiSyncConsent,
   setOpenApiSyncInterval,
   setOpenApiSyncToken,
@@ -46,6 +49,30 @@ describe('OpenAPI sync API', () => {
     vi.mocked(invoke).mockResolvedValue({});
     await getOpenApiSyncSpecView('Orders');
     expect(invoke).toHaveBeenCalledWith('openapi_sync_spec_view', { collection: 'Orders' });
+  });
+
+  it('reset_calls_openapi_sync_reset_with_collection_and_keys', async () => {
+    vi.mocked(invoke).mockResolvedValue({ reset: [], skipped: [] });
+    await resetOpenApiSync('Orders', ['a', 'b']);
+    expect(invoke).toHaveBeenCalledWith('openapi_sync_reset', {
+      collection: 'Orders',
+      keys: ['a', 'b'],
+    });
+  });
+
+  it('restore_calls_openapi_sync_restore', async () => {
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    await restoreOpenApiSync('Orders', 'a');
+    expect(invoke).toHaveBeenCalledWith('openapi_sync_restore', { collection: 'Orders', key: 'a' });
+  });
+
+  it('discard_calls_openapi_sync_discard_backup', async () => {
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    await discardOpenApiSyncBackup('Orders', 'a');
+    expect(invoke).toHaveBeenCalledWith('openapi_sync_discard_backup', {
+      collection: 'Orders',
+      key: 'a',
+    });
   });
 
   it('changes_calls_openapi_sync_changes', async () => {

@@ -24,7 +24,15 @@ function row(over: Partial<OpenApiChangeRow> = {}): OpenApiChangeRow {
 }
 
 function changes(over: Partial<OpenApiChanges> = {}): OpenApiChanges {
-  return { baselineTrusted: true, modified: [], added: [], deleted: [], ...over };
+  return {
+    baselineTrusted: true,
+    modified: [],
+    added: [],
+    deleted: [],
+    backups: [],
+    resetAvailable: true,
+    ...over,
+  };
 }
 
 function show(data: OpenApiChanges) {

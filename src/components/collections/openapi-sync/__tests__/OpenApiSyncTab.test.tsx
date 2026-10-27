@@ -52,6 +52,8 @@ describe('OpenApiSyncTab', () => {
       modified: [],
       added: [],
       deleted: [],
+      backups: [],
+      resetAvailable: true,
     });
     vi.mocked(tauriApi.getOpenApiSyncOverview).mockResolvedValue({
       endpoints: 42,
@@ -235,6 +237,8 @@ describe('OpenApiSyncTab', () => {
       modified: [r('a')],
       added: [r('b')],
       deleted: [r('c')],
+      backups: [],
+      resetAvailable: true,
     });
     renderWithQuery(<TabWithListeners collection='c' />);
     expect(await screen.findByRole('tab', { name: 'Your changes (3)' })).toBeInTheDocument();

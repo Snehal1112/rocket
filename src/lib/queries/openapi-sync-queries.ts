@@ -4,6 +4,7 @@ import {
   applyOpenApiSync,
   checkOpenApiSyncNow,
   clearOpenApiSyncToken,
+  discardOpenApiSyncBackup,
   disconnectOpenApiSync,
   getOpenApiSyncBadges,
   getOpenApiSyncChanges,
@@ -17,6 +18,8 @@ import {
   type OpenApiSyncInterval,
   onOpenApiSyncApplied,
   onOpenApiSyncChecked,
+  resetOpenApiSync,
+  restoreOpenApiSync,
   revokeOpenApiSyncConsent,
   setOpenApiSyncInterval,
   setOpenApiSyncToken,
@@ -204,6 +207,42 @@ export function useRevokeConsent(collection: string) {
 }
 
 /** Removes the sync state of a collection and refreshes everything that showed it. */
+/** After a reset, restore or discard the requests on disk changed, so the tree reloads too. */
+function refreshAfterReset(queryClient: QueryClient, collection: string): void {
+  invalidateSync(queryClient, collection);
+  void queryClient.invalidateQueries({ queryKey: collectionKeys.all });
+}
+
+/** Puts the spec-owned fields of the given operations back to the last synced spec. */
+export function useResetOpenApiSync(collection: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    networkMode: 'always',
+    mutationFn: (keys: string[]) => resetOpenApiSync(collection, keys),
+    onSettled: () => refreshAfterReset(queryClient, collection),
+  });
+}
+
+/** Writes the backed-up version of a reset request back. */
+export function useRestoreOpenApiSync(collection: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    networkMode: 'always',
+    mutationFn: (key: string) => restoreOpenApiSync(collection, key),
+    onSettled: () => refreshAfterReset(queryClient, collection),
+  });
+}
+
+/** Drops a backup without touching any request. */
+export function useDiscardOpenApiBackup(collection: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    networkMode: 'always',
+    mutationFn: (key: string) => discardOpenApiSyncBackup(collection, key),
+    onSettled: () => refreshAfterReset(queryClient, collection),
+  });
+}
+
 export function useDisconnectSync(collection: string) {
   const queryClient = useQueryClient();
   return useMutation({
