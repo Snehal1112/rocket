@@ -400,10 +400,9 @@ impl AcpSessionClient for AcpAgentClient {
                         let notif_update_tx = Arc::clone(&notif_update_tx);
                         async move {
                             if let Some(update) = session_update_to_acp(notification.update) {
-                                if let Ok(guard) = notif_update_tx.lock() {
-                                    if let Some(tx) = guard.as_ref() {
-                                        let _ = tx.send(update);
-                                    }
+                                // A poisoned lock is recovered, so no update is lost.
+                                if let Some(tx) = current_update_sender(&notif_update_tx) {
+                                    let _ = tx.send(update);
                                 }
                             }
                             Ok(())
@@ -880,10 +879,19 @@ fn session_update_to_acp(update: SessionUpdate) -> Option<AcpUpdate> {
             size: usage.size,
             cost_usd: usage
                 .cost
-                .filter(|cost| cost.currency == "USD")
+                .filter(|cost| {
+                    let usd = cost.currency == "USD";
+                    if !usd {
+                        tracing::debug!(currency = %cost.currency, "dropped a non-USD usage cost");
+                    }
+                    usd
+                })
                 .map(|cost| cost.amount),
         }),
-        _ => None,
+        _ => {
+            tracing::debug!("dropped a session update kind Rocket does not model");
+            None
+        }
     }
 }
 
@@ -1184,7 +1192,10 @@ fn stop_reason_to_wire_string(reason: StopReason) -> String {
         StopReason::MaxTurnRequests => "max_turn_requests".to_string(),
         StopReason::Refusal => "refusal".to_string(),
         StopReason::Cancelled => "cancelled".to_string(),
-        _ => "unknown".to_string(),
+        other => {
+            tracing::warn!(reason = ?other, "the agent ended a turn with an unknown stop reason");
+            "unknown".to_string()
+        }
     }
 }
 
