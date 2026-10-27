@@ -7,70 +7,62 @@ function props(overrides: Partial<React.ComponentProps<typeof OpenApiSyncActions
   return {
     query: '',
     onQueryChange: vi.fn(),
-    filteredCount: 3000,
-    selectedCount: 0,
-    itemSelectedCount: 0,
+    updateCount: 5,
+    selectedCount: 2,
     busy: false,
     locked: false,
-    onSelectAll: vi.fn(),
-    onSelectNone: vi.fn(),
-    onSkip: vi.fn(),
-    onApply: vi.fn(),
+    onConfirm: vi.fn(),
+    onAcceptAll: vi.fn(),
+    onSkipAll: vi.fn(),
+    onKeepCurrent: vi.fn(),
     ...overrides,
   };
 }
 
 describe('OpenApiSyncActionsBar', () => {
-  it('shows the count of the whole filtered set on Select all', async () => {
+  it('shows_the_summary_and_the_four_buttons', async () => {
     const p = props();
     render(<OpenApiSyncActionsBar {...p} />);
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Select all (3000)' }));
-    expect(p.onSelectAll).toHaveBeenCalled();
-  });
-
-  it('disables Skip and Apply without a selection and shows the selected count', () => {
-    render(<OpenApiSyncActionsBar {...props()} />);
-    expect(screen.getByRole('button', { name: /^Skip selected/ })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled();
-    expect(screen.getByText('0 selected')).toBeInTheDocument();
-  });
-
-  it('enables Skip and Apply and calls back', async () => {
-    const p = props({ selectedCount: 2, itemSelectedCount: 2 });
-    render(<OpenApiSyncActionsBar {...p} />);
     const user = userEvent.setup();
-    expect(screen.getByText('2 selected')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /^Skip selected/ }));
-    await user.click(screen.getByRole('button', { name: 'Apply' }));
-    await user.click(screen.getByRole('button', { name: 'Select none' }));
-    expect(p.onSkip).toHaveBeenCalled();
-    expect(p.onApply).toHaveBeenCalled();
-    expect(p.onSelectNone).toHaveBeenCalled();
+    expect(screen.getByText('5 updates from the spec · 2 selected')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Accept all' }));
+    await user.click(screen.getByRole('button', { name: 'Skip all' }));
+    await user.click(screen.getByRole('button', { name: 'Keep current' }));
+    await user.click(screen.getByRole('button', { name: 'Confirm and sync (2)' }));
+    expect(p.onAcceptAll).toHaveBeenCalled();
+    expect(p.onSkipAll).toHaveBeenCalled();
+    expect(p.onKeepCurrent).toHaveBeenCalled();
+    expect(p.onConfirm).toHaveBeenCalled();
   });
 
-  it('shows the number of requests the Skip button acts on', () => {
-    render(<OpenApiSyncActionsBar {...props({ selectedCount: 5, itemSelectedCount: 3 })} />);
-    expect(screen.getByRole('button', { name: 'Skip selected (3)' })).toBeInTheDocument();
+  it('confirm_is_disabled_with_nothing_selected', () => {
+    render(<OpenApiSyncActionsBar {...props({ selectedCount: 0 })} />);
+    expect(screen.getByRole('button', { name: 'Confirm and sync (0)' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Accept all' })).toBeEnabled();
   });
 
-  it('cannot skip variables, only requests', () => {
-    render(<OpenApiSyncActionsBar {...props({ selectedCount: 1, itemSelectedCount: 0 })} />);
-    expect(screen.getByRole('button', { name: /^Skip selected/ })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Apply' })).toBeEnabled();
+  it('confirm_shows_the_selected_count', () => {
+    render(<OpenApiSyncActionsBar {...props({ selectedCount: 7 })} />);
+    expect(screen.getByRole('button', { name: 'Confirm and sync (7)' })).toBeEnabled();
   });
 
-  it('disables Skip and Apply while busy', () => {
-    render(
-      <OpenApiSyncActionsBar {...props({ selectedCount: 2, itemSelectedCount: 2, busy: true })} />,
-    );
-    expect(screen.getByRole('button', { name: /^Skip selected/ })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled();
+  it('uses_the_singular_for_one_update', () => {
+    render(<OpenApiSyncActionsBar {...props({ updateCount: 1, selectedCount: 1 })} />);
+    expect(screen.getByText('1 update from the spec · 1 selected')).toBeInTheDocument();
   });
 
-  it('disables Select all and Select none while locked', () => {
-    render(<OpenApiSyncActionsBar {...props({ locked: true, selectedCount: 1 })} />);
-    expect(screen.getByRole('button', { name: /^Select all/ })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Select none' })).toBeDisabled();
+  it('disables_every_action_while_busy', () => {
+    render(<OpenApiSyncActionsBar {...props({ busy: true })} />);
+    for (const name of ['Accept all', 'Skip all', 'Keep current', 'Confirm and sync (2)']) {
+      expect(screen.getByRole('button', { name })).toBeDisabled();
+    }
+  });
+
+  it('disables_the_bulk_buttons_while_locked', () => {
+    render(<OpenApiSyncActionsBar {...props({ locked: true })} />);
+    expect(screen.getByRole('button', { name: 'Accept all' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Skip all' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Keep current' })).toBeDisabled();
   });
 
   it('reports the search text', async () => {

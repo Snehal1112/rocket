@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { type ReactNode, useCallback, useMemo, useState } from 'react';
+import { type ReactNode, useMemo, useState } from 'react';
 import { StateBlock } from '@/components/ui/state-block';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -15,7 +15,9 @@ import {
 } from '@/lib/queries/openapi-sync-queries';
 import { ApplyConfirmDialog } from './ApplyConfirmDialog';
 import { ApplyResultDialog } from './ApplyResultDialog';
+import { BulkConfirmDialog } from './BulkConfirmDialog';
 import { buildSelection } from './buildSelection';
+import { countOverwrites } from './bulkSelection';
 import { OpenApiSyncActionsBar } from './OpenApiSyncActionsBar';
 import { OpenApiSyncChanges } from './OpenApiSyncChanges';
 import { OpenApiSyncConsentBanner } from './OpenApiSyncConsentBanner';
@@ -23,13 +25,7 @@ import { OpenApiSyncDetail } from './OpenApiSyncDetail';
 import { OpenApiSyncHeader } from './OpenApiSyncHeader';
 import { OpenApiSyncList } from './OpenApiSyncList';
 import { OpenApiSyncOverview } from './OpenApiSyncOverview';
-import {
-  filterItems,
-  filterVariables,
-  findEntry,
-  firstEntryId,
-  isPendingChangedError,
-} from './openApiSyncView';
+import { findEntry, firstEntryId, isPendingChangedError } from './openApiSyncView';
 import { GENERIC_SYNC_ERROR, syncErrorMessage } from './syncErrors';
 import { useSyncSelection } from './useSyncSelection';
 
@@ -62,25 +58,9 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
   // The first entry is selected by default, and again when the chosen one is gone.
   const planData = plan.data;
   const sel = useSyncSelection(planData, links, setLinks);
-  const { setMany, setManyVariables, toggle, toggleVariable, approved, variables } = sel;
+  const { toggle, toggleVariable, approved, variables } = sel;
+  const [bulk, setBulk] = useState<'accept' | 'skip' | null>(null);
 
-  // Select all covers every match of the search, rows past the cap included.
-  const matchedKeys = useMemo(
-    () => (planData ? filterItems(planData.items, query).map((i) => i.key) : []),
-    [planData, query],
-  );
-  const matchedVariables = useMemo(
-    () => (planData ? filterVariables(planData.variableChanges, query).map((v) => v.name) : []),
-    [planData, query],
-  );
-  const selectAll = useCallback(() => {
-    setMany(matchedKeys, true);
-    setManyVariables(matchedVariables, true);
-  }, [setMany, setManyVariables, matchedKeys, matchedVariables]);
-  const selectNone = useCallback(() => {
-    setMany(Array.from(approved), false);
-    setManyVariables(Array.from(variables), false);
-  }, [setMany, setManyVariables, approved, variables]);
   const approvedItems = useMemo(
     () => (planData ? planData.items.filter((i) => approved.has(i.key)) : []),
     [planData, approved],
@@ -106,15 +86,16 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
       },
     });
   };
-  const skipSelected = () => {
+  const skipAll = () => {
+    setBulk(null);
     if (!planData) return;
-    const keys = approvedItems.map((i) => i.key);
+    const keys = planData.items.map((i) => i.key);
     if (keys.length === 0) return;
     if (isApplying(collection)) {
       setBusyNotice(true);
       return;
     }
-    // Only the skips go out, with no links. Other approvals wait for the Apply button.
+    // Only the skips go out, with no links and no approvals.
     const selection = buildSelection(planData, {
       approved: new Set(),
       choices: new Map(),
@@ -122,8 +103,18 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
       variables: new Set(),
       links: [],
     });
-    sel.skip(keys);
+    sel.skipAll();
     apply.mutate(selection, { onError: () => sel.unskip(keys) });
+  };
+  // A warning comes first when Accept all would overwrite edits. Skip all always asks first.
+  const requestAcceptAll = () => {
+    if (!planData) return;
+    if (countOverwrites(planData) > 0) setBulk('accept');
+    else sel.acceptAll();
+  };
+  const acceptAll = () => {
+    setBulk(null);
+    sel.acceptAll();
   };
   const checkAgain = async () => {
     setChecking(true);
@@ -211,15 +202,14 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
         <OpenApiSyncActionsBar
           query={query}
           onQueryChange={setQuery}
-          filteredCount={matchedKeys.length + matchedVariables.length}
-          selectedCount={approved.size + variables.size}
-          itemSelectedCount={approvedItems.length}
+          updateCount={planData.items.length + planData.variableChanges.length}
+          selectedCount={sel.selectedCount}
           locked={plan.isPlaceholderData}
           busy={apply.isPending || applyingAnywhere || plan.isFetching}
-          onSelectAll={selectAll}
-          onSelectNone={selectNone}
-          onSkip={skipSelected}
-          onApply={() => setConfirmOpen(true)}
+          onConfirm={() => setConfirmOpen(true)}
+          onAcceptAll={requestAcceptAll}
+          onSkipAll={() => setBulk('skip')}
+          onKeepCurrent={sel.keepCurrent}
         />
         {(busyNotice || (last !== null && last.report === undefined)) && (
           <div className='px-4 pt-2'>
@@ -255,6 +245,15 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
             />
           </div>
         </div>
+        {bulk && (
+          <BulkConfirmDialog
+            kind={bulk}
+            count={planData.items.length}
+            overwritten={bulk === 'accept' ? countOverwrites(planData) : undefined}
+            onConfirm={bulk === 'accept' ? acceptAll : skipAll}
+            onCancel={() => setBulk(null)}
+          />
+        )}
         <ApplyConfirmDialog
           open={confirmOpen && approvedItems.length + variables.size > 0}
           onOpenChange={setConfirmOpen}

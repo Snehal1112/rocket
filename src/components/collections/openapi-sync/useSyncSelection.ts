@@ -1,6 +1,7 @@
 import { type Dispatch, type SetStateAction, useCallback, useMemo, useState } from 'react';
 import type { OpenApiSelection, OpenApiSyncPlan } from '@/lib/tauri-api';
 import { buildSelection } from './buildSelection';
+import { acceptAllSelection, countOverwrites, defaultSelection } from './bulkSelection';
 
 type Links = Array<[string, string]>;
 type Choice = 'spec' | 'yours';
@@ -18,6 +19,12 @@ const emptyState = (): State => ({
   skips: new Set(),
   variables: new Set(),
   choices: new Map(),
+});
+
+/** The state a plan starts with, see `defaultSelection`. */
+const defaultState = (plan: OpenApiSyncPlan | undefined): State => ({
+  ...emptyState(),
+  ...(plan ? defaultSelection(plan) : {}),
 });
 
 const EMPTY_PLAN: OpenApiSyncPlan = {
@@ -62,19 +69,20 @@ function withKeys(set: Set<string>, keys: Iterable<string>, on: boolean): Set<st
 /**
  * The selection of one OpenAPI sync tab. It lives in the tab, not in a store. The rename links
  * are owned by the caller because they are part of the plan query key. A plan with a new
- * digest set clears the selection, so an approval never outlives the item it was made for.
+ * digest set resets the selection to the defaults, so an approval never outlives the item it
+ * was made for. Inside one plan the user's choices are kept.
  */
 export function useSyncSelection(
   plan: OpenApiSyncPlan | undefined,
   links: Links,
   setLinks: Dispatch<SetStateAction<Links>>,
 ) {
-  const [state, setState] = useState<State>(emptyState);
+  const [state, setState] = useState<State>(() => defaultState(plan));
   const signature = useMemo(() => (plan ? planSignature(plan) : ''), [plan]);
   const [seen, setSeen] = useState(signature);
   if (seen !== signature) {
     setSeen(signature);
-    setState(emptyState());
+    setState(defaultState(plan));
     // Links stay across new plans. Only the ones the plan no longer shows are dropped.
     if (plan && links.length > 0) {
       const valid = links.filter(([oldKey, newKey]) => linkIsShown(plan, oldKey, newKey));
@@ -143,6 +151,31 @@ export function useSyncSelection(
 
   const clearLinks = useCallback(() => setLinks([]), [setLinks]);
 
+  const acceptAll = useCallback((): { overwritten: number } => {
+    const overwritten = plan ? countOverwrites(plan) : 0;
+    if (plan) {
+      setState((s) => {
+        const next = acceptAllSelection(plan, s.approved, s.choices);
+        // The accepted items must not stay skipped.
+        return { ...s, ...next, skips: withKeys(s.skips, next.approved, false) };
+      });
+    }
+    return { overwritten };
+  }, [plan]);
+
+  const keepCurrent = useCallback(() => {
+    setState((s) => ({ ...s, approved: new Set(), variables: new Set() }));
+  }, []);
+
+  const skipAll = useCallback(() => {
+    setState((s) => ({
+      ...s,
+      approved: new Set(),
+      variables: new Set(),
+      skips: new Set(plan ? plan.items.map((i) => i.key) : []),
+    }));
+  }, [plan]);
+
   const reset = useCallback(() => setState(emptyState()), []);
 
   const selection: OpenApiSelection = useMemo(
@@ -168,5 +201,9 @@ export function useSyncSelection(
     clearLinks,
     reset,
     selection,
+    selectedCount: state.approved.size + state.variables.size,
+    acceptAll,
+    keepCurrent,
+    skipAll,
   };
 }

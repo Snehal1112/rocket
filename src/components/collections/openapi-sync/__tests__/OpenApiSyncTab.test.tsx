@@ -333,7 +333,7 @@ describe('OpenApiSyncTab', () => {
       ),
     ).toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole('checkbox', { name: 'Include Add pet in apply' }));
-    expect(screen.getByRole('button', { name: /^Apply/ })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /^Confirm and sync/ })).toBeEnabled();
   });
 
   it('explains that the link must be approved when there is no plan', async () => {
@@ -376,9 +376,10 @@ describe('OpenApiSyncTab actions', () => {
     renderWithQuery(<OpenApiSyncTab collection='sel1' />);
     await screen.findByText('Folder: pets / read');
     expect(screen.getAllByRole('checkbox')).toHaveLength(3);
-    expect(screen.getByText('0 selected')).toBeInTheDocument();
+    // The new request starts selected, the one with a conflict does not.
+    expect(screen.getByText(/· 1 selected$/)).toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole('checkbox', { name: 'Include Add pet in apply' }));
-    expect(screen.getByText('1 selected')).toBeInTheDocument();
+    expect(screen.getByText(/· 2 selected$/)).toBeInTheDocument();
   });
 
   it('links a rename, re-plans with the link and shows one Changed item', async () => {
@@ -400,7 +401,7 @@ describe('OpenApiSyncTab actions', () => {
     ]);
   });
 
-  it('skips the selected items with their fingerprints and drops them after the refetch', async () => {
+  it('skip_all_asks_first_and_then_sends_skips_with_fingerprints', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
     vi.mocked(tauriApi.getOpenApiSyncPlan)
       .mockResolvedValueOnce(makePlan())
@@ -409,16 +410,23 @@ describe('OpenApiSyncTab actions', () => {
     renderWithQuery(<OpenApiSyncTab collection='skip1' />);
     const user = userEvent.setup();
     await screen.findByText('Add pet');
-    await user.click(screen.getByRole('checkbox', { name: 'Include Add pet in apply' }));
-    await user.click(screen.getByRole('button', { name: /^Skip selected/ }));
-    await waitFor(() =>
-      expect(tauriApi.applyOpenApiSync).toHaveBeenCalledWith('skip1', {
-        items: [],
-        skips: [{ key: 'POST /pets', fingerprint: 'f2' }],
-        variables: [],
-        renameLinks: [],
-      }),
-    );
+    await user.click(screen.getByRole('button', { name: 'Skip all' }));
+    // Nothing is sent before the user confirms.
+    expect(tauriApi.applyOpenApiSync).not.toHaveBeenCalled();
+    const dialog = screen.getByRole('alertdialog');
+    expect(within(dialog).getByText(/This skips 3 requests/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Skip all' }));
+    await waitFor(() => expect(tauriApi.applyOpenApiSync).toHaveBeenCalledTimes(1));
+    expect(tauriApi.applyOpenApiSync).toHaveBeenCalledWith('skip1', {
+      items: [],
+      skips: [
+        { key: 'DELETE /pets', fingerprint: 'f3' },
+        { key: 'POST /pets', fingerprint: 'f2' },
+        { key: 'GET /pets', fingerprint: 'f1' },
+      ],
+      variables: [],
+      renameLinks: [],
+    });
     expect(await screen.findByText('1 skipped.')).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByText('Add pet')).toBeNull());
   });
@@ -433,8 +441,10 @@ describe('OpenApiSyncTab actions', () => {
     renderWithQuery(<OpenApiSyncTab collection='apply1' />);
     const user = userEvent.setup();
     await screen.findByText('Add pet');
-    await user.click(screen.getByRole('button', { name: 'Select all (3)' }));
-    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    // The new request is selected already. The changed and the removed one are added by hand.
+    await user.click(screen.getByRole('checkbox', { name: 'Include Add pet in apply' }));
+    await user.click(screen.getByRole('checkbox', { name: 'Include Delete pet in apply' }));
+    await user.click(screen.getByRole('button', { name: 'Confirm and sync (3)' }));
     expect(screen.getByText('1 new request will be added.')).toBeInTheDocument();
     expect(
       screen.getByText('1 removed request will be deleted if Rocket can rewrite it, because you did not edit it.'),
@@ -462,15 +472,17 @@ describe('OpenApiSyncTab actions', () => {
       }),
     );
     await user.click(screen.getByRole('checkbox', { name: 'Include Add pet in apply' }));
-    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    await user.click(screen.getByRole('button', { name: /^Confirm and sync/ }));
     await user.click(screen.getByRole('button', { name: 'Apply now' }));
     await waitFor(() => expect(tauriApi.applyOpenApiSync).toHaveBeenCalled());
-    expect(vi.mocked(tauriApi.applyOpenApiSync).mock.calls[0]?.[1].items).toEqual([
-      { key: 'POST /pets', digest: 'd2', choices: { url: 'spec' } },
-    ]);
+    expect(vi.mocked(tauriApi.applyOpenApiSync).mock.calls[0]?.[1].items).toContainEqual({
+      key: 'POST /pets',
+      digest: 'd2',
+      choices: { url: 'spec' },
+    });
   });
 
-  it('searches every group and selects all matches, hidden rows included', async () => {
+  it('searches every group, rows past the cap included', async () => {
     const items = Array.from({ length: 600 }, (_, i) => ({
       ...changedItem,
       key: `GET /p${i}`,
@@ -478,16 +490,15 @@ describe('OpenApiSyncTab actions', () => {
     })) as OpenApiSyncItem[];
     mockSync(makePlan({ items }));
     renderWithQuery(<OpenApiSyncTab collection='search1' />);
-    const user = userEvent.setup();
     await screen.findByText('Changed (600)');
-    expect(screen.getByRole('button', { name: 'Select all (600)' })).toBeInTheDocument();
+    expect(screen.getByText('600 updates from the spec · 0 selected')).toBeInTheDocument();
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search changes' }), {
       target: { value: 'Request 5' },
     });
     // Request 5, 50-59 and 500-599 match, the last ones past the 500 row cap.
     expect(await screen.findByText('Changed (111)')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Select all (111)' }));
-    expect(screen.getByText('111 selected')).toBeInTheDocument();
+    // The summary counts the whole plan, not the filtered rows.
+    expect(screen.getByText('600 updates from the spec · 0 selected')).toBeInTheDocument();
   });
 
   it('shows the sentence for an apply error', async () => {
@@ -499,7 +510,7 @@ describe('OpenApiSyncTab actions', () => {
     const user = userEvent.setup();
     await screen.findByText('Add pet');
     await user.click(screen.getByRole('checkbox', { name: 'Include Add pet in apply' }));
-    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    await user.click(screen.getByRole('button', { name: /^Confirm and sync/ }));
     await user.click(screen.getByRole('button', { name: 'Apply now' }));
     expect(
       await screen.findByText('Another apply is not finished yet. Wait a moment and try again.'),
@@ -514,7 +525,7 @@ describe('OpenApiSyncTab actions', () => {
     const user = userEvent.setup();
     await screen.findByText('Add pet');
     await user.click(screen.getByRole('checkbox', { name: 'Include Add pet in apply' }));
-    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    await user.click(screen.getByRole('button', { name: /^Confirm and sync/ }));
     await user.click(screen.getByRole('button', { name: 'Apply now' }));
     await screen.findByText('1 applied: 0 created, 1 updated.');
     await waitFor(() => expect(tauriApi.getOpenApiSyncPlan).toHaveBeenCalledTimes(2));
@@ -548,14 +559,14 @@ describe('OpenApiSyncTab actions', () => {
     await user.click(await screen.findByRole('button', { name: 'Link as rename' }));
     await screen.findByText('Changed (1)');
     // A skip with a link in place carries no links.
-    await user.click(await screen.findByRole('checkbox', { name: 'Include List pets in apply' }));
-    await user.click(screen.getByRole('button', { name: /^Skip selected/ }));
+    await user.click(await screen.findByRole('button', { name: 'Skip all' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Skip all' }));
     await waitFor(() => expect(tauriApi.applyOpenApiSync).toHaveBeenCalledTimes(1));
     expect(vi.mocked(tauriApi.applyOpenApiSync).mock.calls[0]?.[1].renameLinks).toEqual([]);
     await user.click((await screen.findAllByRole('button', { name: 'Close' }))[0] as HTMLElement);
     // An apply sends the link, and the next selection does not.
     await user.click(await screen.findByRole('checkbox', { name: 'Include List pets in apply' }));
-    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    await user.click(screen.getByRole('button', { name: /^Confirm and sync/ }));
     await user.click(screen.getByRole('button', { name: 'Apply now' }));
     await waitFor(() => expect(tauriApi.applyOpenApiSync).toHaveBeenCalledTimes(2));
     expect(vi.mocked(tauriApi.applyOpenApiSync).mock.calls[1]?.[1].renameLinks).toEqual([
@@ -578,7 +589,7 @@ describe('OpenApiSyncTab actions', () => {
     expect(screen.queryByText('Loading the plan...')).toBeNull();
     expect(screen.getByRole('checkbox', { name: 'Include List pets in apply' })).toBeInTheDocument();
     // Apply waits for the real plan.
-    expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^Confirm and sync/ })).toBeDisabled();
   });
 
   it('does not mark rows as skipped when another apply is already running', async () => {
@@ -600,29 +611,18 @@ describe('OpenApiSyncTab actions', () => {
     for (const box of screen.getAllByRole('checkbox', { name: 'Include Add pet in apply' })) {
       await user.click(box);
     }
-    await user.click(screen.getAllByRole('button', { name: 'Apply' })[0] as HTMLElement);
+    await user.click(screen.getAllByRole('button', { name: /^Confirm and sync/ })[0] as HTMLElement);
     await user.click(screen.getByRole('button', { name: 'Apply now' }));
     // The other tab sees the apply and can neither apply nor skip.
-    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Apply' })[1]).toBeDisabled());
-    expect(screen.getAllByRole('button', { name: /^Skip selected/ })[1]).toBeDisabled();
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /^Confirm and sync/ })[1]).toBeDisabled());
+    expect(screen.getAllByRole('button', { name: 'Skip all' })[1]).toBeDisabled();
     await act(async () => finish(report));
     // Both tabs show the shared report, so Escape closes it for both.
     await screen.findAllByText('Apply finished');
     await user.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByText('Apply finished')).toBeNull());
-    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Apply' })[1]).toBeEnabled());
+    await waitFor(() => expect(screen.getAllByRole('button', { name: /^Confirm and sync/ })[1]).toBeEnabled());
     expect(screen.queryByText('Skipped')).toBeNull();
-  });
-
-  it('keeps a selection made outside the filter when Select all runs on a filter', async () => {
-    mockSync();
-    renderWithQuery(<OpenApiSyncTab collection='keep2' />);
-    const user = userEvent.setup();
-    await screen.findByText('Add pet');
-    await user.click(screen.getByRole('checkbox', { name: 'Include Add pet in apply' }));
-    await user.type(screen.getByRole('searchbox', { name: 'Search changes' }), 'List');
-    await user.click(screen.getByRole('button', { name: 'Select all (1)' }));
-    expect(screen.getByText('2 selected')).toBeInTheDocument();
   });
 
   it('closes the confirm dialog when the plan changes under it', async () => {
@@ -631,7 +631,7 @@ describe('OpenApiSyncTab actions', () => {
     const user = userEvent.setup();
     await screen.findByText('Add pet');
     await user.click(screen.getByRole('checkbox', { name: 'Include Add pet in apply' }));
-    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    await user.click(screen.getByRole('button', { name: /^Confirm and sync/ }));
     expect(screen.getByRole('button', { name: 'Apply now' })).toBeInTheDocument();
     vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(
       makePlan({ items: [{ ...changedItem, digest: 'zz' } as OpenApiSyncItem] }),
@@ -639,10 +639,10 @@ describe('OpenApiSyncTab actions', () => {
     const onChecked = vi.mocked(tauriApi.onOpenApiSyncChecked).mock.calls[0]?.[0];
     await act(async () => onChecked?.({ collection: 'conf1' } as never));
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Apply now' })).toBeNull());
-    expect(screen.getByText('0 selected')).toBeInTheDocument();
+    expect(screen.getByText(/· 0 selected$/)).toBeInTheDocument();
     // Selecting again must not pop the dialog open by itself.
     await user.click(await screen.findByRole('checkbox', { name: 'Include Add pet in apply' }));
-    expect(screen.getByText('1 selected')).toBeInTheDocument();
+    expect(screen.getByText(/· 1 selected$/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Apply now' })).toBeNull();
   });
 
@@ -668,7 +668,7 @@ describe('OpenApiSyncTab actions', () => {
     const onChecked = vi.mocked(tauriApi.onOpenApiSyncChecked).mock.calls[0]?.[0];
     await act(async () => onChecked?.({ collection: 'links3' } as never));
     await user.click(await screen.findByRole('checkbox', { name: 'Include List pets in apply' }));
-    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    await user.click(screen.getByRole('button', { name: /^Confirm and sync/ }));
     await user.click(screen.getByRole('button', { name: 'Apply now' }));
     await waitFor(() => expect(tauriApi.applyOpenApiSync).toHaveBeenCalled());
     expect(vi.mocked(tauriApi.applyOpenApiSync).mock.calls[0]?.[1].renameLinks).toEqual([
@@ -681,11 +681,11 @@ describe('OpenApiSyncTab actions', () => {
     renderWithQuery(<OpenApiSyncTab collection='fetch1' />);
     const user = userEvent.setup();
     await user.click(await screen.findByRole('checkbox', { name: 'Include Add pet in apply' }));
-    expect(screen.getByRole('button', { name: 'Apply' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /^Confirm and sync/ })).toBeEnabled();
     vi.mocked(tauriApi.getOpenApiSyncPlan).mockReturnValue(new Promise(() => undefined));
     const onChecked = vi.mocked(tauriApi.onOpenApiSyncChecked).mock.calls[0]?.[0];
     await act(async () => onChecked?.({ collection: 'fetch1' } as never));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Apply' })).toBeDisabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: /^Confirm and sync/ })).toBeDisabled());
   });
 
   it('shows the report again when the tab is opened after leaving mid-apply', async () => {
@@ -699,7 +699,7 @@ describe('OpenApiSyncTab actions', () => {
     const first = renderWithQuery(<OpenApiSyncTab collection='away1' />);
     const user = userEvent.setup();
     await user.click(await screen.findByRole('checkbox', { name: 'Include Add pet in apply' }));
-    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    await user.click(screen.getByRole('button', { name: /^Confirm and sync/ }));
     await user.click(screen.getByRole('button', { name: 'Apply now' }));
     first.unmount();
     await act(async () => finish(report));
@@ -720,7 +720,7 @@ describe('OpenApiSyncTab actions', () => {
     const first = renderWithQuery(<OpenApiSyncTab collection='away2' />);
     const user = userEvent.setup();
     await user.click(await screen.findByRole('checkbox', { name: 'Include Add pet in apply' }));
-    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    await user.click(screen.getByRole('button', { name: /^Confirm and sync/ }));
     await user.click(screen.getByRole('button', { name: 'Apply now' }));
     first.unmount();
     await act(async () => fail('Conflict: an earlier apply is not finished yet'));
@@ -743,7 +743,7 @@ describe('OpenApiSyncTab actions', () => {
     await user.click(
       await screen.findByRole('checkbox', { name: 'Include Base URL baseUrl in apply' }),
     );
-    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    await user.click(screen.getByRole('button', { name: /^Confirm and sync/ }));
     expect(
       screen.getByText('1 variable change will be applied. A value you changed yourself is kept.'),
     ).toBeInTheDocument();
@@ -774,10 +774,82 @@ describe('OpenApiSyncTab actions', () => {
     );
     const user = userEvent.setup();
     await user.click(await screen.findByRole('checkbox', { name: 'Include Add pet in apply' }));
-    await user.click(screen.getByRole('button', { name: 'Apply' }));
+    await user.click(screen.getByRole('button', { name: /^Confirm and sync/ }));
     fireEvent.click(screen.getByText('start other'));
     await user.click(screen.getByRole('button', { name: 'Apply now' }));
     expect(await screen.findByText('Another apply is still running. Wait for it to finish.')).toBeInTheDocument();
     expect(tauriApi.applyOpenApiSync).toHaveBeenCalledTimes(1);
+  });
+
+  it('confirm_and_sync_opens_the_confirm_dialog_with_counts', async () => {
+    mockSync(makePlan({ items: [newItem, { ...newItem, key: 'GET /cats', name: 'List cats', digest: 'dc', fingerprint: 'fc' }] }));
+    renderWithQuery(<OpenApiSyncTab collection='bulk1' />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Confirm and sync (2)' }));
+    expect(screen.getByText('2 new requests will be added.')).toBeInTheDocument();
+    expect(tauriApi.applyOpenApiSync).not.toHaveBeenCalled();
+  });
+
+  it('accept_all_warns_before_overwriting_edits', async () => {
+    mockSync();
+    vi.mocked(tauriApi.applyOpenApiSync).mockResolvedValue(report);
+    renderWithQuery(<OpenApiSyncTab collection='bulk2' />);
+    const user = userEvent.setup();
+    await screen.findByText('Add pet');
+    await user.click(screen.getByRole('button', { name: 'Accept all' }));
+    const dialog = screen.getByRole('alertdialog');
+    expect(within(dialog).getByText('1 of your edits will be overwritten.')).toBeInTheDocument();
+    // Cancel changes nothing.
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(screen.getByText(/· 1 selected$/)).toBeInTheDocument();
+    // Confirm selects the changed item and takes the spec on its conflict.
+    await user.click(screen.getByRole('button', { name: 'Accept all' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Accept all' }));
+    expect(screen.getByText(/· 2 selected$/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Confirm and sync (2)' }));
+    await user.click(screen.getByRole('button', { name: 'Apply now' }));
+    await waitFor(() => expect(tauriApi.applyOpenApiSync).toHaveBeenCalledTimes(1));
+    const items = vi.mocked(tauriApi.applyOpenApiSync).mock.calls[0]?.[1].items ?? [];
+    expect(items.find((i) => i.key === 'POST /pets')?.choices).toEqual({ url: 'spec' });
+    // The removed request was never part of it.
+    expect(items.map((i) => i.key)).not.toContain('DELETE /pets');
+  });
+
+  it('accept_all_without_conflicts_needs_no_warning', async () => {
+    const plain = {
+      ...changedItem,
+      changes: [{ field: 'header:Accept', outcome: 'takeSpec', baseline: 'a', yours: 'a', spec: 'b' }],
+    } as OpenApiSyncItem;
+    mockSync(makePlan({ items: [plain, { ...removedItem, edited: true } as OpenApiSyncItem] }));
+    renderWithQuery(<OpenApiSyncTab collection='bulk3' />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('checkbox', { name: 'Include Add pet in apply' }));
+    expect(screen.getByText(/· 0 selected$/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Accept all' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(screen.getByText(/· 1 selected$/)).toBeInTheDocument();
+  });
+
+  it('skip_all_does_nothing_when_cancelled', async () => {
+    mockSync();
+    renderWithQuery(<OpenApiSyncTab collection='bulk4' />);
+    const user = userEvent.setup();
+    await screen.findByText('Add pet');
+    await user.click(screen.getByRole('button', { name: 'Skip all' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Cancel' }));
+    expect(tauriApi.applyOpenApiSync).not.toHaveBeenCalled();
+    expect(screen.getByText(/· 1 selected$/)).toBeInTheDocument();
+  });
+
+  it('keep_current_sends_nothing', async () => {
+    mockSync();
+    renderWithQuery(<OpenApiSyncTab collection='bulk5' />);
+    const user = userEvent.setup();
+    await screen.findByText('Add pet');
+    await user.click(screen.getByRole('button', { name: 'Keep current' }));
+    expect(screen.getByText(/· 0 selected$/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Confirm and sync (0)' })).toBeDisabled();
+    expect(tauriApi.applyOpenApiSync).not.toHaveBeenCalled();
   });
 });
