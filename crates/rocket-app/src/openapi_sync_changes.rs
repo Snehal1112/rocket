@@ -129,10 +129,7 @@ impl OpenApiSyncService {
         let root = repo.collection_root_path(collection)?;
         let source = self.load(&root)?;
         // The pending copy when one waits, else the applied copy.
-        let latest = match self.sources.load_pending(&root)? {
-            Some(bytes) => Some(bytes),
-            None => self.sources.load_applied(&root)?,
-        };
+        let latest = self.latest_spec_bytes(&root, &source)?.map(|(bytes, _)| bytes);
         let spec_version = latest
             .and_then(|bytes| String::from_utf8(bytes).ok())
             .and_then(|text| ParsedSpec::parse(&text).ok())

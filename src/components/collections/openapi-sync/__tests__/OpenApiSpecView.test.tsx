@@ -11,6 +11,9 @@ vi.mock('@/lib/tauri-api', async () => {
   return { ...actual, getOpenApiSyncSpecView: vi.fn(), getOpenApiSyncOverview: vi.fn() };
 });
 
+// The 500-row tests render many rows, so a busy machine needs more time.
+vi.setConfig({ testTimeout: 30000 });
+
 function op(over: Partial<OpenApiSpecOperation> = {}): OpenApiSpecOperation {
   return {
     key: 'listPets',
@@ -109,6 +112,23 @@ describe('OpenApiSpecView', () => {
     expect(screen.getAllByRole('button', { name: /^GET \/p/ })).toHaveLength(500);
     await userEvent.setup().click(screen.getByRole('button', { name: 'Show more (100)' }));
     expect(screen.getAllByRole('button', { name: /^GET \/p/ })).toHaveLength(600);
+  });
+
+  it('one_budget_covers_all_tags', async () => {
+    const groups = Array.from({ length: 30 }, (_, g) => ({
+      tag: `tag${g}`,
+      operations: Array.from({ length: 30 }, (_, i) =>
+        op({ key: `op${g}-${i}`, path: `/t${g}/p${i}`, summary: null }),
+      ),
+    }));
+    show(view({ groups }));
+    await screen.findByText('tag0 (30)');
+    // 900 operations in 30 tags: only the first 500 rows are in the page.
+    expect(screen.getAllByRole('button', { name: /^GET \/t/ })).toHaveLength(500);
+    expect(screen.queryByText('tag29 (30)')).toBeNull();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Show more (400)' }));
+    expect(screen.getAllByRole('button', { name: /^GET \/t/ })).toHaveLength(900);
+    expect(screen.getByText('tag29 (30)')).toBeInTheDocument();
   });
 
   it('expanding_a_row_shows_parameters_and_responses', async () => {

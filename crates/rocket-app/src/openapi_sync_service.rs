@@ -428,7 +428,7 @@ impl OpenApiSyncService {
     }
 
     /// True when the pending hash has its file and the file matches. No pending hash is fine.
-    fn pending_is_sound(&self, root: &Path, source: &OpenApiSource) -> bool {
+    pub(crate) fn pending_is_sound(&self, root: &Path, source: &OpenApiSource) -> bool {
         let Some(hash) = source.pending_sha256.as_deref() else {
             return true;
         };

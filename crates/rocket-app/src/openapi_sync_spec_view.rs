@@ -12,6 +12,22 @@ use crate::openapi_sync_service::OpenApiSyncService;
 use crate::openapi_sync_view::{SpecOpRow, SpecTagGroup, SpecView, SpecViewState};
 
 impl OpenApiSyncService {
+    /// The bytes of the latest stored spec and whether they are the pending copy. A pending
+    /// file counts only when the source holds its hash, since a leftover file is harmless.
+    /// `spec_view` calls it under the collection lock.
+    pub(crate) fn latest_spec_bytes(
+        &self,
+        root: &std::path::Path,
+        source: &rocket_collection::openapi_source::OpenApiSource,
+    ) -> DomainResult<Option<(Vec<u8>, bool)>> {
+        if source.pending_sha256.is_some() && self.pending_is_sound(root, source) {
+            if let Some(bytes) = self.sources.load_pending(root)? {
+                return Ok(Some((bytes, true)));
+            }
+        }
+        Ok(self.sources.load_applied(root)?.map(|bytes| (bytes, false)))
+    }
+
     /// The latest stored spec: the pending copy when one waits, else the applied copy. The
     /// files are read under the collection lock, so an apply never shows half a state.
     pub fn spec_view(&self, collection: &str) -> DomainResult<SpecView> {
@@ -23,12 +39,10 @@ impl OpenApiSyncService {
         let lock = collection_lock(&root);
         let _guard = lock.lock();
         let source = self.load(&root)?;
-        let (bytes, state) = match self.sources.load_pending(&root)? {
-            Some(bytes) => (bytes, SpecViewState::UpdatesWaiting),
-            None => match self.sources.load_applied(&root)? {
-                Some(bytes) => (bytes, SpecViewState::InSync),
-                None => return Ok(no_copy()),
-            },
+        let (bytes, state) = match self.latest_spec_bytes(&root, &source)? {
+            Some((bytes, true)) => (bytes, SpecViewState::UpdatesWaiting),
+            Some((bytes, false)) => (bytes, SpecViewState::InSync),
+            None => return Ok(no_copy()),
         };
         let spec = String::from_utf8(bytes)
             .ok()

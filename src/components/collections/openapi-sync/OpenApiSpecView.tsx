@@ -8,7 +8,7 @@ import { useOpenApiSyncOverview, useOpenApiSyncSpecView } from '@/lib/queries/op
 import type { OpenApiSpecGroup, OpenApiSpecOperation } from '@/lib/tauri-api';
 import { syncErrorMessage } from './syncErrors';
 
-/** Large specs list this many operations per tag, then offer more. */
+/** Large specs list this many operations in total, then offer more. */
 const PAGE_SIZE = 500;
 
 function matches(op: OpenApiSpecOperation, needle: string): boolean {
@@ -82,25 +82,23 @@ function OperationRow({ op }: { op: OpenApiSpecOperation }) {
   );
 }
 
-function TagGroup({ group, ops }: { group: OpenApiSpecGroup; ops: OpenApiSpecOperation[] }) {
-  const [shown, setShown] = useState(PAGE_SIZE);
-  const visible = ops.slice(0, shown);
-  const remaining = ops.length - visible.length;
+function TagGroup({
+  group,
+  total,
+  shown,
+}: {
+  group: OpenApiSpecGroup;
+  total: number;
+  shown: OpenApiSpecOperation[];
+}) {
   return (
     <section className='flex flex-col gap-1'>
-      <h3 className='text-sm font-medium'>{`${group.tag} (${ops.length})`}</h3>
+      <h3 className='text-sm font-medium'>{`${group.tag} (${total})`}</h3>
       <ul className='rounded-md border border-border/70'>
-        {visible.map((op) => (
+        {shown.map((op) => (
           <OperationRow key={op.key} op={op} />
         ))}
       </ul>
-      {remaining > 0 && (
-        <div>
-          <Button variant='outline' size='sm' onClick={() => setShown((n) => n + PAGE_SIZE)}>
-            {`Show more (${remaining})`}
-          </Button>
-        </div>
-      )}
     </section>
   );
 }
@@ -116,6 +114,7 @@ export function OpenApiSpecView({
   const spec = useOpenApiSyncSpecView(collection);
   const overview = useOpenApiSyncOverview(collection);
   const [query, setQuery] = useState('');
+  const [shown, setShown] = useState(PAGE_SIZE);
   const needle = query.trim().toLowerCase();
   const groups = useMemo(
     () =>
@@ -124,6 +123,19 @@ export function OpenApiSpecView({
         .filter((g) => g.ops.length > 0),
     [spec.data, needle],
   );
+  // One budget covers every tag, so a spec with many small tags stays light too.
+  const total = groups.reduce((n, g) => n + g.ops.length, 0);
+  const remaining = Math.max(0, total - shown);
+  const visible = useMemo(() => {
+    let budget = shown;
+    return groups
+      .map(({ group, ops }) => {
+        const take = ops.slice(0, budget);
+        budget -= take.length;
+        return { group, total: ops.length, shown: take };
+      })
+      .filter((g) => g.shown.length > 0);
+  }, [groups, shown]);
 
   const back = (
     <Button variant='ghost' size='sm' className='self-start' onClick={onBack}>
@@ -178,12 +190,24 @@ export function OpenApiSpecView({
         aria-label='Search operations'
         placeholder='Search by method, path or summary'
         value={query}
-        onChange={(e) => setQuery(e.target.value)}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setShown(PAGE_SIZE);
+        }}
       />
       {groups.length === 0 ? (
         <StateBlock tone='empty'>No operations match.</StateBlock>
       ) : (
-        groups.map(({ group, ops }) => <TagGroup key={group.tag} group={group} ops={ops} />)
+        visible.map((g) => (
+          <TagGroup key={g.group.tag} group={g.group} total={g.total} shown={g.shown} />
+        ))
+      )}
+      {remaining > 0 && (
+        <div>
+          <Button variant='outline' size='sm' onClick={() => setShown((n) => n + PAGE_SIZE)}>
+            {`Show more (${remaining})`}
+          </Button>
+        </div>
       )}
     </div>
   );

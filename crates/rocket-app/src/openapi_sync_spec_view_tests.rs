@@ -90,3 +90,32 @@ async fn the_overview_version_falls_back_to_the_applied_copy() {
     let overview = w.svc.overview(&w.name).expect("overview");
     assert_eq!(overview.spec_version.as_deref(), Some("1"));
 }
+
+#[tokio::test]
+async fn a_leftover_pending_file_without_a_hash_is_not_shown_as_waiting() {
+    let w = world().await;
+    // A failed clear leaves the file behind, but the source holds no pending hash.
+    rocket_infra::FsOpenApiSourceRepo
+        .save_pending(
+            &w.root,
+            v2().replace(r#""version":"1""#, r#""version":"9""#)
+                .as_bytes(),
+        )
+        .expect("stray pending file");
+    assert!(w.source().pending_sha256.is_none());
+    let view = w.svc.spec_view(&w.name).expect("view");
+    assert_eq!(view.state, SpecViewState::InSync);
+    assert_eq!(view.version.as_deref(), Some("1"));
+    assert!(keys(&view).iter().all(|(_, is_new)| !is_new));
+    let overview = w.svc.overview(&w.name).expect("overview");
+    assert_eq!(overview.spec_version.as_deref(), Some("1"));
+}
+
+#[tokio::test]
+async fn a_pending_file_that_does_not_match_its_hash_is_not_shown() {
+    let w = world().await;
+    w.check_with(v2()).await;
+    std::fs::write(w.root.join(".rocket/openapi-pending.spec"), "{}").expect("tamper");
+    let view = w.svc.spec_view(&w.name).expect("view");
+    assert_eq!(view.state, SpecViewState::InSync);
+}
