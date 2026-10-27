@@ -1,4 +1,5 @@
 import { screen, waitFor } from '@testing-library/react';
+import { open as openFilePicker } from '@tauri-apps/plugin-dialog';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as tauriApi from '@/lib/tauri-api';
@@ -13,6 +14,8 @@ vi.mock('@/lib/tauri-api', async () => {
     confirmOpenApiChangeLink: vi.fn(),
   };
 });
+
+vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), info: vi.fn() } }));
 
@@ -70,6 +73,22 @@ describe('ChangeLinkForm', () => {
     ).toBeInTheDocument();
     expect(screen.queryByText(/Only \d+ of/)).not.toBeInTheDocument();
     expect(tauriApi.previewOpenApiChangeLink).toHaveBeenCalledWith('Orders', NEW_LINK, undefined);
+  });
+
+  it('change_link_previews_a_chosen_file', async () => {
+    vi.mocked(openFilePicker).mockResolvedValue('/tmp/other.yaml');
+    const user = renderForm();
+    await user.click(screen.getByRole('button', { name: 'File' }));
+    await user.click(screen.getByRole('button', { name: /choose spec file/i }));
+    await user.click(await screen.findByRole('button', { name: 'Check link' }));
+    await waitFor(() =>
+      expect(tauriApi.previewOpenApiChangeLink).toHaveBeenCalledWith(
+        'Orders',
+        '/tmp/other.yaml',
+        undefined,
+      ),
+    );
+    expect(screen.queryByText('Access token (optional)')).toBeNull();
   });
 
   it('a_low_match_shows_the_warning', async () => {

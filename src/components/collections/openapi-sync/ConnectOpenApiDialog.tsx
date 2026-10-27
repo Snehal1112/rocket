@@ -30,6 +30,7 @@ import {
   rowsToRequest,
 } from './connectRows';
 import { isGithubLocation } from './openApiSyncView';
+import { SpecSourceField } from './SpecSourceField';
 import { connectWarningMessage, isStaleConnect, syncErrorMessage } from './syncErrors';
 
 /** The interval the import dialog also turns on for "Check for spec updates". */
@@ -156,12 +157,7 @@ export function ConnectOpenApiDialog({
             <ConnectReviewStep rows={rows} onChange={onChoice} />
           ) : (
             <div className='space-y-3'>
-              <Input
-                value={link}
-                onChange={(e) => setLink(e.target.value)}
-                placeholder='https://github.com/owner/repo/blob/main/openapi.yaml'
-                aria-label='Spec link'
-              />
+              <SpecSourceField value={link} onChange={setLink} label='Spec link' />
               <p className='text-[11px] text-muted-foreground'>
                 An https link, or http://localhost for a local server.
               </p>

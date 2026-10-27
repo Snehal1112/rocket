@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { useConfirmChangeLink, usePreviewChangeLink } from '@/lib/queries/openapi-sync-queries';
 import type { OpenApiChangeLinkPreview } from '@/lib/tauri-api';
 import { isGithubLocation, splitLocation } from './openApiSyncView';
+import { SpecSourceField } from './SpecSourceField';
 import { changeLinkWarningMessage, isStaleConnect, syncErrorMessage } from './syncErrors';
 
 interface ChangeLinkFormProps {
@@ -115,14 +116,7 @@ export function ChangeLinkForm({
         <Label htmlFor='change-link-input' className='text-xs font-medium'>
           New spec link
         </Label>
-        <Input
-          id='change-link-input'
-          aria-label='New spec link'
-          value={link}
-          onChange={(e) => edit(e.target.value)}
-          disabled={confirming}
-          placeholder='https://github.com/owner/repo/blob/main/openapi.yaml'
-        />
+        <SpecSourceField value={link} onChange={edit} label='New spec link' disabled={confirming} />
         <p className='text-[11px] text-muted-foreground'>
           Now: {splitLocation(currentLocation).short}. Your requests, skips and backups stay.
         </p>

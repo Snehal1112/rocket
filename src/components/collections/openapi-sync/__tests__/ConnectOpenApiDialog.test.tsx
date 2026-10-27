@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
+import { open as openFilePicker } from '@tauri-apps/plugin-dialog';
 import userEvent from '@testing-library/user-event';
 import { toast } from 'sonner';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,6 +9,8 @@ import { usePaneStore } from '@/stores/pane-store';
 import { createDeferred } from '@/test/deferred';
 import { ConnectOpenApiDialog } from '../ConnectOpenApiDialog';
 import { makeConnectPreview } from './fixtures';
+
+vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), info: vi.fn(), error: vi.fn() } }));
 
@@ -54,6 +57,41 @@ describe('ConnectOpenApiDialog', () => {
       skipped: 1,
       warnings: [],
     });
+  });
+
+  it('connect_previews_a_chosen_file', async () => {
+    vi.mocked(openFilePicker).mockResolvedValue('/tmp/api.yaml');
+    renderDialog();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'File' }));
+    await user.click(screen.getByRole('button', { name: /choose spec file/i }));
+    await user.click(await screen.findByRole('button', { name: 'Preview' }));
+    await screen.findByText('1 linked, 1 added, 1 skipped');
+    expect(tauriApi.previewOpenApiConnect).toHaveBeenCalledWith('Orders', '/tmp/api.yaml', undefined);
+  });
+
+  it('no_token_field_for_a_file', async () => {
+    vi.mocked(openFilePicker).mockResolvedValue('/tmp/api.yaml');
+    renderDialog();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'File' }));
+    await user.click(screen.getByRole('button', { name: /choose spec file/i }));
+    await screen.findByText('/tmp/api.yaml');
+    expect(screen.queryByText('Access token (optional)')).toBeNull();
+  });
+
+  it('errors_for_a_file_never_show_the_path', async () => {
+    vi.mocked(openFilePicker).mockResolvedValue('/home/me/secret/api.yaml');
+    vi.mocked(tauriApi.previewOpenApiConnect).mockRejectedValue(
+      'cannot read /home/me/secret/api.yaml',
+    );
+    renderDialog();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'File' }));
+    await user.click(screen.getByRole('button', { name: /choose spec file/i }));
+    await user.click(await screen.findByRole('button', { name: 'Preview' }));
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent ?? '').not.toContain('secret');
   });
 
   it('the_connect_dialog_hint_mentions_localhost', () => {
