@@ -438,3 +438,71 @@ async fn a_partial_apply_leaves_the_applied_and_pending_copies_alone() {
         .expect("load")
         .is_some());
 }
+
+fn drop_applied(w: &World) {
+    std::fs::remove_file(w.root.join(".rocket/openapi-applied.spec")).expect("remove");
+}
+
+#[tokio::test]
+async fn check_stores_the_applied_copy_when_the_hash_matches() {
+    let w = world().await;
+    drop_applied(&w);
+    w.check_with(v1()).await;
+    assert_eq!(applied(&w).as_deref(), Some(v1().as_str()));
+}
+
+#[tokio::test]
+async fn check_does_not_store_an_applied_copy_when_the_hash_differs() {
+    let w = world().await;
+    drop_applied(&w);
+    w.check_with(v2()).await;
+    assert!(applied(&w).is_none());
+    assert!(rocket_infra::FsOpenApiSourceRepo
+        .load_pending(&w.root)
+        .expect("load")
+        .is_some());
+}
+
+#[tokio::test]
+async fn check_sends_no_validators_when_the_copy_is_missing() {
+    let w = world().await;
+    *w.fetcher.etag.lock().expect("lock") = Some("\"e1\"".to_string());
+    // The first check stores the etag in the source.
+    w.check_with(v1()).await;
+    assert!(w.source().etag.is_some());
+    drop_applied(&w);
+    w.fetcher.requests.lock().expect("lock").clear();
+    w.check_with(v1()).await;
+    let requests = w.fetcher.requests.lock().expect("lock");
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].if_none_match.is_none());
+    assert!(requests[0].if_modified_since.is_none());
+}
+
+#[tokio::test]
+async fn check_without_consent_never_fetches_to_heal() {
+    let w = world().await;
+    drop_applied(&w);
+    w.svc.revoke_consent(&w.root).expect("revoke");
+    w.fetcher.requests.lock().expect("lock").clear();
+    w.svc.check(&w.root).await.expect("check");
+    assert!(w.fetcher.requests.lock().expect("lock").is_empty());
+    assert!(applied(&w).is_none());
+}
+
+#[tokio::test]
+async fn check_leaves_an_existing_applied_copy_alone() {
+    let w = world().await;
+    *w.fetcher.etag.lock().expect("lock") = Some("\"e1\"".to_string());
+    w.fetcher
+        .honor_304
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    w.check_with(v1()).await;
+    w.fetcher.requests.lock().expect("lock").clear();
+    w.check_with(v1()).await;
+    let requests = w.fetcher.requests.lock().expect("lock");
+    // The stored validators are still sent when the copy exists.
+    assert_eq!(requests[0].if_none_match.as_deref(), Some("\"e1\""));
+    drop(requests);
+    assert_eq!(applied(&w).as_deref(), Some(v1().as_str()));
+}

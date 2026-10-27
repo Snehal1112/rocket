@@ -476,7 +476,11 @@ impl OpenApiSyncService {
         // Rule 2: send the stored validators.
         // A pending hash without its file would make a 304 answer stick forever, so the
         // validators are dropped and the spec is fetched again.
-        if !self.pending_is_sound(collection_root, &source) {
+        // An import from before the saved copy existed has none. With nothing pending, one
+        // fetch without validators can store it.
+        let heal = source.pending_sha256.is_none()
+            && matches!(self.sources.load_applied(collection_root), Ok(None));
+        if heal || !self.pending_is_sound(collection_root, &source) {
             source.etag = None;
             source.last_modified = None;
         }
@@ -702,6 +706,13 @@ impl OpenApiSyncService {
             source.pending_sha256 = None;
             self.sources.save(collection_root, &source)?;
             self.sources.clear_pending(collection_root)?;
+            // The fetched text is the applied spec, so a missing saved copy is restored. A
+            // failed save never fails the check.
+            if heal {
+                if let Err(e) = self.sources.save_applied(collection_root, &text) {
+                    tracing::debug!(error = %e, "the saved spec copy could not be restored");
+                }
+            }
             self.record_success(collection_root, &now, SyncStatus::Unchanged, Some(0))?;
             return Ok(CheckOutcome::Unchanged);
         }
@@ -1160,6 +1171,10 @@ mod tests {
         fn new(src: OpenApiSource) -> Self {
             let dir = TempDir::new().expect("tempdir");
             FsOpenApiSourceRepo.save(dir.path(), &src).expect("seed");
+            // The saved copy exists, so a check keeps sending the stored validators.
+            FsOpenApiSourceRepo
+                .save_applied(dir.path(), b"openapi: 3.0.3")
+                .expect("seed applied copy");
             let fetcher = Arc::new(FakeFetcher::default());
             let secrets = Arc::new(MemSecrets::default());
             let svc = OpenApiSyncService::new(
