@@ -134,8 +134,12 @@ async fn main() -> Result<()> {
                     let _ = std::fs::write(path, dump);
                 }
                 responder.respond(
-                    NewSessionResponse::new(SessionId::new("fixture-session"))
-                        .config_options(fixture_config_options("default")),
+                    NewSessionResponse::new(SessionId::new(
+                        // Test hook: lets two sessions on one client differ.
+                        std::env::var("FIXTURE_SESSION_ID")
+                            .unwrap_or_else(|_| "fixture-session".to_string()),
+                    ))
+                    .config_options(fixture_config_options("default")),
                 )
             },
             agent_client_protocol::on_receive_request!(),

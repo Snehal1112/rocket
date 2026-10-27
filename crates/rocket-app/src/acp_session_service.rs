@@ -58,6 +58,8 @@ pub struct AcpSessionService {
     shutting_down: AtomicBool,
     agent_config_service: Arc<AgentConfigService>,
     prompt_idle_timeout: Duration,
+    /// How long one permission request may stay unanswered.
+    permission_wait_limit: Duration,
     /// Idle limits of sessions whose agent config sets one.
     session_idle: Mutex<HashMap<String, Duration>>,
     /// Values handed to each session that must never be shown: the agent
@@ -67,6 +69,10 @@ pub struct AcpSessionService {
     /// session's own values.
     stream_secrets: Option<Arc<dyn StreamSecretSource>>,
 }
+
+/// Longest time one permission request may stay open. The idle clock is
+/// paused meanwhile, so this bounds a user who walked away.
+const PERMISSION_WAIT_LIMIT: Duration = Duration::from_secs(30 * 60);
 
 /// Fixed idle limit for one prompt turn, from the spec. Every update from the
 /// agent restarts it, so a long turn that keeps making progress is never cut
@@ -123,10 +129,17 @@ impl AcpSessionService {
             shutting_down: AtomicBool::new(false),
             agent_config_service,
             prompt_idle_timeout,
+            permission_wait_limit: PERMISSION_WAIT_LIMIT,
             session_idle: Mutex::new(HashMap::new()),
             session_secrets: Mutex::new(HashMap::new()),
             stream_secrets: None,
         }
+    }
+
+    /// Test seam. Changes how long a permission request may stay unanswered.
+    pub fn with_permission_wait_limit(mut self, limit: Duration) -> Self {
+        self.permission_wait_limit = limit;
+        self
     }
 
     /// Masks the live agent text of every session with the secrets `source`
@@ -332,11 +345,16 @@ impl AcpSessionService {
         let mut outcome: Option<DomainResult<String>> = None;
         let mut channel_open = true;
         let mut tool_calls = ToolCallStates::new();
-        let mut open_permissions: HashSet<String> = HashSet::new();
+        let mut open_permissions: HashMap<String, tokio::time::Instant> = HashMap::new();
         let mut idle_deadline = tokio::time::Instant::now() + idle;
 
         while outcome.is_none() || channel_open {
             let flush_at = chunks.deadline().map(tokio::time::Instant::from_std);
+            // The oldest open permission request sets the wait deadline.
+            let permission_deadline = open_permissions
+                .values()
+                .min()
+                .map(|opened| *opened + self.permission_wait_limit);
             tokio::select! {
                 biased;
                 update = rx.recv(), if channel_open => match update {
@@ -345,7 +363,7 @@ impl AcpSessionService {
                         idle_deadline = now + idle;
                         match &update {
                             AcpUpdate::PermissionRequest { request_id, .. } => {
-                                open_permissions.insert(request_id.clone());
+                                open_permissions.insert(request_id.clone(), now);
                             }
                             AcpUpdate::PermissionResolved { request_id, .. } => {
                                 open_permissions.remove(request_id);
@@ -378,6 +396,21 @@ impl AcpSessionService {
                 {
                     self.publish_chunks(session_id, chunks.flush_due());
                 }
+                // A permission request open past the limit ends the session.
+                () = tokio::time::sleep_until(permission_deadline.unwrap_or(idle_deadline)),
+                    if permission_deadline.is_some() =>
+                {
+                    if outcome.is_some() {
+                        break;
+                    }
+                    drop(send);
+                    self.publish_chunks(session_id, chunks.finish());
+                    let message = format!(
+                        "permission request unanswered for {}s",
+                        self.permission_wait_limit.as_secs()
+                    );
+                    return Err(self.end_idle_session(session_id, message).await);
+                }
                 // A turn waiting for the user's answer is not idle. The clock
                 // starts again when the answer arrives.
                 () = tokio::time::sleep_until(idle_deadline), if open_permissions.is_empty() => {
@@ -391,7 +424,8 @@ impl AcpSessionService {
                     // the turn before the session is killed.
                     drop(send);
                     self.publish_chunks(session_id, chunks.finish());
-                    return Err(self.end_idle_session(session_id, idle).await);
+                    let message = format!("agent sent no update for {}s", idle.as_secs());
+                    return Err(self.end_idle_session(session_id, message).await);
                 }
             }
         }
@@ -580,10 +614,9 @@ impl AcpSessionService {
     /// `AcpSessionFailed`, and returns the error for the caller. The kill
     /// result is ignored on purpose: the timeout is the error the caller must
     /// see, and a session that already crashed changes nothing.
-    async fn end_idle_session(&self, session_id: &str, idle: Duration) -> DomainError {
+    async fn end_idle_session(&self, session_id: &str, message: String) -> DomainError {
         let _ = self.session_client.end_session(session_id).await;
         self.release(session_id);
-        let message = format!("agent sent no update for {}s", idle.as_secs());
         self.event_publisher.publish(DomainEvent::AcpSessionFailed {
             session_id: session_id.to_string(),
             error: message.clone(),
@@ -1988,6 +2021,32 @@ mod tests {
             .expect("a turn waiting for the user must not time out");
         assert_eq!(stop_reason, "end_turn");
         assert!(!end_session_called.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn a_permission_request_left_open_past_the_limit_ends_the_session() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let end_session_called = Arc::new(AtomicBool::new(false));
+        let client = FakeSessionClient {
+            prompt_updates: vec![permission_request("perm-1")],
+            // The user never answers within the limit.
+            pause_after_first_update: Duration::from_millis(600),
+            end_session_called: Arc::clone(&end_session_called),
+            ..Default::default()
+        };
+        let service = service_with(client, &publisher, Duration::from_millis(100))
+            .with_permission_wait_limit(Duration::from_millis(250));
+
+        let err = service
+            .send_prompt("session-1", hi())
+            .await
+            .expect_err("an unanswered permission must not wait forever");
+        assert!(err.to_string().contains("permission"), "{err}");
+        assert!(end_session_called.load(Ordering::SeqCst));
+        let events = publisher.events.lock().expect("lock");
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, DomainEvent::AcpSessionFailed { .. })));
     }
 
     #[tokio::test]

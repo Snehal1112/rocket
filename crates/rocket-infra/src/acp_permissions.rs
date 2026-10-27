@@ -59,18 +59,20 @@ impl PermissionBroker {
         Ok(())
     }
 
-    /// Answers every pending request as cancelled.
-    pub fn drain_cancelled(&self) {
-        let drained: Vec<Pending> = self
+    /// Answers every pending request as cancelled. Returns their ids.
+    pub fn drain_cancelled(&self) -> Vec<String> {
+        let drained: Vec<(String, Pending)> = self
             .pending
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .drain()
-            .map(|(_, entry)| entry)
             .collect();
-        for entry in drained {
+        let mut ids = Vec::with_capacity(drained.len());
+        for (id, entry) in drained {
             let _ = entry.answer.send(None);
+            ids.push(id);
         }
+        ids
     }
 }
 

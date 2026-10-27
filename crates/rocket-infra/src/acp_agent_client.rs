@@ -94,6 +94,32 @@ fn terminate_process(process: &SharedProcess) -> std::io::Result<()> {
         .terminate()
 }
 
+/// Stores a session. Session ids are only unique per agent process, so an id
+/// that is already taken is refused: the new process is terminated and the
+/// old session stays untouched.
+fn insert_unique_session<T>(
+    sessions: &mut HashMap<String, T>,
+    session_id: &str,
+    running: T,
+    on_reject: impl FnOnce(&T),
+) -> DomainResult<()> {
+    if sessions.contains_key(session_id) {
+        on_reject(&running);
+        return Err(DomainError::Internal(
+            "the agent returned a session id that is already in use".to_string(),
+        ));
+    }
+    sessions.insert(session_id.to_string(), running);
+    Ok(())
+}
+
+/// True when the error is a JSON-RPC error response from a live agent. A
+/// broken or closed connection surfaces from the crate as an internal error,
+/// so that code is treated as a transport failure.
+fn is_agent_error_response(error: &agent_client_protocol::Error) -> bool {
+    !matches!(error.code, agent_client_protocol::ErrorCode::InternalError)
+}
+
 /// Sets the per-prompt update sender. A poisoned lock is recovered because
 /// the guarded value is a plain `Option` that cannot be left half-written.
 fn set_update_sender(slot: &UpdateSlot, sender: Option<UnboundedSender<AcpUpdate>>) {
@@ -106,8 +132,18 @@ fn set_update_sender(slot: &UpdateSlot, sender: Option<UnboundedSender<AcpUpdate
 /// (see `open_permission_request`).
 fn end_turn(slot: &UpdateSlot, permissions: &PermissionBroker) {
     let mut guard = slot.lock().unwrap_or_else(PoisonError::into_inner);
+    let drained = permissions.drain_cancelled();
+    // The wait tasks find no sender once the slot is cleared, so the cards
+    // are closed here, while the turn's sender is still known.
+    if let Some(tx) = guard.as_ref() {
+        for request_id in drained {
+            let _ = tx.send(AcpUpdate::PermissionResolved {
+                request_id,
+                option_id: None,
+            });
+        }
+    }
     *guard = None;
-    permissions.drain_cancelled();
 }
 
 /// Ends the turn when dropped, so a `send_prompt` future that is dropped
@@ -551,7 +587,9 @@ impl AcpSessionClient for AcpAgentClient {
             let _ = terminate_session(&running);
             return Err(shutting_down_error());
         }
-        sessions.insert(info.session_id.clone(), running);
+        insert_unique_session(&mut sessions, &info.session_id, running, |new| {
+            let _ = terminate_session(new);
+        })?;
         Ok(info)
     }
 
@@ -597,6 +635,14 @@ impl AcpSessionClient for AcpAgentClient {
 
         match result {
             Ok(response) => Ok(stop_reason_to_wire_string(response.stop_reason)),
+            Err(e) if is_agent_error_response(&e) => {
+                // The agent refused this prompt but the session still works.
+                // Only the code is reported, as the message may echo a value.
+                Err(DomainError::InvalidInput(format!(
+                    "the agent rejected the prompt (error code {})",
+                    i32::from(e.code)
+                )))
+            }
             Err(e) => {
                 self.fail_and_remove(session_id).await;
                 Err(DomainError::Internal(format!("agent session failed: {e}")))
@@ -1543,5 +1589,55 @@ mod tests {
             [ContentBlock::Text(text)] => assert_eq!(text.text, "Context from rocket://x:\nbody"),
             other => panic!("expected one text block, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_json_rpc_error_response_is_not_a_transport_failure() {
+        use agent_client_protocol::Error;
+        assert!(is_agent_error_response(&Error::invalid_params()));
+        assert!(is_agent_error_response(&Error::auth_required()));
+        assert!(is_agent_error_response(&Error::new(-32001, "custom")));
+        assert!(!is_agent_error_response(&Error::internal_error()));
+    }
+
+    #[test]
+    fn a_duplicate_session_id_is_refused_and_the_old_session_kept() {
+        let mut sessions: HashMap<String, u32> = HashMap::new();
+        insert_unique_session(&mut sessions, "s1", 1, |_| panic!("not a duplicate"))
+            .expect("first insert");
+        let mut rejected = None;
+        let err = insert_unique_session(&mut sessions, "s1", 2, |new| rejected = Some(*new))
+            .expect_err("duplicate id");
+        assert!(matches!(err, DomainError::Internal(_)));
+        assert_eq!(rejected, Some(2));
+        assert_eq!(sessions.get("s1"), Some(&1));
+    }
+
+    #[tokio::test]
+    async fn end_turn_reports_drained_permissions_as_resolved_before_clearing_the_slot() {
+        let broker = PermissionBroker::default();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let slot: UpdateSlot = Arc::new(std::sync::Mutex::new(Some(tx)));
+        let (request_id, _answer) =
+            open_permission_request(&permission_request("ls"), &broker, &slot, &[])
+                .expect("a turn is running");
+        assert!(matches!(
+            rx.try_recv().expect("card"),
+            AcpUpdate::PermissionRequest { .. }
+        ));
+
+        end_turn(&slot, &broker);
+
+        match rx.try_recv().expect("resolved update") {
+            AcpUpdate::PermissionResolved {
+                request_id: id,
+                option_id,
+            } => {
+                assert_eq!(id, request_id);
+                assert_eq!(option_id, None);
+            }
+            other => panic!("expected PermissionResolved, got {other:?}"),
+        }
+        assert!(current_update_sender(&slot).is_none());
     }
 }

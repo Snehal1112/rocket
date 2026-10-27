@@ -418,7 +418,17 @@ async fn acp_agent_client_end_all_sessions_kills_every_running_session() {
         .expect("start_session a")
         .session_id;
     let session_b = client
-        .start_session(&fixture_command(), &[], "/tmp", &[], &[], None)
+        .start_session(
+            &fixture_command(),
+            &[],
+            "/tmp",
+            &[(
+                "FIXTURE_SESSION_ID".to_string(),
+                "fixture-session-b".to_string(),
+            )],
+            &[],
+            None,
+        )
         .await
         .expect("start_session b")
         .session_id;
