@@ -1,4 +1,4 @@
-import { MoreHorizontal } from 'lucide-react';
+import { MoreHorizontal, Settings2 } from 'lucide-react';
 import { useState } from 'react';
 import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -101,7 +101,12 @@ export function OpenApiSyncHeader({
             <span>Check interval: {intervalLabel(status.interval)}</span>
           </div>
         </div>
-        <div className='flex items-center gap-2'>
+        <div className='flex flex-wrap items-center gap-2'>
+          {/* The same dialog is in the menu, but a faint icon is easy to miss. */}
+          <Button variant='outline' size='sm' onClick={() => setDialogOpen(true)}>
+            <Settings2 aria-hidden='true' className='mr-1.5 h-3.5 w-3.5' />
+            Connection settings
+          </Button>
           {onViewSpec && (
             <Button variant='outline' size='sm' onClick={onViewSpec}>
               View spec

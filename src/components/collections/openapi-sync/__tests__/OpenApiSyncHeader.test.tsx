@@ -157,6 +157,13 @@ describe('OpenApiSyncHeader', () => {
       expect(await screen.findByRole('dialog')).toHaveTextContent('Edit connection settings');
     });
 
+    it('a_visible_button_beside_check_now_opens_the_connection_settings', async () => {
+      const user = userEvent.setup();
+      renderWithQuery(<OpenApiSyncHeader collection='c' status={makeStatus()} waiting={0} />);
+      await user.click(screen.getByRole('button', { name: 'Connection settings' }));
+      expect(await screen.findByRole('dialog')).toHaveTextContent('Edit connection settings');
+    });
+
     it('the_menu_opens_the_disconnect_dialog', async () => {
       const user = userEvent.setup();
       renderWithQuery(<OpenApiSyncHeader collection='c' status={makeStatus()} waiting={0} />);
