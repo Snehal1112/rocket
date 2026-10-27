@@ -425,7 +425,7 @@ export function OpenApiSyncConnectionDialog({
         }}
       >
         <DialogHeader>
-          <DialogTitle>Edit connection settings</DialogTitle>
+          <DialogTitle>Connection settings</DialogTitle>
           <DialogDescription>
             How Rocket follows the spec this collection came from.
           </DialogDescription>

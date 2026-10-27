@@ -56,6 +56,29 @@ The collection menu has **Connect to an OpenAPI spec** for a collection without 
 - A linked or added request gets a `baseUrl` variable when the collection has none.
 
 
+## Connection settings
+
+The header button (and the menu item and the Overview link) opens **Connection settings**. It has:
+
+- **Status.** When the spec was last checked and whether that went well, with a Check now button. Without approval the button is disabled. A failed check shows the fixed sentence, never the raw message.
+- **Spec link.** Change link moves the collection to another link without disconnecting. It fetches the new spec with the typed token only, shows how many operations match, and keeps the baseline, skips, backups and interval. A move away from a GitHub repo gets a fresh source id so the old repo's token is never sent to the new one.
+- **Check frequency.** For a GitHub link without a token, five-minute checks show a hint about GitHub's 60 requests an hour, with an Add token link.
+- **Access.** The GitHub token, kept in the keychain.
+
+## Next steps on a failed check
+
+A failed check shows a button under the alert: **Add access token** (not found or unauthorized on a GitHub link, opens Connection settings at the token field) or **Check now** (network, status, rate limit, too many redirects). An unknown code, a non-GitHub link or a missing approval shows no button. Every Check now trigger of a collection shares one running check.
+
+The Spec updates empty state says when the spec was last checked and offers Check now. The Your changes empty state explains how changes appear.
+
+## Values in Your changes
+
+Show changes on a modified row lists, for each changed field, the version last synced and yours (500 characters at most). Credentials are masked: the values of `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie` and `X-Api-Key` headers, URL user info, and query or form values named like `api_key`, `token`, `access_token`, `secret` or `password`. A New item in Spec updates shows a preview: method, URL, the names of enabled headers and query parameters, whether it has a body, and the auth kind. Values of headers and query parameters are not sent. **Open request** opens the request tab (or focuses it); a missing file says so.
+
+## Skipped items
+
+The "N skipped, hidden from this list." line opens the Skipped list. Each row has **Un-skip**, and **Un-skip all** takes every skip back. Un-skip refreshes the waiting count and refuses while an apply runs. A skip whose item changed again is back in the review list and is not listed here. The import dialog says a spec imported from a file is not kept in sync.
+
 ## Notifications
 
 A count badge shows on the collection row. A toast "N spec updates" with Review shows once per pending spec version. The ids that were shown are kept in `localStorage` under `rocket.openapi-sync.notified` (newest 200).
@@ -73,6 +96,8 @@ A count badge shows on the collection row. A toast "N spec updates" with Review 
 - Open reset confirm dialogs are not closed when a refetch removes their row.
 - A tangled group can only be kept, with the spec operations added or skipped. Link them by hand afterwards.
 - Scripts, tests and assertions are not compared, so they are never reset.
+- The values in Your changes are not shown for a collection whose baseline is missing or from an older converter.
+- A skip for an operation that left the spec stays in the local file until it is un-skipped.
 
 ## Manual checks
 
@@ -88,3 +113,11 @@ A count badge shows on the collection row. A toast "N spec updates" with Review 
 10. Reset, then sync: the backup of an applied request is gone.
 11. Connect a hand-made collection: Preview, check the default choices, Connect, then Check now.
 12. Open View spec with the network off.
+13. Open Change link, paste another spec link, read the counts, then Move. Check that Spec updates shows the differences.
+14. On a GitHub link, move to a link on another host: the token field is gone, and the old token is not sent.
+15. Edit a request header, open Your changes, Show changes: the value shows; add `Authorization: Bearer abc` and check it shows as a mask.
+16. Click Open request on a modified row, then on another: the tab opens, then focuses.
+17. Break the link (wrong path), Check now: the alert offers Add access token on a GitHub link, Check now on a network failure.
+18. With nothing waiting, the Spec updates empty state shows the last checked time and a Check now button.
+19. Skip an item, open the skipped line, Un-skip it, and see it return to the list and the badge count rise.
+20. Open Connection settings: the status row, the five-minute hint on a GitHub link without a token, and the title reads Connection settings from the menu, the button and the Overview link.

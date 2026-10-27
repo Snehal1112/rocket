@@ -78,7 +78,7 @@ export function OpenApiSyncHeader({
               </DropdownMenuTrigger>
               <DropdownMenuContent align='start'>
                 <DropdownMenuItem onSelect={() => openDialog()}>
-                  Edit connection settings
+                  Connection settings
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => setDisconnectOpen(true)}>
                   Disconnect

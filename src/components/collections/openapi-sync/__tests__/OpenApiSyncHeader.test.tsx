@@ -76,6 +76,15 @@ describe('OpenApiSyncHeader', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('The spec host did not answer in time.');
   });
 
+  it('every_entry_point_opens_connection_settings', async () => {
+    const user = userEvent.setup();
+    renderWithQuery(<OpenApiSyncHeader collection='c' status={makeStatus()} waiting={0} />);
+    await user.click(screen.getByRole('button', { name: 'Connection settings' }));
+    expect(
+      within(await screen.findByRole('dialog')).getByRole('heading', { name: 'Connection settings' }),
+    ).toBeInTheDocument();
+  });
+
   describe('next step in the failed-check alert', () => {
     const GITHUB = 'https://github.com/acme/api/blob/main/openapi.yaml';
     const failedWith = (code: string, over: Record<string, unknown> = {}) =>
@@ -217,15 +226,15 @@ describe('OpenApiSyncHeader', () => {
       const user = userEvent.setup();
       renderWithQuery(<OpenApiSyncHeader collection='c' status={makeStatus()} waiting={0} />);
       await user.click(screen.getByRole('button', { name: 'OpenAPI sync actions' }));
-      await user.click(await screen.findByRole('menuitem', { name: 'Edit connection settings' }));
-      expect(await screen.findByRole('dialog')).toHaveTextContent('Edit connection settings');
+      await user.click(await screen.findByRole('menuitem', { name: 'Connection settings' }));
+      expect(await screen.findByRole('dialog')).toHaveTextContent('Connection settings');
     });
 
     it('a_visible_button_beside_check_now_opens_the_connection_settings', async () => {
       const user = userEvent.setup();
       renderWithQuery(<OpenApiSyncHeader collection='c' status={makeStatus()} waiting={0} />);
       await user.click(screen.getByRole('button', { name: 'Connection settings' }));
-      expect(await screen.findByRole('dialog')).toHaveTextContent('Edit connection settings');
+      expect(await screen.findByRole('dialog')).toHaveTextContent('Connection settings');
     });
 
     it('the_menu_opens_the_disconnect_dialog', async () => {

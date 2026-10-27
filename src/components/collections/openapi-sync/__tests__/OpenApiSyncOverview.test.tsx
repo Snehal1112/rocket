@@ -82,7 +82,7 @@ describe('OpenApiSyncOverview', () => {
   it('edit_connection_settings_opens_the_dialog', async () => {
     show();
     await screen.findByText('Endpoints');
-    await userEvent.setup().click(screen.getByRole('button', { name: 'Edit connection settings' }));
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Connection settings' }));
     await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument());
   });
 

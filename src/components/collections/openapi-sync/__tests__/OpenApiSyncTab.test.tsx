@@ -391,7 +391,7 @@ describe('OpenApiSyncTab', () => {
     );
     const user = userEvent.setup();
     renderWithQuery(<TabWithListeners collection='c' />);
-    await user.click(await screen.findByRole('button', { name: 'Edit connection settings' }));
+    await user.click(await screen.findByRole('button', { name: 'Connection settings' }));
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
     vi.mocked(tauriApi.getOpenApiSyncPlan).mockReturnValue(new Promise(() => undefined));
@@ -514,7 +514,7 @@ describe('OpenApiSyncTab', () => {
     await screen.findByText('Folder: pets / read');
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'OpenAPI sync actions' }));
-    await user.click(await screen.findByRole('menuitem', { name: 'Edit connection settings' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Connection settings' }));
     await user.click(await screen.findByRole('button', { name: 'Disconnect' }));
     const confirm = await screen.findByRole('alertdialog');
     await user.click(within(confirm).getByRole('button', { name: 'Disconnect' }));

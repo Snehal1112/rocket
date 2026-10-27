@@ -103,7 +103,7 @@ export function OpenApiSyncOverview({ collection, status, onReview }: OpenApiSyn
             className='ml-2 h-auto p-0 text-xs'
             onClick={() => setDialogOpen(true)}
           >
-            Edit connection settings
+            Connection settings
           </Button>
         </Fact>
         <Fact label='Last synced'>

@@ -75,7 +75,7 @@ describe('OpenApiSyncConnectionDialog', () => {
     const view = render(tree(false));
     expect(tauriApi.getOpenApiSyncStatus).not.toHaveBeenCalled();
     view.rerender(tree(true));
-    expect(await screen.findByText('Edit connection settings')).toBeInTheDocument();
+    expect(await screen.findByText('Connection settings')).toBeInTheDocument();
     await waitFor(() => expect(tauriApi.getOpenApiSyncStatus).toHaveBeenCalledWith('d0', true));
   });
 
