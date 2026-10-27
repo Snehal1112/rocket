@@ -398,3 +398,43 @@ async fn a_304_check_that_drops_a_missing_pending_copy_stores_zero() {
     assert_eq!(outcome.expect("check"), CheckOutcome::Unchanged);
     assert_eq!(w.svc.local_state(&w.name).expect("local").pending_count, 0);
 }
+
+fn applied(w: &World) -> Option<String> {
+    rocket_infra::FsOpenApiSourceRepo
+        .load_applied(&w.root)
+        .expect("load")
+        .map(|b| String::from_utf8(b).expect("utf8"))
+}
+
+#[tokio::test]
+async fn a_finalized_apply_replaces_the_applied_copy_with_the_applied_spec() {
+    let w = world().await;
+    assert_eq!(applied(&w).as_deref(), Some(v1().as_str()));
+    w.check_with(v2()).await;
+    let plan = w.plan();
+    w.svc
+        .apply(&w.name, &w.approve(&plan, &[]))
+        .await
+        .expect("apply");
+    assert_eq!(applied(&w).as_deref(), Some(v2().as_str()));
+    assert!(rocket_infra::FsOpenApiSourceRepo
+        .load_pending(&w.root)
+        .expect("load")
+        .is_none());
+}
+
+#[tokio::test]
+async fn a_partial_apply_leaves_the_applied_and_pending_copies_alone() {
+    let w = world().await;
+    w.check_with(v2()).await;
+    let plan = w.plan();
+    w.svc
+        .apply(&w.name, &w.approve(&plan, &["listPets"]))
+        .await
+        .expect("apply");
+    assert_eq!(applied(&w).as_deref(), Some(v1().as_str()));
+    assert!(rocket_infra::FsOpenApiSourceRepo
+        .load_pending(&w.root)
+        .expect("load")
+        .is_some());
+}

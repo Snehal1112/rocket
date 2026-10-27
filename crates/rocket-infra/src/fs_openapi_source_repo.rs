@@ -17,9 +17,14 @@ const SOURCE_DIR: &str = ".rocket";
 const SOURCE_FILE: &str = "openapi-source.yml";
 
 const PENDING_FILE: &str = "openapi-pending.spec";
+const APPLIED_FILE: &str = "openapi-applied.spec";
 
 fn pending_path(collection_root: &Path) -> PathBuf {
     collection_root.join(SOURCE_DIR).join(PENDING_FILE)
+}
+
+fn applied_path(collection_root: &Path) -> PathBuf {
+    collection_root.join(SOURCE_DIR).join(APPLIED_FILE)
 }
 
 fn source_path(collection_root: &Path) -> PathBuf {
@@ -87,6 +92,23 @@ impl OpenApiSourceRepository for FsOpenApiSourceRepo {
         }
     }
 
+    fn save_applied(&self, collection_root: &Path, spec: &[u8]) -> DomainResult<()> {
+        // Ignore the file first, so a failure never leaves an unignored copy on disk.
+        crate::rocket_dir::ensure_gitignore(collection_root)?;
+        atomic_write(&applied_path(collection_root), spec)?;
+        Ok(())
+    }
+
+    fn load_applied(&self, collection_root: &Path) -> DomainResult<Option<Vec<u8>>> {
+        match std::fs::read(applied_path(collection_root)) {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(DomainError::Internal(format!(
+                "{APPLIED_FILE} could not be read: {e}"
+            ))),
+        }
+    }
+
     fn clear_pending(&self, collection_root: &Path) -> DomainResult<()> {
         match std::fs::remove_file(pending_path(collection_root)) {
             Ok(()) => Ok(()),
@@ -106,6 +128,22 @@ mod tests {
     };
     use rocket_collection::CollectionRepository;
     use tempfile::tempdir;
+
+    #[test]
+    fn applied_copy_round_trips_and_a_missing_one_is_none() {
+        let dir = tempdir().expect("tempdir");
+        assert_eq!(
+            FsOpenApiSourceRepo.load_applied(dir.path()).expect("load"),
+            None
+        );
+        FsOpenApiSourceRepo
+            .save_applied(dir.path(), b"openapi: 3.0.3")
+            .expect("save");
+        assert_eq!(
+            FsOpenApiSourceRepo.load_applied(dir.path()).expect("load"),
+            Some(b"openapi: 3.0.3".to_vec())
+        );
+    }
 
     #[test]
     fn a_failing_ignore_step_leaves_no_pending_file_behind() {

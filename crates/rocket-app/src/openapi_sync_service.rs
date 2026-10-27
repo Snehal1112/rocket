@@ -1063,6 +1063,12 @@ mod tests {
         fn clear_pending(&self, root: &Path) -> DomainResult<()> {
             FsOpenApiSourceRepo.clear_pending(root)
         }
+        fn save_applied(&self, root: &Path, spec: &[u8]) -> DomainResult<()> {
+            FsOpenApiSourceRepo.save_applied(root, spec)
+        }
+        fn load_applied(&self, root: &Path) -> DomainResult<Option<Vec<u8>>> {
+            FsOpenApiSourceRepo.load_applied(root)
+        }
     }
 
     impl SecretStore for MemSecrets {

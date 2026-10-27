@@ -162,7 +162,7 @@ mod tests {
         let text = std::fs::read_to_string(dir.path().join(".rocket/.gitignore")).expect("file");
         assert_eq!(
             text,
-            "openapi-baseline.json\nopenapi-pending.spec\nopenapi-local.json\napply-journal.json\nstaging/\n"
+            "openapi-baseline.json\nopenapi-reset-backups.json\nopenapi-applied.spec\nopenapi-pending.spec\nopenapi-local.json\napply-journal.json\nstaging/\n"
         );
     }
 
@@ -180,7 +180,7 @@ mod tests {
         let text = std::fs::read_to_string(dir.path().join(".rocket/.gitignore")).expect("file");
         assert_eq!(
             text,
-            "my-notes.txt\nopenapi-pending.spec\nopenapi-baseline.json\nopenapi-local.json\napply-journal.json\nstaging/\n"
+            "my-notes.txt\nopenapi-pending.spec\nopenapi-baseline.json\nopenapi-reset-backups.json\nopenapi-applied.spec\nopenapi-local.json\napply-journal.json\nstaging/\n"
         );
     }
 

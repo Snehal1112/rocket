@@ -155,6 +155,10 @@ pub trait OpenApiSourceRepository: Send + Sync {
     fn load_pending(&self, collection_root: &Path) -> DomainResult<Option<Vec<u8>>>;
     /// Removes the pending copy. A missing file is not an error.
     fn clear_pending(&self, collection_root: &Path) -> DomainResult<()>;
+    /// Keeps a copy of the spec as it was last applied, so it can be shown offline.
+    fn save_applied(&self, collection_root: &Path, spec: &[u8]) -> DomainResult<()>;
+    /// `Ok(None)` when there is no applied copy.
+    fn load_applied(&self, collection_root: &Path) -> DomainResult<Option<Vec<u8>>>;
 }
 
 /// The validators of one file a spec refers to, kept so a check can ask "has it changed?"

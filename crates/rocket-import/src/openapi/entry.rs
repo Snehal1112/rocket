@@ -209,8 +209,14 @@ impl ImportService {
             &imported,
         );
         let root = self.collections_root().join(&imported.collection);
-        if let Err(e) = sources.save(&root, &record) {
-            warnings.push(format!("Sync could not be set up: {e}"));
+        match sources.save(&root, &record) {
+            // The saved copy lets the spec be shown offline. It is only useful next to a source.
+            Ok(()) => {
+                if sources.save_applied(&root, bundle.text.as_bytes()).is_err() {
+                    warnings.push("The saved copy of the spec could not be written.".to_string());
+                }
+            }
+            Err(e) => warnings.push(format!("Sync could not be set up: {e}")),
         }
         let baseline = OpenApiBaseline {
             version: BASELINE_FILE_VERSION,
@@ -344,6 +350,42 @@ mod tests {
         }
         fn clear_pending(&self, _root: &Path) -> DomainResult<()> {
             Ok(())
+        }
+        fn save_applied(&self, _root: &Path, _spec: &[u8]) -> DomainResult<()> {
+            Err(DomainError::Internal("disk full".to_string()))
+        }
+        fn load_applied(&self, _root: &Path) -> DomainResult<Option<Vec<u8>>> {
+            Ok(None)
+        }
+    }
+
+    /// Delegates to the file repo, but cannot write the applied copy.
+    struct NoAppliedSources;
+
+    impl OpenApiSourceRepository for NoAppliedSources {
+        fn load(&self, root: &Path) -> DomainResult<Option<OpenApiSource>> {
+            FsOpenApiSourceRepo.load(root)
+        }
+        fn save(&self, root: &Path, source: &OpenApiSource) -> DomainResult<()> {
+            FsOpenApiSourceRepo.save(root, source)
+        }
+        fn delete(&self, root: &Path) -> DomainResult<()> {
+            FsOpenApiSourceRepo.delete(root)
+        }
+        fn save_pending(&self, root: &Path, spec: &[u8]) -> DomainResult<()> {
+            FsOpenApiSourceRepo.save_pending(root, spec)
+        }
+        fn load_pending(&self, root: &Path) -> DomainResult<Option<Vec<u8>>> {
+            FsOpenApiSourceRepo.load_pending(root)
+        }
+        fn clear_pending(&self, root: &Path) -> DomainResult<()> {
+            FsOpenApiSourceRepo.clear_pending(root)
+        }
+        fn save_applied(&self, _root: &Path, _spec: &[u8]) -> DomainResult<()> {
+            Err(DomainError::Internal("disk full".to_string()))
+        }
+        fn load_applied(&self, root: &Path) -> DomainResult<Option<Vec<u8>>> {
+            FsOpenApiSourceRepo.load_applied(root)
         }
     }
 
@@ -502,6 +544,63 @@ parameters:
     }
 
     #[tokio::test]
+    async fn import_writes_the_applied_copy() {
+        let ws = TempDir::new().expect("tempdir");
+        let service = ImportService::new_with_workspace_path(ws.path());
+        let result = service
+            .import_openapi_url(
+                &sample_fetcher(true),
+                &FsOpenApiSourceRepo,
+                &FsOpenApiBaselineRepo,
+                SAMPLE_LINK,
+                GroupBy::Tags,
+                None,
+                "ws",
+            )
+            .await
+            .expect("import");
+        let root = ws.path().join("collections").join(&result.collection);
+        let source = FsOpenApiSourceRepo
+            .load(&root)
+            .expect("load")
+            .expect("source");
+        let copy = FsOpenApiSourceRepo
+            .load_applied(&root)
+            .expect("load")
+            .expect("applied copy");
+        assert_eq!(
+            sha(&String::from_utf8(copy).expect("utf8")),
+            source.spec_sha256
+        );
+    }
+
+    #[tokio::test]
+    async fn import_warns_when_the_applied_copy_cannot_be_written() {
+        let ws = TempDir::new().expect("tempdir");
+        let service = ImportService::new_with_workspace_path(ws.path());
+        let result = service
+            .import_openapi_url(
+                &sample_fetcher(true),
+                &NoAppliedSources,
+                &FsOpenApiBaselineRepo,
+                SAMPLE_LINK,
+                GroupBy::Tags,
+                None,
+                "ws",
+            )
+            .await
+            .expect("the import still succeeds");
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w == "The saved copy of the spec could not be written."),
+            "{:?}",
+            result.warnings
+        );
+    }
+
+    #[tokio::test]
     async fn import_with_an_unreachable_ref_still_creates_the_collection_with_one_note() {
         let ws = TempDir::new().expect("tempdir");
         let service = ImportService::new_with_workspace_path(ws.path());
@@ -522,7 +621,12 @@ parameters:
         assert!(result.warnings[0].contains("definitions.yaml"));
         // The bundler's note is the one warning. The unresolved refs also reach the report as
         // grouped NotFollowed rows (four refs to the same file), which is accepted.
-        assert_eq!(result.report.skipped.len(), 4, "{:?}", result.report.skipped);
+        assert_eq!(
+            result.report.skipped.len(),
+            4,
+            "{:?}",
+            result.report.skipped
+        );
         assert!(result.report.skipped.iter().all(|i| matches!(
             &i.reason,
             crate::report::SkipReason::NotFollowed(t) if t == "a $ref to definitions.yaml was not loaded"

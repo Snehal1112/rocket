@@ -8,9 +8,10 @@ use crate::atomic_write;
 
 const GITIGNORE_FILE: &str = ".gitignore";
 /// Files in the folder that are local state and must not be committed.
-const IGNORED_NAMES: [&str; 6] = [
+const IGNORED_NAMES: [&str; 7] = [
     "openapi-baseline.json",
     "openapi-reset-backups.json",
+    "openapi-applied.spec",
     "openapi-pending.spec",
     "openapi-local.json",
     "apply-journal.json",
@@ -54,6 +55,14 @@ pub fn ensure_gitignore(collection_root: &Path) -> DomainResult<()> {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn the_gitignore_lists_the_applied_copy() {
+        let dir = tempdir().expect("tempdir");
+        ensure_gitignore(dir.path()).expect("ensure");
+        let text = std::fs::read_to_string(dir.path().join(".rocket/.gitignore")).expect("read");
+        assert!(text.lines().any(|l| l == "openapi-applied.spec"), "{text}");
+    }
 
     #[test]
     fn the_gitignore_lists_the_backups_file() {

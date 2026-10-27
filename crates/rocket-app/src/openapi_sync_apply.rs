@@ -25,6 +25,7 @@ const SOURCE_REL: &str = ".rocket/openapi-source.yml";
 const BASELINE_REL: &str = ".rocket/openapi-baseline.json";
 const LOCAL_REL: &str = ".rocket/openapi-local.json";
 const PENDING_REL: &str = ".rocket/openapi-pending.spec";
+const APPLIED_REL: &str = ".rocket/openapi-applied.spec";
 const BASE_URL_KEY: &str = "baseUrl";
 
 /// Builds the renderer for the collection folder at the given path.
@@ -269,6 +270,8 @@ impl OpenApiSyncService {
         ];
         let mut extra = extra;
         if output.finalized {
+            // The spec that was just applied becomes the saved copy.
+            extra.push((APPLIED_REL, Some(loaded.pending_text.clone().into_bytes())));
             extra.push((PENDING_REL, None));
         }
         let mut tx = deps.tx.begin(&root)?;
