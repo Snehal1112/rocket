@@ -6,8 +6,11 @@ import * as tauriApi from '@/lib/tauri-api';
 import type { OpenApiBackupRow, OpenApiChangeRow, OpenApiChanges } from '@/lib/tauri-api';
 import { renderWithQuery } from '@/test/trust-fixtures';
 import { OpenApiSyncChanges } from '../OpenApiSyncChanges';
+import { openSyncRequest } from '../openSyncRequest';
 
 vi.mock('sonner', () => ({ toast: { success: vi.fn(), info: vi.fn() } }));
+
+vi.mock('../openSyncRequest', () => ({ openSyncRequest: vi.fn() }));
 
 vi.mock('@/lib/tauri-api', async () => {
   const actual = await vi.importActual<typeof tauriApi>('@/lib/tauri-api');
@@ -125,10 +128,38 @@ describe('OpenApiSyncChanges', () => {
     expect(screen.getAllByRole('button', { name: 'Reset to spec' })).toHaveLength(2);
   });
 
-  it('added_and_deleted_rows_have_no_buttons', async () => {
+  it('added_rows_only_open_and_deleted_rows_have_no_buttons', async () => {
     show(changes({ added: [row({ uid: 'u2' })], deleted: [row({ uid: 'u3' })] }));
     await screen.findByText('Added by you (1)');
-    expect(screen.queryAllByRole('button')).toHaveLength(0);
+    const buttons = screen.getAllByRole('button');
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]).toHaveAccessibleName('Open request');
+  });
+
+  it('open_request_button_calls_the_helper', async () => {
+    vi.mocked(openSyncRequest).mockResolvedValue('opened');
+    show(changes({ modified: [row()] }));
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Open request' }));
+    expect(openSyncRequest).toHaveBeenCalledWith({
+      collection: 'c',
+      uid: 'u1',
+      requestPath: 'pets/list-pets.yml',
+    });
+  });
+
+  it('a_missing_request_shows_a_fixed_sentence', async () => {
+    vi.mocked(openSyncRequest).mockResolvedValue('missing');
+    show(changes({ modified: [row()] }));
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Open request' }));
+    expect(await screen.findByText('The request file was not found.')).toBeInTheDocument();
+  });
+
+  it('a_deleted_row_has_no_open_button', async () => {
+    show(changes({ deleted: [row({ uid: 'u3' })] }));
+    await screen.findByText('Deleted by you (1)');
+    expect(screen.queryByRole('button', { name: 'Open request' })).not.toBeInTheDocument();
   });
 
   it('reset_asks_first_and_cancel_sends_nothing', async () => {

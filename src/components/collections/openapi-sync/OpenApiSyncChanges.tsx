@@ -12,6 +12,7 @@ import {
 import { formatRelativeTime } from '@/lib/relative-time';
 import type { OpenApiBackupRow, OpenApiChangeRow } from '@/lib/tauri-api';
 import { fieldLabel, resetAllConfirmText, resetConfirmText } from './openApiSyncView';
+import { openSyncRequest } from './openSyncRequest';
 import { ResetConfirmDialog } from './ResetConfirmDialog';
 import { syncErrorMessage } from './syncErrors';
 import { ValueBox } from './ValueBox';
@@ -36,11 +37,13 @@ interface ResetControl {
 }
 
 function ChangeRow({
+  collection,
   row,
   kind,
   showFields,
   reset,
 }: {
+  collection: string;
   row: OpenApiChangeRow;
   kind: Kind;
   showFields: boolean;
@@ -49,6 +52,17 @@ function ChangeRow({
   // Deleted rows have no method or URL, so the path or the name stands in.
   const target = row.url || row.requestPath || row.name;
   const [open, setOpen] = useState(false);
+  const [missing, setMissing] = useState(false);
+  const canOpen = kind !== 'deleted' && row.requestPath !== null;
+  const openRequest = async () => {
+    if (!row.requestPath) return;
+    const result = await openSyncRequest({
+      collection,
+      uid: row.uid,
+      requestPath: row.requestPath,
+    });
+    setMissing(result === 'missing');
+  };
   const canExpand = showFields && kind === 'modified' && row.changes.length > 0;
   return (
     <li className='flex flex-col gap-1 border-b border-border/60 px-3 py-2 text-sm last:border-b-0'>
@@ -58,6 +72,16 @@ function ChangeRow({
           <span className='shrink-0 font-mono text-xs font-semibold'>{row.method}</span>
         )}
         <span className='min-w-0 flex-1 break-all font-mono text-xs'>{target}</span>
+        {canOpen && (
+          <Button
+            variant='ghost'
+            size='sm'
+            className='h-7 shrink-0'
+            onClick={() => void openRequest()}
+          >
+            Open request
+          </Button>
+        )}
         {kind === 'modified' && reset && row.key && (
           <Button
             variant='outline'
@@ -70,6 +94,11 @@ function ChangeRow({
           </Button>
         )}
       </div>
+      {missing && (
+        <p role='alert' className='text-xs text-destructive'>
+          The request file was not found.
+        </p>
+      )}
       {showFields && kind === 'modified' && row.fields.length > 0 && (
         <div className='flex flex-wrap gap-1'>
           {row.fields.map((f) => (
@@ -105,12 +134,14 @@ function ChangeRow({
 }
 
 function Group({
+  collection,
   kind,
   rows,
   showFields,
   reset,
   onResetAll,
 }: {
+  collection: string;
   kind: Kind;
   rows: OpenApiChangeRow[];
   showFields: boolean;
@@ -130,7 +161,14 @@ function Group({
       </div>
       <ul className='rounded-md border border-border/70'>
         {rows.map((r) => (
-          <ChangeRow key={r.uid} row={r} kind={kind} showFields={showFields} reset={reset} />
+          <ChangeRow
+            key={r.uid}
+            collection={collection}
+            row={r}
+            kind={kind}
+            showFields={showFields}
+            reset={reset}
+          />
         ))}
       </ul>
     </section>
@@ -256,6 +294,7 @@ export function OpenApiSyncChanges({ collection }: { collection: string }) {
       {restore.isError && <StateBlock tone='error'>{syncErrorMessage(restore.error)}</StateBlock>}
       {discard.isError && <StateBlock tone='error'>{syncErrorMessage(discard.error)}</StateBlock>}
       <Group
+        collection={collection}
         kind='modified'
         rows={c.modified}
         showFields={c.baselineTrusted}
@@ -274,8 +313,8 @@ export function OpenApiSyncChanges({ collection }: { collection: string }) {
           setDiscarding(row);
         }}
       />
-      <Group kind='added' rows={c.added} showFields={false} />
-      <Group kind='deleted' rows={c.deleted} showFields={false} />
+      <Group collection={collection} kind='added' rows={c.added} showFields={false} />
+      <Group collection={collection} kind='deleted' rows={c.deleted} showFields={false} />
       <p className='text-xs text-muted-foreground'>
         Scripts, tests and assertions are not tracked here.
       </p>
