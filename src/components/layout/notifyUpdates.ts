@@ -32,19 +32,30 @@ export function shouldNotify(store: NotifyStore, collection: string, pendingId: 
   }
 }
 
+/** Removes a recorded id, so a toast that never showed can be tried again. Never throws. */
+export function forgetNotified(store: NotifyStore, collection: string, pendingId: string): void {
+  try {
+    const id = `${collection}:${pendingId}`;
+    store.setItem(STORAGE_KEY, JSON.stringify(readIds(store).filter((v) => v !== id)));
+  } catch {
+    // Nothing more can be done with a broken store.
+  }
+}
+
 // The session copy keeps dedupe working when localStorage is blocked or throws.
 const sessionIds = new Map<string, string>();
 
 /** A store that prefers localStorage and falls back to memory for the session. */
 export const notifyStore: NotifyStore = {
   getItem(key) {
+    // The session copy is the newest when a write to localStorage failed.
+    const session = sessionIds.get(key);
+    if (session !== undefined) return session;
     try {
-      const value = localStorage.getItem(key);
-      if (value !== null) return value;
+      return localStorage.getItem(key);
     } catch {
-      // Fall through to the session copy.
+      return null;
     }
-    return sessionIds.get(key) ?? null;
   },
   setItem(key, value) {
     sessionIds.set(key, value);

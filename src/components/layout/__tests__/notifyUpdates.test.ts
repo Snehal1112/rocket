@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { shouldNotify } from '../notifyUpdates';
+import { describe, expect, it, vi } from 'vitest';
+import { clearSessionNotified, notifyStore, shouldNotify } from '../notifyUpdates';
 
 const KEY = 'rocket.openapi-sync.notified';
 
@@ -57,5 +57,18 @@ describe('shouldNotify', () => {
     expect(stored).not.toContain('Orders:id0');
     expect(stored).toContain('Orders:id200');
     expect(shouldNotify(store, 'Orders', 'id0')).toBe(true);
+  });
+
+  it('the_session_copy_wins_when_a_write_to_local_storage_failed', () => {
+    clearSessionNotified();
+    localStorage.setItem(KEY, JSON.stringify(['Orders:old']));
+    const set = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('quota');
+    });
+    expect(shouldNotify(notifyStore, 'Orders', 'new')).toBe(true);
+    expect(shouldNotify(notifyStore, 'Orders', 'new')).toBe(false);
+    set.mockRestore();
+    clearSessionNotified();
+    localStorage.clear();
   });
 });

@@ -9,7 +9,7 @@ import {
 } from '@/lib/queries/openapi-sync-queries';
 import { getOpenApiSyncBadges, getOpenApiSyncStatus } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
-import { notifyStore, shouldNotify } from './notifyUpdates';
+import { forgetNotified, notifyStore, shouldNotify } from './notifyUpdates';
 
 function syncTabIsActive(collection: string): boolean {
   const { root, activeGroupId } = usePaneStore.getState();
@@ -33,8 +33,7 @@ export function OpenApiSyncNotifier() {
           staleTime: 0,
         });
         if (!info || info.consent !== 'granted' || !info.hasPending || !info.pendingId) return;
-        if (!shouldNotify(notifyStore, collection, info.pendingId)) return;
-        if (syncTabIsActive(collection)) return;
+        // The badge count comes first, so a failed lookup does not consume the id.
         const badges = await queryClient.fetchQuery({
           networkMode: 'always',
           queryKey: openApiSyncKeys.badges,
@@ -43,14 +42,23 @@ export function OpenApiSyncNotifier() {
         });
         const waiting = badges.find((b) => b.collection === collection)?.waiting ?? 0;
         if (waiting < 1) return;
-        toast.info(`${collection} has ${waiting} spec ${waiting === 1 ? 'update' : 'updates'}`, {
-          action: {
-            label: 'Review',
-            onClick: () => usePaneStore.getState().openOpenApiSyncTab(collection),
-          },
-        });
+        // Record the id only now. A viewed version is recorded too, but gets no toast.
+        if (!shouldNotify(notifyStore, collection, info.pendingId)) return;
+        if (syncTabIsActive(collection)) return;
+        try {
+          toast.info(`${collection} has ${waiting} spec ${waiting === 1 ? 'update' : 'updates'}`, {
+            action: {
+              label: 'Review',
+              onClick: () => usePaneStore.getState().openOpenApiSyncTab(collection),
+            },
+          });
+        } catch (error) {
+          // The toast never showed, so free the id and let the next event retry.
+          forgetNotified(notifyStore, collection, info.pendingId);
+          throw error;
+        }
       } catch {
-        // A failed lookup only skips the toast.
+        // A failed lookup only skips the toast. The id is not recorded, so the next event retries.
       }
     },
     [queryClient],

@@ -144,6 +144,42 @@ describe('OpenApiSyncNotifier toast', () => {
     vi.restoreAllMocks();
   });
 
+  it('retries_after_a_failed_badge_lookup', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncBadges).mockRejectedValueOnce(new Error('boom'));
+    mount();
+    fire();
+    await waitFor(() => expect(tauriApi.getOpenApiSyncBadges).toHaveBeenCalledTimes(1));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(toast.info).not.toHaveBeenCalled();
+    fire();
+    await waitFor(() => expect(toast.info).toHaveBeenCalledTimes(1));
+  });
+
+  it('a_zero_count_does_not_consume_the_id', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncBadges).mockResolvedValueOnce([
+      { collection: 'Orders', waiting: 0 },
+    ]);
+    mount();
+    fire();
+    await waitFor(() => expect(tauriApi.getOpenApiSyncBadges).toHaveBeenCalledTimes(1));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(toast.info).not.toHaveBeenCalled();
+    fire();
+    await waitFor(() => expect(toast.info).toHaveBeenCalledTimes(1));
+  });
+
+  it('a_throwing_toast_does_not_consume_the_id', async () => {
+    vi.mocked(toast.info).mockImplementationOnce(() => {
+      throw new Error('toast failed');
+    });
+    mount();
+    fire();
+    await waitFor(() => expect(toast.info).toHaveBeenCalledTimes(1));
+    await new Promise((r) => setTimeout(r, 30));
+    fire();
+    await waitFor(() => expect(toast.info).toHaveBeenCalledTimes(2));
+  });
+
   it('the_review_action_opens_the_tab', async () => {
     mount();
     fire();
