@@ -867,3 +867,77 @@ impl SecretStore for FailingSecrets {
         Ok(())
     }
 }
+
+/// Removes the `uid:` line from a saved request, like a Bruno file that never had one.
+fn strip_uid(w: &World, file: &str) {
+    let path = hand_root(w).join(file);
+    let text = std::fs::read_to_string(&path).expect("read");
+    let kept: Vec<&str> = text
+        .lines()
+        .filter(|l| !l.trim_start().starts_with("uid:"))
+        .collect();
+    assert!(kept.len() < text.lines().count(), "no uid line in {file}");
+    std::fs::write(&path, kept.join("\n") + "\n").expect("write");
+}
+
+#[tokio::test]
+async fn requests_without_a_uid_key_get_distinct_uids_and_can_be_linked() {
+    let w = world().await;
+    w.repo.create(HAND).expect("create");
+    save_hand(&w, "list-pets", &spec_request("listPets"));
+    save_hand(&w, "get-pet", &spec_request("getPet"));
+    strip_uid(&w, "list-pets.yml");
+    strip_uid(&w, "get-pet.yml");
+
+    let preview = w.svc.preview(HAND, LINK, None).await.expect("preview");
+    let mut uids: Vec<String> = preview
+        .matched
+        .iter()
+        .map(|p| p.request.uid.clone())
+        .collect();
+    uids.sort();
+    uids.dedup();
+    assert_eq!(uids.len(), 2, "{:?}", preview.matched);
+    assert!(uids.iter().all(|u| !u.is_empty()));
+    for pair in &preview.matched {
+        let expected = if pair.operation.key == "listPets" {
+            "list-pets"
+        } else {
+            "get-pet"
+        };
+        assert_eq!(pair.request.request_path, expected);
+    }
+
+    let rows: Vec<ConnectRow> = preview
+        .matched
+        .iter()
+        .map(|p| ConnectRow::Link {
+            uid: p.request.uid.clone(),
+            key: p.operation.key.clone(),
+        })
+        .chain([ConnectRow::Skip {
+            key: "getInventory".into(),
+        }])
+        .collect();
+    let outcome = w
+        .svc
+        .confirm(
+            HAND,
+            LINK,
+            None,
+            rows,
+            GroupBy::Tags,
+            None,
+            &preview.digest,
+            &preview.spec_sha256,
+        )
+        .await
+        .expect("confirm");
+    assert_eq!(outcome.linked, 2);
+    let source = hand_source(&w);
+    let mut stored: Vec<String> = source.operations.iter().map(|o| o.uid.clone()).collect();
+    stored.sort();
+    stored.dedup();
+    assert_eq!(stored.len(), 2);
+    assert!(stored.iter().all(|u| !u.is_empty()));
+}

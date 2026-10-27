@@ -57,8 +57,15 @@ fn flatten(folder: &Folder, prefix: &str, out: &mut Vec<CurrentRequest>) {
                     .strip_suffix(".yml")
                     .or_else(|| file.strip_suffix(".yaml"))
                     .unwrap_or(file);
+                // A file with no `uid:` key (a Bruno import) reads as an empty uid. Give it the
+                // uid the sidebar derives from its path, so two such files never share one.
+                let uid = if request.uid.is_empty() {
+                    format!("http-{prefix}{file}")
+                } else {
+                    request.uid.clone()
+                };
                 out.push(CurrentRequest {
-                    uid: request.uid.clone(),
+                    uid,
                     request_path: format!("{prefix}{stem}"),
                     request: (**request).clone(),
                 });
