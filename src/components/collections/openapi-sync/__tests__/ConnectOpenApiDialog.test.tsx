@@ -193,4 +193,32 @@ describe('ConnectOpenApiDialog', () => {
     expect(tauriApi.confirmOpenApiConnect).toHaveBeenCalledTimes(1);
     pending.resolve({ linked: 0, added: 0, skipped: 0, warnings: [] });
   });
+
+  it('closing_is_blocked_while_the_connect_runs', async () => {
+    const pending = createDeferred<tauriApi.ConnectOutcome>();
+    vi.mocked(tauriApi.confirmOpenApiConnect).mockReturnValue(pending.promise);
+    const user = userEvent.setup();
+    const { onOpenChange } = renderDialog();
+    await toStepTwo(user);
+    await user.click(screen.getByRole('button', { name: 'Connect' }));
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+    await user.keyboard('{Escape}');
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+    pending.resolve({ linked: 0, added: 0, skipped: 0, warnings: [] });
+  });
+
+  it('a_preview_that_finishes_after_close_is_dropped', async () => {
+    const pending = createDeferred<tauriApi.ConnectPreview>();
+    vi.mocked(tauriApi.previewOpenApiConnect).mockReturnValue(pending.promise);
+    const user = userEvent.setup();
+    const { setOpen } = renderDialog();
+    await user.type(screen.getByLabelText('Spec link'), LINK);
+    await user.click(screen.getByRole('button', { name: 'Preview' }));
+    setOpen(false);
+    setOpen(true);
+    pending.resolve(makeConnectPreview());
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.getByLabelText('Spec link')).toHaveValue('');
+    expect(screen.queryByRole('button', { name: 'Connect' })).toBeNull();
+  });
 });

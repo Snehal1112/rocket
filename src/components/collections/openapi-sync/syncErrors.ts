@@ -53,6 +53,15 @@ const KNOWN: Array<[string, string]> = [
   ['There is no backup for this request.', 'There is no backup for this request.'],
   ['Reset failed. Nothing was changed.', 'Reset failed. Nothing was changed.'],
   [
+    'The file was not found, or it needs a sign-in.',
+    'The file was not found, or it needs a sign-in. For a private GitHub repository, add an access token.',
+  ],
+  [
+    'or the token was rejected or lacks Contents read access.',
+    'The file was not found, or the token was rejected or lacks Contents read access.',
+  ],
+  ['The file is larger than the 25 MB limit.', 'The file is larger than the 25 MB limit.'],
+  [
     'The collection changed. Run the preview again.',
     'The collection changed. Run the preview again.',
   ],

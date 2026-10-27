@@ -58,6 +58,8 @@ export function ConnectOpenApiDialog({
   const confirmMutation = useConfirmOpenApiConnect(collection);
   // A ref so a fast second click is dropped before the mutation state has rerendered.
   const confirming = useRef(false);
+  // Bumped on close, so a call that finishes later is dropped and cannot fill a reopened dialog.
+  const epoch = useRef(0);
 
   // Closing drops everything, the token included, so a reopened dialog starts clean.
   useEffect(() => {
@@ -70,6 +72,7 @@ export function ConnectOpenApiDialog({
     setRows([]);
     setError(null);
     confirming.current = false;
+    epoch.current += 1;
     previewMutation.reset();
     confirmMutation.reset();
   }, [open, previewMutation.reset, confirmMutation.reset]);
@@ -79,15 +82,17 @@ export function ConnectOpenApiDialog({
 
   const runPreview = async () => {
     setError(null);
+    const started = epoch.current;
     try {
       const result = await previewMutation.mutateAsync({
         link: trimmed,
         token: github && token.trim() ? token.trim() : undefined,
       });
+      if (started !== epoch.current) return;
       setPreview(result);
       setRows(defaultRows(result));
     } catch (e) {
-      setError(syncErrorMessage(e));
+      if (started === epoch.current) setError(syncErrorMessage(e));
     }
   };
 
@@ -95,6 +100,7 @@ export function ConnectOpenApiDialog({
     if (!preview || confirming.current) return;
     confirming.current = true;
     setError(null);
+    const started = epoch.current;
     try {
       const outcome = await confirmMutation.mutateAsync({
         link: trimmed,
@@ -112,6 +118,7 @@ export function ConnectOpenApiDialog({
       onOpenChange(false);
       usePaneStore.getState().openOpenApiSyncTab(collection);
     } catch (e) {
+      if (started !== epoch.current) return;
       confirming.current = false;
       setError(syncErrorMessage(e));
       // A stale preview cannot be confirmed, so the user goes back to run it again.
@@ -127,8 +134,14 @@ export function ConnectOpenApiDialog({
 
   const busy = previewMutation.isPending || confirmMutation.isPending;
 
+  // The connect cannot be cancelled once sent, so the dialog stays until it answers.
+  const requestClose = (next: boolean) => {
+    if (!next && confirmMutation.isPending) return;
+    onOpenChange(next);
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={requestClose}>
       <DialogContent className='max-w-3xl'>
         <DialogHeader>
           <DialogTitle>Connect to an OpenAPI spec</DialogTitle>
@@ -210,7 +223,11 @@ export function ConnectOpenApiDialog({
           )}
         </DialogBody>
         <DialogFooter>
-          <Button variant='ghost' onClick={() => onOpenChange(false)}>
+          <Button
+            variant='ghost'
+            disabled={confirmMutation.isPending}
+            onClick={() => requestClose(false)}
+          >
             Cancel
           </Button>
           {preview ? (

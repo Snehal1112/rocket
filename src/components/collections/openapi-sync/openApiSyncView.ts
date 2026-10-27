@@ -146,11 +146,14 @@ export function intervalLabel(interval: OpenApiSyncInterval): string {
   return INTERVAL_LABEL[interval];
 }
 
+/** The hosts the backend reads as a GitHub location, the only kind that takes a token. */
+const GITHUB_HOSTS = ['github.com', 'raw.githubusercontent.com', 'api.github.com'];
+
 /** True for a GitHub file link, the only kind that takes a token. */
 export function isGithubLocation(location: string): boolean {
   try {
     const url = new URL(location);
-    return url.protocol === 'https:' && url.host === 'github.com';
+    return url.protocol === 'https:' && GITHUB_HOSTS.includes(url.host);
   } catch {
     return false;
   }

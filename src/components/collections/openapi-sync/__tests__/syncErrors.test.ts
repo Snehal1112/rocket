@@ -95,4 +95,15 @@ describe('syncErrorMessage', () => {
     expect(connectWarningMessage('The token was not saved.')).toBe('The token was not saved.');
     expect(connectWarningMessage('keychain said no at /home/u')).toBeNull();
   });
+
+  it('keeps_the_fixed_fetch_sentences_that_tell_the_user_what_to_do', () => {
+    for (const sentence of [
+      'The file was not found, or it needs a sign-in. For a private GitHub repository, add an access token.',
+      'The file was not found, or the token was rejected or lacks Contents read access.',
+      'The file is larger than the 25 MB limit.',
+      'Tokens work with GitHub links only.',
+    ]) {
+      expect(syncErrorMessage(sentence)).toBe(sentence);
+    }
+  });
 });

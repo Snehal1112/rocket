@@ -7,6 +7,7 @@ import {
   filterVariables,
   firstEntryId,
   groupItems,
+  isGithubLocation,
   isPendingChangedError,
   outcomeLabel,
   renameHint,
@@ -104,5 +105,17 @@ describe('openApiSyncView', () => {
     ];
     expect(filterVariables(vars, 'security').map((v) => v.name)).toEqual(['apiKey']);
     expect(filterVariables(vars, '')).toHaveLength(2);
+  });
+});
+
+describe('isGithubLocation', () => {
+  it('accepts_the_github_hosts_the_backend_treats_as_github', () => {
+    expect(isGithubLocation('https://github.com/a/b/blob/main/x.yaml')).toBe(true);
+    expect(isGithubLocation('https://raw.githubusercontent.com/a/b/main/x.yaml')).toBe(true);
+    expect(isGithubLocation('https://api.github.com/repos/a/b/contents/x.yaml?ref=main')).toBe(
+      true,
+    );
+    expect(isGithubLocation('https://example.com/x.yaml')).toBe(false);
+    expect(isGithubLocation('https://github.com.evil.example/x.yaml')).toBe(false);
   });
 });
