@@ -31,7 +31,9 @@ import {
   useRestoreOpenApiSync,
   useRevokeConsent,
   useSetInterval,
+  useOpenApiSyncSkipped,
   useSetToken,
+  useUnskip,
 } from '../openapi-sync-queries';
 
 vi.mock('@/lib/tauri-api', async () => {
@@ -58,6 +60,8 @@ vi.mock('@/lib/tauri-api', async () => {
     discardOpenApiSyncBackup: vi.fn(),
     applyOpenApiSync: vi.fn(),
     previewOpenApiChangeLink: vi.fn(),
+    getOpenApiSyncSkipped: vi.fn(),
+    unskipOpenApiSync: vi.fn(),
     confirmOpenApiChangeLink: vi.fn(),
     previewOpenApiConnect: vi.fn(),
     confirmOpenApiConnect: vi.fn(),
@@ -724,6 +728,39 @@ describe('openapi sync queries', () => {
     expect(keys).toContainEqual(openApiSyncKeys.overview('A'));
     expect(keys).toContainEqual(openApiSyncKeys.specView('A'));
     expect(keys).toContainEqual(openApiSyncKeys.planAll('A'));
+    expect(keys).toContainEqual(openApiSyncKeys.badges);
+  });
+
+  it('skipped_and_unskip_call_the_commands', async () => {
+    const row = { key: 'listPets', name: 'List pets', method: 'GET', path: '/pets' };
+    vi.mocked(tauriApi.getOpenApiSyncSkipped).mockResolvedValue([row]);
+    vi.mocked(tauriApi.unskipOpenApiSync).mockResolvedValue(1);
+    const list = renderHook(() => useOpenApiSyncSkipped('A', true), { wrapper });
+    await waitFor(() => expect(list.result.current.data).toEqual([row]));
+    expect(tauriApi.getOpenApiSyncSkipped).toHaveBeenCalledWith('A');
+    const { result } = renderHook(() => useUnskip('A'), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync(['listPets']);
+    });
+    expect(tauriApi.unskipOpenApiSync).toHaveBeenCalledWith('A', ['listPets']);
+  });
+
+  it('the_skipped_list_is_not_fetched_while_disabled', () => {
+    renderHook(() => useOpenApiSyncSkipped('A', false), { wrapper });
+    expect(tauriApi.getOpenApiSyncSkipped).not.toHaveBeenCalled();
+  });
+
+  it('unskip_refreshes_plan_and_skipped_queries', async () => {
+    vi.mocked(tauriApi.unskipOpenApiSync).mockResolvedValue(1);
+    const spy = vi.spyOn(client, 'invalidateQueries');
+    const { result } = renderHook(() => useUnskip('A'), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync(['listPets']);
+    });
+    const keys = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(keys).toContainEqual(openApiSyncKeys.skipped('A'));
+    expect(keys).toContainEqual(openApiSyncKeys.planAll('A'));
+    expect(keys).toContainEqual(openApiSyncKeys.statusAll('A'));
     expect(keys).toContainEqual(openApiSyncKeys.badges);
   });
 });

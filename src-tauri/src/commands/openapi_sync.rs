@@ -10,7 +10,7 @@ use rocket_app::{
     safe_message, BackupRow, BadgeView, ChangeLinkOutcome, ChangeLinkPreview, ChangeRow,
     ChangeValue, ChangesView, CheckOutcome, ConnectOperationRow, ConnectOutcome, ConnectPreview,
     ConnectRequestRow, ConnectRow, OpenApiSyncService, OverviewView, PlanView, ResetReport,
-    SpecView, SpecViewState, SyncStatusView,
+    SkippedRow, SpecView, SpecViewState, SyncStatusView,
 };
 use rocket_collection::openapi_source::{SyncInterval, SyncStatus};
 use rocket_collection::ConsentState;
@@ -1072,6 +1072,71 @@ pub async fn openapi_sync_changes(
         move |service| service.changes(&collection).map(changes_dto),
     )
     .await
+}
+
+/// One skipped item, for the Skipped list.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkippedRowDto {
+    pub key: String,
+    pub name: String,
+    pub method: String,
+    pub path: String,
+}
+
+fn skipped_row_dto(row: SkippedRow) -> SkippedRowDto {
+    SkippedRowDto {
+        key: row.key,
+        name: row.name,
+        method: row.method,
+        path: row.path,
+    }
+}
+
+fn unskip_error(error: DomainError) -> String {
+    match error {
+        DomainError::Conflict(m) if m.contains("not finished") => m,
+        DomainError::Conflict(_) => "A sync is running. Try again when it is done.".to_string(),
+        DomainError::NotFound(_) => "The collection was not found.".to_string(),
+        _ => "Taking the skip back failed. Nothing was changed.".to_string(),
+    }
+}
+
+/// The items the user skipped. Never contacts the network.
+#[tauri::command]
+pub async fn openapi_sync_skipped(
+    collection: String,
+    workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
+    fetcher: State<'_, Arc<dyn SpecFetcher>>,
+) -> Result<Vec<SkippedRowDto>, String> {
+    run_blocking(
+        Arc::clone(workspace_path.inner()),
+        Arc::clone(fetcher.inner()),
+        move |service| {
+            service
+                .skipped(&collection)
+                .map(|rows| rows.into_iter().map(skipped_row_dto).collect())
+        },
+    )
+    .await
+}
+
+/// Takes the named skips back. Returns how many were removed. Never contacts the network.
+#[tauri::command]
+pub async fn openapi_sync_unskip(
+    collection: String,
+    keys: Vec<String>,
+    workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
+    fetcher: State<'_, Arc<dyn SpecFetcher>>,
+) -> Result<usize, String> {
+    let workspace_path = Arc::clone(workspace_path.inner());
+    let fetcher = Arc::clone(fetcher.inner());
+    tokio::task::spawn_blocking(move || {
+        make_sync_service(workspace_path, fetcher).unskip(&collection, &keys)
+    })
+    .await
+    .map_err(|_| TASK_FAILED.to_string())?
+    .map_err(unskip_error)
 }
 
 /// The collections with updates waiting, for the sidebar badges.
@@ -2230,6 +2295,30 @@ mod tests {
             change_link_error(DomainError::NotFound("x".to_string())),
             "The collection was not found."
         );
+    }
+
+    #[test]
+    fn skipped_dto_uses_camel_case_keys() {
+        let json = serde_json::to_value(skipped_row_dto(SkippedRow {
+            key: "listPets".to_string(),
+            name: "List pets".to_string(),
+            method: "GET".to_string(),
+            path: "{{baseUrl}}/pets".to_string(),
+        }))
+        .expect("json");
+        assert_eq!(json["key"], "listPets");
+        assert_eq!(json["name"], "List pets");
+        assert_eq!(json["method"], "GET");
+        assert_eq!(json["path"], "{{baseUrl}}/pets");
+    }
+
+    #[test]
+    fn unskip_errors_pass_only_fixed_sentences() {
+        let busy = unskip_error(DomainError::Conflict("An apply is running.".to_string()));
+        assert_eq!(busy, "A sync is running. Try again when it is done.");
+        let other = unskip_error(DomainError::Internal("cannot write /home/me/secret".to_string()));
+        assert_eq!(other, "Taking the skip back failed. Nothing was changed.");
+        assert!(!other.contains("secret"));
     }
 
     #[test]

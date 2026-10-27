@@ -2193,6 +2193,21 @@ export const getOpenApiSyncOverview = (collection: string) =>
 export const getOpenApiSyncChanges = (collection: string) =>
   invoke<OpenApiChanges>('openapi_sync_changes', { collection });
 
+/** One skipped item. A key the spec no longer has shows the key as its name. */
+export interface OpenApiSkippedRow {
+  key: string;
+  name: string;
+  method: string;
+  path: string;
+}
+
+export const getOpenApiSyncSkipped = (collection: string) =>
+  invoke<OpenApiSkippedRow[]>('openapi_sync_skipped', { collection });
+
+/** Takes the named skips back. Returns how many were removed. */
+export const unskipOpenApiSync = (collection: string, keys: string[]) =>
+  invoke<number>('openapi_sync_unskip', { collection, keys });
+
 export const resetOpenApiSync = (collection: string, keys: string[]) =>
   invoke<OpenApiResetReport>('openapi_sync_reset', { collection, keys });
 

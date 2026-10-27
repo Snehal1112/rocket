@@ -13,6 +13,7 @@ import {
   getOpenApiSyncChanges,
   getOpenApiSyncOverview,
   getOpenApiSyncPlan,
+  getOpenApiSyncSkipped,
   getOpenApiSyncSpecView,
   getOpenApiSyncStatus,
   grantOpenApiSyncConsent,
@@ -28,6 +29,7 @@ import {
   revokeOpenApiSyncConsent,
   setOpenApiSyncInterval,
   setOpenApiSyncToken,
+  unskipOpenApiSync,
 } from '@/lib/tauri-api';
 import { collectionKeys } from './collection-queries';
 
@@ -49,6 +51,7 @@ export const openApiSyncKeys = {
   planAll: (collection: string) => ['openapi-sync', 'plan', collection] as const,
   overview: (collection: string) => ['openapi-sync', 'overview', collection] as const,
   changes: (collection: string) => ['openapi-sync', 'changes', collection] as const,
+  skipped: (collection: string) => ['openapi-sync', 'skipped', collection] as const,
   specView: (collection: string) => ['openapi-sync', 'spec-view', collection] as const,
   /** The waiting counts of every collection, so it is not scoped to one. */
   badges: ['openapi-sync', 'badges'] as const,
@@ -122,6 +125,28 @@ export function useOpenApiSyncChanges(collection: string | null | undefined) {
   });
 }
 
+/** The items the user skipped. It reads local files only, and only when `enabled`. */
+export function useOpenApiSyncSkipped(collection: string | null | undefined, enabled: boolean) {
+  return useQuery({
+    networkMode: 'always',
+    queryKey: openApiSyncKeys.skipped(collection ?? ''),
+    queryFn: () => getOpenApiSyncSkipped(collection ?? ''),
+    enabled: !!collection && enabled,
+    staleTime: 0,
+    retry: false,
+  });
+}
+
+/** Takes skips back and refreshes the plan, the counts and the skipped list. */
+export function useUnskip(collection: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    networkMode: 'always',
+    mutationFn: (keys: string[]) => unskipOpenApiSync(collection, keys),
+    onSettled: () => invalidateSync(queryClient, collection),
+  });
+}
+
 /** The latest stored spec of a collection, for the read-only viewer. */
 export function useOpenApiSyncSpecView(collection: string | null | undefined) {
   return useQuery({
@@ -148,6 +173,7 @@ export function useOpenApiSyncBadges() {
 function invalidateSync(queryClient: QueryClient, collection: string): void {
   void queryClient.invalidateQueries({ queryKey: openApiSyncKeys.overview(collection) });
   void queryClient.invalidateQueries({ queryKey: openApiSyncKeys.changes(collection) });
+  void queryClient.invalidateQueries({ queryKey: openApiSyncKeys.skipped(collection) });
   void queryClient.invalidateQueries({ queryKey: openApiSyncKeys.specView(collection) });
   void queryClient.invalidateQueries({ queryKey: openApiSyncKeys.badges });
   void queryClient.invalidateQueries({ queryKey: openApiSyncKeys.statusAll(collection) });
