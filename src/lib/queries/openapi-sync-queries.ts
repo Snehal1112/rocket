@@ -1,5 +1,5 @@
 import { type QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 import {
   applyOpenApiSync,
   checkOpenApiSyncNow,
@@ -21,6 +21,12 @@ import {
   setOpenApiSyncToken,
 } from '@/lib/tauri-api';
 import { collectionKeys } from './collection-queries';
+
+/** The payload of an `openapi-sync-checked` event. */
+export interface OpenApiCheckedEvent {
+  collection: string;
+  status: string;
+}
 
 type Links = Array<[string, string]>;
 
@@ -331,11 +337,14 @@ export function useApplySync(collection: string) {
  * Refreshes the status and plan queries of the collection named in a sync check event, and
  * also the collection tree for an apply event. Mount it once, through `useOpenApiSyncGlobalEvents`.
  */
-export function useOpenApiSyncEvents(): void {
+export function useOpenApiSyncEvents(onChecked?: (event: OpenApiCheckedEvent) => void): void {
   const queryClient = useQueryClient();
+  const checkedRef = useRef(onChecked);
+  checkedRef.current = onChecked;
   useEffect(() => {
-    const unsubChecked = onOpenApiSyncChecked(({ collection }) => {
-      invalidateSync(queryClient, collection);
+    const unsubChecked = onOpenApiSyncChecked((event) => {
+      invalidateSync(queryClient, event.collection);
+      checkedRef.current?.(event);
     });
     const unsubApplied = onOpenApiSyncApplied(({ collection }) => {
       invalidateSync(queryClient, collection);
@@ -352,6 +361,6 @@ export function useOpenApiSyncEvents(): void {
  * The one app-wide pair of sync listeners. Every event also refreshes the waiting badges.
  * Mount it once from `OpenApiSyncNotifier`, not from the sync tab.
  */
-export function useOpenApiSyncGlobalEvents(): void {
-  useOpenApiSyncEvents();
+export function useOpenApiSyncGlobalEvents(onChecked?: (event: OpenApiCheckedEvent) => void): void {
+  useOpenApiSyncEvents(onChecked);
 }
