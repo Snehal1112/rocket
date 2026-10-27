@@ -28,8 +28,11 @@ import {
   useSetInterval,
   useSetToken,
 } from '@/lib/queries/openapi-sync-queries';
+import { formatRelativeTime } from '@/lib/relative-time';
 import type { OpenApiSyncInterval, OpenApiSyncStatus } from '@/lib/tauri-api';
+import { cn } from '@/lib/utils';
 import { ChangeLinkForm } from './ChangeLinkForm';
+import { CheckNowButton } from './CheckNowButton';
 import { DisconnectSyncDialog } from './DisconnectSyncDialog';
 import { OpenApiSyncConsentBanner } from './OpenApiSyncConsentBanner';
 import { intervalLabel, isGithubLocation, splitLocation } from './openApiSyncView';
@@ -129,8 +132,23 @@ function ConnectionBody({
       .join(' ') || undefined;
   const revokeError = revoke.isError ? syncErrorMessage(revoke.error) : null;
 
+  const failed = status.lastStatus?.state === 'failed';
+  const checkedText = status.lastCheckedAt
+    ? `Last checked ${formatRelativeTime(status.lastCheckedAt)}.`
+    : 'Not checked yet.';
+
   return (
     <>
+      <section
+        aria-label='Status'
+        className='flex flex-wrap items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2'
+      >
+        <p className={cn('text-sm', failed && 'text-destructive')}>
+          {checkedText} {failed ? (status.lastMessage ?? 'The last check failed.') : 'No problems.'}
+        </p>
+        <CheckNowButton collection={collection} consent={status.consent} />
+      </section>
+
       <section
         aria-label='Spec link'
         className='flex flex-col gap-2 rounded-lg border border-border/70 bg-muted/30 p-3'

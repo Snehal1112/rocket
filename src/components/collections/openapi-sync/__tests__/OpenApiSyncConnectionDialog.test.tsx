@@ -23,6 +23,7 @@ vi.mock('@/lib/tauri-api', async () => {
     disconnectOpenApiSync: vi.fn(),
     previewOpenApiChangeLink: vi.fn(),
     confirmOpenApiChangeLink: vi.fn(),
+    checkOpenApiSyncNow: vi.fn(),
   };
 });
 
@@ -76,6 +77,46 @@ describe('OpenApiSyncConnectionDialog', () => {
     view.rerender(tree(true));
     expect(await screen.findByText('Edit connection settings')).toBeInTheDocument();
     await waitFor(() => expect(tauriApi.getOpenApiSyncStatus).toHaveBeenCalledWith('d0', true));
+  });
+
+  describe('status row', () => {
+    it('the_status_row_shows_the_last_check', () => {
+      renderDialog('s1', makeStatus());
+      const row = screen.getByRole('region', { name: 'Status' });
+      expect(row).toHaveTextContent('Last checked 2h ago. No problems.');
+    });
+
+    it('the_status_row_says_when_it_was_never_checked', () => {
+      renderDialog('s2', makeStatus({ lastCheckedAt: null, lastStatus: null }));
+      expect(screen.getByRole('region', { name: 'Status' })).toHaveTextContent('Not checked yet.');
+    });
+
+    it('the_status_row_shows_the_failure_sentence', () => {
+      renderDialog(
+        's3',
+        makeStatus({
+          lastStatus: { state: 'failed', code: 'network' },
+          lastMessage: 'The server could not be reached.',
+        }),
+      );
+      const row = screen.getByRole('region', { name: 'Status' });
+      expect(row).toHaveTextContent('The server could not be reached.');
+      expect(row).not.toHaveTextContent('No problems');
+    });
+
+    it('check_now_in_the_dialog_runs_a_check', async () => {
+      vi.mocked(tauriApi.checkOpenApiSyncNow).mockResolvedValue({ state: 'unchanged' });
+      const user = renderDialog('s4', makeStatus());
+      const row = screen.getByRole('region', { name: 'Status' });
+      await user.click(within(row).getByRole('button', { name: 'Check now' }));
+      await waitFor(() => expect(tauriApi.checkOpenApiSyncNow).toHaveBeenCalledWith('s4'));
+    });
+
+    it('check_now_is_disabled_without_approval', () => {
+      renderDialog('s5', makeStatus({ consent: 'missing' }));
+      const row = screen.getByRole('region', { name: 'Status' });
+      expect(within(row).getByRole('button', { name: 'Check now' })).toBeDisabled();
+    });
   });
 
   it('focus_token_scrolls_to_the_access_section', async () => {
