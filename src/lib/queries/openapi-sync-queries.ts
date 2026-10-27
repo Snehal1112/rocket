@@ -154,10 +154,14 @@ function invalidateSync(queryClient: QueryClient, collection: string): void {
   void queryClient.invalidateQueries({ queryKey: openApiSyncKeys.planAll(collection) });
 }
 
+/** One key per collection, so every Check now trigger can see a check that is already running. */
+export const checkNowKey = (collection: string) => ['openapi-sync-check-now', collection];
+
 /** Runs a check now and refreshes the status and plan of the collection. */
 export function useCheckNow(collection: string) {
   const queryClient = useQueryClient();
   return useMutation({
+    mutationKey: checkNowKey(collection),
     networkMode: 'always',
     mutationFn: () => checkOpenApiSyncNow(collection),
     onSettled: () => invalidateSync(queryClient, collection),

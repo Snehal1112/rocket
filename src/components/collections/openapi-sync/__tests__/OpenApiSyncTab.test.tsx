@@ -178,6 +178,23 @@ describe('OpenApiSyncTab', () => {
       await waitFor(() => expect(tauriApi.checkOpenApiSyncNow).toHaveBeenCalledWith('c'));
     });
 
+    it('two_check_buttons_never_run_two_checks_at_once', async () => {
+      let finish: (v: { state: 'unchanged' }) => void = () => undefined;
+      vi.mocked(tauriApi.checkOpenApiSyncNow).mockClear();
+      vi.mocked(tauriApi.checkOpenApiSyncNow).mockReturnValue(
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+      );
+      await openEmptyUpdates();
+      const [header, empty] = screen.getAllByRole('button', { name: 'Check now' });
+      const user = userEvent.setup();
+      await user.click(empty);
+      await user.click(header);
+      expect(tauriApi.checkOpenApiSyncNow).toHaveBeenCalledTimes(1);
+      await act(async () => finish({ state: 'unchanged' }));
+    });
+
     it('the_empty_updates_state_says_when_it_was_last_checked', async () => {
       await openEmptyUpdates();
       expect(screen.getByText('Last checked 2h ago.')).toBeInTheDocument();

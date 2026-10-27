@@ -1,8 +1,9 @@
+import { useIsMutating, useQueryClient } from '@tanstack/react-query';
 import { RefreshCw } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { useCheckNow } from '@/lib/queries/openapi-sync-queries';
+import { checkNowKey, useCheckNow } from '@/lib/queries/openapi-sync-queries';
 import type { OpenApiCheckOutcome, OpenApiConsent } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { syncErrorMessage } from './syncErrors';
@@ -34,6 +35,9 @@ export interface CheckRunner {
 /** One check state for every Check now trigger of a collection, so they share it. */
 export function useCheckRunner(collection: string, consent: OpenApiConsent): CheckRunner {
   const check = useCheckNow(collection);
+  const queryClient = useQueryClient();
+  // Another trigger of the same collection may be checking already.
+  const running = useIsMutating({ mutationKey: checkNowKey(collection) }) > 0;
   // A ref closes the gap before the pending state renders on a fast double click.
   const busy = useRef(false);
   const granted = consent === 'granted';
@@ -44,6 +48,7 @@ export function useCheckRunner(collection: string, consent: OpenApiConsent): Che
   }, [consent, reset]);
   const run = () => {
     if (busy.current || !granted) return;
+    if (queryClient.isMutating({ mutationKey: checkNowKey(collection) }) > 0) return;
     busy.current = true;
     check.mutate(undefined, {
       onSettled: () => {
@@ -55,7 +60,7 @@ export function useCheckRunner(collection: string, consent: OpenApiConsent): Che
   if (check.isError) text = `${syncErrorMessage(check.error)} ${retryHint()}`;
   else if (check.data) text = outcomeText(check.data);
   const failed = check.isError || check.data?.state === 'failed';
-  return { run, pending: check.isPending, granted, text, failed };
+  return { run, pending: check.isPending || running, granted, text, failed };
 }
 
 /** The Check now button for a runner shared with other triggers. */
