@@ -8,9 +8,9 @@ Status words: **Done** (exists on the branch today), **Planned** (a plan covers 
 
 | Feature | Bruno 3.2.0 (verified in code) | Rocket today | Status and plan |
 |---|---|---|---|
-| Source kinds | URL or local file (`.json`, `.yaml`, `.yml`); any `http`/`https` URL, no host rule | https link; a file only as a one-shot import with no link | Done: file source (series 4 plans 02 and 03) |
-| Local-file storage | Picked absolute path stored collection-relative, resolved at read time | none | Planned: series 4 plan 02 |
-| Local-file reload | No watcher; re-read on a check (manual, timer, opening the tab) | n/a | Planned: same rule, series 4 plan 02 |
+| Source kinds | URL or local file (`.json`, `.yaml`, `.yml`); any `http`/`https` URL, no host rule | https link or `http://localhost`; a file source (relative path, approval, hash change detection) | Done: file source (series 4 plans 02 and 03) |
+| Local-file storage | Picked absolute path stored collection-relative, resolved at read time | none | Done: series 4 plan 02 |
+| Local-file reload | No watcher; re-read on a check (manual, timer, opening the tab) | n/a | Done: same rule, series 4 plan 02 |
 | http / localhost | Any http or https URL | https only | Differs: loopback http only (series 4 plan 01), because Rocket asks consent but Bruno does not and a private-address first hop is a bigger risk here |
 | Authenticated spec URLs | Not supported | Github token only | Done (Beyond) |
 | Swagger 2.0 | Refused: "Swagger 2.0 is not supported. Please convert your spec to OpenAPI 3.x." | Imported | Beyond |

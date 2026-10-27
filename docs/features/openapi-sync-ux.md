@@ -77,16 +77,16 @@ Show changes on a modified row lists, for each changed field, the version last s
 
 ## Skipped items
 
-The "N skipped, hidden from this list." line opens the Skipped list. Each row has **Un-skip**, and **Un-skip all** takes every skip back. Un-skip refreshes the waiting count and refuses while an apply runs. A skip whose item changed again is back in the review list and is not listed here. The import dialog says a spec imported from a file is not kept in sync.
+The "N skipped, hidden from this list." line opens the Skipped list. Each row has **Un-skip**, and **Un-skip all** takes every skip back. Un-skip refreshes the waiting count and refuses while an apply runs. A skip whose item changed again is back in the review list and is not listed here.
 
 ## Spec files
 
-A spec can be a file on this computer instead of a link. Pick it in the import dialog (File mode, **Keep in sync with this file**, on by default), in Connect, or in Change link (the Link / File switch and **Choose spec file**). The source file stores the path relative to the collection folder when the file is inside the collection or beside it (`../api.yaml`), and the absolute path otherwise. A source with a file is written as `version: 2`, so older Rocket builds refuse it, and link sources stay version 1.
+A spec can be a file on this computer instead of a link. Pick it in the import dialog (File mode, **Keep in sync with this file**, on by default; it approves the file for this machine and turns on checks every 5 minutes), in Connect, or in Change link (the Link / File switch and **Choose spec file**). The source file stores the path relative to the collection folder when the file is inside the collection or beside it (`../api.yaml`), and the absolute path otherwise. A source with a file is written as `version: 2`, so older Rocket builds refuse it, and link sources stay version 1.
 
 - Approval is the gate, as for a link: a cloned or moved collection shows **Needs approval** with the full resolved path (`file:///home/me/specs/api.yaml`) and reads nothing until it is approved on this machine.
 - A check reads the file and compares its SHA-256 with the last one. A rewrite with the same bytes is no update. A file has no validators, no redirects, no token and no backoff.
 - A missing file fails with "The spec file was not found on this computer." and changes nothing. The alert offers **Choose another file**, which opens Connection settings at the Change link form. An unreadable file, a directory, a device, or a file over 25 MB also fails with a fixed sentence that names no path.
-- A stored path is refused (never shown as approvable, never read) when it has more than one leading `..`, a `..` after a folder, a network share (`//server/share`) or a NUL.
+- A stored path is refused (approval fails with a fixed sentence and nothing is read) when it has more than one leading `..`, a `..` after a folder, a network share (`//server/share`) or a NUL.
 - The `$ref` files of a spec file are not loaded, with one note.
 - Disconnect and Change link never write the spec file.
 

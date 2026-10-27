@@ -12,6 +12,13 @@ interface SpecSourceFieldProps {
   label: string;
   disabled?: boolean;
   placeholder?: string;
+  /** The mode to start in. Without it a path-like value starts in file mode. */
+  initialMode?: 'link' | 'file';
+}
+
+/** A picked path starts with a slash, a drive letter or `file://`. A link has a web scheme. */
+function looksLikePath(value: string): boolean {
+  return value.startsWith('/') || value.startsWith('file://') || /^[A-Za-z]:[\\/]/.test(value);
 }
 
 /** A spec link, or a spec file chosen with the system picker. */
@@ -21,8 +28,11 @@ export function SpecSourceField({
   label,
   disabled,
   placeholder = 'https://github.com/owner/repo/blob/main/openapi.yaml',
+  initialMode,
 }: SpecSourceFieldProps) {
-  const [mode, setMode] = useState<'link' | 'file'>('link');
+  const [mode, setMode] = useState<'link' | 'file'>(
+    () => initialMode ?? (looksLikePath(value) ? 'file' : 'link'),
+  );
 
   const switchTo = (next: 'link' | 'file') => {
     if (next === mode) return;

@@ -129,7 +129,7 @@ describe('OpenApiSyncHeader', () => {
       await userEvent
         .setup()
         .click(within(alert).getByRole('button', { name: 'Choose another file' }));
-      expect(await screen.findByLabelText('New spec link')).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: /choose spec file/i })).toBeInTheDocument();
     });
   });
 

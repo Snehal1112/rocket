@@ -91,6 +91,18 @@ describe('ChangeLinkForm', () => {
     expect(screen.queryByText('Access token (optional)')).toBeNull();
   });
 
+  it('a_file_source_opens_the_form_in_file_mode', () => {
+    renderWithQuery(
+      <ChangeLinkForm
+        collection='Orders'
+        currentLocation='file:///home/me/specs/api.yaml'
+        onDone={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /choose spec file/i })).toBeInTheDocument();
+    expect(screen.queryByLabelText('New spec link')).toBeNull();
+  });
+
   it('a_low_match_shows_the_warning', async () => {
     vi.mocked(tauriApi.previewOpenApiChangeLink).mockResolvedValue(
       preview({ matched: 1, removed: 4 }),

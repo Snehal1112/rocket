@@ -65,6 +65,23 @@ describe('SpecSourceField', () => {
     expect(screen.getByText('/tmp/api.yaml')).toBeInTheDocument();
   });
 
+  it('starts_in_file_mode_when_the_value_is_a_path', () => {
+    render(<SpecSourceField value='/tmp/api.yaml' onChange={vi.fn()} label='Spec link' />);
+    expect(screen.getByRole('button', { name: /choose spec file/i })).toBeInTheDocument();
+    expect(screen.getByText('/tmp/api.yaml')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Spec link')).toBeNull();
+  });
+
+  it('an_initial_mode_can_be_given', () => {
+    render(<SpecSourceField value='' onChange={vi.fn()} label='Spec link' initialMode='file' />);
+    expect(screen.getByRole('button', { name: /choose spec file/i })).toBeInTheDocument();
+  });
+
+  it('a_link_value_starts_in_link_mode', () => {
+    render(<SpecSourceField value='https://x.test/a.json' onChange={vi.fn()} label='Spec link' />);
+    expect(screen.getByLabelText('Spec link')).toBeInTheDocument();
+  });
+
   it('switching_mode_clears_the_value', async () => {
     const onChange = vi.fn();
     render(<SpecSourceField value='https://x.test/a.json' onChange={onChange} label='Spec link' />);

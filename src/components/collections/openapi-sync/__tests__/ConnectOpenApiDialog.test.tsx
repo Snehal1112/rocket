@@ -70,6 +70,19 @@ describe('ConnectOpenApiDialog', () => {
     expect(tauriApi.previewOpenApiConnect).toHaveBeenCalledWith('Orders', '/tmp/api.yaml', undefined);
   });
 
+  it('going_back_keeps_the_chosen_file', async () => {
+    vi.mocked(openFilePicker).mockResolvedValue('/tmp/api.yaml');
+    renderDialog();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'File' }));
+    await user.click(screen.getByRole('button', { name: /choose spec file/i }));
+    await user.click(await screen.findByRole('button', { name: 'Preview' }));
+    await screen.findByText('1 linked, 1 added, 1 skipped');
+    await user.click(screen.getByRole('button', { name: 'Back' }));
+    expect(await screen.findByText('/tmp/api.yaml')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /choose spec file/i })).toBeInTheDocument();
+  });
+
   it('no_token_field_for_a_file', async () => {
     vi.mocked(openFilePicker).mockResolvedValue('/tmp/api.yaml');
     renderDialog();
