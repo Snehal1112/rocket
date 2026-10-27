@@ -109,7 +109,33 @@ describe('CollectionNode OpenAPI sync entry', () => {
   });
 
   describe('waiting count badge', () => {
-    const badge = (n: number) => screen.findByRole('button', { name: `Open OpenAPI sync, ${n} updates` });
+    const badge = (n: number) =>
+      screen.findByRole('button', {
+        name: `Open OpenAPI sync, ${n} ${n === 1 ? 'update' : 'updates'}`,
+      });
+
+    it('uses_the_singular_for_one_update', async () => {
+      vi.mocked(tauriApi.getOpenApiSyncBadges).mockResolvedValue([
+        { collection: 'my-collection', waiting: 1 },
+      ]);
+      const user = userEvent.setup();
+      renderNode();
+      const el = await badge(1);
+      expect(el).toHaveAccessibleName('Open OpenAPI sync, 1 update');
+      await user.hover(el);
+      expect(await screen.findAllByText('1 OpenAPI spec update')).not.toHaveLength(0);
+    });
+
+    it('double_clicking_the_badge_does_not_open_the_collection_tab', async () => {
+      vi.mocked(tauriApi.getOpenApiSyncBadges).mockResolvedValue([
+        { collection: 'my-collection', waiting: 2 },
+      ]);
+      const openTab = vi.spyOn(usePaneStore.getState(), 'openTab');
+      const user = userEvent.setup();
+      renderNode();
+      await user.dblClick(await badge(2));
+      expect(openTab).not.toHaveBeenCalledWith(expect.objectContaining({ tabType: 'collection' }));
+    });
 
     it('shows_the_waiting_count_badge', async () => {
       vi.mocked(tauriApi.getOpenApiSyncBadges).mockResolvedValue([

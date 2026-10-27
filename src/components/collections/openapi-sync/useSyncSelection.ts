@@ -1,4 +1,4 @@
-import { type Dispatch, type SetStateAction, useCallback, useMemo, useState } from 'react';
+import { type Dispatch, type SetStateAction, useCallback, useMemo, useRef, useState } from 'react';
 import type { OpenApiSelection, OpenApiSyncPlan } from '@/lib/tauri-api';
 import { buildSelection } from './buildSelection';
 import { acceptAllSelection, countOverwrites, defaultSelection } from './bulkSelection';
@@ -80,6 +80,8 @@ export function useSyncSelection(
   const [state, setState] = useState<State>(() => defaultState(plan));
   const signature = useMemo(() => (plan ? planSignature(plan) : ''), [plan]);
   const [seen, setSeen] = useState(signature);
+  const signatureRef = useRef(signature);
+  signatureRef.current = signature;
   if (seen !== signature) {
     setSeen(signature);
     setState(defaultState(plan));
@@ -181,6 +183,7 @@ export function useSyncSelection(
 
   const skipAll = useCallback((): (() => void) => {
     const before = state;
+    const startedOn = signature;
     setState((s) => ({
       ...s,
       approved: new Set(),
@@ -188,14 +191,17 @@ export function useSyncSelection(
       skips: new Set(plan ? plan.items.map((i) => i.key) : []),
     }));
     // The undo puts back the selection and the skips from before.
-    return () =>
+    // A new plan has its own defaults, so the old selection is not put back onto it.
+    return () => {
+      if (signatureRef.current !== startedOn) return;
       setState((s) => ({
         ...s,
         approved: before.approved,
         variables: before.variables,
         skips: before.skips,
       }));
-  }, [plan, state]);
+    };
+  }, [plan, state, signature]);
 
   const reset = useCallback(() => setState(emptyState()), []);
 

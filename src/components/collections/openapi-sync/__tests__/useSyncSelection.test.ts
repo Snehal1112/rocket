@@ -77,6 +77,9 @@ describe('useSyncSelection', () => {
       variableChanges: [{ name: 'baseUrl', kind: 'baseUrl', digest: 'dv' }],
     });
     const { result } = setup(plan);
+    expect(result.current.selection.variables).toEqual([{ name: 'baseUrl', digest: 'dv' }]);
+    act(() => result.current.toggleVariable('baseUrl'));
+    expect(result.current.selection.variables).toEqual([]);
     act(() => result.current.toggleVariable('baseUrl'));
     expect(result.current.selection.variables).toEqual([{ name: 'baseUrl', digest: 'dv' }]);
   });
@@ -281,6 +284,8 @@ describe('useSyncSelection defaults and bulk actions', () => {
       variableChanges: [{ name: 'baseUrl', kind: 'baseUrl', digest: 'dv' }],
     });
     const { result } = setup(plan);
+    expect(result.current.variables.size).toBe(1);
+    act(() => result.current.keepCurrent());
     expect(result.current.variables.size).toBe(0);
     act(() => {
       result.current.acceptAll();
@@ -298,5 +303,26 @@ describe('useSyncSelection defaults and bulk actions', () => {
     act(() => undo());
     expect([...result.current.approved].sort()).toEqual(['GET /pets', 'PUT /pets']);
     expect(result.current.skips.size).toBe(0);
+  });
+
+  it('a_skip_all_undo_is_ignored_after_the_plan_changed', () => {
+    const { result, rerender } = setup(bulkPlan());
+    let undo = () => {};
+    act(() => {
+      undo = result.current.skipAll();
+    });
+    rerender({ p: makePlan({ items: [{ ...newItem, digest: 'other' }] }) });
+    act(() => undo());
+    expect([...result.current.approved]).toEqual(['GET /pets']);
+    expect(result.current.skips.size).toBe(0);
+  });
+
+  it('the_defaults_select_variable_changes', () => {
+    const plan = makePlan({
+      items: [newItem],
+      variableChanges: [{ name: 'baseUrl', kind: 'baseUrl', digest: 'dv' }],
+    });
+    const { result } = setup(plan);
+    expect(result.current.selectedCount).toBe(2);
   });
 });

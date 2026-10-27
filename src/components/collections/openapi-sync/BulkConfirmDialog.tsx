@@ -40,7 +40,7 @@ export function BulkConfirmDialog({
           <AlertDialogDescription>
             {accept
               ? `This selects ${requests(count)} from the spec. Nothing changes until you confirm and sync.`
-              : `This skips ${requests(count)}. They stay hidden until the spec changes.`}
+              : `This skips ${requests(count)}. They stay hidden until the spec changes. Variable changes cannot be skipped and stay waiting.`}
           </AlertDialogDescription>
         </AlertDialogHeader>
         {accept && (

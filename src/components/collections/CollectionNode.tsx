@@ -425,12 +425,14 @@ export function CollectionNode({
                           <span
                             role='button'
                             tabIndex={0}
-                            aria-label={`Open OpenAPI sync, ${waitingUpdates} updates`}
+                            aria-label={`Open OpenAPI sync, ${waitingUpdates} ${waitingUpdates === 1 ? 'update' : 'updates'}`}
                             className='flex h-4 min-w-4 shrink-0 cursor-pointer items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground hover:opacity-80'
                             onClick={(e) => {
                               e.stopPropagation();
                               openOpenApiSync();
                             }}
+                            // A double click must not reach the row and open the Overview tab.
+                            onDoubleClick={(e) => e.stopPropagation()}
                             onKeyDown={(e) => {
                               if (e.key === 'Enter' || e.key === ' ') {
                                 e.preventDefault();
@@ -442,7 +444,7 @@ export function CollectionNode({
                             {waitingUpdates}
                           </span>
                         </TooltipTrigger>
-                        <TooltipContent>{waitingUpdates} OpenAPI spec updates</TooltipContent>
+                        <TooltipContent>{`${waitingUpdates} OpenAPI spec ${waitingUpdates === 1 ? 'update' : 'updates'}`}</TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
                   )}

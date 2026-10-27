@@ -751,9 +751,8 @@ describe('OpenApiSyncTab actions', () => {
     vi.mocked(tauriApi.applyOpenApiSync).mockResolvedValue({ ...report, applied: [] });
     renderWithQuery(<TabWithListeners collection='vars1' />);
     const user = userEvent.setup();
-    await user.click(
-      await screen.findByRole('checkbox', { name: 'Include Base URL baseUrl in apply' }),
-    );
+    // The variable change is selected by default.
+    await screen.findByRole('checkbox', { name: 'Include Base URL baseUrl in apply' });
     await user.click(screen.getByRole('button', { name: /^Confirm and sync/ }));
     expect(
       screen.getByText('1 variable change will be applied. A value you changed yourself is kept.'),
@@ -901,6 +900,8 @@ describe('OpenApiSyncTab actions', () => {
     const user = userEvent.setup();
     await screen.findByRole('button', { name: 'Accept all' });
     expect(screen.getByRole('button', { name: 'Skip all' })).toBeDisabled();
+    expect(screen.getByText(/· 1 selected$/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Keep current' }));
     expect(screen.getByText(/· 0 selected$/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Accept all' }));
     expect(screen.getByText(/· 1 selected$/)).toBeInTheDocument();
@@ -916,9 +917,70 @@ describe('OpenApiSyncTab actions', () => {
     renderWithQuery(<TabWithListeners collection='bulk9' />);
     const user = userEvent.setup();
     await screen.findByRole('button', { name: 'Accept all' });
-    expect(screen.getByText(/· 1 selected$/)).toBeInTheDocument();
+    expect(screen.getByText(/· 2 selected$/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Keep current' }));
     await user.click(screen.getByRole('button', { name: 'Accept all' }));
     expect(screen.getByText(/· 2 selected$/)).toBeInTheDocument();
+  });
+
+  it('confirm_with_the_defaults_sends_the_variable_change_too', async () => {
+    mockSync(
+      makePlan({
+        items: [newItem],
+        variableChanges: [{ name: 'baseUrl', kind: 'baseUrl', digest: 'dv' }],
+      }),
+    );
+    vi.mocked(tauriApi.applyOpenApiSync).mockResolvedValue(report);
+    renderWithQuery(<TabWithListeners collection='bulk14' />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Confirm and sync (2)' }));
+    await user.click(screen.getByRole('button', { name: 'Apply now' }));
+    await waitFor(() => expect(tauriApi.applyOpenApiSync).toHaveBeenCalledTimes(1));
+    const sent = vi.mocked(tauriApi.applyOpenApiSync).mock.calls[0]?.[1];
+    expect(sent?.variables).toEqual([{ name: 'baseUrl', digest: 'dv' }]);
+    expect(sent?.items.map((i) => i.key)).toEqual(['GET /pets']);
+  });
+
+  it('skip_all_dialog_says_variable_changes_stay_waiting', async () => {
+    mockSync(
+      makePlan({
+        items: [newItem],
+        variableChanges: [{ name: 'baseUrl', kind: 'baseUrl', digest: 'dv' }],
+      }),
+    );
+    renderWithQuery(<TabWithListeners collection='bulk15' />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Skip all' }));
+    expect(
+      within(screen.getByRole('alertdialog')).getByText(/Variable changes cannot be skipped and stay waiting/),
+    ).toBeInTheDocument();
+  });
+
+  it('a_late_skip_all_failure_does_not_restore_onto_a_new_plan', async () => {
+    mockSync();
+    let fail: (e: unknown) => void = () => undefined;
+    vi.mocked(tauriApi.applyOpenApiSync).mockReturnValue(
+      new Promise((_, reject) => {
+        fail = reject;
+      }),
+    );
+    renderWithQuery(<TabWithListeners collection='bulk16' />);
+    const user = userEvent.setup();
+    await screen.findByText('Add pet');
+    await user.click(screen.getByRole('button', { name: 'Skip all' }));
+    await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Skip all' }));
+    await waitFor(() => expect(tauriApi.applyOpenApiSync).toHaveBeenCalledTimes(1));
+    // The plan changes while the skip is still running.
+    vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(
+      makePlan({ items: [{ ...newItem, digest: 'zz' }, { ...newItem, key: 'GET /cats', name: 'List cats', digest: 'dc', fingerprint: 'fc' }] }),
+    );
+    const onChecked = vi.mocked(tauriApi.onOpenApiSyncChecked).mock.calls[0]?.[0];
+    await act(async () => onChecked?.({ collection: 'bulk16' } as never));
+    await screen.findByText('List cats');
+    await act(async () => fail('Conflict: an earlier apply is not finished yet'));
+    // Only the defaults of the new plan are selected, not the old approvals.
+    await waitFor(() => expect(screen.getByText(/· 2 selected$/)).toBeInTheDocument());
+    expect(screen.getByRole('checkbox', { name: 'Include List cats in apply' })).toBeChecked();
   });
 
   it('skip_selected_skips_only_the_selected_requests', async () => {

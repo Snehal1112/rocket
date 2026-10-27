@@ -5,6 +5,7 @@ type Choice = 'spec' | 'yours';
 export interface DefaultSelection {
   approved: Set<string>;
   choices: Map<string, Record<string, Choice>>;
+  variables: Set<string>;
 }
 
 /** The conflict fields of a changed item, which are the fields the user edited too. */
@@ -22,6 +23,7 @@ export function isEditedRemoved(item: OpenApiSyncItem): boolean {
  * The selection a fresh plan starts with. New items and changed items without a conflict are
  * selected. A changed item with a conflict starts unselected and keeps the user's version.
  * A removed item is never selected, so nothing is deleted without a deliberate click.
+ * Variable changes are selected too. A value the user changed is kept by the apply.
  */
 export function defaultSelection(plan: OpenApiSyncPlan): DefaultSelection {
   const approved = new Set<string>();
@@ -34,7 +36,7 @@ export function defaultSelection(plan: OpenApiSyncPlan): DefaultSelection {
       approved.add(item.key);
     }
   }
-  return { approved, choices };
+  return { approved, choices, variables: new Set(plan.variableChanges.map((v) => v.name)) };
 }
 
 /** How many of the user's edits Accept all would overwrite with the spec. */
@@ -50,7 +52,7 @@ export function acceptAllSelection(
   plan: OpenApiSyncPlan,
   approved: Set<string>,
   choices: Map<string, Record<string, Choice>>,
-): DefaultSelection {
+): Omit<DefaultSelection, 'variables'> {
   const nextApproved = new Set(approved);
   const nextChoices = new Map(choices);
   for (const item of plan.items) {
