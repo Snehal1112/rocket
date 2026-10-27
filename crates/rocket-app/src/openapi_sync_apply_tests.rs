@@ -1240,6 +1240,9 @@ mod spec_view_tests;
 #[path = "openapi_sync_reset_tests.rs"]
 mod reset_tests;
 
+#[path = "openapi_sync_skips_tests.rs"]
+mod skips_tests;
+
 #[cfg(test)]
 #[path = "openapi_connect_tests.rs"]
 mod connect_tests;

@@ -64,6 +64,7 @@ pub mod openapi_connect;
 pub mod openapi_sync_apply;
 pub mod openapi_sync_changes;
 pub mod openapi_sync_reset;
+pub mod openapi_sync_skips;
 pub mod openapi_sync_scheduler;
 pub mod openapi_sync_service;
 pub mod openapi_sync_spec_view;
@@ -156,6 +157,7 @@ pub use openapi_connect::{
     ConnectPreview, ConnectRequestRow, ConnectRow,
 };
 pub use openapi_sync_reset::ResetReport;
+pub use openapi_sync_skips::SkippedRow;
 pub use openapi_sync_view::{
     BackupRow, BadgeView, ChangeRow, ChangeValue, ChangesView, OverviewView, PlanView, SpecOpRow, SpecTagGroup, SpecView,
     SpecViewState, UnchangedView,

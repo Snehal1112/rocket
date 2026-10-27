@@ -123,25 +123,25 @@ pub(crate) fn to_json<T: serde::Serialize>(value: &T) -> DomainResult<Vec<u8>> {
 }
 
 /// Everything `apply` reads before it builds the changes.
-struct Loaded {
-    source: OpenApiSource,
-    baseline: Option<OpenApiBaseline>,
-    local: OpenApiLocalState,
+pub(crate) struct Loaded {
+    pub(crate) source: OpenApiSource,
+    pub(crate) baseline: Option<OpenApiBaseline>,
+    pub(crate) local: OpenApiLocalState,
     pending_text: String,
-    current: Vec<CurrentRequest>,
+    pub(crate) current: Vec<CurrentRequest>,
     existing_paths: HashSet<String>,
     settings: rocket_collection::CollectionSettings,
 }
 
 /// What the plan needs besides `Loaded`: the parsed pending spec and the collection facts.
-struct Prepared {
+pub(crate) struct Prepared {
     incoming: ParsedSpec,
     variables: Vec<String>,
     base_url: Option<String>,
 }
 
 impl Loaded {
-    fn prepare(&self) -> DomainResult<Prepared> {
+    pub(crate) fn prepare(&self) -> DomainResult<Prepared> {
         let incoming = ParsedSpec::parse(&self.pending_text)
             .map_err(|e| DomainError::InvalidInput(e.to_string()))?;
         let variables = self
@@ -164,7 +164,7 @@ impl Loaded {
     }
 
     /// The one place the plan inputs are put together, for `apply` and `plan` alike.
-    fn sync_inputs<'a>(
+    pub(crate) fn sync_inputs<'a>(
         &'a self,
         prepared: &'a Prepared,
         skips: &'a BTreeMap<String, String>,
@@ -186,7 +186,7 @@ impl OpenApiSyncService {
         self.apply_deps.as_ref().ok_or_else(not_set_up)
     }
 
-    fn load_for_apply(
+    pub(crate) fn load_for_apply(
         &self,
         deps: &ApplyDeps,
         repo: &dyn CollectionRepository,
@@ -332,7 +332,7 @@ impl OpenApiSyncService {
     /// Stores the waiting count of the plan as it stands after an apply, with the same logic
     /// as `count_pending`. The caller holds the collection lock. A failure keeps the count the
     /// apply staged from its report.
-    fn refresh_count(
+    pub(crate) fn refresh_count(
         &self,
         deps: &ApplyDeps,
         repo: &dyn CollectionRepository,
