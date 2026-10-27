@@ -1,6 +1,7 @@
 pub(crate) mod bundle;
 pub(crate) mod entry;
 pub(crate) mod layout;
+pub(crate) mod matching;
 pub(crate) mod model;
 pub(crate) mod reader;
 pub(crate) mod source_record;
@@ -27,4 +28,7 @@ pub use sync::{
     build_sync_plan, fingerprint, merge_item, merge_request, request_is_edited, Choice,
     CurrentRequest, FieldChange, FieldOutcome, MergeOutcome, SyncInputs, SyncItem, SyncPlan,
     VariableChange, VariableKind,
+};
+pub use matching::{
+    match_requests, normalise_path, AmbiguousGroup, MatchPair, MatchRequest, MatchResult,
 };
