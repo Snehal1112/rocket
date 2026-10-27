@@ -123,6 +123,11 @@ impl World {
         FsOpenApiLocalRepo.save(&root, &local).expect("local");
         // A spec copy from the sync design and a file this feature does not own.
         std::fs::write(root.join(".rocket/openapi-applied.spec"), b"applied").expect("applied");
+        std::fs::write(
+            root.join(".rocket/openapi-reset-backups.json"),
+            br#"{"version":1}"#,
+        )
+        .expect("backups");
         std::fs::write(root.join(".rocket/other.json"), b"{}").expect("other");
         let secrets = Arc::new(Secrets::default());
         secrets.set("src-1", "token", "ghp_secret").expect("token");
@@ -189,6 +194,7 @@ fn disconnect_removes_only_sync_state() {
         "openapi-pending.spec",
         "openapi-baseline.json",
         "openapi-applied.spec",
+        "openapi-reset-backups.json",
     ] {
         assert!(!w.rocket(name), "{name} should be gone");
     }

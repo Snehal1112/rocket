@@ -5,12 +5,13 @@ use rocket_shared::error::{DomainError, DomainResult};
 use std::path::Path;
 
 /// Files under `.rocket` that this feature owns and a transaction may touch.
-pub const OWNED_STATE_FILES: [&str; 5] = [
+pub const OWNED_STATE_FILES: [&str; 6] = [
     "openapi-source.yml",
     "openapi-baseline.json",
     "openapi-pending.spec",
     "openapi-local.json",
     "openapi-applied.spec",
+    "openapi-reset-backups.json",
 ];
 
 /// Names that Windows treats as devices, with or without an extension.
@@ -104,5 +105,16 @@ pub trait CollectionFileTxFactory: Send + Sync {
         Err(DomainError::Internal(
             "listing the collection files is not available".into(),
         ))
+    }
+}
+
+#[cfg(test)]
+mod owned_files_tests {
+    use super::*;
+
+    #[test]
+    fn owned_state_files_lists_the_backups_file() {
+        assert_eq!(OWNED_STATE_FILES.len(), 6);
+        assert!(OWNED_STATE_FILES.contains(&"openapi-reset-backups.json"));
     }
 }
