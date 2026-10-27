@@ -27,6 +27,29 @@ const defaultState = (plan: OpenApiSyncPlan | undefined): State => ({
   ...(plan ? defaultSelection(plan) : {}),
 });
 
+/**
+ * The state for a new plan. An item or variable whose digest did not change keeps what the user
+ * chose for it, so a plan that changes under them (a check, a skip, a rename link) never ticks
+ * again something they unticked. Anything with new content starts from its default.
+ */
+function carryOver(prev: OpenApiSyncPlan, state: State, next: OpenApiSyncPlan): State {
+  const fresh = defaultState(next);
+  const was = new Map(prev.items.map((i) => [`${i.kind}\u0000${i.key}`, i.digest]));
+  for (const item of next.items) {
+    if (was.get(`${item.kind}\u0000${item.key}`) !== item.digest) continue;
+    fresh.approved = withKeys(fresh.approved, [item.key], state.approved.has(item.key));
+    fresh.skips = withKeys(fresh.skips, [item.key], state.skips.has(item.key));
+    const chosen = state.choices.get(item.key);
+    if (chosen) fresh.choices.set(item.key, chosen);
+  }
+  const wasVars = new Map(prev.variableChanges.map((v) => [v.name, v.digest]));
+  for (const v of next.variableChanges) {
+    if (wasVars.get(v.name) !== v.digest) continue;
+    fresh.variables = withKeys(fresh.variables, [v.name], state.variables.has(v.name));
+  }
+  return fresh;
+}
+
 const EMPTY_PLAN: OpenApiSyncPlan = {
   pending: false,
   items: [],
@@ -69,8 +92,9 @@ function withKeys(set: Set<string>, keys: Iterable<string>, on: boolean): Set<st
 /**
  * The selection of one OpenAPI sync tab. It lives in the tab, not in a store. The rename links
  * are owned by the caller because they are part of the plan query key. A plan with a new
- * digest set resets the selection to the defaults, so an approval never outlives the item it
- * was made for. Inside one plan the user's choices are kept.
+ * digest set resets an item whose digest changed to its defaults, so an approval never outlives
+ * the content it was made for. Items whose digest did not change keep the user's choices, both
+ * inside one plan and across plans.
  */
 export function useSyncSelection(
   plan: OpenApiSyncPlan | undefined,
@@ -80,11 +104,13 @@ export function useSyncSelection(
   const [state, setState] = useState<State>(() => defaultState(plan));
   const signature = useMemo(() => (plan ? planSignature(plan) : ''), [plan]);
   const [seen, setSeen] = useState(signature);
+  const [seenPlan, setSeenPlan] = useState(plan);
   const signatureRef = useRef(signature);
   signatureRef.current = signature;
   if (seen !== signature) {
     setSeen(signature);
-    setState(defaultState(plan));
+    setSeenPlan(plan);
+    setState((s) => (plan && seenPlan ? carryOver(seenPlan, s, plan) : defaultState(plan)));
     // Links stay across new plans. Only the ones the plan no longer shows are dropped.
     if (plan && links.length > 0) {
       const valid = links.filter(([oldKey, newKey]) => linkIsShown(plan, oldKey, newKey));

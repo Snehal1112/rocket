@@ -51,6 +51,8 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // The plan the confirm dialog was opened on, so a different plan closes it.
+  const [confirmPlan, setConfirmPlan] = useState<unknown>(null);
   const [busyNotice, setBusyNotice] = useState(false);
   const [checking, setChecking] = useState(false);
   const [tab, setTab] = useState<string | null>(null);
@@ -79,8 +81,11 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
   // A new plan, a locked tab or a running apply closes the bulk dialog for good.
   if (bulk && (bulk.plan !== planData || locked || busy)) setBulk(null);
 
-  // An emptied selection, for example after a plan change, closes the dialog for good.
-  if (confirmOpen && approvedItems.length + variables.size === 0) setConfirmOpen(false);
+  // A new plan or an emptied selection closes the confirm dialog for good, so the user never
+  // applies a list they did not see.
+  if (confirmOpen && (confirmPlan !== planData || approvedItems.length + variables.size === 0)) {
+    setConfirmOpen(false);
+  }
 
   // The notice goes away once the other apply is done.
   if (busyNotice && !applyingAnywhere) setBusyNotice(false);
@@ -302,7 +307,10 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
           busy={busy}
           onSelectMatches={selectMatches}
           onSkipSelected={skipSelected}
-          onConfirm={() => setConfirmOpen(true)}
+          onConfirm={() => {
+            setConfirmPlan(planData);
+            setConfirmOpen(true);
+          }}
           onAcceptAll={requestAcceptAll}
           onSkipAll={() => setBulk({ kind: 'skip', plan: planData })}
           onKeepCurrent={sel.keepCurrent}

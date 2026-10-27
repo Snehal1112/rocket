@@ -21,7 +21,7 @@ Four counts: Endpoints, In sync, Changed by you, Spec updates waiting. A banner 
 - Select matches selects the New and Changed items that match the search. It never selects a Removed item.
 - Skip selected skips only the selected requests.
 - Confirm and sync is disabled at 0 selected. It opens the confirm dialog, then the result dialog.
-- The selection resets to the defaults whenever the plan changes. Choices made inside one plan are kept.
+- When the plan changes, an item whose content changed goes back to its default. An item whose content did not change keeps your choice, so a check or a skip never ticks again something you unticked. A plan change closes an open confirm dialog.
 
 ## Your changes
 

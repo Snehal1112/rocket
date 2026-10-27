@@ -778,6 +778,29 @@ describe('OpenApiSyncTab actions', () => {
     expect(screen.queryByRole('button', { name: 'Apply now' })).toBeNull();
   });
 
+  it('closes_the_confirm_dialog_and_keeps_an_unticked_item_unticked_when_the_plan_changes', async () => {
+    const plain = {
+      ...changedItem,
+      digest: 'dp',
+      changes: [
+        { field: 'header:Accept', outcome: 'takeSpec', baseline: 'a', yours: 'a', spec: 'b' },
+      ],
+    } as OpenApiSyncItem;
+    mockSync(makePlan({ items: [newItem, plain] }));
+    renderWithQuery(<TabWithListeners collection='conf2' />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('checkbox', { name: 'Include List pets in apply' }));
+    await user.click(screen.getByRole('button', { name: /^Confirm and sync/ }));
+    expect(screen.getByRole('button', { name: 'Apply now' })).toBeInTheDocument();
+    vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(
+      makePlan({ items: [newItem, { ...plain, digest: 'dp2' } as OpenApiSyncItem] }),
+    );
+    const onChecked = vi.mocked(tauriApi.onOpenApiSyncChecked).mock.calls[0]?.[0];
+    await act(async () => onChecked?.({ collection: 'conf2' } as never));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Apply now' })).toBeNull());
+    expect(screen.getByRole('checkbox', { name: 'Include List pets in apply' })).not.toBeChecked();
+  });
+
   it('keeps the rename links through a background refresh of the plan', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
     const linked = makePlan({

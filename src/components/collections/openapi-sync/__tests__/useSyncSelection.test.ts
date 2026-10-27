@@ -249,14 +249,34 @@ describe('useSyncSelection defaults and bulk actions', () => {
     );
   });
 
-  it('a_new_plan_resets_to_the_defaults', () => {
+  it('a_new_plan_resets_an_item_whose_digest_changed_to_its_default', () => {
     const { result, rerender } = setup(bulkPlan());
-    act(() => result.current.keepCurrent());
-    act(() => result.current.toggle('DELETE /pets'));
+    act(() => result.current.toggle('GET /pets'));
+    expect(result.current.approved.has('GET /pets')).toBe(false);
     rerender({
       p: makePlan({ items: [{ ...newItem, digest: 'changed' }, plainChanged, changedItem] }),
     });
-    expect([...result.current.approved].sort()).toEqual(['GET /pets', 'PUT /pets']);
+    expect(result.current.approved.has('GET /pets')).toBe(true);
+  });
+
+  it('a_new_plan_keeps_the_choice_for_items_whose_digest_did_not_change', () => {
+    const { result, rerender } = setup(bulkPlan());
+    act(() => result.current.keepCurrent());
+    act(() => result.current.toggle('DELETE /pets'));
+    act(() => result.current.setChoice('POST /pets', 'url', 'spec'));
+    rerender({
+      p: makePlan({ items: [{ ...newItem, digest: 'changed' }, plainChanged, changedItem] }),
+    });
+    // The new item has new content, so it starts from the default. The rest keep the user's choice.
+    expect([...result.current.approved]).toEqual(['GET /pets']);
+    expect(result.current.choices.get('POST /pets')).toEqual({ url: 'spec' });
+  });
+
+  it('an_item_the_user_unticked_stays_unticked_when_another_item_leaves_the_plan', () => {
+    const { result, rerender } = setup(bulkPlan());
+    act(() => result.current.toggle('PUT /pets'));
+    rerender({ p: makePlan({ items: [plainChanged, changedItem] }) });
+    expect(result.current.approved.size).toBe(0);
   });
 
   it('toggling_inside_one_plan_is_kept', () => {
