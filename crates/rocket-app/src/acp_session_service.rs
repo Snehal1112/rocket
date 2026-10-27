@@ -363,7 +363,7 @@ impl AcpSessionService {
                             }
                             other => {
                                 self.publish_chunks(session_id, chunks.finish());
-                                self.publish_update(session_id, other, &mut tool_calls);
+                                self.publish_update(session_id, other, &mut tool_calls, &forms);
                             }
                         }
                     }
@@ -484,10 +484,17 @@ impl AcpSessionService {
     }
 
     /// Publishes one update as its domain event. Tool call updates are merged
-    /// with the last known title and status of the same call. Text and
+    /// with the last known title and status of the same call. Titles and
+    /// permission summaries are masked with `forms`, like the chunks. Text and
     /// reasoning go through `ChunkStream` and `publish_chunks` instead, so
     /// they are ignored here.
-    fn publish_update(&self, session_id: &str, update: AcpUpdate, tool_calls: &mut ToolCallStates) {
+    fn publish_update(
+        &self,
+        session_id: &str,
+        update: AcpUpdate,
+        tool_calls: &mut ToolCallStates,
+        forms: &HashSet<String>,
+    ) {
         let session_id = session_id.to_string();
         let event = match update {
             AcpUpdate::Text { .. } | AcpUpdate::Thought { .. } => return,
@@ -497,6 +504,7 @@ impl AcpSessionService {
                 kind: _,
                 status,
             } => {
+                let title = mask_text(title, forms);
                 tool_calls.insert(call_id.clone(), (title.clone(), status));
                 DomainEvent::AcpToolActivity {
                     session_id,
@@ -514,7 +522,7 @@ impl AcpSessionService {
                     .entry(call_id.clone())
                     .or_insert_with(|| (String::new(), ToolCallStatus::Pending));
                 if let Some(title) = title {
-                    entry.0 = title;
+                    entry.0 = mask_text(title, forms);
                 }
                 if let Some(status) = status {
                     entry.1 = status;
@@ -551,9 +559,9 @@ impl AcpSessionService {
                 session_id,
                 request_id,
                 call_id,
-                title: cap_title(title),
+                title: cap_title(mask_text(title, forms)),
                 kind,
-                summary,
+                summary: mask_text(summary, forms),
                 options,
             },
             AcpUpdate::PermissionResolved {
@@ -702,6 +710,15 @@ fn session_env(
     env.push((config.credential_env_var.clone(), credential));
     env.extend(isolation_env.iter().cloned());
     env
+}
+
+/// Masks the secret forms in a text that reaches the webview. Masking comes
+/// before any length cap, so a cut cannot leave half a secret behind.
+fn mask_text(text: String, forms: &HashSet<String>) -> String {
+    if forms.is_empty() {
+        return text;
+    }
+    redact_secrets(&text, forms)
 }
 
 /// Masks the secret forms in an error's message. The message reaches the
@@ -1807,6 +1824,121 @@ mod tests {
         assert_eq!(capped.chars().count(), 201);
         assert!(capped.ends_with('\u{2026}'));
         assert!(capped.starts_with(&"\u{e9}".repeat(200)));
+    }
+
+    const TOOL_SECRET: &str = "s3cr3t-value";
+
+    fn tool_call(title: &str) -> AcpUpdate {
+        AcpUpdate::ToolCall {
+            call_id: "c1".to_string(),
+            title: title.to_string(),
+            kind: "execute".to_string(),
+            status: ToolCallStatus::Pending,
+        }
+    }
+
+    fn tool_call_update(title: Option<&str>) -> AcpUpdate {
+        AcpUpdate::ToolCallUpdate {
+            call_id: "c1".to_string(),
+            title: title.map(str::to_string),
+            status: None,
+        }
+    }
+
+    async fn events_for(
+        service: &AcpSessionService,
+        publisher: &Arc<FakeEventPublisher>,
+    ) -> Vec<DomainEvent> {
+        service.send_prompt("session-1", hi()).await.expect("turn");
+        publisher.events.lock().expect("lock").clone()
+    }
+
+    #[tokio::test]
+    async fn tool_call_title_is_masked() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let client = FakeSessionClient {
+            prompt_updates: vec![tool_call(&format!("curl -H 'Bearer {TOOL_SECRET}'"))],
+            ..Default::default()
+        };
+        let service = masked_service(client, &publisher, &[TOOL_SECRET]);
+
+        let events = events_for(&service, &publisher).await;
+
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, DomainEvent::AcpToolActivity { .. })));
+        assert!(
+            !format!("{events:?}").contains(TOOL_SECRET),
+            "got {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn tool_call_update_title_is_masked_and_stays_masked() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let client = FakeSessionClient {
+            prompt_updates: vec![
+                tool_call("curl"),
+                tool_call_update(Some(&format!("curl {TOOL_SECRET}"))),
+                tool_call_update(None),
+            ],
+            ..Default::default()
+        };
+        let service = masked_service(client, &publisher, &[TOOL_SECRET]);
+
+        let events = events_for(&service, &publisher).await;
+
+        let activity = events
+            .iter()
+            .filter(|e| matches!(e, DomainEvent::AcpToolActivity { .. }))
+            .count();
+        assert_eq!(activity, 3);
+        assert!(
+            !format!("{events:?}").contains(TOOL_SECRET),
+            "got {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn permission_title_and_summary_are_masked() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let mut request = permission_request("perm-1");
+        if let AcpUpdate::PermissionRequest { title, summary, .. } = &mut request {
+            *title = format!("curl {TOOL_SECRET}");
+            *summary = format!("token={TOOL_SECRET}");
+        }
+        let client = FakeSessionClient {
+            prompt_updates: vec![request],
+            ..Default::default()
+        };
+        let service = masked_service(client, &publisher, &[TOOL_SECRET]);
+
+        let events = events_for(&service, &publisher).await;
+
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, DomainEvent::AcpPermissionRequested { .. })));
+        assert!(
+            !format!("{events:?}").contains(TOOL_SECRET),
+            "got {events:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn titles_pass_through_without_secrets() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let client = FakeSessionClient {
+            prompt_updates: vec![tool_call("Read GET /orders")],
+            ..Default::default()
+        };
+        let service = service_with(client, &publisher, Duration::from_secs(5));
+
+        let events = events_for(&service, &publisher).await;
+
+        assert!(events.iter().any(|e| matches!(
+            e,
+            DomainEvent::AcpToolActivity { title, .. } if title == "Read GET /orders"
+        )));
     }
 
     #[tokio::test]
