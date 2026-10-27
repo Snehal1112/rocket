@@ -391,7 +391,9 @@ describe('OpenApiSyncTab', () => {
     );
     const user = userEvent.setup();
     renderWithQuery(<TabWithListeners collection='c' />);
-    await user.click(await screen.findByRole('button', { name: 'Connection settings' }));
+    // The header has a button of the same name, so the Overview link is found in its panel.
+    const panel = await screen.findByRole('tabpanel');
+    await user.click(await within(panel).findByRole('button', { name: 'Connection settings' }));
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
     vi.mocked(tauriApi.getOpenApiSyncPlan).mockReturnValue(new Promise(() => undefined));

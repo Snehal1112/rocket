@@ -73,7 +73,7 @@ The Spec updates empty state says when the spec was last checked and offers Chec
 
 ## Values in Your changes
 
-Show changes on a modified row lists, for each changed field, the version last synced and yours (500 characters at most). Credentials are masked: the values of `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie` and `X-Api-Key` headers, URL user info, and query or form values named like `api_key`, `token`, `access_token`, `secret` or `password`. A New item in Spec updates shows a preview: method, URL, the names of enabled headers and query parameters, whether it has a body, and the auth kind. Values of headers and query parameters are not sent. **Open request** opens the request tab (or focuses it); a missing file says so.
+Show changes on a modified row lists, for each changed field, the version last synced and yours (500 characters at most). Credentials are masked: the values of `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie` and `X-Api-Key` headers, URL user info, and query or form values whose name is exactly one of `api_key`, `apikey`, `api-key`, `key`, `token`, `access_token`, `refresh_token`, `client_secret`, `secret` or `password` (any letter case). A New item in Spec updates shows a preview: method, URL, the names of enabled headers and query parameters, whether it has a body, and the auth kind. Values of headers and query parameters are not sent. **Open request** opens the request tab (or focuses it); a missing file says so.
 
 ## Skipped items
 
@@ -97,6 +97,7 @@ A count badge shows on the collection row. A toast "N spec updates" with Review 
 - A tangled group can only be kept, with the spec operations added or skipped. Link them by hand afterwards.
 - Scripts, tests and assertions are not compared, so they are never reset.
 - The values in Your changes are not shown for a collection whose baseline is missing or from an older converter.
+- Values inside a request body are shown as they are, without masking.
 - A skip for an operation that left the spec stays in the local file until it is un-skipped.
 
 ## Manual checks

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearApplyState } from '@/lib/queries/openapi-sync-queries';
@@ -88,7 +88,15 @@ describe('OpenApiSyncConnectionDialog', () => {
 
     it('the_status_row_says_when_it_was_never_checked', () => {
       renderDialog('s2', makeStatus({ lastCheckedAt: null, lastStatus: null }));
-      expect(screen.getByRole('region', { name: 'Status' })).toHaveTextContent('Not checked yet.');
+      const row = screen.getByRole('region', { name: 'Status' });
+      expect(row).toHaveTextContent('Not checked yet.');
+      expect(row).not.toHaveTextContent('No problems');
+    });
+
+    it('the_status_row_does_not_claim_no_problems_without_approval', () => {
+      renderDialog('s6', makeStatus({ consent: 'missing' }));
+      const row = screen.getByRole('region', { name: 'Status' });
+      expect(row).not.toHaveTextContent('No problems');
     });
 
     it('the_status_row_shows_the_failure_sentence', () => {
@@ -121,6 +129,8 @@ describe('OpenApiSyncConnectionDialog', () => {
 
   describe('rate limit hint', () => {
     const HINT = /60 requests an hour without a token/;
+    // Lets the token query resolve, so a hidden hint is not just a hint that has not loaded yet.
+    const settled = () => act(async () => new Promise((r) => setTimeout(r, 50)));
 
     it('the_hint_shows_for_five_minutes_on_github_without_a_token', async () => {
       renderDialog('h1', makeStatus({ location: GH, interval: 'every_5_minutes' }));
@@ -137,14 +147,31 @@ describe('OpenApiSyncConnectionDialog', () => {
     });
 
     it('no_rate_limit_hint_for_a_non_github_link', async () => {
+      // The same status on a GitHub link shows the hint, so a missing hint here is the link's doing.
       renderDialog('h3', makeStatus({ interval: 'every_5_minutes' }));
-      await waitFor(() => expect(tauriApi.getOpenApiSyncStatus).toHaveBeenCalled());
+      await settled();
       expect(screen.queryByText(HINT)).toBeNull();
     });
 
     it('no_rate_limit_hint_for_a_longer_interval', async () => {
       renderDialog('h4', makeStatus({ location: GH, interval: 'hourly' }));
-      await waitFor(() => expect(tauriApi.getOpenApiSyncStatus).toHaveBeenCalled());
+      await settled();
+      expect(screen.queryByText(HINT)).toBeNull();
+    });
+
+    it('no_rate_limit_hint_without_approval', async () => {
+      renderDialog(
+        'h6',
+        makeStatus({ location: GH, interval: 'every_5_minutes', consent: 'missing' }),
+      );
+      await settled();
+      expect(screen.queryByText(HINT)).toBeNull();
+    });
+
+    it('no_rate_limit_hint_while_the_token_flag_loads', async () => {
+      vi.mocked(tauriApi.getOpenApiSyncStatus).mockReturnValue(new Promise(() => undefined));
+      renderDialog('h7', makeStatus({ location: GH, interval: 'every_5_minutes' }));
+      await settled();
       expect(screen.queryByText(HINT)).toBeNull();
     });
 

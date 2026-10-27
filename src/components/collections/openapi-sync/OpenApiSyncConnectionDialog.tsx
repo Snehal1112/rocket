@@ -135,7 +135,16 @@ function ConnectionBody({
   const failed = status.lastStatus?.state === 'failed';
   // Five-minute checks use up GitHub's anonymous limit. It waits for the token flag to load.
   const showRateHint =
-    github && status.interval === 'every_5_minutes' && tokenStatus.data !== undefined && !hasToken;
+    granted &&
+    github &&
+    status.interval === 'every_5_minutes' &&
+    tokenStatus.data !== undefined &&
+    !hasToken;
+  // "No problems" is only true after a check that ran and did not fail.
+  const ran = status.lastStatus?.state === 'unchanged' || status.lastStatus?.state === 'changed';
+  let statusSentence = '';
+  if (failed) statusSentence = status.lastMessage ?? 'The last check failed.';
+  else if (ran && granted) statusSentence = 'No problems.';
   const checkedText = status.lastCheckedAt
     ? `Last checked ${formatRelativeTime(status.lastCheckedAt)}.`
     : 'Not checked yet.';
@@ -147,7 +156,7 @@ function ConnectionBody({
         className='flex flex-wrap items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2'
       >
         <p className={cn('text-sm', failed && 'text-destructive')}>
-          {checkedText} {failed ? (status.lastMessage ?? 'The last check failed.') : 'No problems.'}
+          {checkedText} {statusSentence}
         </p>
         <CheckNowButton collection={collection} consent={status.consent} />
       </section>

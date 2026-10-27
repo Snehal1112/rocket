@@ -76,7 +76,7 @@ describe('OpenApiSyncHeader', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('The spec host did not answer in time.');
   });
 
-  it('every_entry_point_opens_connection_settings', async () => {
+  it('the_header_button_opens_connection_settings', async () => {
     const user = userEvent.setup();
     renderWithQuery(<OpenApiSyncHeader collection='c' status={makeStatus()} waiting={0} />);
     await user.click(screen.getByRole('button', { name: 'Connection settings' }));
