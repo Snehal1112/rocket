@@ -342,3 +342,59 @@ async fn overview_counts_a_modified_and_waiting_operation_once() {
     // listPets is modified and waiting, getInventory is waiting, so one is in sync.
     assert_eq!(view.in_sync, Some(1));
 }
+
+fn set_stored_count(w: &World, count: u32) {
+    let mut local = w.svc.local_state(&w.name).expect("local");
+    local.pending_count = count;
+    rocket_infra::FsOpenApiLocalRepo
+        .save(&w.root, &local)
+        .expect("save");
+}
+
+#[tokio::test]
+async fn a_304_check_recomputes_the_waiting_count() {
+    let w = world().await;
+    *w.fetcher.etag.lock().expect("lock") = Some("\"e1\"".to_string());
+    w.fetcher
+        .honor_304
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    w.check_with(v2()).await;
+    // A pending copy from before the count was stored reads as zero.
+    set_stored_count(&w, 0);
+    let out = w.svc.check(&w.root).await.expect("check");
+    assert!(matches!(out, CheckOutcome::Changed { .. }), "{out:?}");
+    let count = w.svc.count_pending(&w.name).expect("count");
+    assert_eq!(count, 3);
+    assert_eq!(
+        w.svc.local_state(&w.name).expect("local").pending_count,
+        count
+    );
+}
+
+#[tokio::test]
+async fn a_304_check_that_drops_a_missing_pending_copy_stores_zero() {
+    let w = world().await;
+    *w.fetcher.etag.lock().expect("lock") = Some("\"e1\"".to_string());
+    w.fetcher
+        .honor_304
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    w.check_with(v2()).await;
+    assert_eq!(w.svc.local_state(&w.name).expect("local").pending_count, 3);
+    // The pending file vanishes while the check waits for the answer.
+    let gate = Arc::new(Gate {
+        started: tokio::sync::Notify::new(),
+        go: tokio::sync::Notify::new(),
+    });
+    *w.fetcher.gate.lock().expect("lock") = Some(Arc::clone(&gate));
+    let check = w.svc.check(&w.root);
+    let remove = async {
+        gate.started.notified().await;
+        rocket_infra::FsOpenApiSourceRepo
+            .clear_pending(&w.root)
+            .expect("clear");
+        gate.go.notify_one();
+    };
+    let (outcome, ()) = tokio::join!(check, remove);
+    assert_eq!(outcome.expect("check"), CheckOutcome::Unchanged);
+    assert_eq!(w.svc.local_state(&w.name).expect("local").pending_count, 0);
+}

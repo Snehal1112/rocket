@@ -615,7 +615,15 @@ impl OpenApiSyncService {
                 } else {
                     (CheckOutcome::Unchanged, SyncStatus::Unchanged)
                 };
-                self.record_success(collection_root, &now, status, None)?;
+                // The count is recomputed, so a pending copy from before the count was stored
+                // gets its badge, and a dropped copy leaves no old count. A failed count keeps
+                // the stored one.
+                let count = if source.pending_sha256.is_none() {
+                    Some(0)
+                } else {
+                    self.count_pending_locked(collection_root).ok()
+                };
+                self.record_success(collection_root, &now, status, count)?;
                 return Ok(outcome);
             }
             Ok(SpecFetchOutcome::Fetched {
