@@ -30,9 +30,12 @@ export function ResetConfirmDialog({
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
-        <AlertDialogHeader>
+        <AlertDialogHeader className='min-w-0'>
           <AlertDialogTitle>{title}</AlertDialogTitle>
-          <AlertDialogDescription>{body}</AlertDialogDescription>
+          {/* A long URL has no spaces, so it must be allowed to break anywhere. */}
+          <AlertDialogDescription className='[overflow-wrap:anywhere]'>
+            {body}
+          </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
