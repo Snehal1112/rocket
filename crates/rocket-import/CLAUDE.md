@@ -283,3 +283,7 @@ import_wsdl(path: String, target_workspace_id: String) -> Result<ImportReport, S
 ### Known Deferred Work
 
 - `converter/collection.rs::convert_variables` is implemented but not yet called from `ImportService`. Bruno's `bruno.json` at the workspace level may carry collection-level variables; wiring this up is deferred.
+
+### OpenAPI sync, series 2
+
+`openapi/matching.rs` (`match_requests`, `normalise_path`) pairs requests with spec operations by method and normalised path and returns matched, suggested (a name only), tangled and unmatched sets. `openapi/sync/reset.rs` (`reset_spec_owned_fields`, `RESET_FIELD_NAMES`) rewrites the spec-owned fields of a request. `openapi/sync/spec.rs` adds `ParsedSpec::{title, servers, operation_views, converted_request}` for View spec and Reset. `entry.rs` has `fetch_spec_bundle`, shared by the URL import and by connect. See `docs/features/openapi-sync-ux.md`.

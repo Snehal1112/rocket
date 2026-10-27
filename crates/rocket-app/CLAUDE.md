@@ -240,3 +240,7 @@ Chip secret lookups fail closed: a real read or parse error of the workspace con
 Values that exist only at run time in the frontend are not known to the backend, so they are not masked: a script's `setVar` or `setEnvVar` results, and OAuth tokens that the tab does not send as its auth. A secret that is not held in a variable, a literal credential or the vault, and is echoed under a neutral field, cannot be recognised either.
 
 **Script host limits.** `rok.sendRequest` runs `check_request_guard` on its first URL only, so redirect hops are not checked yet (see R-68). Nested runs carry `unresolved_aliases` and refuse a send that references one. At most 16 nested runs (`MAX_ACTIVE_NESTED_RUNS`) are active per send.
+
+## OpenAPI sync series 2
+
+`openapi_sync_spec_view.rs` (`spec_view`), `openapi_sync_reset.rs` (`reset`, `restore`, `discard`, one file transaction each under `collection_lock`) and `openapi_connect.rs` (`preview`, `confirm`, `request_digest`) extend `OpenApiSyncService`. Reset and View spec read local files only. `confirm` fetches the spec once more, checks the request digest and the spec hash against the preview, commits the files in one transaction, then approves the typed link, sets the interval and stores the token. Later failures are warnings. Errors cross IPC as fixed sentences. See `docs/features/openapi-sync-ux.md`.

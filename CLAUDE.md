@@ -72,7 +72,7 @@ See `docs/features/collection-export.md` for the collection export to Bruno and 
 See `docs/features/example-masking.md` for how saved request examples get their secrets masked in a git commit.
 See `docs/features/bruno-import-strictness.md` for Bruno 3 imports (files are copied as they are), what Rocket's readers now tolerate, and the known gaps.
 See `docs/features/response-examples.md` for saved response examples (save, view, limits, the Try temporary tab and its save guards, manual checks).
-See `docs/features/openapi-sync-ux.md` for the OpenAPI sync tab (spec updates bulk rules, badge and toast, local read commands, known limits, manual checks).
+See `docs/features/openapi-sync-ux.md` for the OpenAPI sync tab (spec updates bulk rules, View spec, Reset and Restore, Connect, local files, known limits, manual checks).
 See `docs/roadmaps/roadmap.md` for the master roadmap of unimplemented work, and `docs/roadmaps/flow-roadmap.md` for Flow (item IDs, status, batches). Update them when work ships.
 
 Delegation: for asks that mix sub-steps of different difficulty, use the `decompose-and-dispatch` skill and always state the subagent model. See `.claude/rules/delegation.md`.

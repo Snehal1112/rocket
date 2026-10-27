@@ -8,7 +8,7 @@ The header shows the collection name, a status chip, the spec link, the last che
 
 ## Overview
 
-Four counts: Endpoints, In sync, Changed by you, Spec updates waiting. A banner leads to the review when updates wait. The spec version shows "-" until the stored applied copy lands (series 2).
+Four counts: Endpoints, In sync, Changed by you, Spec updates waiting. A banner leads to the review when updates wait. The spec version comes from the stored applied copy.
 
 ## Spec updates
 
@@ -25,7 +25,36 @@ Four counts: Endpoints, In sync, Changed by you, Spec updates waiting. A banner 
 
 ## Your changes
 
-Read-only. It lists requests you changed, added or deleted compared with the last synced spec.
+It lists requests you changed, added or deleted compared with the last synced spec. A Modified row has **Reset to spec**, and the group has **Reset all to spec (n)**. A request you reset shows in **Reset by you** with **Restore my version** and **Discard backup**.
+
+## Local files
+
+Besides `openapi-source.yml`, `openapi-baseline.json`, `openapi-local.json` and the pending copy, a collection keeps two more files under `.rocket/`, both git-ignored:
+
+- `openapi-applied.spec` is the spec as of the last sync. The import writes it and each finished apply replaces it. View spec and Reset read it. A check heals a missing copy by fetching once more, so an older import can show "updates waiting" once.
+- `openapi-reset-backups.json` holds the version of a request from before a reset. A sync that applies or deletes that request drops its backup.
+
+## View spec
+
+The header has a **View spec** button. It lists the operations of the newest spec the source accepts (the pending copy counts only when the source holds its hash) in tag groups, at most 500 rows at once with **Show more (N)**. It reads local files only, so it works offline.
+
+## Reset and Restore
+
+- Reset puts the spec-owned fields back to the last synced spec: name, method, URL, description, headers, query, path variables, form, body and auth. Scripts, tests, assertions and docs are kept.
+- A confirm dialog names the fields that change. A backup of your version is kept until the next sync.
+- Restore writes only the spec-owned fields of the backup over the request. It finds the request by uid, never by path, so a new request at the old path is not touched.
+- Reset is refused for sync data from an older version (no trusted baseline), while an apply runs, and for a request that changed on disk.
+
+## Connect to an OpenAPI spec
+
+The collection menu has **Connect to an OpenAPI spec** for a collection without a source. A collection with only GraphQL, gRPC or WebSocket requests does not offer it.
+
+- Step one takes the link, an optional token (GitHub links only), the folder layout and **Check for spec updates** (on by default, every 5 minutes like the import).
+- Step two is the Initial sync review. Matching uses the method and the normalised path, where `:id`, `{id}` and `{{var}}` are the same segment. Matched rows link, Suggested rows (a name match only) start as Keep, In spec only rows are added, Yours only rows stay, and tangled groups have no default and block **Connect** until picked.
+- GraphQL and gRPC requests never match.
+- Confirm checks that the collection and the spec are still what the preview showed, writes everything in one file transaction, and only then approves the typed link, sets the interval and stores the token. A failure in those last steps is a warning ("Checks are not enabled yet." or "The token was not saved.") and never undoes the connect.
+- A linked or added request gets a `baseUrl` variable when the collection has none.
+
 
 ## Notifications
 
@@ -38,9 +67,12 @@ A count badge shows on the collection row. A toast "N spec updates" with Review 
 ## Known limits
 
 - Counts can be stale after an edit in another pane, until the tab remounts or the next check.
-- The spec version shows "-" until series 2.
 - The tab is not restored after a restart.
-- Series 2 is pending: View spec, Reset to spec, Connect an existing collection.
+- A damaged backups file fails the whole Your changes view until it is removed.
+- Reset all (n) counts rows, while rows without a key are not reset.
+- Open reset confirm dialogs are not closed when a refetch removes their row.
+- A tangled group can only be kept, with the spec operations added or skipped. Link them by hand afterwards.
+- Scripts, tests and assertions are not compared, so they are never reset.
 
 ## Manual checks
 
@@ -52,3 +84,7 @@ A count badge shows on the collection row. A toast "N spec updates" with Review 
 6. Confirm and sync, then see the badge clear.
 7. Edit a request in another pane and check that the counts catch up after remount or a check.
 8. Reach the badge with the keyboard (Tab, then Enter or Space).
+9. Reset a modified request, then Restore it, then reset another and Discard its backup.
+10. Reset, then sync: the backup of an applied request is gone.
+11. Connect a hand-made collection: Preview, check the default choices, Connect, then Check now.
+12. Open View spec with the network off.
