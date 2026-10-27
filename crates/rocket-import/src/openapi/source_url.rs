@@ -25,6 +25,9 @@ pub fn parse_spec_url(input: &str) -> ImportResult<SpecLocation> {
     if text.is_empty() {
         return Err(reject("paste a link to an OpenAPI file"));
     }
+    if let Some(location) = parse_loopback_http(text)? {
+        return Ok(location);
+    }
     let Some(rest) = strip_https(text) else {
         return Err(if text.contains("://") {
             reject("only https links are supported")
@@ -106,6 +109,33 @@ pub fn parse_spec_url(input: &str) -> ImportResult<SpecLocation> {
             Ok(SpecLocation::Https { url })
         }
     }
+}
+
+/// A plain `http` link to this machine, for a spec served by a dev server. It is stored as an
+/// `Https` location with its `http` url. Any other `http` link is left for the caller to
+/// refuse. The fragment is dropped, and a secret-like query name is refused as for `https`.
+fn parse_loopback_http(text: &str) -> ImportResult<Option<SpecLocation>> {
+    let is_http = text
+        .get(..7)
+        .is_some_and(|p| p.eq_ignore_ascii_case("http://"));
+    if !is_http {
+        return Ok(None);
+    }
+    let Ok(mut url) = url::Url::parse(text) else {
+        return Ok(None);
+    };
+    if !rocket_http::spec_fetch::is_loopback_http(&url) {
+        return Ok(None);
+    }
+    url.set_fragment(None);
+    if url.query().is_some_and(query_has_secret_name) {
+        return Err(reject(
+            "the link has a secret in its query string; remove it from the link",
+        ));
+    }
+    Ok(Some(SpecLocation::Https {
+        url: url.to_string(),
+    }))
 }
 
 /// Builds a `Github` location after checking every part. A `.` or `..` segment (even one that
@@ -431,5 +461,80 @@ mod tests {
             "https://github.com/acme/orders/blob/main/docs/openapi.yaml"
         );
         assert_eq!(parse_spec_url(&loc.display_url()).expect("round trip"), loc);
+    }
+
+    fn https_location(url: &str) -> SpecLocation {
+        SpecLocation::Https {
+            url: url.to_string(),
+        }
+    }
+
+    #[test]
+    fn http_localhost_is_accepted_as_https_location() {
+        assert_eq!(
+            parse_spec_url("http://localhost:3000/openapi.json#top").expect("localhost"),
+            https_location("http://localhost:3000/openapi.json")
+        );
+        assert_eq!(
+            parse_spec_url("  HTTP://LocalHost/api/spec.yaml?format=yaml ").expect("case"),
+            https_location("http://localhost/api/spec.yaml?format=yaml")
+        );
+    }
+
+    #[test]
+    fn http_loopback_ip_is_accepted() {
+        assert_eq!(
+            parse_spec_url("http://127.0.0.1:8080/openapi.json").expect("v4"),
+            https_location("http://127.0.0.1:8080/openapi.json")
+        );
+        assert_eq!(
+            parse_spec_url("http://[::1]:8080/openapi.json").expect("v6"),
+            https_location("http://[::1]:8080/openapi.json")
+        );
+    }
+
+    #[test]
+    fn lookalike_and_private_http_hosts_are_refused() {
+        for link in [
+            "http://localhost.evil.com/x.json",
+            "http://127.0.0.1.evil.com/x.json",
+            "http://user@localhost/x.json",
+            "http://user:pass@127.0.0.1/x.json",
+            "http://0.0.0.0/x.json",
+            "http://192.168.1.5/x.json",
+            "http://10.0.0.5/x.json",
+            "http://localhost./x.json",
+            "http://api.localhost/x.json",
+            "http://example.com/x.json",
+            "http://localhost:99999/x.json",
+            "http:///x.json",
+        ] {
+            assert!(parse_spec_url(link).is_err(), "{link}");
+        }
+    }
+
+    #[test]
+    fn https_links_behave_as_before() {
+        assert_eq!(
+            parse_spec_url("https://localhost:3000/openapi.json").expect("https localhost"),
+            https_location("https://localhost:3000/openapi.json")
+        );
+        assert!(parse_spec_url("https://user:pass@localhost/x").is_err());
+    }
+
+    #[test]
+    fn secret_query_names_are_still_rejected_on_localhost() {
+        assert!(parse_spec_url("http://localhost:3000/openapi.json?token=abc").is_err());
+        assert!(parse_spec_url("http://127.0.0.1/o.json?api_key=abc").is_err());
+    }
+
+    #[test]
+    fn a_localhost_link_round_trips_for_consent() {
+        let location = parse_spec_url("http://localhost:3000/openapi.json").expect("parse");
+        let shown = location.display_url();
+        assert_eq!(parse_spec_url(&shown).expect("again"), location);
+        let target = fetch_target(&location, false);
+        assert_eq!(target.url, "http://localhost:3000/openapi.json");
+        assert_eq!(target.origin, "http://localhost:3000");
     }
 }

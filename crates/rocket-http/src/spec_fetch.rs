@@ -114,6 +114,22 @@ pub trait SpecFetcher: Send + Sync {
     async fn fetch(&self, request: SpecFetchRequest) -> Result<SpecFetchOutcome, SpecFetchFailure>;
 }
 
+/// True for a plain `http` link to this machine: the host is exactly `localhost`, `127.0.0.1`
+/// or `::1`, with no user info. Anything else on `http` stays refused, and a host that only
+/// starts with one of these names is another host.
+pub fn is_loopback_http(url: &reqwest::Url) -> bool {
+    use std::net::{Ipv4Addr, Ipv6Addr};
+    if url.scheme() != "http" || !url.username().is_empty() || url.password().is_some() {
+        return false;
+    }
+    match url.host() {
+        Some(url::Host::Domain(name)) => name == "localhost",
+        Some(url::Host::Ipv4(ip)) => ip == Ipv4Addr::LOCALHOST,
+        Some(url::Host::Ipv6(ip)) => ip == Ipv6Addr::LOCALHOST,
+        None => false,
+    }
+}
+
 /// True when a redirect to `to` may be followed: it must be `https`, and its host must not be
 /// a loopback, private, link-local or unspecified address. Host names are not resolved, so
 /// this only stops address literals and `localhost`.
@@ -204,6 +220,35 @@ mod tests {
             "not a url",
         ] {
             assert!(!redirect_target_allowed(bad), "{bad}");
+        }
+    }
+
+    #[test]
+    fn is_loopback_http_table() {
+        let parse = |s: &str| reqwest::Url::parse(s).expect("url");
+        for ok in [
+            "http://localhost/x",
+            "http://LOCALHOST:3000/x",
+            "http://127.0.0.1:8080/x",
+            "http://[::1]/x",
+        ] {
+            assert!(is_loopback_http(&parse(ok)), "{ok}");
+        }
+        for bad in [
+            "https://localhost/x",
+            "http://localhost.evil.com/x",
+            "http://127.0.0.1.evil.com/x",
+            "http://user@localhost/x",
+            "http://user:pw@127.0.0.1/x",
+            "http://0.0.0.0/x",
+            "http://192.168.1.5/x",
+            "http://10.0.0.1/x",
+            "http://localhost./x",
+            "http://api.localhost/x",
+            "http://example.com/x",
+            "ftp://localhost/x",
+        ] {
+            assert!(!is_loopback_http(&parse(bad)), "{bad}");
         }
     }
 
