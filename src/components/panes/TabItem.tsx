@@ -7,6 +7,7 @@ import {
   GitBranch,
   Globe,
   LayoutDashboard,
+  RefreshCw,
   ShieldCheck,
   X,
 } from 'lucide-react';
@@ -19,6 +20,7 @@ import {
   isExampleTab,
   isFolderTab,
   isGitTab,
+  isOpenApiSyncTab,
   isRequestTab,
   isScriptTab,
   isWorkspaceTab,
@@ -112,6 +114,8 @@ export function TabItem({
         </>
       ) : isContractTab(tab) ? (
         <FileLock aria-hidden='true' className='h-4 w-4 shrink-0' />
+      ) : isOpenApiSyncTab(tab) ? (
+        <RefreshCw aria-hidden='true' className='h-4 w-4 shrink-0' />
       ) : isScriptTab(tab) ? (
         <FileCode aria-hidden='true' className='h-4 w-4 shrink-0' />
       ) : isExampleTab(tab) ? (

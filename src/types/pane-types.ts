@@ -105,6 +105,15 @@ export function isContractTab(tab: Tab): tab is ContractTab {
   return tab.tabType === 'contract';
 }
 
+export interface OpenApiSyncTab extends BaseTab {
+  tabType: 'openapi-sync';
+  collectionName: string;
+}
+
+export function isOpenApiSyncTab(tab: Tab): tab is OpenApiSyncTab {
+  return tab.tabType === 'openapi-sync';
+}
+
 export interface ContractDiffTab extends BaseTab {
   tabType: 'contract_diff';
   collectionId: string; // absolute path — passed as collectionRoot to IPC
@@ -282,6 +291,7 @@ export type Tab =
   | ConflictTab
   | GitTab
   | ContractTab
+  | OpenApiSyncTab
   | ContractDiffTab
   | RunnerTab
   | FlowTab

@@ -45,6 +45,7 @@ import {
   isFlowTab,
   isFolderTab,
   isGitTab,
+  isOpenApiSyncTab,
   isRequestTab,
   isRunnerTab,
   isScriptTab,
@@ -451,6 +452,26 @@ function deriveSegments(
         },
       },
       { label: 'Contracts', icon: <FileLock className='h-3 w-3' /> },
+    ];
+  }
+
+  if (isOpenApiSyncTab(tab)) {
+    return [
+      {
+        label: tab.collectionName,
+        picker: {
+          loadItems: async () => {
+            const summaries = await listCollections();
+            return summaries.map((s) => ({
+              id: s.name,
+              label: s.name,
+              isActive: s.name === tab.collectionName,
+            }));
+          },
+          onSelect: (item) => nav.switchCollection(item.id),
+        },
+      },
+      { label: 'OpenAPI sync', icon: <RefreshCw className='h-3 w-3' /> },
     ];
   }
 

@@ -21,6 +21,11 @@ const GitPanel = lazy(() =>
 const ContractsTab = lazy(() =>
   import('@/components/contracts/ContractsTab').then((m) => ({ default: m.ContractsTab })),
 );
+const OpenApiSyncTab = lazy(() =>
+  import('@/components/collections/spec-sync/OpenApiSyncTab').then((m) => ({
+    default: m.OpenApiSyncTab,
+  })),
+);
 const ScriptFilePane = lazy(() =>
   import('@/components/scripts/ScriptFilePane').then((m) => ({ default: m.ScriptFilePane })),
 );
@@ -73,6 +78,7 @@ import {
   isFlowTab,
   isFolderTab,
   isGitTab,
+  isOpenApiSyncTab,
   isRequestTab,
   isRunnerTab,
   isScriptTab,
@@ -278,6 +284,10 @@ export function EditorGroup({ node }: { node: LeafNode }) {
                 collectionId={activeTab.collectionRoot}
                 collectionName={activeTab.collectionName}
               />
+            </Suspense>
+          ) : isOpenApiSyncTab(activeTab) ? (
+            <Suspense fallback={<PanelSkeleton label='Loading OpenAPI sync' />}>
+              <OpenApiSyncTab collection={activeTab.collectionName} />
             </Suspense>
           ) : isContractDiffTab(activeTab) ? (
             <Suspense fallback={<EditorSkeleton />}>

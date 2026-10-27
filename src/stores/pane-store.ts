@@ -61,6 +61,7 @@ import type {
   FolderSection,
   FolderTab,
   LeafNode,
+  OpenApiSyncTab,
   PaneNode,
   RequestState,
   RequestTab,
@@ -325,6 +326,8 @@ export interface PaneState {
 
   // Contract tab.
   openContractTab: (collectionName: string, collectionRoot: string) => void;
+  // OpenAPI sync tab.
+  openOpenApiSyncTab: (collectionName: string) => void;
   openScriptTab: (collectionName: string, path: string) => Promise<void>;
   updateScriptContent: (tabId: string, content: string) => void;
   markScriptSaved: (tabId: string, content: string) => void;
@@ -473,9 +476,11 @@ export const usePaneStore = create<PaneState>((set, get) => ({
         ? (tab as CollectionTab).collectionName
         : tab.tabType === 'contract'
           ? (tab as ContractTab).collectionName
-          : tab.tabType === 'folder'
-            ? tab.collectionName
-            : (tab.source?.collection ?? null);
+          : tab.tabType === 'openapi-sync'
+            ? (tab as OpenApiSyncTab).collectionName
+            : tab.tabType === 'folder'
+              ? tab.collectionName
+              : (tab.source?.collection ?? null);
     if (collectionName && collectionName !== get().activeCollection) {
       get().switchCollection(collectionName);
     }
@@ -723,6 +728,17 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       tabType: 'contract',
       collectionName,
       collectionRoot,
+      isDirty: false,
+    };
+    get().openTab(tab);
+  },
+
+  openOpenApiSyncTab(collectionName) {
+    const tab: OpenApiSyncTab = {
+      id: `openapi-sync:${collectionName}`,
+      title: `OpenAPI sync — ${collectionName}`,
+      tabType: 'openapi-sync',
+      collectionName,
       isDirty: false,
     };
     get().openTab(tab);
