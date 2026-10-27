@@ -16,6 +16,7 @@ vi.mock('@/lib/tauri-api', async () => {
     getOpenApiSyncStatus: vi.fn(),
     getOpenApiSyncPlan: vi.fn(),
     getOpenApiSyncOverview: vi.fn(),
+    getOpenApiSyncChanges: vi.fn(),
     onOpenApiSyncChecked: vi.fn(() => Promise.resolve(() => undefined)),
     onOpenApiSyncApplied: vi.fn(() => Promise.resolve(() => undefined)),
     applyOpenApiSync: vi.fn(),
@@ -34,6 +35,12 @@ configure({ asyncUtilTimeout: 10000 });
 describe('OpenApiSyncTab', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(tauriApi.getOpenApiSyncChanges).mockResolvedValue({
+      baselineTrusted: true,
+      modified: [],
+      added: [],
+      deleted: [],
+    });
     vi.mocked(tauriApi.getOpenApiSyncOverview).mockResolvedValue({
       endpoints: 42,
       inSync: 36,
@@ -107,7 +114,28 @@ describe('OpenApiSyncTab', () => {
     renderWithQuery(<OpenApiSyncTab collection='c' />);
     expect(await screen.findByText('Spec updates waiting')).toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole('tab', { name: 'Your changes' }));
-    expect(screen.getByText('Nothing to show yet')).toBeInTheDocument();
+    expect(await screen.findByText('You have not changed anything.')).toBeInTheDocument();
+  });
+
+  it('shows_the_change_count_on_the_tab_label_only_when_above_zero', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus({ hasPending: false }));
+    const r = (uid: string) => ({
+      key: null,
+      uid,
+      name: uid,
+      method: 'GET',
+      url: '/x',
+      requestPath: null,
+      fields: [],
+    });
+    vi.mocked(tauriApi.getOpenApiSyncChanges).mockResolvedValue({
+      baselineTrusted: true,
+      modified: [r('a')],
+      added: [r('b')],
+      deleted: [r('c')],
+    });
+    renderWithQuery(<OpenApiSyncTab collection='c' />);
+    expect(await screen.findByRole('tab', { name: 'Your changes (3)' })).toBeInTheDocument();
   });
 
   it('the_tab_mounts_the_overview_and_review_switches_to_spec_updates', async () => {

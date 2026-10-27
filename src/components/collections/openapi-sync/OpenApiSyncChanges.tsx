@@ -1,0 +1,107 @@
+import { Badge } from '@/components/ui/badge';
+import { StateBlock } from '@/components/ui/state-block';
+import { useOpenApiSyncChanges } from '@/lib/queries/openapi-sync-queries';
+import type { OpenApiChangeRow } from '@/lib/tauri-api';
+import { fieldLabel } from './openApiSyncView';
+import { syncErrorMessage } from './syncErrors';
+
+type Kind = 'modified' | 'added' | 'deleted';
+
+const KIND_LABEL: Record<Kind, string> = {
+  modified: 'Modified',
+  added: 'Added',
+  deleted: 'Deleted',
+};
+
+const GROUP_TITLE: Record<Kind, string> = {
+  modified: 'Modified',
+  added: 'Added by you',
+  deleted: 'Deleted by you',
+};
+
+function ChangeRow({
+  row,
+  kind,
+  showFields,
+}: {
+  row: OpenApiChangeRow;
+  kind: Kind;
+  showFields: boolean;
+}) {
+  // Deleted rows have no method or URL, so the path or the name stands in.
+  const target = row.url || row.requestPath || row.name;
+  return (
+    <li className='flex flex-col gap-1 border-b border-border/60 px-3 py-2 text-sm last:border-b-0'>
+      <div className='flex min-w-0 items-center gap-2'>
+        <Badge variant='outline'>{KIND_LABEL[kind]}</Badge>
+        {row.method && (
+          <span className='shrink-0 font-mono text-xs font-semibold'>{row.method}</span>
+        )}
+        <span className='min-w-0 flex-1 break-all font-mono text-xs'>{target}</span>
+      </div>
+      {showFields && kind === 'modified' && row.fields.length > 0 && (
+        <div className='flex flex-wrap gap-1'>
+          {row.fields.map((f) => (
+            <Badge key={f} variant='secondary'>
+              {fieldLabel(f)}
+            </Badge>
+          ))}
+        </div>
+      )}
+    </li>
+  );
+}
+
+function Group({
+  kind,
+  rows,
+  showFields,
+}: {
+  kind: Kind;
+  rows: OpenApiChangeRow[];
+  showFields: boolean;
+}) {
+  if (rows.length === 0) return null;
+  return (
+    <section className='flex flex-col gap-1'>
+      <h3 className='text-sm font-medium'>{`${GROUP_TITLE[kind]} (${rows.length})`}</h3>
+      <ul className='rounded-md border border-border/70'>
+        {rows.map((r) => (
+          <ChangeRow key={r.uid} row={r} kind={kind} showFields={showFields} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** A read-only list of what the user changed against the last synced spec. */
+export function OpenApiSyncChanges({ collection }: { collection: string }) {
+  const changes = useOpenApiSyncChanges(collection);
+  if (changes.isError) {
+    return <StateBlock tone='error'>{syncErrorMessage(changes.error)}</StateBlock>;
+  }
+  const c = changes.data;
+  if (!c) return <StateBlock tone='loading'>Loading your changes...</StateBlock>;
+
+  const total = c.modified.length + c.added.length + c.deleted.length;
+  if (total === 0) return <StateBlock tone='empty'>You have not changed anything.</StateBlock>;
+  return (
+    <div className='flex flex-col gap-4'>
+      <p className='text-xs text-muted-foreground'>
+        Differences between your collection and the last synced spec. Sync never overwrites these
+        without asking.
+      </p>
+      {!c.baselineTrusted && (
+        <p className='text-xs text-muted-foreground'>
+          These differences are approximate because the sync data is from an older version.
+        </p>
+      )}
+      <Group kind='modified' rows={c.modified} showFields={c.baselineTrusted} />
+      <Group kind='added' rows={c.added} showFields={false} />
+      <Group kind='deleted' rows={c.deleted} showFields={false} />
+      <p className='text-xs text-muted-foreground'>
+        Scripts, tests and assertions are not tracked here.
+      </p>
+    </div>
+  );
+}

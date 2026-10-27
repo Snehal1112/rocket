@@ -8,6 +8,7 @@ import {
   useApplySync,
   useIsApplying,
   useLastApply,
+  useOpenApiSyncChanges,
   useOpenApiSyncEvents,
   useOpenApiSyncPlan,
   useOpenApiSyncStatus,
@@ -16,6 +17,7 @@ import { ApplyConfirmDialog } from './ApplyConfirmDialog';
 import { ApplyResultDialog } from './ApplyResultDialog';
 import { buildSelection } from './buildSelection';
 import { OpenApiSyncActionsBar } from './OpenApiSyncActionsBar';
+import { OpenApiSyncChanges } from './OpenApiSyncChanges';
 import { OpenApiSyncConsentBanner } from './OpenApiSyncConsentBanner';
 import { OpenApiSyncDetail } from './OpenApiSyncDetail';
 import { OpenApiSyncHeader } from './OpenApiSyncHeader';
@@ -51,6 +53,7 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
   const [checking, setChecking] = useState(false);
   const [tab, setTab] = useState<string | null>(null);
   const queryClient = useQueryClient();
+  const changes = useOpenApiSyncChanges(collection);
   const apply = useApplySync(collection);
   const applyingAnywhere = useIsApplying(collection);
   const { last, dismiss } = useLastApply(collection);
@@ -262,6 +265,9 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
     );
   }
 
+  const changeCount = changes.data
+    ? changes.data.modified.length + changes.data.added.length + changes.data.deleted.length
+    : 0;
   const waiting = planData?.pending ? planData.items.length + planData.variableChanges.length : 0;
   const showUpdates = waiting > 0 || (planEnabled && plan.isError);
   // No default is chosen while the plan loads, so the tab does not jump when it arrives.
@@ -293,7 +299,9 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
                 {waiting > 0 ? `Spec updates (${waiting})` : 'Spec updates'}
               </TabsTrigger>
             )}
-            <TabsTrigger value='changes'>Your changes</TabsTrigger>
+            <TabsTrigger value='changes'>
+              {changeCount > 0 ? `Your changes (${changeCount})` : 'Your changes'}
+            </TabsTrigger>
           </TabsList>
           <TabsContent value='overview' className='p-4'>
             <OpenApiSyncOverview
@@ -306,7 +314,7 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
             {body}
           </TabsContent>
           <TabsContent value='changes' className='p-4'>
-            <StateBlock tone='empty'>Nothing to show yet</StateBlock>
+            <OpenApiSyncChanges collection={collection} />
           </TabsContent>
         </Tabs>
       )}
