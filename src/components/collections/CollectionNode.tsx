@@ -49,7 +49,7 @@ import { sortItemsFoldersFirst } from '@/lib/collection-utils';
 import { createRequestErrorMessage } from '@/lib/create-request-error';
 import { createDefaultRequest } from '@/lib/pane-utils';
 import { useFlows } from '@/lib/queries/flow-queries';
-import { useOpenApiSyncStatus } from '@/lib/queries/openapi-sync-queries';
+import { useOpenApiSyncBadges, useOpenApiSyncStatus } from '@/lib/queries/openapi-sync-queries';
 import { useWorkspaces } from '@/lib/queries/workspace-queries';
 import type { Collection, CollectionSummary, Contract, FlowListEntry } from '@/lib/tauri-api';
 import {
@@ -123,6 +123,8 @@ export function CollectionNode({
   const [exportOpen, setExportOpen] = useState(false);
   // The sync status is only asked for once the row is hovered, focused or a menu opens.
   const [menuSeen, setMenuSeen] = useState(false);
+  const syncBadges = useOpenApiSyncBadges();
+  const waitingUpdates = syncBadges.data?.find((b) => b.collection === summary.name)?.waiting ?? 0;
   const openApiSync = useOpenApiSyncStatus(summary.name, false, menuSeen);
   // Fetch the flow list only while the node is expanded.
   const { data: flows = EMPTY_FLOWS } = useFlows(summary.name, open);
@@ -414,6 +416,36 @@ export function CollectionNode({
               ) : (
                 <>
                   <span className='truncate text-foreground'>{summary.name}</span>
+                  {waitingUpdates > 0 && (
+                    <TooltipProvider delayDuration={200}>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          {/* span instead of button: it lives inside the tree-item-row <button>. */}
+                          {/* biome-ignore lint/a11y/useSemanticElements: nested inside <button>, cannot use <button> */}
+                          <span
+                            role='button'
+                            tabIndex={0}
+                            aria-label={`Open OpenAPI sync, ${waitingUpdates} updates`}
+                            className='flex h-4 min-w-4 shrink-0 cursor-pointer items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground hover:opacity-80'
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openOpenApiSync();
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                openOpenApiSync();
+                              }
+                            }}
+                          >
+                            {waitingUpdates}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>{waitingUpdates} OpenAPI spec updates</TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  )}
                   {collectionRoot && (
                     <ContractBadge
                       contracts={collectionScopedContracts}

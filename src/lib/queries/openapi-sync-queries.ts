@@ -329,8 +329,7 @@ export function useApplySync(collection: string) {
 
 /**
  * Refreshes the status and plan queries of the collection named in a sync check event, and
- * also the collection tree for an apply event. Mount it from the OpenAPI sync tab, never
- * globally.
+ * also the collection tree for an apply event. Mount it once, through `useOpenApiSyncGlobalEvents`.
  */
 export function useOpenApiSyncEvents(): void {
   const queryClient = useQueryClient();
@@ -347,4 +346,12 @@ export function useOpenApiSyncEvents(): void {
       void unsubApplied.then((fn) => fn()).catch(() => undefined);
     };
   }, [queryClient]);
+}
+
+/**
+ * The one app-wide pair of sync listeners. Every event also refreshes the waiting badges.
+ * Mount it once from `OpenApiSyncNotifier`, not from the sync tab.
+ */
+export function useOpenApiSyncGlobalEvents(): void {
+  useOpenApiSyncEvents();
 }

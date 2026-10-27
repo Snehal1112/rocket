@@ -9,7 +9,6 @@ import {
   useIsApplying,
   useLastApply,
   useOpenApiSyncChanges,
-  useOpenApiSyncEvents,
   useOpenApiSyncPlan,
   useOpenApiSyncStatus,
 } from '@/lib/queries/openapi-sync-queries';
@@ -43,7 +42,6 @@ interface OpenApiSyncTabProps {
 
 /** What the pending spec would change, with the choices to apply it. It never runs a check. */
 export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
-  useOpenApiSyncEvents();
   const status = useOpenApiSyncStatus(collection);
   const planEnabled = !!status.data?.hasPending;
   const [links, setLinks] = useState<Links>([]);

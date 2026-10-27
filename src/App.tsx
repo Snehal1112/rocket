@@ -5,6 +5,7 @@ import { AssistantPanel } from '@/components/assistant/AssistantPanel';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { CollectionsSidebar } from '@/components/layout/CollectionsSidebar';
 import { ConsolePanel } from '@/components/layout/ConsolePanel';
+import { OpenApiSyncNotifier } from '@/components/layout/OpenApiSyncNotifier';
 import { StatusBar } from '@/components/layout/StatusBar';
 import { TrustMigrationNotice } from '@/components/layout/TrustMigrationNotice';
 import { WorkspaceToolbar } from '@/components/layout/WorkspaceToolbar';
@@ -270,6 +271,7 @@ function App() {
       {showSplash && <SplashScreen onComplete={() => setShowSplash(false)} />}
       <Toaster position='bottom-right' />
       <TrustMigrationNotice />
+      <OpenApiSyncNotifier />
     </div>
   );
 }

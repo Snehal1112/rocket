@@ -17,6 +17,7 @@ import {
   useOpenApiSyncBadges,
   useOpenApiSyncChanges,
   useOpenApiSyncEvents,
+  useOpenApiSyncGlobalEvents,
   useOpenApiSyncOverview,
   useOpenApiSyncPlan,
   useOpenApiSyncStatus,
@@ -121,6 +122,70 @@ describe('openapi sync queries', () => {
       'B',
       'A',
     ]);
+  });
+
+  it('global_events_refresh_the_badge_list_for_any_collection', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncBadges).mockResolvedValue([]);
+    renderHook(
+      () => {
+        useOpenApiSyncGlobalEvents();
+        useOpenApiSyncBadges();
+      },
+      { wrapper },
+    );
+    await waitFor(() => expect(tauriApi.getOpenApiSyncBadges).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(tauriApi.onOpenApiSyncChecked).toHaveBeenCalled());
+    await waitFor(() => expect(tauriApi.onOpenApiSyncApplied).toHaveBeenCalled());
+    vi.mocked(tauriApi.onOpenApiSyncChecked).mock.calls[0]?.[0]({
+      collection: 'Zed',
+      status: 'changed',
+    });
+    await waitFor(() => expect(tauriApi.getOpenApiSyncBadges).toHaveBeenCalledTimes(2));
+    vi.mocked(tauriApi.onOpenApiSyncApplied).mock.calls[0]?.[0]({ collection: 'Other' } as never);
+    await waitFor(() => expect(tauriApi.getOpenApiSyncBadges).toHaveBeenCalledTimes(3));
+  });
+
+  it('global_events_refresh_status_and_plan_only_for_the_named_collection', async () => {
+    renderHook(
+      () => {
+        useOpenApiSyncGlobalEvents();
+        useOpenApiSyncStatus('A');
+        useOpenApiSyncPlan('A', true);
+        useOpenApiSyncStatus('B');
+        useOpenApiSyncPlan('B', true);
+      },
+      { wrapper },
+    );
+    await waitFor(() => expect(tauriApi.getOpenApiSyncStatus).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(tauriApi.getOpenApiSyncPlan).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(tauriApi.onOpenApiSyncChecked).toHaveBeenCalled());
+    vi.mocked(tauriApi.onOpenApiSyncChecked).mock.calls[0]?.[0]({
+      collection: 'A',
+      status: 'changed',
+    });
+    await waitFor(() => expect(tauriApi.getOpenApiSyncStatus).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(tauriApi.getOpenApiSyncPlan).toHaveBeenCalledTimes(3));
+    expect(vi.mocked(tauriApi.getOpenApiSyncStatus).mock.calls.map((c) => c[0])).toEqual([
+      'A',
+      'B',
+      'A',
+    ]);
+    expect(vi.mocked(tauriApi.getOpenApiSyncPlan).mock.calls.map((c) => c[0])).toEqual([
+      'A',
+      'B',
+      'A',
+    ]);
+  });
+
+  it('the_listeners_are_removed_on_unmount', async () => {
+    const unlistenChecked = vi.fn();
+    const unlistenApplied = vi.fn();
+    vi.mocked(tauriApi.onOpenApiSyncChecked).mockResolvedValue(unlistenChecked);
+    vi.mocked(tauriApi.onOpenApiSyncApplied).mockResolvedValue(unlistenApplied);
+    const { unmount } = renderHook(() => useOpenApiSyncGlobalEvents(), { wrapper });
+    unmount();
+    await waitFor(() => expect(unlistenChecked).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(unlistenApplied).toHaveBeenCalledTimes(1));
   });
 
   it('unlistens on unmount', async () => {

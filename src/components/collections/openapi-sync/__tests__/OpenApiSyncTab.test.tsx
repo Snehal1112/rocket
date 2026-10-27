@@ -5,7 +5,18 @@ import { clearApplyState } from '@/lib/queries/openapi-sync-queries';
 import { useApplySync } from '@/lib/queries/openapi-sync-queries';
 import * as tauriApi from '@/lib/tauri-api';
 import { renderWithQuery } from '@/test/trust-fixtures';
+import { OpenApiSyncNotifier } from '@/components/layout/OpenApiSyncNotifier';
 import { OpenApiSyncTab } from '../OpenApiSyncTab';
+
+/** The app mounts the global listeners once, so the tests do the same. */
+function TabWithListeners({ collection }: { collection: string }) {
+  return (
+    <>
+      <OpenApiSyncNotifier />
+      <OpenApiSyncTab collection={collection} />
+    </>
+  );
+}
 import type { OpenApiApplyReport, OpenApiSyncItem } from '@/lib/tauri-api';
 import { changedItem, makePlan, makeStatus, newItem, removedItem } from './fixtures';
 
@@ -54,7 +65,7 @@ describe('OpenApiSyncTab', () => {
 
   it('shows a loading state first', () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockReturnValue(new Promise(() => undefined));
-    renderWithQuery(<OpenApiSyncTab collection='c' />);
+    renderWithQuery(<TabWithListeners collection='c' />);
     expect(screen.getByText('Loading OpenAPI sync...')).toBeInTheDocument();
   });
 
@@ -62,7 +73,7 @@ describe('OpenApiSyncTab', () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(
       makeStatus({ hasPending: false, lastStatus: { state: 'unchanged' } }),
     );
-    renderWithQuery(<OpenApiSyncTab collection='c' />);
+    renderWithQuery(<TabWithListeners collection='c' />);
     expect(await screen.findByText('Spec updates waiting')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('data-state', 'active');
     expect(screen.queryByRole('tab', { name: /^Spec updates/ })).toBeNull();
@@ -72,7 +83,7 @@ describe('OpenApiSyncTab', () => {
   it('trusts the plan when it says nothing is pending', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
     vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(makePlan({ pending: false }));
-    renderWithQuery(<OpenApiSyncTab collection='c' />);
+    renderWithQuery(<TabWithListeners collection='c' />);
     expect(await screen.findByText('Spec updates waiting')).toBeInTheDocument();
   });
 
@@ -81,7 +92,7 @@ describe('OpenApiSyncTab', () => {
     vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(
       makePlan({ items: [changedItem, newItem] }),
     );
-    renderWithQuery(<OpenApiSyncTab collection='c' />);
+    renderWithQuery(<TabWithListeners collection='c' />);
     expect(await screen.findByText('Folder: pets / read')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Spec updates (2)' })).toHaveAttribute(
       'data-state',
@@ -93,14 +104,14 @@ describe('OpenApiSyncTab', () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(
       makeStatus({ consent: 'missing', hasPending: false }),
     );
-    renderWithQuery(<OpenApiSyncTab collection='cb1' />);
+    renderWithQuery(<TabWithListeners collection='cb1' />);
     expect(await screen.findByText('Trust this spec link')).toBeInTheDocument();
   });
 
   it('inner_tabs_switch', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
     vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(makePlan());
-    renderWithQuery(<OpenApiSyncTab collection='c' />);
+    renderWithQuery(<TabWithListeners collection='c' />);
     await screen.findByText('Folder: pets / read');
     const user = userEvent.setup();
     await user.click(screen.getByRole('tab', { name: 'Your changes' }));
@@ -111,7 +122,7 @@ describe('OpenApiSyncTab', () => {
 
   it('changes_shows_the_empty_state', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus({ hasPending: false }));
-    renderWithQuery(<OpenApiSyncTab collection='c' />);
+    renderWithQuery(<TabWithListeners collection='c' />);
     expect(await screen.findByText('Spec updates waiting')).toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole('tab', { name: 'Your changes' }));
     expect(await screen.findByText('You have not changed anything.')).toBeInTheDocument();
@@ -134,7 +145,7 @@ describe('OpenApiSyncTab', () => {
       added: [r('b')],
       deleted: [r('c')],
     });
-    renderWithQuery(<OpenApiSyncTab collection='c' />);
+    renderWithQuery(<TabWithListeners collection='c' />);
     expect(await screen.findByRole('tab', { name: 'Your changes (3)' })).toBeInTheDocument();
   });
 
@@ -153,7 +164,7 @@ describe('OpenApiSyncTab', () => {
       lastSyncedUpdated: 0,
     });
     const user = userEvent.setup();
-    renderWithQuery(<OpenApiSyncTab collection='c' />);
+    renderWithQuery(<TabWithListeners collection='c' />);
     await user.click(await screen.findByRole('tab', { name: 'Overview' }));
     await user.click(await screen.findByRole('button', { name: 'Review updates' }));
     expect(screen.getByRole('tab', { name: 'Spec updates (2)' })).toHaveAttribute(
@@ -170,7 +181,7 @@ describe('OpenApiSyncTab', () => {
         resolvePlan = r;
       }),
     );
-    renderWithQuery(<OpenApiSyncTab collection='c' />);
+    renderWithQuery(<TabWithListeners collection='c' />);
     expect(await screen.findByText('Loading the plan...')).toBeInTheDocument();
     expect(screen.queryByRole('tab', { name: 'Overview', selected: true })).toBeNull();
     expect(screen.queryByText('Spec updates waiting')).toBeNull();
@@ -185,7 +196,7 @@ describe('OpenApiSyncTab', () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(
       makeStatus({ hasPending: false, lastStatus: { state: 'unchanged' } }),
     );
-    renderWithQuery(<OpenApiSyncTab collection='c' />);
+    renderWithQuery(<TabWithListeners collection='c' />);
     await userEvent.setup().click(await screen.findByRole('tab', { name: 'Your changes' }));
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
     vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(
@@ -205,7 +216,7 @@ describe('OpenApiSyncTab', () => {
       makeStatus({ hasPending: false, lastStatus: { state: 'unchanged' } }),
     );
     const user = userEvent.setup();
-    renderWithQuery(<OpenApiSyncTab collection='c' />);
+    renderWithQuery(<TabWithListeners collection='c' />);
     await user.click(await screen.findByRole('button', { name: 'Edit connection settings' }));
     expect(await screen.findByRole('dialog')).toBeInTheDocument();
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
@@ -224,7 +235,7 @@ describe('OpenApiSyncTab', () => {
 
   it('after_disconnect_the_tab_shows_that_nothing_is_connected', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(null);
-    renderWithQuery(<OpenApiSyncTab collection='nc1' />);
+    renderWithQuery(<TabWithListeners collection='nc1' />);
     expect(
       await screen.findByText('This collection is not connected to an OpenAPI spec.'),
     ).toBeInTheDocument();
@@ -233,7 +244,7 @@ describe('OpenApiSyncTab', () => {
   it('shows the list with the first item selected and switches the detail', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
     vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(makePlan());
-    renderWithQuery(<OpenApiSyncTab collection='c' />);
+    renderWithQuery(<TabWithListeners collection='c' />);
     expect(await screen.findByText('Folder: pets / read')).toBeInTheDocument();
     await userEvent.setup().click(screen.getByText('Delete pet'));
     expect(screen.getByText('Treated as edited, will be kept.')).toBeInTheDocument();
@@ -244,7 +255,7 @@ describe('OpenApiSyncTab', () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockRejectedValue(
       'bad yaml in /home/me/proj/.rocket/openapi-source.yml at line 3',
     );
-    renderWithQuery(<OpenApiSyncTab collection='c' />);
+    renderWithQuery(<TabWithListeners collection='c' />);
     expect(
       await screen.findByText('Something went wrong with the OpenAPI sync. Try again.'),
     ).toBeInTheDocument();
@@ -254,14 +265,14 @@ describe('OpenApiSyncTab', () => {
 
   it('prefixes a known status error with the state file sentence', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockRejectedValue('consent_required: x');
-    renderWithQuery(<OpenApiSyncTab collection='c' />);
+    renderWithQuery(<TabWithListeners collection='c' />);
     expect(await screen.findByText(/The sync state file cannot be read: /)).toBeInTheDocument();
   });
 
   it('shows a fixed sentence for a plan error, never the path', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
     vi.mocked(tauriApi.getOpenApiSyncPlan).mockRejectedValue('cannot read /home/me/spec.json');
-    renderWithQuery(<OpenApiSyncTab collection='c' />);
+    renderWithQuery(<TabWithListeners collection='c' />);
     expect(
       await screen.findByText(
         'The plan cannot be built: Something went wrong with the OpenAPI sync. Try again.',
@@ -273,14 +284,14 @@ describe('OpenApiSyncTab', () => {
   it('asks for a new check when the pending spec changed', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
     vi.mocked(tauriApi.getOpenApiSyncPlan).mockRejectedValue('Conflict: the pending spec changed, check again');
-    renderWithQuery(<OpenApiSyncTab collection='c' />);
+    renderWithQuery(<TabWithListeners collection='c' />);
     expect(await screen.findByText('The pending spec changed, check again')).toBeInTheDocument();
   });
 
   it('no longer has the folded Settings section', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
     vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(makePlan());
-    renderWithQuery(<OpenApiSyncTab collection='c' />);
+    renderWithQuery(<TabWithListeners collection='c' />);
     await screen.findByText('Folder: pets / read');
     expect(screen.queryByRole('button', { name: /^Settings/ })).toBeNull();
   });
@@ -294,7 +305,7 @@ describe('OpenApiSyncTab', () => {
     vi.mocked(tauriApi.disconnectOpenApiSync).mockImplementation(async () => {
       connected = false;
     });
-    renderWithQuery(<OpenApiSyncTab collection='dis1' />);
+    renderWithQuery(<TabWithListeners collection='dis1' />);
     await screen.findByText('Folder: pets / read');
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'OpenAPI sync actions' }));
@@ -311,7 +322,7 @@ describe('OpenApiSyncTab', () => {
   it('offers a Check now button next to the plan', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
     vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(makePlan());
-    renderWithQuery(<OpenApiSyncTab collection='c' />);
+    renderWithQuery(<TabWithListeners collection='c' />);
     await screen.findByText('Folder: pets / read');
     expect(screen.getByRole('button', { name: 'Check now' })).toBeEnabled();
     expect(screen.queryByText('Trust this spec link')).toBeNull();
@@ -323,7 +334,7 @@ describe('OpenApiSyncTab', () => {
       makeStatus({ consent: 'missing', interval: 'off' }),
     );
     vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(makePlan());
-    renderWithQuery(<OpenApiSyncTab collection='cons1' />);
+    renderWithQuery(<TabWithListeners collection='cons1' />);
     expect(await screen.findByText('Trust this spec link')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Check now' })).toBeDisabled();
     await screen.findByText('Folder: pets / read');
@@ -345,7 +356,7 @@ describe('OpenApiSyncTab', () => {
         lastStatus: null,
       }),
     );
-    renderWithQuery(<OpenApiSyncTab collection='cons2' />);
+    renderWithQuery(<TabWithListeners collection='cons2' />);
     expect(await screen.findByText('Trust this spec link')).toBeInTheDocument();
   });
 });
@@ -373,7 +384,7 @@ describe('OpenApiSyncTab actions', () => {
 
   it('puts a checkbox on every row and counts the selection', async () => {
     mockSync();
-    renderWithQuery(<OpenApiSyncTab collection='sel1' />);
+    renderWithQuery(<TabWithListeners collection='sel1' />);
     await screen.findByText('Folder: pets / read');
     expect(screen.getAllByRole('checkbox')).toHaveLength(3);
     // The new request starts selected, the one with a conflict does not.
@@ -389,7 +400,7 @@ describe('OpenApiSyncTab actions', () => {
         ? makePlan({ items: [{ ...changedItem, key: 'GET /pets', name: 'List pets' } as OpenApiSyncItem] })
         : makePlan({ items: [{ ...newItem }, ({ ...removedItem, key: 'GET /animals', possiblyRenamedTo: undefined } as OpenApiSyncItem)] }),
     );
-    renderWithQuery(<OpenApiSyncTab collection='link1' />);
+    renderWithQuery(<TabWithListeners collection='link1' />);
     await screen.findByText('New (1)');
     expect(screen.getByText('Removed (1)')).toBeInTheDocument();
     await userEvent.setup().click(await screen.findByRole('button', { name: 'Link as rename' }));
@@ -407,7 +418,7 @@ describe('OpenApiSyncTab actions', () => {
       .mockResolvedValueOnce(makePlan())
       .mockResolvedValue(makePlan({ items: [newItem, removedItem] }));
     vi.mocked(tauriApi.applyOpenApiSync).mockResolvedValue({ ...report, applied: [], skipped: 1 });
-    renderWithQuery(<OpenApiSyncTab collection='skip1' />);
+    renderWithQuery(<TabWithListeners collection='skip1' />);
     const user = userEvent.setup();
     await screen.findByText('Add pet');
     await user.click(screen.getByRole('button', { name: 'Skip all' }));
@@ -438,7 +449,7 @@ describe('OpenApiSyncTab actions', () => {
       }),
     );
     vi.mocked(tauriApi.applyOpenApiSync).mockResolvedValue(report);
-    renderWithQuery(<OpenApiSyncTab collection='apply1' />);
+    renderWithQuery(<TabWithListeners collection='apply1' />);
     const user = userEvent.setup();
     await screen.findByText('Add pet');
     // The new request is selected already. The changed and the removed one are added by hand.
@@ -462,7 +473,7 @@ describe('OpenApiSyncTab actions', () => {
   it('sends the field choices the user made', async () => {
     mockSync();
     vi.mocked(tauriApi.applyOpenApiSync).mockResolvedValue(report);
-    renderWithQuery(<OpenApiSyncTab collection='choice1' />);
+    renderWithQuery(<TabWithListeners collection='choice1' />);
     const user = userEvent.setup();
     await screen.findByText('Add pet');
     await user.click(screen.getByText('Add pet'));
@@ -489,7 +500,7 @@ describe('OpenApiSyncTab actions', () => {
       name: `Request ${i}`,
     })) as OpenApiSyncItem[];
     mockSync(makePlan({ items }));
-    renderWithQuery(<OpenApiSyncTab collection='search1' />);
+    renderWithQuery(<TabWithListeners collection='search1' />);
     await screen.findByText('Changed (600)');
     expect(screen.getByText('600 updates from the spec · 0 selected')).toBeInTheDocument();
     fireEvent.change(screen.getByRole('searchbox', { name: 'Search changes' }), {
@@ -506,7 +517,7 @@ describe('OpenApiSyncTab actions', () => {
     vi.mocked(tauriApi.applyOpenApiSync).mockRejectedValue(
       'Conflict: an earlier apply is not finished yet at /home/me/x',
     );
-    renderWithQuery(<OpenApiSyncTab collection='err1' />);
+    renderWithQuery(<TabWithListeners collection='err1' />);
     const user = userEvent.setup();
     await screen.findByText('Add pet');
     await user.click(screen.getByRole('checkbox', { name: 'Include Add pet in apply' }));
@@ -521,7 +532,7 @@ describe('OpenApiSyncTab actions', () => {
   it('Check again refetches the status and the plan', async () => {
     mockSync();
     vi.mocked(tauriApi.applyOpenApiSync).mockResolvedValue(report);
-    renderWithQuery(<OpenApiSyncTab collection='again1' />);
+    renderWithQuery(<TabWithListeners collection='again1' />);
     const user = userEvent.setup();
     await screen.findByText('Add pet');
     await user.click(screen.getByRole('checkbox', { name: 'Include Add pet in apply' }));
@@ -554,7 +565,7 @@ describe('OpenApiSyncTab actions', () => {
       links.length > 0 ? linked : unlinked,
     );
     vi.mocked(tauriApi.applyOpenApiSync).mockResolvedValue(report);
-    renderWithQuery(<OpenApiSyncTab collection='links2' />);
+    renderWithQuery(<TabWithListeners collection='links2' />);
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: 'Link as rename' }));
     await screen.findByText('Changed (1)');
@@ -583,7 +594,7 @@ describe('OpenApiSyncTab actions', () => {
     vi.mocked(tauriApi.getOpenApiSyncPlan).mockImplementation((_c, links = []) =>
       links.length > 0 ? new Promise(() => undefined) : Promise.resolve(makePlan()),
     );
-    renderWithQuery(<OpenApiSyncTab collection='keep1' />);
+    renderWithQuery(<TabWithListeners collection='keep1' />);
     const link = await screen.findByRole('button', { name: 'Link as rename' });
     await userEvent.setup().click(link);
     expect(screen.queryByText('Loading the plan...')).toBeNull();
@@ -602,8 +613,8 @@ describe('OpenApiSyncTab actions', () => {
     );
     renderWithQuery(
       <>
-        <OpenApiSyncTab collection='busy1' />
-        <OpenApiSyncTab collection='busy1' />
+        <TabWithListeners collection='busy1' />
+        <TabWithListeners collection='busy1' />
       </>,
     );
     const user = userEvent.setup();
@@ -627,7 +638,7 @@ describe('OpenApiSyncTab actions', () => {
 
   it('closes the confirm dialog when the plan changes under it', async () => {
     mockSync();
-    renderWithQuery(<OpenApiSyncTab collection='conf1' />);
+    renderWithQuery(<TabWithListeners collection='conf1' />);
     const user = userEvent.setup();
     await screen.findByText('Add pet');
     await user.click(screen.getByRole('checkbox', { name: 'Include Add pet in apply' }));
@@ -661,7 +672,7 @@ describe('OpenApiSyncTab actions', () => {
       links.length > 0 ? { ...linked, warnings: [`w${Math.random()}`] } : unlinked,
     );
     vi.mocked(tauriApi.applyOpenApiSync).mockResolvedValue(report);
-    renderWithQuery(<OpenApiSyncTab collection='links3' />);
+    renderWithQuery(<TabWithListeners collection='links3' />);
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: 'Link as rename' }));
     await screen.findByText('Changed (1)');
@@ -678,7 +689,7 @@ describe('OpenApiSyncTab actions', () => {
 
   it('disables Apply while the plan refetches', async () => {
     mockSync();
-    renderWithQuery(<OpenApiSyncTab collection='fetch1' />);
+    renderWithQuery(<TabWithListeners collection='fetch1' />);
     const user = userEvent.setup();
     await user.click(await screen.findByRole('checkbox', { name: 'Include Add pet in apply' }));
     expect(screen.getByRole('button', { name: /^Confirm and sync/ })).toBeEnabled();
@@ -696,14 +707,14 @@ describe('OpenApiSyncTab actions', () => {
         finish = resolve;
       }),
     );
-    const first = renderWithQuery(<OpenApiSyncTab collection='away1' />);
+    const first = renderWithQuery(<TabWithListeners collection='away1' />);
     const user = userEvent.setup();
     await user.click(await screen.findByRole('checkbox', { name: 'Include Add pet in apply' }));
     await user.click(screen.getByRole('button', { name: /^Confirm and sync/ }));
     await user.click(screen.getByRole('button', { name: 'Apply now' }));
     first.unmount();
     await act(async () => finish(report));
-    renderWithQuery(<OpenApiSyncTab collection='away1' />);
+    renderWithQuery(<TabWithListeners collection='away1' />);
     expect(await screen.findByText('1 applied: 0 created, 1 updated.')).toBeInTheDocument();
     await user.click((await screen.findAllByRole('button', { name: 'Close' }))[0] as HTMLElement);
     await waitFor(() => expect(screen.queryByText('Apply finished')).toBeNull());
@@ -717,14 +728,14 @@ describe('OpenApiSyncTab actions', () => {
         fail = reject;
       }),
     );
-    const first = renderWithQuery(<OpenApiSyncTab collection='away2' />);
+    const first = renderWithQuery(<TabWithListeners collection='away2' />);
     const user = userEvent.setup();
     await user.click(await screen.findByRole('checkbox', { name: 'Include Add pet in apply' }));
     await user.click(screen.getByRole('button', { name: /^Confirm and sync/ }));
     await user.click(screen.getByRole('button', { name: 'Apply now' }));
     first.unmount();
     await act(async () => fail('Conflict: an earlier apply is not finished yet'));
-    renderWithQuery(<OpenApiSyncTab collection='away2' />);
+    renderWithQuery(<TabWithListeners collection='away2' />);
     expect(
       await screen.findByText('Another apply is not finished yet. Wait a moment and try again.'),
     ).toBeInTheDocument();
@@ -738,7 +749,7 @@ describe('OpenApiSyncTab actions', () => {
       }),
     );
     vi.mocked(tauriApi.applyOpenApiSync).mockResolvedValue({ ...report, applied: [] });
-    renderWithQuery(<OpenApiSyncTab collection='vars1' />);
+    renderWithQuery(<TabWithListeners collection='vars1' />);
     const user = userEvent.setup();
     await user.click(
       await screen.findByRole('checkbox', { name: 'Include Base URL baseUrl in apply' }),
@@ -768,7 +779,7 @@ describe('OpenApiSyncTab actions', () => {
     }
     renderWithQuery(
       <>
-        <OpenApiSyncTab collection='race1' />
+        <TabWithListeners collection='race1' />
         <Starter />
       </>,
     );
@@ -783,7 +794,7 @@ describe('OpenApiSyncTab actions', () => {
 
   it('confirm_and_sync_opens_the_confirm_dialog_with_counts', async () => {
     mockSync(makePlan({ items: [newItem, { ...newItem, key: 'GET /cats', name: 'List cats', digest: 'dc', fingerprint: 'fc' }] }));
-    renderWithQuery(<OpenApiSyncTab collection='bulk1' />);
+    renderWithQuery(<TabWithListeners collection='bulk1' />);
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: 'Confirm and sync (2)' }));
     expect(screen.getByText('2 new requests will be added.')).toBeInTheDocument();
@@ -793,7 +804,7 @@ describe('OpenApiSyncTab actions', () => {
   it('accept_all_warns_before_overwriting_edits', async () => {
     mockSync();
     vi.mocked(tauriApi.applyOpenApiSync).mockResolvedValue(report);
-    renderWithQuery(<OpenApiSyncTab collection='bulk2' />);
+    renderWithQuery(<TabWithListeners collection='bulk2' />);
     const user = userEvent.setup();
     await screen.findByText('Add pet');
     await user.click(screen.getByRole('button', { name: 'Accept all' }));
@@ -822,7 +833,7 @@ describe('OpenApiSyncTab actions', () => {
       changes: [{ field: 'header:Accept', outcome: 'takeSpec', baseline: 'a', yours: 'a', spec: 'b' }],
     } as OpenApiSyncItem;
     mockSync(makePlan({ items: [plain, { ...removedItem, edited: true } as OpenApiSyncItem] }));
-    renderWithQuery(<OpenApiSyncTab collection='bulk3' />);
+    renderWithQuery(<TabWithListeners collection='bulk3' />);
     const user = userEvent.setup();
     await user.click(await screen.findByRole('checkbox', { name: 'Include Add pet in apply' }));
     expect(screen.getByText(/· 0 selected$/)).toBeInTheDocument();
@@ -833,7 +844,7 @@ describe('OpenApiSyncTab actions', () => {
 
   it('skip_all_does_nothing_when_cancelled', async () => {
     mockSync();
-    renderWithQuery(<OpenApiSyncTab collection='bulk4' />);
+    renderWithQuery(<TabWithListeners collection='bulk4' />);
     const user = userEvent.setup();
     await screen.findByText('Add pet');
     await user.click(screen.getByRole('button', { name: 'Skip all' }));
@@ -844,7 +855,7 @@ describe('OpenApiSyncTab actions', () => {
 
   it('keep_current_sends_nothing', async () => {
     mockSync();
-    renderWithQuery(<OpenApiSyncTab collection='bulk5' />);
+    renderWithQuery(<TabWithListeners collection='bulk5' />);
     const user = userEvent.setup();
     await screen.findByText('Add pet');
     await user.click(screen.getByRole('button', { name: 'Keep current' }));
@@ -856,7 +867,7 @@ describe('OpenApiSyncTab actions', () => {
   it('keep_current_resets_take_spec_choices', async () => {
     mockSync();
     vi.mocked(tauriApi.applyOpenApiSync).mockResolvedValue(report);
-    renderWithQuery(<OpenApiSyncTab collection='bulk6' />);
+    renderWithQuery(<TabWithListeners collection='bulk6' />);
     const user = userEvent.setup();
     await screen.findByText('Add pet');
     await user.click(screen.getByRole('button', { name: 'Accept all' }));
@@ -872,7 +883,7 @@ describe('OpenApiSyncTab actions', () => {
 
   it('accept_all_dialog_counts_new_and_changed_only', async () => {
     mockSync();
-    renderWithQuery(<OpenApiSyncTab collection='bulk7' />);
+    renderWithQuery(<TabWithListeners collection='bulk7' />);
     const user = userEvent.setup();
     await screen.findByText('Add pet');
     await user.click(screen.getByRole('button', { name: 'Accept all' }));
@@ -886,7 +897,7 @@ describe('OpenApiSyncTab actions', () => {
         variableChanges: [{ name: 'baseUrl', kind: 'baseUrl', digest: 'dv' }],
       }),
     );
-    renderWithQuery(<OpenApiSyncTab collection='bulk8' />);
+    renderWithQuery(<TabWithListeners collection='bulk8' />);
     const user = userEvent.setup();
     await screen.findByRole('button', { name: 'Accept all' });
     expect(screen.getByRole('button', { name: 'Skip all' })).toBeDisabled();
@@ -902,7 +913,7 @@ describe('OpenApiSyncTab actions', () => {
         variableChanges: [{ name: 'baseUrl', kind: 'baseUrl', digest: 'dv' }],
       }),
     );
-    renderWithQuery(<OpenApiSyncTab collection='bulk9' />);
+    renderWithQuery(<TabWithListeners collection='bulk9' />);
     const user = userEvent.setup();
     await screen.findByRole('button', { name: 'Accept all' });
     expect(screen.getByText(/· 1 selected$/)).toBeInTheDocument();
@@ -913,7 +924,7 @@ describe('OpenApiSyncTab actions', () => {
   it('skip_selected_skips_only_the_selected_requests', async () => {
     mockSync();
     vi.mocked(tauriApi.applyOpenApiSync).mockResolvedValue({ ...report, applied: [], skipped: 1 });
-    renderWithQuery(<OpenApiSyncTab collection='bulk10' />);
+    renderWithQuery(<TabWithListeners collection='bulk10' />);
     const user = userEvent.setup();
     await screen.findByText('Add pet');
     await user.click(screen.getByRole('button', { name: 'Skip selected (1)' }));
@@ -931,7 +942,7 @@ describe('OpenApiSyncTab actions', () => {
     const cleanRemoved = { ...removedItem, edited: false } as OpenApiSyncItem;
     const editedRemoved = { ...removedItem, key: 'DELETE /e', name: 'Delete edited', digest: 'de', fingerprint: 'fe', edited: true } as OpenApiSyncItem;
     mockSync(makePlan({ items: [cleanRemoved, editedRemoved, changedItem, newItem] }));
-    renderWithQuery(<OpenApiSyncTab collection='bulk11' />);
+    renderWithQuery(<TabWithListeners collection='bulk11' />);
     const user = userEvent.setup();
     await screen.findByRole('button', { name: /^Select matches/ });
     // The new request is selected already and stays selected through a narrower search.
@@ -948,7 +959,7 @@ describe('OpenApiSyncTab actions', () => {
 
   it('the_bulk_dialog_closes_when_the_plan_changes', async () => {
     mockSync();
-    renderWithQuery(<OpenApiSyncTab collection='bulk12' />);
+    renderWithQuery(<TabWithListeners collection='bulk12' />);
     const user = userEvent.setup();
     await screen.findByText('Add pet');
     await user.click(screen.getByRole('button', { name: 'Skip all' }));
@@ -965,7 +976,7 @@ describe('OpenApiSyncTab actions', () => {
   it('a_failed_skip_all_restores_the_selection', async () => {
     mockSync();
     vi.mocked(tauriApi.applyOpenApiSync).mockRejectedValue('Conflict: an earlier apply is not finished yet');
-    renderWithQuery(<OpenApiSyncTab collection='bulk13' />);
+    renderWithQuery(<TabWithListeners collection='bulk13' />);
     const user = userEvent.setup();
     await screen.findByText('Add pet');
     expect(screen.getByText(/· 1 selected$/)).toBeInTheDocument();
