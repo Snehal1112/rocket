@@ -283,8 +283,8 @@ export function useApplySync(collection: string) {
 
 /**
  * Refreshes the status and plan queries of the collection named in a sync check event, and
- * also the collection tree for an apply event. Mount it from the OpenAPI sync tab and the
- * notice, never globally.
+ * also the collection tree for an apply event. Mount it from the OpenAPI sync tab, never
+ * globally.
  */
 export function useOpenApiSyncEvents(): void {
   const queryClient = useQueryClient();

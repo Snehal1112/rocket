@@ -287,7 +287,7 @@ export function EditorGroup({ node }: { node: LeafNode }) {
             </Suspense>
           ) : isOpenApiSyncTab(activeTab) ? (
             <Suspense fallback={<PanelSkeleton label='Loading OpenAPI sync' />}>
-              <OpenApiSyncTab collection={activeTab.collectionName} />
+              <OpenApiSyncTab key={activeTab.id} collection={activeTab.collectionName} />
             </Suspense>
           ) : isContractDiffTab(activeTab) ? (
             <Suspense fallback={<EditorSkeleton />}>
