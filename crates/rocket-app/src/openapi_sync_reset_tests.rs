@@ -433,3 +433,24 @@ async fn changes_has_no_backups_for_a_fresh_import() {
     assert!(view.backups.is_empty());
     assert!(view.reset_available);
 }
+
+#[tokio::test]
+async fn restore_keeps_scripts_and_tags_added_after_the_reset() {
+    let w = world().await;
+    edit(&w, "listPets", "https://edited.example.com/x");
+    w.svc.reset(&w.name, &keys(&["listPets"])).expect("reset");
+    // The user keeps working on the reset request before restoring.
+    let path = path_of(&w, "listPets");
+    let mut request = w.repo.get_request(&w.name, &path).expect("get");
+    request.pre_request_script = Some("rok.log('later')".to_string());
+    request.tags = vec!["later".to_string()];
+    w.repo.save_request(&w.name, &path, &request).expect("save");
+    w.svc.restore(&w.name, "listPets").expect("restore");
+    let after = load(&w, "listPets");
+    assert_eq!(after.url, "https://edited.example.com/x");
+    assert_eq!(
+        after.pre_request_script.as_deref(),
+        Some("rok.log('later')")
+    );
+    assert_eq!(after.tags, vec!["later".to_string()]);
+}

@@ -165,9 +165,9 @@ impl OpenApiSyncService {
         let staged = (|| -> DomainResult<Option<(String, Request)>> {
             let mut watch = None;
             if let Some(cur) = find_current(&current, &entry.uid) {
-                let mut request = entry.request.clone();
-                request.file_name = cur.request.file_name.clone();
-                request.seq = cur.request.seq;
+                // Only the spec-owned fields come back, so scripts, examples and other edits
+                // made after the reset stay.
+                let request = reset_spec_owned_fields(&cur.request, &entry.request);
                 let bytes = renderer.render(&cur.request_path, &request)?;
                 tx.stage_put(&request_filename_for(&cur.request_path), &bytes)?;
                 watch = Some((cur.request_path.clone(), cur.request.clone()));
