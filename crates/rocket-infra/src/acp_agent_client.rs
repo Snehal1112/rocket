@@ -110,6 +110,27 @@ fn end_turn(slot: &UpdateSlot, permissions: &PermissionBroker) {
     permissions.drain_cancelled();
 }
 
+/// Ends the turn when dropped, so a `send_prompt` future that is dropped
+/// mid-turn cannot leave its update sender installed or a permission request
+/// open. `end_turn` is idempotent, so an explicit drop and the end of scope
+/// do not conflict.
+struct TurnGuard {
+    slot: UpdateSlot,
+    permissions: Arc<PermissionBroker>,
+}
+
+impl TurnGuard {
+    fn new(slot: UpdateSlot, permissions: Arc<PermissionBroker>) -> Self {
+        Self { slot, permissions }
+    }
+}
+
+impl Drop for TurnGuard {
+    fn drop(&mut self) {
+        end_turn(&self.slot, &self.permissions);
+    }
+}
+
 /// Owns a spawned agent process and the background task that drives its
 /// ACP connection, and tears both down together.
 ///
@@ -556,6 +577,10 @@ impl AcpSessionClient for AcpAgentClient {
             ));
         };
         set_update_sender(&running.current_update_tx, Some(update_tx));
+        let turn_guard = TurnGuard::new(
+            Arc::clone(&running.current_update_tx),
+            Arc::clone(&running.permissions),
+        );
 
         // `connection.send_request(...)` takes `&self` and `ConnectionTo` is
         // cheaply `Clone` and safe to call concurrently, so no lock is needed
@@ -566,8 +591,9 @@ impl AcpSessionClient for AcpAgentClient {
             .block_task()
             .await;
 
-        // A request the agent left open cannot be answered after the turn.
-        end_turn(&running.current_update_tx, &running.permissions);
+        // A request the agent left open cannot be answered after the turn. The
+        // guard also does this when the future is dropped before this point.
+        drop(turn_guard);
 
         match result {
             Ok(response) => Ok(stop_reason_to_wire_string(response.stop_reason)),
@@ -1448,6 +1474,36 @@ mod tests {
             .resolve(&request_id, Some("allow-once"))
             .expect_err("a request from an ended turn");
         assert!(matches!(err, DomainError::NotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn dropping_the_turn_guard_clears_the_slot_and_cancels_open_permissions() {
+        let broker = Arc::new(PermissionBroker::default());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let slot: UpdateSlot = Arc::new(std::sync::Mutex::new(Some(tx)));
+        let (request_id, answer) =
+            open_permission_request(&permission_request("ls"), &broker, &slot, &[])
+                .expect("a turn is running");
+
+        let guard = TurnGuard::new(Arc::clone(&slot), Arc::clone(&broker));
+        drop(guard);
+
+        assert_eq!(answer.await.expect("answer"), None);
+        assert!(current_update_sender(&slot).is_none());
+        let err = broker
+            .resolve(&request_id, Some("allow-once"))
+            .expect_err("a request from an ended turn");
+        assert!(matches!(err, DomainError::NotFound(_)));
+    }
+
+    #[test]
+    fn turn_guard_is_a_no_op_after_end_turn() {
+        let broker = Arc::new(PermissionBroker::default());
+        let slot: UpdateSlot = Arc::new(std::sync::Mutex::new(None));
+        let guard = TurnGuard::new(Arc::clone(&slot), Arc::clone(&broker));
+        end_turn(&slot, &broker);
+        drop(guard);
+        assert!(current_update_sender(&slot).is_none());
     }
 
     #[test]
