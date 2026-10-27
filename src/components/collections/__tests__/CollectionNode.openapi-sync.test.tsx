@@ -3,12 +3,10 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CollectionNode } from '@/components/collections/CollectionNode';
-import { collectAllTabs } from '@/lib/pane-utils';
 import type { CollectionSummary } from '@/lib/tauri-api';
 import * as tauriApi from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
-import { isCollectionTab } from '@/types/pane-types';
-import { makeStatus } from '../spec-sync/__tests__/fixtures';
+import { makeStatus } from '../openapi-sync/__tests__/fixtures';
 
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn().mockResolvedValue(() => undefined),
@@ -81,19 +79,19 @@ describe('CollectionNode OpenAPI sync entry', () => {
     expect(await screen.findByRole('menuitem', { name: /OpenAPI sync/ })).toBeInTheDocument();
   });
 
-  it('shows OpenAPI sync for a collection with a source and opens the section', async () => {
+  it('the_menu_entry_opens_the_openapi_sync_tab', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
+    const openTab = vi.spyOn(usePaneStore.getState(), 'openOpenApiSyncTab');
+    const openSection = vi.spyOn(usePaneStore.getState(), 'openCollectionTab');
     const user = userEvent.setup();
     renderNode();
     await user.click(await screen.findByLabelText('Actions for my-collection'));
     await user.click(await screen.findByRole('menuitem', { name: /OpenAPI sync/ }));
-    await waitFor(() => {
-      const tab = collectAllTabs(usePaneStore.getState().root).find(isCollectionTab);
-      expect(tab?.activeSection).toBe('spec-sync');
-    });
+    await waitFor(() => expect(openTab).toHaveBeenCalledWith('my-collection'));
+    expect(openSection).not.toHaveBeenCalled();
   });
 
-  it('does not show OpenAPI sync without a source', async () => {
+  it('the_entry_is_hidden_without_a_source', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(null);
     const user = userEvent.setup();
     renderNode();

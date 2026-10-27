@@ -13,12 +13,12 @@ import {
   renameHint,
   variableId,
   variableLabel,
-} from './specSyncView';
+} from './openApiSyncView';
 
 /** A group shows at most this many rows. Rows past the cap are not shown yet. */
 export const MAX_ROWS_PER_GROUP = 500;
 
-interface SpecSyncListProps {
+interface OpenApiSyncListProps {
   plan: OpenApiSyncPlan;
   selectedId: string | null;
   onSelect: (id: string) => void;
@@ -88,7 +88,7 @@ interface RowData {
 }
 
 /** The grouped list of pending changes. Each group collapses. */
-export function SpecSyncList({
+export function OpenApiSyncList({
   plan,
   selectedId,
   onSelect,
@@ -98,7 +98,7 @@ export function SpecSyncList({
   variables,
   onToggle,
   onToggleVariable,
-}: SpecSyncListProps) {
+}: OpenApiSyncListProps) {
   // Extra pages of rows per group, added by Show more. A query shows every match instead.
   const [pages, setPages] = useState<Record<string, number>>({});
   const searching = query.trim().length > 0;

@@ -9,10 +9,10 @@ import {
   isPendingChangedError,
   outcomeLabel,
   renameHint,
-} from '../specSyncView';
+} from '../openApiSyncView';
 import { changedItem, makePlan, newItem, removedItem } from './fixtures';
 
-describe('specSyncView', () => {
+describe('openApiSyncView', () => {
   it('groups New, Changed, Removed in that order with counts', () => {
     const groups = groupItems([removedItem, changedItem, newItem, { ...newItem, key: 'x' }]);
     expect(groups.map((g) => [g.label, g.items.length])).toEqual([

@@ -16,30 +16,30 @@ import { formatRelativeTime } from '@/lib/relative-time';
 import { ApplyConfirmDialog } from './ApplyConfirmDialog';
 import { ApplyResultDialog } from './ApplyResultDialog';
 import { buildSelection } from './buildSelection';
-import { SpecSyncActionsBar } from './SpecSyncActionsBar';
-import { SpecSyncConsentBanner } from './SpecSyncConsentBanner';
-import { SpecSyncDetail } from './SpecSyncDetail';
-import { SpecSyncHeader } from './SpecSyncHeader';
-import { SpecSyncList } from './SpecSyncList';
-import { SpecSyncOverview } from './SpecSyncOverview';
+import { OpenApiSyncActionsBar } from './OpenApiSyncActionsBar';
+import { OpenApiSyncConsentBanner } from './OpenApiSyncConsentBanner';
+import { OpenApiSyncDetail } from './OpenApiSyncDetail';
+import { OpenApiSyncHeader } from './OpenApiSyncHeader';
+import { OpenApiSyncList } from './OpenApiSyncList';
+import { OpenApiSyncOverview } from './OpenApiSyncOverview';
 import {
   filterItems,
   filterVariables,
   findEntry,
   firstEntryId,
   isPendingChangedError,
-} from './specSyncView';
+} from './openApiSyncView';
 import { GENERIC_SYNC_ERROR, syncErrorMessage } from './syncErrors';
 import { useSyncSelection } from './useSyncSelection';
 
 type Links = Array<[string, string]>;
 
-interface SpecSyncTabProps {
+interface OpenApiSyncTabProps {
   collection: string;
 }
 
 /** What the pending spec would change, with the choices to apply it. It never runs a check. */
-export function SpecSyncTab({ collection }: SpecSyncTabProps) {
+export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
   useOpenApiSyncEvents();
   const status = useOpenApiSyncStatus(collection);
   const planEnabled = !!status.data?.hasPending;
@@ -155,7 +155,7 @@ export function SpecSyncTab({ collection }: SpecSyncTabProps) {
   if (status.isPending) {
     return (
       <div className='p-4'>
-        <StateBlock tone='loading'>Loading spec sync...</StateBlock>
+        <StateBlock tone='loading'>Loading OpenAPI sync...</StateBlock>
       </div>
     );
   }
@@ -213,8 +213,8 @@ export function SpecSyncTab({ collection }: SpecSyncTabProps) {
             machine.
           </p>
         )}
-        <SpecSyncOverview plan={planData} status={s} />
-        <SpecSyncActionsBar
+        <OpenApiSyncOverview plan={planData} status={s} />
+        <OpenApiSyncActionsBar
           query={query}
           onQueryChange={setQuery}
           filteredCount={matchedKeys.length + matchedVariables.length}
@@ -236,7 +236,7 @@ export function SpecSyncTab({ collection }: SpecSyncTabProps) {
         )}
         <div className='flex min-h-0 flex-1'>
           <div className='w-72 shrink-0 border-r border-border'>
-            <SpecSyncList
+            <OpenApiSyncList
               plan={planData}
               selectedId={activeId}
               onSelect={setSelectedId}
@@ -249,7 +249,7 @@ export function SpecSyncTab({ collection }: SpecSyncTabProps) {
             />
           </div>
           <div className='min-w-0 flex-1'>
-            <SpecSyncDetail
+            <OpenApiSyncDetail
               plan={planData}
               selectedId={activeId}
               choices={sel.choices}
@@ -274,9 +274,9 @@ export function SpecSyncTab({ collection }: SpecSyncTabProps) {
 
   return (
     <div className='flex h-full flex-col overflow-hidden'>
-      <SpecSyncHeader collection={collection} status={s} />
+      <OpenApiSyncHeader collection={collection} status={s} />
       {s.consent !== 'granted' && (
-        <SpecSyncConsentBanner
+        <OpenApiSyncConsentBanner
           key={collection}
           collection={collection}
           location={s.location}

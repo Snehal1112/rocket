@@ -2,7 +2,7 @@ import { Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
-interface SpecSyncActionsBarProps {
+interface OpenApiSyncActionsBarProps {
   query: string;
   onQueryChange: (query: string) => void;
   /** Requests and variables that match the search, hidden rows included. */
@@ -20,7 +20,7 @@ interface SpecSyncActionsBarProps {
 }
 
 /** Search, select all or none, and the Skip and Apply buttons. */
-export function SpecSyncActionsBar({
+export function OpenApiSyncActionsBar({
   query,
   onQueryChange,
   filteredCount,
@@ -32,7 +32,7 @@ export function SpecSyncActionsBar({
   onSelectNone,
   onSkip,
   onApply,
-}: SpecSyncActionsBarProps) {
+}: OpenApiSyncActionsBarProps) {
   return (
     <div className='flex flex-wrap items-center gap-2 border-b border-border/70 px-4 py-2'>
       <div className='relative w-56'>

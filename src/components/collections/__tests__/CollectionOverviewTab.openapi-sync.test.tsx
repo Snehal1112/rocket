@@ -1,6 +1,6 @@
-import { screen, waitFor } from '@testing-library/react';
+import { act, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { makeStatus } from '@/components/collections/spec-sync/__tests__/fixtures';
+import { makeStatus } from '@/components/collections/openapi-sync/__tests__/fixtures';
 import * as tauriApi from '@/lib/tauri-api';
 import { renderWithQuery } from '@/test/trust-fixtures';
 import type { CollectionSection, CollectionTab } from '@/types/pane-types';
@@ -61,66 +61,51 @@ function makeTab(activeSection?: CollectionSection): CollectionTab {
   };
 }
 
-describe('CollectionOverviewTab Spec sync tab', () => {
+describe('CollectionOverviewTab without the sync section', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('has no Spec sync tab when the status is null', async () => {
-    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(null);
-    renderWithQuery(<CollectionOverviewTab tab={makeTab('overview')} />);
-    await screen.findByText('Documentation');
-    await waitFor(() => expect(tauriApi.getOpenApiSyncStatus).toHaveBeenCalled());
-    expect(screen.queryByText('Spec sync')).toBeNull();
-  });
-
-  it('shows the Spec sync tab when the status has data', async () => {
+  it('has_no_spec_sync_tab_any_more', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
     renderWithQuery(<CollectionOverviewTab tab={makeTab('overview')} />);
-    expect(await screen.findByText('Spec sync')).toBeInTheDocument();
+    await screen.findByText('Documentation');
+    for (const label of ['Overview', 'Authorization', 'Variables', 'Documentation']) {
+      expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
+    }
+    expect(screen.queryByRole('button', { name: /sync/i })).toBeNull();
   });
 
-  it('shows the Spec sync tab and its message when the status errored', async () => {
-    vi.mocked(tauriApi.getOpenApiSyncStatus).mockRejectedValue('bad yaml');
-    renderWithQuery(<CollectionOverviewTab tab={makeTab('spec-sync')} />);
-    expect(
-      await screen.findByText('Something went wrong with the spec sync. Try again.'),
-    ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Spec sync' })).toBeInTheDocument();
-  });
-
-  it('falls back to the overview for a stale spec-sync section', async () => {
-    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(null);
-    renderWithQuery(<CollectionOverviewTab tab={makeTab('spec-sync')} />);
+  it('a_stored_spec_sync_section_falls_back_to_overview', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
+    renderWithQuery(<CollectionOverviewTab tab={makeTab('spec-sync' as never)} />);
     expect(await screen.findByText('Default Headers')).toBeInTheDocument();
+  });
+
+  it('shows_no_sync_notice', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(
+      makeStatus({ hasPending: true, lastStatus: { state: 'changed' } }),
+    );
+    renderWithQuery(<CollectionOverviewTab tab={makeTab('overview')} />);
+    await screen.findByText('Documentation');
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(screen.queryByText('A new version of the spec was found')).toBeNull();
+    expect(screen.queryByText(/new version of the spec/i)).toBeNull();
   });
 });
 
 describe('resolveCollectionSection', () => {
-  const valid: CollectionSection[] = ['overview', 'auth', 'spec-sync'];
+  const valid: CollectionSection[] = ['overview', 'auth'];
 
-  it('keeps spec-sync while the status loads', () => {
-    expect(
-      resolveCollectionSection('spec-sync', valid, {
-        specSyncAvailable: false,
-        specSyncPending: true,
-      }),
-    ).toBe('spec-sync');
+  it('keeps a valid section', () => {
+    expect(resolveCollectionSection('auth', valid)).toBe('auth');
   });
 
-  it('falls back once the status is known to be absent', () => {
-    expect(
-      resolveCollectionSection('spec-sync', valid, {
-        specSyncAvailable: false,
-        specSyncPending: false,
-      }),
-    ).toBe('overview');
+  it('falls back for a stored spec-sync section', () => {
+    expect(resolveCollectionSection('spec-sync' as never, valid)).toBe('overview');
   });
 
   it('falls back for an unknown section', () => {
-    expect(
-      resolveCollectionSection('gone' as CollectionSection, valid, {
-        specSyncAvailable: true,
-        specSyncPending: false,
-      }),
-    ).toBe('overview');
+    expect(resolveCollectionSection('gone' as CollectionSection, valid)).toBe('overview');
   });
 });

@@ -60,7 +60,7 @@ function withKeys(set: Set<string>, keys: Iterable<string>, on: boolean): Set<st
 }
 
 /**
- * The selection of one Spec sync tab. It lives in the tab, not in a store. The rename links
+ * The selection of one OpenAPI sync tab. It lives in the tab, not in a store. The rename links
  * are owned by the caller because they are part of the plan query key. A plan with a new
  * digest set clears the selection, so an approval never outlives the item it was made for.
  */

@@ -1,7 +1,7 @@
 import { formatRelativeTime } from '@/lib/relative-time';
 import type { OpenApiSyncPlan, OpenApiSyncStatus } from '@/lib/tauri-api';
 
-interface SpecSyncOverviewProps {
+interface OpenApiSyncOverviewProps {
   plan: OpenApiSyncPlan;
   status: OpenApiSyncStatus;
 }
@@ -26,7 +26,7 @@ function Stat({ id, label, value }: { id: string; label: string; value: number }
 }
 
 /** A counts strip for the pending spec, with the last checked time. */
-export function SpecSyncOverview({ plan, status }: SpecSyncOverviewProps) {
+export function OpenApiSyncOverview({ plan, status }: OpenApiSyncOverviewProps) {
   return (
     <div className='flex flex-wrap items-end gap-x-8 gap-y-2 border-b border-border/70 px-4 py-3'>
       <Stat id='overview-in-sync' label='Endpoints in sync' value={plan.unchanged.length} />

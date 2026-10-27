@@ -16,11 +16,11 @@ import {
   outcomeLabel,
   renameHint,
   variableLabel,
-} from './specSyncView';
+} from './openApiSyncView';
 
 type Choice = 'spec' | 'yours';
 
-interface SpecSyncDetailProps {
+interface OpenApiSyncDetailProps {
   plan: OpenApiSyncPlan;
   selectedId: string | null;
   /** The explicit field choices by item key. A field without one takes its default. */
@@ -100,7 +100,7 @@ function VariableBlock({ change }: { change: OpenApiVariableChange }) {
 }
 
 /** The detail of the selected entry. Only this one entry is rendered. */
-export function SpecSyncDetail({
+export function OpenApiSyncDetail({
   plan,
   selectedId,
   choices,
@@ -109,7 +109,7 @@ export function SpecSyncDetail({
   onLink,
   onUnlink,
   linksLocked,
-}: SpecSyncDetailProps) {
+}: OpenApiSyncDetailProps) {
   const entry = findEntry(plan, selectedId);
   // The pair `[oldKey, newKey]` a rename hint points at, or null without a hint.
   const renameLink = (item: OpenApiSyncItem): [string, string] | null => {

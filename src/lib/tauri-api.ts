@@ -1916,7 +1916,7 @@ export const importOpenApiUrl = (
   });
 
 // ============================================================
-// OpenAPI spec sync
+// OpenAPI OpenAPI sync
 // ============================================================
 
 export type OpenApiSyncInterval =

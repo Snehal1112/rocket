@@ -22,7 +22,7 @@ interface DisconnectSyncDialogProps {
   onDisconnected?: () => void;
 }
 
-/** Confirms the end of spec sync. The requests stay as they are. */
+/** Confirms the end of OpenAPI sync. The requests stay as they are. */
 export function DisconnectSyncDialog({
   collection,
   open,
@@ -71,12 +71,12 @@ export function DisconnectSyncDialog({
         </AlertDialogHeader>
         <div className='flex items-start gap-2'>
           <Checkbox
-            id='spec-sync-remove-token'
+            id='openapi-sync-remove-token'
             checked={removeToken}
             onCheckedChange={(v) => setRemoveToken(v === true)}
             className='mt-0.5'
           />
-          <Label htmlFor='spec-sync-remove-token' className='text-sm font-normal'>
+          <Label htmlFor='openapi-sync-remove-token' className='text-sm font-normal'>
             Also remove the stored token (this also removes it for any copy of this collection on
             this machine that uses the same link)
           </Label>

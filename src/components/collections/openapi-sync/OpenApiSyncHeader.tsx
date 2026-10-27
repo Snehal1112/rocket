@@ -11,16 +11,16 @@ import {
 import { formatRelativeTime } from '@/lib/relative-time';
 import type { OpenApiSyncStatus } from '@/lib/tauri-api';
 import { CheckNowButtonView, useCheckRunner } from './CheckNowButton';
-import { SpecSyncConnectionDialog } from './SpecSyncConnectionDialog';
-import { intervalLabel, splitLocation } from './specSyncView';
+import { OpenApiSyncConnectionDialog } from './OpenApiSyncConnectionDialog';
+import { intervalLabel, splitLocation } from './openApiSyncView';
 
-interface SpecSyncHeaderProps {
+interface OpenApiSyncHeaderProps {
   collection: string;
   status: OpenApiSyncStatus;
 }
 
 /** Where the spec comes from, when it was last checked and how often, with Check now. */
-export function SpecSyncHeader({ collection, status }: SpecSyncHeaderProps) {
+export function OpenApiSyncHeader({ collection, status }: OpenApiSyncHeaderProps) {
   const [showFull, setShowFull] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const runner = useCheckRunner(collection, status.consent);
@@ -31,14 +31,14 @@ export function SpecSyncHeader({ collection, status }: SpecSyncHeaderProps) {
       <div className='flex flex-wrap items-start justify-between gap-3'>
         <div className='flex min-w-0 flex-col gap-1'>
           <div className='flex items-center gap-1'>
-            <h2 className='text-sm font-semibold'>Spec sync</h2>
+            <h2 className='text-sm font-semibold'>OpenAPI sync</h2>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   variant='ghost'
                   size='icon'
                   className='h-6 w-6'
-                  aria-label='Spec sync actions'
+                  aria-label='OpenAPI sync actions'
                 >
                   <MoreHorizontal aria-hidden='true' className='h-4 w-4' />
                 </Button>
@@ -88,7 +88,7 @@ export function SpecSyncHeader({ collection, status }: SpecSyncHeaderProps) {
           </p>
         </Alert>
       )}
-      <SpecSyncConnectionDialog
+      <OpenApiSyncConnectionDialog
         collection={collection}
         status={status}
         open={dialogOpen}

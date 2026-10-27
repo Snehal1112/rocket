@@ -22,7 +22,7 @@ const ContractsTab = lazy(() =>
   import('@/components/contracts/ContractsTab').then((m) => ({ default: m.ContractsTab })),
 );
 const OpenApiSyncTab = lazy(() =>
-  import('@/components/collections/spec-sync/OpenApiSyncTab').then((m) => ({
+  import('@/components/collections/openapi-sync/OpenApiSyncTab').then((m) => ({
     default: m.OpenApiSyncTab,
   })),
 );

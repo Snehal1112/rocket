@@ -4,8 +4,6 @@ import { CollectionOverviewSkeleton } from '@/components/collections/CollectionO
 import { CollectionTrustBanner } from '@/components/collections/CollectionTrustBanner';
 import { CollectionTrustSection } from '@/components/collections/CollectionTrustSection';
 import { MarkdownEditor } from '@/components/collections/MarkdownEditor';
-import { SpecSyncNotice } from '@/components/collections/spec-sync/SpecSyncNotice';
-import { SpecSyncTab } from '@/components/collections/spec-sync/SpecSyncTab';
 import { TagsList } from '@/components/collections/TagsList';
 import { AuthEditor } from '@/components/request/AuthEditor';
 import { HeadersEditor } from '@/components/request/HeadersEditor';
@@ -31,7 +29,6 @@ import {
   useGlobalEnvironmentName,
   useProcessEnvVars,
 } from '@/lib/queries/environment-queries';
-import { useSpecSyncAvailability } from '@/lib/queries/openapi-sync-queries';
 import {
   type Collection,
   type CollectionItem,
@@ -108,19 +105,12 @@ const COLLECTION_AUTH_TYPES: { label: string; value: AuthState['authType'] }[] =
   { label: 'WSSE', value: 'wsse' },
 ];
 
-/**
- * Falls back to the overview for a stale section. The Spec sync section stays while its
- * status loads, so a restored tab shows a loading state, not a flicker.
- */
+/** Falls back to the overview for a stale section, such as a stored OpenAPI sync one. */
 export function resolveCollectionSection(
   section: CollectionSection | undefined,
   valid: CollectionSection[],
-  spec: { specSyncAvailable: boolean; specSyncPending: boolean },
 ): CollectionSection {
   if (!section || !valid.includes(section)) return 'overview';
-  if (section === 'spec-sync' && !spec.specSyncAvailable && !spec.specSyncPending) {
-    return 'overview';
-  }
   return section;
 }
 
@@ -129,7 +119,6 @@ const TABS: { label: string; value: CollectionSection }[] = [
   { label: 'Authorization', value: 'auth' },
   { label: 'Variables', value: 'variables' },
   { label: 'Documentation', value: 'documentation' },
-  { label: 'Spec sync', value: 'spec-sync' },
 ];
 
 export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
@@ -143,9 +132,6 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   const { data: globalEnvName = null } = useGlobalEnvironmentName();
   const { data: globalEnv = null } = useGlobalEnvironment(globalEnvName);
   const { data: processEnvVars = {} } = useProcessEnvVars(collectionName);
-  // The Spec sync tab shows only for a collection that has a spec source.
-  const { available: specSyncAvailable, pending: specSyncPending } =
-    useSpecSyncAvailability(collectionName);
 
   const [collection, setCollection] = useState<Collection | null>(null);
   const [loading, setLoading] = useState(true);
@@ -199,17 +185,8 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   // state before getCollection resolves, which would wipe a cached token.
   const [isLoaded, setIsLoaded] = useState(false);
   // Guard against stale section values from before the tab redesign.
-  const validSections: CollectionSection[] = [
-    'overview',
-    'auth',
-    'variables',
-    'documentation',
-    'spec-sync',
-  ];
-  const activeSection = resolveCollectionSection(tab.activeSection, validSections, {
-    specSyncAvailable,
-    specSyncPending,
-  });
+  const validSections: CollectionSection[] = ['overview', 'auth', 'variables', 'documentation'];
+  const activeSection = resolveCollectionSection(tab.activeSection, validSections);
 
   const handleSectionChange = useCallback(
     (section: CollectionSection) => {
@@ -362,7 +339,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
 
         {/* Tab bar. */}
         <div className='flex items-center gap-0'>
-          {TABS.filter((t) => t.value !== 'spec-sync' || specSyncAvailable).map((t) => (
+          {TABS.map((t) => (
             <button
               key={t.value}
               type='button'
@@ -406,7 +383,6 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
             >
               <div className='p-4 flex flex-col gap-4'>
                 <CollectionTrustBanner key={collectionName} collection={collectionName} />
-                <SpecSyncNotice key={collectionName} collection={collectionName} />
                 <MethodBreakdown items={items} />
 
                 <Card>
@@ -607,11 +583,6 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
               </div>
             </div>
           </ScrollArea>
-        )}
-
-        {/* Spec sync tab. */}
-        {activeSection === 'spec-sync' && (
-          <SpecSyncTab key={collectionName} collection={collectionName} />
         )}
 
         {/* Documentation tab. */}

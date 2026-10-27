@@ -123,7 +123,7 @@ export function CollectionNode({
   const [exportOpen, setExportOpen] = useState(false);
   // The sync status is only asked for once the row is hovered, focused or a menu opens.
   const [menuSeen, setMenuSeen] = useState(false);
-  const specSync = useOpenApiSyncStatus(summary.name, false, menuSeen);
+  const openApiSync = useOpenApiSyncStatus(summary.name, false, menuSeen);
   // Fetch the flow list only while the node is expanded.
   const { data: flows = EMPTY_FLOWS } = useFlows(summary.name, open);
 
@@ -307,16 +307,8 @@ export function CollectionNode({
     usePaneStore.getState().openTab(tab);
   };
 
-  const openSpecSync = () => {
-    const tab: CollectionTab = {
-      id: summary.uid,
-      title: summary.name,
-      tabType: 'collection',
-      collectionName: summary.name,
-      isDirty: false,
-    };
-    usePaneStore.getState().openTab(tab);
-    usePaneStore.getState().openCollectionTab(summary.name, 'spec-sync');
+  const openOpenApiSync = () => {
+    usePaneStore.getState().openOpenApiSyncTab(summary.name);
   };
 
   const handleNewRequestCreate = async () => {
@@ -519,8 +511,8 @@ export function CollectionNode({
               <DropdownMenuItem onClick={() => setExportOpen(true)}>
                 <Download aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Export...
               </DropdownMenuItem>
-              {(specSync.data || specSync.isError) && (
-                <DropdownMenuItem onClick={openSpecSync}>
+              {(openApiSync.data || openApiSync.isError) && (
+                <DropdownMenuItem onClick={openOpenApiSync}>
                   <RefreshCw aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> OpenAPI sync
                 </DropdownMenuItem>
               )}
@@ -586,8 +578,8 @@ export function CollectionNode({
         <ContextMenuItem onClick={() => setExportOpen(true)}>
           <Download aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Export...
         </ContextMenuItem>
-        {(specSync.data || specSync.isError) && (
-          <ContextMenuItem onClick={openSpecSync}>
+        {(openApiSync.data || openApiSync.isError) && (
+          <ContextMenuItem onClick={openOpenApiSync}>
             <RefreshCw aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> OpenAPI sync
           </ContextMenuItem>
         )}

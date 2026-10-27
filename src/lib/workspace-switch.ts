@@ -124,7 +124,7 @@ export function clearWorkspaceScopedCaches(qc: QueryClient): void {
       q.queryKey[0] === 'environments' && q.queryKey[1] !== 'global' && q.queryKey[1] !== 'process',
   });
   qc.removeQueries({ queryKey: flowKeys.all });
-  // Spec sync status and plans are keyed by collection name.
+  // OpenAPI sync status and plans are keyed by collection name.
   qc.removeQueries({ queryKey: openApiSyncKeys.all });
   // Running and finished applies are keyed by collection name too.
   clearApplyState();

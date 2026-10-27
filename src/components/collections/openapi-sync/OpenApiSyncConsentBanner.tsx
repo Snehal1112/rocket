@@ -4,17 +4,17 @@ import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { useGrantConsent } from '@/lib/queries/openapi-sync-queries';
 import type { OpenApiConsent } from '@/lib/tauri-api';
-import { isGithubLocation } from './specSyncView';
+import { isGithubLocation } from './openApiSyncView';
 import { syncErrorMessage } from './syncErrors';
 
-interface SpecSyncConsentBannerProps {
+interface OpenApiSyncConsentBannerProps {
   collection: string;
   /** The exact location text from the status. It is what gets approved. */
   location: string;
   consent: Exclude<OpenApiConsent, 'granted'>;
 }
 
-const WHY: Record<SpecSyncConsentBannerProps['consent'], string> = {
+const WHY: Record<OpenApiSyncConsentBannerProps['consent'], string> = {
   missing:
     'This collection came from another place or was moved. Rocket does not contact the link until you approve it on this machine.',
   locationChanged:
@@ -22,11 +22,11 @@ const WHY: Record<SpecSyncConsentBannerProps['consent'], string> = {
 };
 
 /** Asks the user to trust the spec link on this machine before Rocket contacts it. */
-export function SpecSyncConsentBanner({
+export function OpenApiSyncConsentBanner({
   collection,
   location,
   consent,
-}: SpecSyncConsentBannerProps) {
+}: OpenApiSyncConsentBannerProps) {
   const grant = useGrantConsent(collection);
   // The text the user was shown. A refetch must not swap it before the click.
   const [seen, setSeen] = useState(location);

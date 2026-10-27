@@ -28,8 +28,8 @@ import {
 } from '@/lib/queries/openapi-sync-queries';
 import type { OpenApiSyncInterval, OpenApiSyncStatus } from '@/lib/tauri-api';
 import { DisconnectSyncDialog } from './DisconnectSyncDialog';
-import { SpecSyncConsentBanner } from './SpecSyncConsentBanner';
-import { intervalLabel, isGithubLocation, splitLocation } from './specSyncView';
+import { OpenApiSyncConsentBanner } from './OpenApiSyncConsentBanner';
+import { intervalLabel, isGithubLocation, splitLocation } from './openApiSyncView';
 import { syncErrorMessage } from './syncErrors';
 
 const FREQUENCIES: OpenApiSyncInterval[] = [
@@ -44,7 +44,7 @@ const FREQUENCIES: OpenApiSyncInterval[] = [
 
 const DEFAULT_FREQUENCY: OpenApiSyncInterval = 'every_5_minutes';
 
-interface SpecSyncConnectionDialogProps {
+interface OpenApiSyncConnectionDialogProps {
   collection: string;
   status: OpenApiSyncStatus;
   open: boolean;
@@ -116,7 +116,7 @@ function ConnectionBody({
   const intervalError = interval.isError ? syncErrorMessage(interval.error) : null;
   const clearError = clearToken.isError ? syncErrorMessage(clearToken.error) : null;
   const describedBy =
-    [unknown && 'spec-sync-unknown', intervalError && 'spec-sync-interval-error']
+    [unknown && 'openapi-sync-unknown', intervalError && 'openapi-sync-interval-error']
       .filter(Boolean)
       .join(' ') || undefined;
   const revokeError = revoke.isError ? syncErrorMessage(revoke.error) : null;
@@ -140,7 +140,7 @@ function ConnectionBody({
       </div>
 
       {needConsent && status.consent !== 'granted' && (
-        <SpecSyncConsentBanner
+        <OpenApiSyncConsentBanner
           key={collection}
           collection={collection}
           location={status.location}
@@ -151,22 +151,22 @@ function ConnectionBody({
       <div className='flex flex-col gap-3'>
         <div className='flex items-center gap-2'>
           <Switch
-            id='spec-sync-auto'
+            id='openapi-sync-auto'
             checked={autoOn}
             onCheckedChange={toggleAuto}
             disabled={interval.isPending}
           />
-          <Label htmlFor='spec-sync-auto'>Check for spec updates automatically</Label>
+          <Label htmlFor='openapi-sync-auto'>Check for spec updates automatically</Label>
         </div>
         <div className='flex flex-col gap-1.5'>
-          <Label htmlFor='spec-sync-interval'>Check frequency</Label>
+          <Label htmlFor='openapi-sync-interval'>Check frequency</Label>
           <Select
             value={unknown ? '' : lastChosen}
             onValueChange={(v) => pickFrequency(v as OpenApiSyncInterval)}
             disabled={(!autoOn && !unknown) || !granted || interval.isPending}
           >
             <SelectTrigger
-              id='spec-sync-interval'
+              id='openapi-sync-interval'
               aria-label='Check frequency'
               aria-describedby={describedBy}
               className='w-48'
@@ -182,7 +182,7 @@ function ConnectionBody({
             </SelectContent>
           </Select>
           {unknown && (
-            <p id='spec-sync-unknown' className='text-xs text-muted-foreground'>
+            <p id='openapi-sync-unknown' className='text-xs text-muted-foreground'>
               This setting is not understood. Pick a frequency.
             </p>
           )}
@@ -193,7 +193,7 @@ function ConnectionBody({
             </p>
           )}
           {intervalError && (
-            <p id='spec-sync-interval-error' role='alert' className='text-xs text-destructive'>
+            <p id='openapi-sync-interval-error' role='alert' className='text-xs text-destructive'>
               {intervalError}
             </p>
           )}
@@ -202,7 +202,7 @@ function ConnectionBody({
 
       {github ? (
         <div className='flex flex-col gap-1.5'>
-          <Label htmlFor='spec-sync-token'>Access token</Label>
+          <Label htmlFor='openapi-sync-token'>Access token</Label>
           <p className='text-xs text-muted-foreground'>
             Tokens work with GitHub links only. The token is kept in the keychain and never shown.
           </p>
@@ -222,10 +222,10 @@ function ConnectionBody({
           )}
           <div className='flex items-center gap-2'>
             <Input
-              id='spec-sync-token'
+              id='openapi-sync-token'
               type='password'
               autoComplete='new-password'
-              aria-describedby={tokenError ? 'spec-sync-token-error' : undefined}
+              aria-describedby={tokenError ? 'openapi-sync-token-error' : undefined}
               value={token}
               onChange={(e) => setTokenText(e.target.value)}
               placeholder={hasToken ? 'Paste a new token to replace it' : 'Paste the token'}
@@ -240,7 +240,7 @@ function ConnectionBody({
             </Button>
           </div>
           {tokenError && (
-            <p id='spec-sync-token-error' role='alert' className='text-xs text-destructive'>
+            <p id='openapi-sync-token-error' role='alert' className='text-xs text-destructive'>
               {tokenError}
             </p>
           )}
@@ -290,12 +290,12 @@ function ConnectionBody({
 }
 
 /** Frequency, token, trust and disconnect for the spec link, in a dialog. */
-export function SpecSyncConnectionDialog({
+export function OpenApiSyncConnectionDialog({
   collection,
   status,
   open,
   onOpenChange,
-}: SpecSyncConnectionDialogProps) {
+}: OpenApiSyncConnectionDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>

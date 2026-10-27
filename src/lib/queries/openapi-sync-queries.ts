@@ -55,11 +55,11 @@ export function useOpenApiSyncStatus(
 }
 
 /**
- * Whether the Spec sync section is offered for a collection. It is true when the status
+ * Whether the OpenAPI sync section is offered for a collection. It is true when the status
  * resolved to a source, or errored, so an unreadable state file still shows its message.
  * `pending` is true while the status loads.
  */
-export function useSpecSyncAvailability(collection: string | null | undefined): {
+export function useOpenApiSyncAvailability(collection: string | null | undefined): {
   available: boolean;
   pending: boolean;
 } {
@@ -283,7 +283,7 @@ export function useApplySync(collection: string) {
 
 /**
  * Refreshes the status and plan queries of the collection named in a sync check event, and
- * also the collection tree for an apply event. Mount it from the Spec sync tab and the
+ * also the collection tree for an apply event. Mount it from the OpenAPI sync tab and the
  * notice, never globally.
  */
 export function useOpenApiSyncEvents(): void {

@@ -1,4 +1,4 @@
-export const GENERIC_SYNC_ERROR = 'Something went wrong with the spec sync. Try again.';
+export const GENERIC_SYNC_ERROR = 'Something went wrong with the OpenAPI sync. Try again.';
 
 // Each entry maps a known backend phrase to a fixed sentence. The raw text is never shown.
 const KNOWN: Array<[string, string]> = [

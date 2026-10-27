@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as tauriApi from '@/lib/tauri-api';
 import { renderWithQuery } from '@/test/trust-fixtures';
-import { SpecSyncConsentBanner } from '../SpecSyncConsentBanner';
+import { OpenApiSyncConsentBanner } from '../OpenApiSyncConsentBanner';
 
 vi.mock('@/lib/tauri-api', async () => {
   const actual = await vi.importActual<typeof tauriApi>('@/lib/tauri-api');
@@ -13,13 +13,13 @@ vi.mock('@/lib/tauri-api', async () => {
 
 const LOCATION = 'https://example.com/openapi.json?key=abc';
 
-describe('SpecSyncConsentBanner', () => {
+describe('OpenApiSyncConsentBanner', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it('explains a missing approval and shows the exact location', () => {
-    renderWithQuery(<SpecSyncConsentBanner collection='c' location={LOCATION} consent='missing' />);
+    renderWithQuery(<OpenApiSyncConsentBanner collection='c' location={LOCATION} consent='missing' />);
     expect(screen.getByText('Trust this spec link')).toBeInTheDocument();
     expect(screen.getByText(LOCATION)).toBeInTheDocument();
     expect(
@@ -31,7 +31,7 @@ describe('SpecSyncConsentBanner', () => {
 
   it('explains a changed location', () => {
     renderWithQuery(
-      <SpecSyncConsentBanner collection='c' location={LOCATION} consent='locationChanged' />,
+      <OpenApiSyncConsentBanner collection='c' location={LOCATION} consent='locationChanged' />,
     );
     expect(
       screen.getByText(
@@ -44,7 +44,7 @@ describe('SpecSyncConsentBanner', () => {
     vi.mocked(tauriApi.grantOpenApiSyncConsent).mockImplementation(
       () => new Promise((r) => setTimeout(() => r(undefined), 30)),
     );
-    renderWithQuery(<SpecSyncConsentBanner collection='c' location={LOCATION} consent='missing' />);
+    renderWithQuery(<OpenApiSyncConsentBanner collection='c' location={LOCATION} consent='missing' />);
     await userEvent.setup().dblClick(screen.getByRole('button', { name: 'Approve' }));
     expect(tauriApi.grantOpenApiSyncConsent).toHaveBeenCalledTimes(1);
     expect(tauriApi.grantOpenApiSyncConsent).toHaveBeenCalledWith('c', LOCATION);
@@ -55,7 +55,7 @@ describe('SpecSyncConsentBanner', () => {
     const client = new QueryClient();
     const ui = (location: string) => (
       <QueryClientProvider client={client}>
-        <SpecSyncConsentBanner collection='c' location={location} consent='missing' />
+        <OpenApiSyncConsentBanner collection='c' location={location} consent='missing' />
       </QueryClientProvider>
     );
     const { rerender } = render(ui('https://a.example.com/spec.json'));
@@ -74,7 +74,7 @@ describe('SpecSyncConsentBanner', () => {
     vi.mocked(tauriApi.grantOpenApiSyncConsent).mockRejectedValue(
       'This spec location cannot be approved because its link is ambiguous.',
     );
-    renderWithQuery(<SpecSyncConsentBanner collection='c' location={LOCATION} consent='missing' />);
+    renderWithQuery(<OpenApiSyncConsentBanner collection='c' location={LOCATION} consent='missing' />);
     await userEvent.setup().click(screen.getByRole('button', { name: 'Approve' }));
     await screen.findByText(/cannot be approved because it is ambiguous/);
     expect(screen.queryByText(/branch name with a slash/)).toBeNull();
@@ -85,7 +85,7 @@ describe('SpecSyncConsentBanner', () => {
       'This spec location cannot be approved because its link is ambiguous.',
     );
     renderWithQuery(
-      <SpecSyncConsentBanner
+      <OpenApiSyncConsentBanner
         collection='c'
         location='https://github.com/acme/orders/blob/feat/x/spec.yaml'
         consent='missing'

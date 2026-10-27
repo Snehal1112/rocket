@@ -5,7 +5,7 @@ import { renderWithQuery } from '@/test/trust-fixtures';
 import { EditorGroup } from '../EditorGroup';
 
 vi.mock('@/components/editor/MonacoWrapper', () => ({ MonacoWrapper: () => null }));
-vi.mock('@/components/collections/spec-sync/OpenApiSyncTab', () => ({
+vi.mock('@/components/collections/openapi-sync/OpenApiSyncTab', () => ({
   OpenApiSyncTab: () => <div data-testid='openapi-sync-tab' />,
 }));
 vi.mock('@/components/collections/CollectionOverviewTab', () => ({

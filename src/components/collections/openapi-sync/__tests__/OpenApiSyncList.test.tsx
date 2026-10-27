@@ -2,10 +2,10 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { OpenApiSyncItem } from '@/lib/tauri-api';
-import { SpecSyncList } from '../SpecSyncList';
+import { OpenApiSyncList } from '../OpenApiSyncList';
 import { changedItem, makePlan } from './fixtures';
 
-function props(overrides: Partial<React.ComponentProps<typeof SpecSyncList>> = {}) {
+function props(overrides: Partial<React.ComponentProps<typeof OpenApiSyncList>> = {}) {
   return {
     plan: makePlan(),
     selectedId: null,
@@ -31,10 +31,10 @@ function manyItems(count: number): OpenApiSyncItem[] {
 // The big-plan tests render hundreds of rows, which is slow when the machine is busy.
 vi.setConfig({ testTimeout: 30000 });
 
-describe('SpecSyncList', () => {
+describe('OpenApiSyncList', () => {
   it('shows the groups with counts and calls back on select', async () => {
     const p = props();
-    render(<SpecSyncList {...p} />);
+    render(<OpenApiSyncList {...p} />);
     expect(screen.getByText('New (1)')).toBeInTheDocument();
     expect(screen.getByText('Changed (1)')).toBeInTheDocument();
     expect(screen.getByText('Removed (1)')).toBeInTheDocument();
@@ -43,7 +43,7 @@ describe('SpecSyncList', () => {
   });
 
   it('collapses a group', async () => {
-    render(<SpecSyncList {...props()} />);
+    render(<OpenApiSyncList {...props()} />);
     const user = userEvent.setup();
     expect(screen.getByText('Add pet')).toBeInTheDocument();
     await user.click(screen.getByText('Changed (1)'));
@@ -57,7 +57,7 @@ describe('SpecSyncList', () => {
       skippedHidden: 2,
       deletedByUser: ['Old request'],
     });
-    render(<SpecSyncList {...props({ plan })} />);
+    render(<OpenApiSyncList {...props({ plan })} />);
     expect(screen.queryByText('Same one')).toBeNull();
     await userEvent.setup().click(screen.getByText('Stays as you have it (1)'));
     expect(screen.getByText('Same one')).toBeInTheDocument();
@@ -69,7 +69,7 @@ describe('SpecSyncList', () => {
 
   it('caps a very large plan at 500 rows per group and offers Show more', async () => {
     const plan = makePlan({ items: manyItems(600) });
-    render(<SpecSyncList {...props({ plan })} />);
+    render(<OpenApiSyncList {...props({ plan })} />);
     expect(screen.getByText('Changed (600)')).toBeInTheDocument();
     expect(screen.getByText('Request 499')).toBeInTheDocument();
     expect(screen.queryByText('Request 500')).toBeNull();
@@ -81,7 +81,7 @@ describe('SpecSyncList', () => {
 
   it('toggles an approval with the row checkbox and with the Space key', async () => {
     const p = props();
-    render(<SpecSyncList {...p} />);
+    render(<OpenApiSyncList {...p} />);
     const user = userEvent.setup();
     await user.click(screen.getByRole('checkbox', { name: 'Include Add pet in apply' }));
     expect(p.onToggle).toHaveBeenCalledWith('POST /pets');
@@ -94,7 +94,7 @@ describe('SpecSyncList', () => {
 
   it('shows checked and skipped state from the sets', () => {
     const p = props({ approved: new Set(['POST /pets']), skips: new Set(['GET /pets']) });
-    render(<SpecSyncList {...p} />);
+    render(<OpenApiSyncList {...p} />);
     expect(screen.getByRole('checkbox', { name: 'Include Add pet in apply' })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: 'Include List pets in apply' })).not.toBeChecked();
     expect(screen.getByText('Skipped')).toBeInTheDocument();
@@ -105,7 +105,7 @@ describe('SpecSyncList', () => {
       variableChanges: [{ name: 'baseUrl', kind: 'baseUrl', digest: 'v' }],
     });
     const p = props({ plan });
-    render(<SpecSyncList {...p} />);
+    render(<OpenApiSyncList {...p} />);
     await userEvent.setup().click(screen.getByRole('checkbox', { name: 'Include Base URL baseUrl in apply' }));
     expect(p.onToggleVariable).toHaveBeenCalledWith('baseUrl');
     expect(p.onToggle).not.toHaveBeenCalled();
@@ -113,7 +113,7 @@ describe('SpecSyncList', () => {
 
   it('filters every group by the query and lifts the cap for the matches', () => {
     const plan = makePlan({ items: [...manyItems(650), ...makePlan().items] });
-    render(<SpecSyncList {...props({ plan, query: 'request' })} />);
+    render(<OpenApiSyncList {...props({ plan, query: 'request' })} />);
     // All 650 match, which is past the cap of 500.
     expect(screen.getByText('Changed (650)')).toBeInTheDocument();
     expect(screen.getByText('Request 649')).toBeInTheDocument();
@@ -123,7 +123,7 @@ describe('SpecSyncList', () => {
   });
 
   it('says when nothing matches the query', () => {
-    render(<SpecSyncList {...props({ query: 'zzz' })} />);
+    render(<OpenApiSyncList {...props({ query: 'zzz' })} />);
     expect(screen.getAllByText('Nothing here.').length).toBeGreaterThan(0);
   });
 });

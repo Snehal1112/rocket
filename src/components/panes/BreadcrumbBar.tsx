@@ -24,7 +24,6 @@ import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { METHOD_TEXT_COLOR } from '@/lib/colors';
 import { mapApiRequestToState } from '@/lib/pane-utils';
-import { useSpecSyncAvailability } from '@/lib/queries/openapi-sync-queries';
 import { useSwitchWorkspace, useWorkspaces } from '@/lib/queries/workspace-queries';
 import { getCollection, listCollections } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
@@ -97,8 +96,6 @@ function collectionSectionLabel(section: CollectionSection | undefined): string 
       return 'Variables';
     case 'documentation':
       return 'Documentation';
-    case 'spec-sync':
-      return 'Spec sync';
     default:
       return 'Overview';
   }
@@ -112,8 +109,6 @@ function collectionSectionIcon(section: CollectionSection): React.ReactNode {
       return <Variable className='h-3 w-3' />;
     case 'documentation':
       return <BookOpen className='h-3 w-3' />;
-    case 'spec-sync':
-      return <RefreshCw className='h-3 w-3' />;
     default:
       return <List className='h-3 w-3' />;
   }
@@ -149,7 +144,6 @@ function deriveSegments(
   workspaceName: string,
   workspaces: Array<{ id: string; name: string }>,
   nav: NavActions,
-  specSyncAvailable: boolean,
 ): Segment[] {
   if (isRequestTab(tab)) {
     if (!tab.source) return [{ label: 'Unsaved Request' }];
@@ -299,13 +293,7 @@ function deriveSegments(
   }
 
   if (isCollectionTab(tab)) {
-    const ALL_SECTIONS: CollectionSection[] = [
-      'overview',
-      'auth',
-      'variables',
-      'documentation',
-      ...(specSyncAvailable ? (['spec-sync'] as const) : []),
-    ];
+    const ALL_SECTIONS: CollectionSection[] = ['overview', 'auth', 'variables', 'documentation'];
     return [
       {
         label: tab.collectionName,
@@ -728,12 +716,9 @@ export function BreadcrumbBar({ tab }: BreadcrumbBarProps) {
     ],
   );
 
-  const { available: specSyncAvailable } = useSpecSyncAvailability(
-    isCollectionTab(tab) ? tab.collectionName : null,
-  );
   const segments = useMemo(
-    () => deriveSegments(tab, workspaceName, workspaces, nav, specSyncAvailable),
-    [tab, workspaceName, workspaces, nav, specSyncAvailable],
+    () => deriveSegments(tab, workspaceName, workspaces, nav),
+    [tab, workspaceName, workspaces, nav],
   );
   const [openPickerIndex, setOpenPickerIndex] = useState<number | null>(null);
 

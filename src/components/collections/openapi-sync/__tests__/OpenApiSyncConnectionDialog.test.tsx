@@ -5,7 +5,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import { clearApplyState } from '@/lib/queries/openapi-sync-queries';
 import * as tauriApi from '@/lib/tauri-api';
 import { renderWithQuery } from '@/test/trust-fixtures';
-import { SpecSyncConnectionDialog } from '../SpecSyncConnectionDialog';
+import { OpenApiSyncConnectionDialog } from '../OpenApiSyncConnectionDialog';
 import { makeStatus } from './fixtures';
 
 const GH = 'https://github.com/acme/orders/blob/main/openapi.yaml';
@@ -28,7 +28,7 @@ type Status = ReturnType<typeof makeStatus>;
 
 function renderDialog(collection: string, status: Status) {
   renderWithQuery(
-    <SpecSyncConnectionDialog
+    <OpenApiSyncConnectionDialog
       collection={collection}
       status={status}
       open
@@ -40,7 +40,7 @@ function renderDialog(collection: string, status: Status) {
 
 const SWITCH = 'Check for spec updates automatically';
 
-describe('SpecSyncConnectionDialog', () => {
+describe('OpenApiSyncConnectionDialog', () => {
   // jsdom lacks the pointer and scroll APIs the Radix Select relies on.
   beforeAll(() => {
     HTMLElement.prototype.hasPointerCapture = vi.fn(() => false);
@@ -60,7 +60,7 @@ describe('SpecSyncConnectionDialog', () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const tree = (open: boolean) => (
       <QueryClientProvider client={queryClient}>
-        <SpecSyncConnectionDialog
+        <OpenApiSyncConnectionDialog
           collection='d0'
           status={makeStatus()}
           open={open}
@@ -104,7 +104,7 @@ describe('SpecSyncConnectionDialog', () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const tree = (interval: 'off' | 'weekly') => (
       <QueryClientProvider client={queryClient}>
-        <SpecSyncConnectionDialog
+        <OpenApiSyncConnectionDialog
           collection='d18'
           status={makeStatus({ interval })}
           open
@@ -151,7 +151,7 @@ describe('SpecSyncConnectionDialog', () => {
     expect(screen.getByRole('switch', { name: SWITCH })).not.toBeChecked();
     const select = screen.getByRole('combobox', { name: 'Check frequency' });
     expect(select).toBeEnabled();
-    expect(select).toHaveAttribute('aria-describedby', 'spec-sync-unknown');
+    expect(select).toHaveAttribute('aria-describedby', 'openapi-sync-unknown');
     expect(select).toHaveTextContent('');
   });
 
@@ -205,7 +205,7 @@ describe('SpecSyncConnectionDialog', () => {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
       <QueryClientProvider client={queryClient}>
-        <SpecSyncConnectionDialog
+        <OpenApiSyncConnectionDialog
           collection='d12'
           status={makeStatus({ location: GH })}
           open
