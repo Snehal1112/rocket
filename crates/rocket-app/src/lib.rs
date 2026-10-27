@@ -157,7 +157,7 @@ pub use openapi_connect::{
 };
 pub use openapi_sync_reset::ResetReport;
 pub use openapi_sync_view::{
-    BackupRow, BadgeView, ChangeRow, ChangesView, OverviewView, PlanView, SpecOpRow, SpecTagGroup, SpecView,
+    BackupRow, BadgeView, ChangeRow, ChangeValue, ChangesView, OverviewView, PlanView, SpecOpRow, SpecTagGroup, SpecView,
     SpecViewState, UnchangedView,
 };
 pub use openapi_sync_scheduler::{

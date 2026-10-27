@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use rocket_app::{
     safe_message, BackupRow, BadgeView, ChangeLinkOutcome, ChangeLinkPreview, ChangeRow,
-    ChangesView, CheckOutcome, ConnectOperationRow, ConnectOutcome, ConnectPreview,
+    ChangeValue, ChangesView, CheckOutcome, ConnectOperationRow, ConnectOutcome, ConnectPreview,
     ConnectRequestRow, ConnectRow, OpenApiSyncService, OverviewView, PlanView, ResetReport,
     SpecView, SpecViewState, SyncStatusView,
 };
@@ -89,6 +89,7 @@ pub enum SyncItemDto {
         folder: Vec<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         possibly_renamed_from: Option<String>,
+        preview: NewPreviewDto,
     },
     Changed {
         key: String,
@@ -208,6 +209,51 @@ fn field_change_dto(change: &FieldChange) -> FieldChangeDto {
     }
 }
 
+/// What a new request looks like, without any value of a header or a query parameter, because an
+/// example in a spec can hold a secret.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewPreviewDto {
+    pub method: String,
+    pub url: String,
+    pub headers: Vec<String>,
+    pub query: Vec<String>,
+    pub has_body: bool,
+    pub auth_kind: Option<String>,
+}
+
+fn new_preview_dto(request: &rocket_collection::Request) -> NewPreviewDto {
+    let names = |entries: &[rocket_shared::types::Header]| {
+        entries
+            .iter()
+            .filter(|h| h.enabled)
+            .map(|h| h.key.clone())
+            .collect::<Vec<_>>()
+    };
+    let has_body = request.body.as_ref().is_some_and(|b| {
+        !matches!(b.mode, rocket_shared::types::BodyMode::None)
+            && (b.content.as_deref().is_some_and(|c| !c.is_empty())
+                || b.form_data.as_ref().is_some_and(|f| !f.is_empty())
+                || b.file_path.is_some())
+    });
+    // The tag of the serialized auth is the kind. None and inherit mean the request has none.
+    let auth_kind = serde_json::to_value(&request.auth)
+        .ok()
+        .and_then(|v| {
+            v.get("authType")
+                .and_then(|t| t.as_str().map(str::to_string))
+        })
+        .filter(|kind| kind != "none" && kind != "inherit");
+    NewPreviewDto {
+        method: request.method.to_string(),
+        url: request.url.clone(),
+        headers: names(&request.headers),
+        query: names(&request.query_params),
+        has_body,
+        auth_kind,
+    }
+}
+
 fn item_dto(item: &SyncItem, digest: &str) -> SyncItemDto {
     let digest = digest.to_string();
     match item {
@@ -217,7 +263,7 @@ fn item_dto(item: &SyncItem, digest: &str) -> SyncItemDto {
             folder,
             fingerprint,
             possibly_renamed_from,
-            ..
+            request,
         } => SyncItemDto::New {
             key: key.clone(),
             name: name.clone(),
@@ -225,6 +271,7 @@ fn item_dto(item: &SyncItem, digest: &str) -> SyncItemDto {
             fingerprint: fingerprint.clone(),
             folder: folder.clone(),
             possibly_renamed_from: possibly_renamed_from.clone(),
+            preview: new_preview_dto(request),
         },
         SyncItem::Changed {
             key,
@@ -485,6 +532,24 @@ pub struct ChangeRowDto {
     pub url: String,
     pub request_path: Option<String>,
     pub fields: Vec<String>,
+    pub changes: Vec<ChangeValueDto>,
+}
+
+/// One changed field with the version last synced and the user's version.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeValueDto {
+    pub field: String,
+    pub baseline: Option<String>,
+    pub yours: Option<String>,
+}
+
+fn change_value_dto(value: &ChangeValue) -> ChangeValueDto {
+    ChangeValueDto {
+        field: value.field.clone(),
+        baseline: value.baseline.clone(),
+        yours: value.yours.clone(),
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -862,6 +927,7 @@ fn change_row_dto(row: ChangeRow) -> ChangeRowDto {
         url: row.url,
         request_path: row.request_path,
         fields: row.fields,
+        changes: row.changes.iter().map(change_value_dto).collect(),
     }
 }
 
@@ -1944,6 +2010,7 @@ mod tests {
             url: "{{baseUrl}}/pets".to_string(),
             request_path: Some("pets/getPet".to_string()),
             fields: vec!["url".to_string()],
+            changes: Vec::new(),
         };
         let json = serde_json::to_value(changes_dto(ChangesView {
             baseline_trusted: true,
@@ -2055,6 +2122,68 @@ mod tests {
         .expect("json");
         assert_eq!(json["linked"], 2);
         assert_eq!(json["warnings"][0], "The token was not saved.");
+    }
+
+    fn new_request() -> rocket_collection::Request {
+        let mut r = rocket_collection::Request::new(
+            "Create pet",
+            rocket_shared::types::HttpMethod::Post,
+            "{{baseUrl}}/pets",
+        );
+        r.headers.push(rocket_shared::types::Header::new(
+            "X-Api-Key",
+            "super-secret",
+        ));
+        r.headers
+            .push(rocket_shared::types::Header::disabled("X-Off", "off"));
+        r.query_params
+            .push(rocket_shared::types::Header::new("limit", "10"));
+        r
+    }
+
+    #[test]
+    fn new_preview_lists_names_not_values() {
+        let json = serde_json::to_value(new_preview_dto(&new_request())).expect("json");
+        assert_eq!(json["method"], "POST");
+        assert_eq!(json["url"], "{{baseUrl}}/pets");
+        assert_eq!(json["headers"], serde_json::json!(["X-Api-Key"]));
+        assert_eq!(json["query"], serde_json::json!(["limit"]));
+        let text = json.to_string();
+        assert!(!text.contains("super-secret"), "{text}");
+    }
+
+    #[test]
+    fn new_preview_has_body_and_auth_kind() {
+        let mut r = new_request();
+        let none = serde_json::to_value(new_preview_dto(&r)).expect("json");
+        assert_eq!(none["hasBody"], false);
+        assert!(none["authKind"].is_null());
+        r.body = Some(rocket_shared::types::Body {
+            mode: rocket_shared::types::BodyMode::Json,
+            content: Some("{\"a\":1}".to_string()),
+            form_data: None,
+            file_path: None,
+        });
+        r.auth = rocket_shared::types::Auth::Bearer {
+            token: "secret-token".to_string(),
+        };
+        let json = serde_json::to_value(new_preview_dto(&r)).expect("json");
+        assert_eq!(json["hasBody"], true);
+        assert_eq!(json["authKind"], "bearer");
+        assert!(!json.to_string().contains("secret-token"));
+    }
+
+    #[test]
+    fn change_value_dto_uses_camel_case_keys() {
+        let json = serde_json::to_value(change_value_dto(&ChangeValue {
+            field: "url".to_string(),
+            baseline: Some("a".to_string()),
+            yours: None,
+        }))
+        .expect("json");
+        assert_eq!(json["field"], "url");
+        assert_eq!(json["baseline"], "a");
+        assert!(json["yours"].is_null());
     }
 
     #[test]

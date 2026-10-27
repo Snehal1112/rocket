@@ -10,13 +10,16 @@ use rocket_shared::error::DomainResult;
 use crate::collection_lock::collection_lock;
 use crate::openapi_sync_apply::flatten_requests;
 use crate::openapi_sync_service::OpenApiSyncService;
-use crate::openapi_sync_view::{BackupRow, BadgeView, ChangeRow, ChangesView, OverviewView};
+use crate::openapi_sync_view::{
+    BackupRow, BadgeView, ChangeRow, ChangeValue, ChangesView, OverviewView,
+};
 
 fn row(
     key: Option<&str>,
     cur: &CurrentRequest,
     path: Option<String>,
     fields: Vec<String>,
+    changes: Vec<ChangeValue>,
 ) -> ChangeRow {
     ChangeRow {
         key: key.map(str::to_string),
@@ -26,7 +29,38 @@ fn row(
         url: cur.request.url.clone(),
         request_path: path,
         fields,
+        changes,
     }
+}
+
+/// The fields where `yours` differs from the baseline, with both values. The user's request
+/// plays the incoming side, so their value is the `spec` slot of each change record.
+/// Longest text kept in a shown value. The merge clips entries and bodies but not scalars.
+const MAX_SHOWN: usize = 500;
+
+fn clip(text: &str) -> String {
+    if text.chars().count() <= MAX_SHOWN {
+        return text.to_string();
+    }
+    let mut cut: String = text.chars().take(MAX_SHOWN).collect();
+    cut.push_str("...");
+    cut
+}
+
+fn differences(
+    base: &rocket_collection::Request,
+    yours: &rocket_collection::Request,
+) -> Vec<ChangeValue> {
+    let none = BTreeMap::new();
+    merge_request(base, base, yours, &none)
+        .changes
+        .into_iter()
+        .map(|c| ChangeValue {
+            field: c.field,
+            baseline: c.baseline.as_deref().map(clip),
+            yours: c.spec.as_deref().map(clip),
+        })
+        .collect()
 }
 
 impl OpenApiSyncService {
@@ -71,20 +105,12 @@ impl OpenApiSyncService {
                     url: String::new(),
                     request_path: Some(op.request_path.clone()),
                     fields: Vec::new(),
+                    changes: Vec::new(),
                 });
                 continue;
             };
-            let fields = match (&baseline, base_by_key.get(op.key.as_str())) {
-                (Some(_), Some(base)) => {
-                    let none = BTreeMap::new();
-                    // The user's request plays the incoming side, so the changes are the
-                    // fields where it differs from the baseline.
-                    merge_request(base, base, &cur.request, &none)
-                        .changes
-                        .into_iter()
-                        .map(|c| c.field)
-                        .collect::<Vec<_>>()
-                }
+            let changes = match (&baseline, base_by_key.get(op.key.as_str())) {
+                (Some(_), Some(base)) => differences(base, &cur.request),
                 (Some(_), None) => Vec::new(),
                 (None, _) => {
                     if baseline_hash(&cur.request) == op.baseline_hash {
@@ -93,20 +119,30 @@ impl OpenApiSyncService {
                     Vec::new()
                 }
             };
-            if baseline.is_some() && fields.is_empty() {
+            if baseline.is_some() && changes.is_empty() {
                 continue;
             }
+            let fields = changes.iter().map(|c| c.field.clone()).collect();
             modified.push(row(
                 Some(&op.key),
                 cur,
                 Some(cur.request_path.clone()),
                 fields,
+                changes,
             ));
         }
         let added = current
             .iter()
             .filter(|c| !known.contains(c.uid.as_str()))
-            .map(|c| row(None, c, Some(c.request_path.clone()), Vec::new()))
+            .map(|c| {
+                row(
+                    None,
+                    c,
+                    Some(c.request_path.clone()),
+                    Vec::new(),
+                    Vec::new(),
+                )
+            })
             .collect();
         // A service without a backups store has none. An unreadable file is an error, so a
         // damaged file never reads as "no backups".

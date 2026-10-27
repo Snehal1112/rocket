@@ -49,6 +49,17 @@ pub struct ChangeRow {
     /// Names of the spec-owned fields the user changed. Empty when the baseline is not trusted
     /// and for deleted and added rows.
     pub fields: Vec<String>,
+    /// The baseline's and the user's value of each changed field, clipped. Same order as
+    /// `fields`. Empty when the baseline is not trusted and for deleted and added rows.
+    pub changes: Vec<ChangeValue>,
+}
+
+/// One changed field with the version last synced and the user's version.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangeValue {
+    pub field: String,
+    pub baseline: Option<String>,
+    pub yours: Option<String>,
 }
 
 /// A request the user reset to the spec, with the version they had kept as a backup.

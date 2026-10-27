@@ -157,6 +157,77 @@ async fn changes_lists_a_modified_request_with_its_field_names() {
 }
 
 #[tokio::test]
+async fn modified_rows_carry_baseline_and_yours_values() {
+    let w = world().await;
+    let path = path_of(&w, "getPet");
+    let mut request = w.repo.get_request(&w.name, &path).expect("get");
+    let original = request.url.clone();
+    request.url = "https://edited.example.com/pets".to_string();
+    request
+        .headers
+        .push(rocket_shared::types::Header::new("Accept", "text/plain"));
+    w.repo.save_request(&w.name, &path, &request).expect("save");
+    let view = w.svc.changes(&w.name).expect("changes");
+    let row = &view.modified[0];
+    let url = row.changes.iter().find(|c| c.field == "url").expect("url");
+    assert_eq!(url.baseline.as_deref(), Some(original.as_str()));
+    assert_eq!(url.yours.as_deref(), Some("https://edited.example.com/pets"));
+    let accept = row
+        .changes
+        .iter()
+        .find(|c| c.field == "header:Accept")
+        .expect("header");
+    assert_eq!(accept.baseline, None);
+    assert!(accept.yours.as_deref().is_some_and(|v| v.contains("text/plain")));
+    // The field names stay as they were.
+    assert!(row.fields.contains(&"url".to_string()));
+    assert_eq!(row.fields.len(), row.changes.len());
+}
+
+#[tokio::test]
+async fn long_values_are_clipped() {
+    let w = world().await;
+    let path = path_of(&w, "getPet");
+    let mut request = w.repo.get_request(&w.name, &path).expect("get");
+    request.url = "x".repeat(900);
+    w.repo.save_request(&w.name, &path, &request).expect("save");
+    let view = w.svc.changes(&w.name).expect("changes");
+    let url = view.modified[0]
+        .changes
+        .iter()
+        .find(|c| c.field == "url")
+        .expect("url");
+    let yours = url.yours.as_deref().expect("yours");
+    assert_eq!(yours.chars().count(), 503);
+    assert!(yours.ends_with("..."));
+}
+
+#[tokio::test]
+async fn no_values_without_a_trusted_baseline() {
+    let w = world().await;
+    std::fs::remove_file(w.root.join(".rocket/openapi-baseline.json")).expect("remove");
+    edit_url(&w, "getPet");
+    let view = w.svc.changes(&w.name).expect("changes");
+    assert!(view.modified[0].changes.is_empty());
+}
+
+#[tokio::test]
+async fn added_and_deleted_rows_have_no_values() {
+    let w = world().await;
+    let request = rocket_collection::Request::new(
+        "Mine",
+        rocket_shared::types::HttpMethod::Get,
+        "https://x.example.com",
+    );
+    w.repo.save_request(&w.name, "mine", &request).expect("save");
+    let path = path_of(&w, "listPets");
+    w.repo.delete_request(&w.name, &path).expect("delete");
+    let view = w.svc.changes(&w.name).expect("changes");
+    assert!(view.added[0].changes.is_empty());
+    assert!(view.deleted[0].changes.is_empty());
+}
+
+#[tokio::test]
 async fn changes_ignores_scripts_tests_and_docs() {
     let w = world().await;
     let path = path_of(&w, "getPet");
