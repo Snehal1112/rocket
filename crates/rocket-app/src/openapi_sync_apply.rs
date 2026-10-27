@@ -70,6 +70,11 @@ fn flatten(folder: &Folder, prefix: &str, out: &mut Vec<CurrentRequest>) {
     }
 }
 
+fn count_of(view: &PlanView) -> u32 {
+    let total = view.plan.items.len() + view.plan.variable_changes.len();
+    u32::try_from(total).unwrap_or(u32::MAX)
+}
+
 fn stage_all(
     tx: &mut dyn CollectionFileTx,
     files: &[rocket_import::FileChange],
@@ -238,7 +243,11 @@ impl OpenApiSyncService {
             skips,
             ..loaded.local.clone()
         };
+        output.local.pending_count = u32::try_from(output.report.remaining).unwrap_or(u32::MAX);
         if output.finalized {
+            output.local.last_synced_at = Some(self.now().to_rfc3339());
+            output.local.last_synced_updated =
+                u32::try_from(output.report.applied.len()).unwrap_or(u32::MAX);
             output.local.last_status = Some(SyncStatus::Unchanged);
             output.local.consecutive_failures = 0;
             output.local.not_before = None;
@@ -300,10 +309,57 @@ impl OpenApiSyncService {
         let root = repo.collection_root_path(collection)?;
         let lock = collection_lock(&root);
         let _guard = lock.lock();
-        if self.load(&root)?.pending_sha256.is_none() {
+        self.plan_locked(deps, repo, collection, &root, links)
+    }
+
+    /// The items and variable changes of the current plan that wait for a decision. Skipped
+    /// items are not counted, and no pending copy gives `0`.
+    pub fn count_pending(&self, collection: &str) -> DomainResult<u32> {
+        let deps = self.deps()?;
+        let pinned = deps.collections.pinned();
+        let repo: &dyn CollectionRepository =
+            pinned.as_deref().unwrap_or(deps.collections.as_ref());
+        let root = repo.collection_root_path(collection)?;
+        let lock = collection_lock(&root);
+        let _guard = lock.lock();
+        Ok(count_of(&self.plan_locked(
+            deps,
+            repo,
+            collection,
+            &root,
+            &[],
+        )?))
+    }
+
+    /// Like `count_pending` for a caller that holds the collection lock and knows the root.
+    pub(crate) fn count_pending_locked(&self, root: &Path) -> DomainResult<u32> {
+        let deps = self.deps()?;
+        let pinned = deps.collections.pinned();
+        let repo: &dyn CollectionRepository =
+            pinned.as_deref().unwrap_or(deps.collections.as_ref());
+        // The plan reads the collection by name, so the name of this root is looked up.
+        let name = repo
+            .list()?
+            .into_iter()
+            .map(|s| s.name)
+            .find(|n| repo.collection_root_path(n).is_ok_and(|r| r == root))
+            .ok_or_else(|| DomainError::NotFound("the collection was not found".to_string()))?;
+        Ok(count_of(&self.plan_locked(deps, repo, &name, root, &[])?))
+    }
+
+    /// The plan work for a caller that already holds the collection lock.
+    fn plan_locked(
+        &self,
+        deps: &ApplyDeps,
+        repo: &dyn CollectionRepository,
+        collection: &str,
+        root: &Path,
+        links: &[(String, String)],
+    ) -> DomainResult<PlanView> {
+        if self.load(root)?.pending_sha256.is_none() {
             return Ok(PlanView::empty());
         }
-        let loaded = self.load_for_apply(deps, repo, collection, &root)?;
+        let loaded = self.load_for_apply(deps, repo, collection, root)?;
         let prepared = loaded.prepare()?;
         let inputs = loaded.sync_inputs(&prepared, &loaded.local.skips);
         let plan = plan_with_links(&inputs, links)

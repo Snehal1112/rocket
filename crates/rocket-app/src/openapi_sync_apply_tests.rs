@@ -1183,3 +1183,7 @@ async fn a_finalized_apply_clears_the_failure_message() {
         None
     );
 }
+
+#[cfg(test)]
+#[path = "openapi_sync_changes_tests.rs"]
+mod changes_tests;

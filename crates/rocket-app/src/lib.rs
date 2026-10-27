@@ -60,6 +60,7 @@ pub mod mcp_read_views;
 pub mod mcp_tool_service;
 pub mod oauth2_service;
 pub mod openapi_sync_apply;
+pub mod openapi_sync_changes;
 pub mod openapi_sync_scheduler;
 pub mod openapi_sync_service;
 pub mod openapi_sync_view;

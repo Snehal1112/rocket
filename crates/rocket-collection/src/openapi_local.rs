@@ -37,6 +37,16 @@ pub struct OpenApiLocalState {
     /// A success clears it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_message: Option<String>,
+    /// Items and variable changes of the current plan that still wait for a decision. Skipped
+    /// items are not counted.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub pending_count: u32,
+    /// RFC 3339 UTC time of the last apply that finished the pending spec.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_synced_at: Option<String>,
+    /// How many items that apply changed.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub last_synced_updated: u32,
     /// True when the stored interval name was not understood and reads as off. Set by the
     /// repository on load and never written.
     #[serde(skip)]
@@ -59,6 +69,9 @@ impl Default for OpenApiLocalState {
             not_before: None,
             opt_in_root: None,
             last_message: None,
+            pending_count: 0,
+            last_synced_at: None,
+            last_synced_updated: 0,
             interval_unknown: false,
         }
     }
@@ -67,4 +80,25 @@ impl Default for OpenApiLocalState {
 pub trait OpenApiLocalRepository: Send + Sync {
     fn load(&self, root: &Path) -> DomainResult<Option<OpenApiLocalState>>;
     fn save(&self, root: &Path, state: &OpenApiLocalState) -> DomainResult<()>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_fields_are_omitted_at_their_defaults() {
+        let json = serde_json::to_string(&OpenApiLocalState::default()).expect("json");
+        for key in ["pending_count", "last_synced_at", "last_synced_updated"] {
+            assert!(!json.contains(key), "{key} in {json}");
+        }
+    }
+
+    #[test]
+    fn an_old_file_without_the_new_fields_loads_with_defaults() {
+        let state: OpenApiLocalState = serde_json::from_str(r#"{"version":1}"#).expect("parse");
+        assert_eq!(state.pending_count, 0);
+        assert!(state.last_synced_at.is_none());
+        assert_eq!(state.last_synced_updated, 0);
+    }
 }

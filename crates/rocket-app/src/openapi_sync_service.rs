@@ -66,6 +66,8 @@ pub struct SyncStatusView {
     pub last_message: Option<String>,
     /// True when the stored interval name was not understood. The interval then reads as off.
     pub interval_unknown: bool,
+    /// The first 12 hex characters of the pending spec's hash. `None` without a pending copy.
+    pub pending_id: Option<String>,
 }
 
 /// A collection whose background check is due.
@@ -332,6 +334,11 @@ impl OpenApiSyncService {
         self
     }
 
+    /// The current time from the injected clock.
+    pub(crate) fn now(&self) -> DateTime<Utc> {
+        (self.clock)()
+    }
+
     /// Replaces the clock, so tests can use a fixed time.
     pub fn with_clock(mut self, clock: Clock) -> Self {
         self.clock = clock;
@@ -405,6 +412,7 @@ impl OpenApiSyncService {
         root: &Path,
         now: &DateTime<Utc>,
         status: SyncStatus,
+        pending_count: Option<u32>,
     ) -> DomainResult<()> {
         let locals = self.local_repo()?;
         let mut local = locals.load(root)?.unwrap_or_default();
@@ -413,6 +421,9 @@ impl OpenApiSyncService {
         local.last_message = None;
         local.consecutive_failures = 0;
         local.not_before = None;
+        if let Some(count) = pending_count {
+            local.pending_count = count;
+        }
         locals.save(root, &local)
     }
 
@@ -604,7 +615,7 @@ impl OpenApiSyncService {
                 } else {
                     (CheckOutcome::Unchanged, SyncStatus::Unchanged)
                 };
-                self.record_success(collection_root, &now, status)?;
+                self.record_success(collection_root, &now, status, None)?;
                 return Ok(outcome);
             }
             Ok(SpecFetchOutcome::Fetched {
@@ -683,7 +694,7 @@ impl OpenApiSyncService {
             source.pending_sha256 = None;
             self.sources.save(collection_root, &source)?;
             self.sources.clear_pending(collection_root)?;
-            self.record_success(collection_root, &now, SyncStatus::Unchanged)?;
+            self.record_success(collection_root, &now, SyncStatus::Unchanged, Some(0))?;
             return Ok(CheckOutcome::Unchanged);
         }
 
@@ -696,7 +707,15 @@ impl OpenApiSyncService {
             source.pending_sha256 = Some(hash.clone());
         }
         self.sources.save(collection_root, &source)?;
-        self.record_success(collection_root, &now, SyncStatus::Changed)?;
+        // A count that cannot be made keeps the old one, so the check itself never fails on it.
+        let count = match self.count_pending_locked(collection_root) {
+            Ok(count) => Some(count),
+            Err(e) => {
+                tracing::debug!(error = %e, "the waiting count could not be made");
+                None
+            }
+        };
+        self.record_success(collection_root, &now, SyncStatus::Changed, count)?;
         Ok(CheckOutcome::Changed { spec_sha256: hash })
     }
 
@@ -740,6 +759,10 @@ impl OpenApiSyncService {
                 None
             },
             interval_unknown: local.interval_unknown,
+            pending_id: source
+                .pending_sha256
+                .as_deref()
+                .map(|h| h.chars().take(12).collect()),
         })
     }
 
