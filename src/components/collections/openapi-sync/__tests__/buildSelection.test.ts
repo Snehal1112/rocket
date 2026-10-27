@@ -5,7 +5,15 @@ import { buildSelection, type SelectionState } from '../buildSelection';
 const plan: OpenApiSyncPlan = {
   pending: true,
   items: [
-    { kind: 'new', key: 'GET /a', name: 'A', digest: 'dA', fingerprint: 'fA', folder: [] },
+    {
+      kind: 'new',
+      key: 'GET /a',
+      name: 'A',
+      digest: 'dA',
+      fingerprint: 'fA',
+      folder: [],
+      preview: { method: 'GET', url: '/a', headers: [], query: [], hasBody: false, authKind: null },
+    },
     {
       kind: 'changed',
       key: 'GET /b',

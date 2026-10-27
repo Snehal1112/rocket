@@ -14,6 +14,7 @@ import type { OpenApiBackupRow, OpenApiChangeRow } from '@/lib/tauri-api';
 import { fieldLabel, resetAllConfirmText, resetConfirmText } from './openApiSyncView';
 import { ResetConfirmDialog } from './ResetConfirmDialog';
 import { syncErrorMessage } from './syncErrors';
+import { ValueBox } from './ValueBox';
 
 type Kind = 'modified' | 'added' | 'deleted';
 
@@ -47,6 +48,8 @@ function ChangeRow({
 }) {
   // Deleted rows have no method or URL, so the path or the name stands in.
   const target = row.url || row.requestPath || row.name;
+  const [open, setOpen] = useState(false);
+  const canExpand = showFields && kind === 'modified' && row.changes.length > 0;
   return (
     <li className='flex flex-col gap-1 border-b border-border/60 px-3 py-2 text-sm last:border-b-0'>
       <div className='flex min-w-0 items-center gap-2'>
@@ -74,6 +77,27 @@ function ChangeRow({
               {fieldLabel(f)}
             </Badge>
           ))}
+        </div>
+      )}
+      {canExpand && (
+        <div className='flex flex-col gap-2'>
+          <Button
+            variant='link'
+            size='sm'
+            className='h-auto self-start p-0 text-xs'
+            aria-expanded={open}
+            onClick={() => setOpen((v) => !v)}
+          >
+            {open ? 'Hide changes' : 'Show changes'}
+          </Button>
+          {open &&
+            row.changes.map((c) => (
+              <div key={c.field} className='flex flex-col gap-2 rounded-md border p-3'>
+                <span className='break-all text-sm font-medium'>{fieldLabel(c.field)}</span>
+                <ValueBox title='Baseline' value={c.baseline} />
+                <ValueBox title='Yours' value={c.yours} />
+              </div>
+            ))}
         </div>
       )}
     </li>

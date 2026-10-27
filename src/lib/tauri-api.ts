@@ -1971,6 +1971,16 @@ export interface OpenApiVariableChange {
   spec?: string;
 }
 
+/** What a new request looks like. Header and query values are never sent, only their names. */
+export interface OpenApiNewPreview {
+  method: string;
+  url: string;
+  headers: string[];
+  query: string[];
+  hasBody: boolean;
+  authKind: string | null;
+}
+
 export type OpenApiSyncItem =
   | {
       kind: 'new';
@@ -1980,6 +1990,7 @@ export type OpenApiSyncItem =
       fingerprint: string;
       folder: string[];
       possiblyRenamedFrom?: string;
+      preview: OpenApiNewPreview;
     }
   | {
       kind: 'changed';
@@ -2096,6 +2107,14 @@ export interface OpenApiChangeRow {
   url: string;
   requestPath: string | null;
   fields: string[];
+  /** The last synced and the user's value of each changed field. Empty without a baseline. */
+  changes: OpenApiChangeValue[];
+}
+
+export interface OpenApiChangeValue {
+  field: string;
+  baseline: string | null;
+  yours: string | null;
 }
 
 /** A request the user reset to the spec, with the version they can restore. */

@@ -257,6 +257,7 @@ describe('OpenApiSyncTab', () => {
       url: '/x',
       requestPath: null,
       fields: [],
+      changes: [],
     });
     vi.mocked(tauriApi.getOpenApiSyncChanges).mockResolvedValue({
       baselineTrusted: true,

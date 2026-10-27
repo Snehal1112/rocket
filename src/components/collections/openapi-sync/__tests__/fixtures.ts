@@ -26,6 +26,14 @@ export const newItem: OpenApiSyncItem = {
   fingerprint: 'f1',
   folder: ['pets', 'read'],
   possiblyRenamedFrom: 'GET /animals',
+  preview: {
+    method: 'GET',
+    url: '{{baseUrl}}/pets',
+    headers: ['Accept'],
+    query: ['limit'],
+    hasBody: false,
+    authKind: null,
+  },
 };
 
 export const changedItem: OpenApiSyncItem = {

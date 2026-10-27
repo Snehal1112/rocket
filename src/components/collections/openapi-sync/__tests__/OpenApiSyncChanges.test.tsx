@@ -27,6 +27,7 @@ function row(over: Partial<OpenApiChangeRow> = {}): OpenApiChangeRow {
     url: '{{baseUrl}}/pets',
     requestPath: 'pets/list-pets.yml',
     fields: [],
+    changes: [],
     ...over,
   };
 }
@@ -322,5 +323,82 @@ describe('OpenApiSyncChanges', () => {
       await screen.findByText(/The reset backups file is damaged/),
     ).toBeInTheDocument();
     expect(screen.queryByText(/expected value/)).toBeNull();
+  });
+  it('modified_rows_expand_to_show_baseline_and_yours', async () => {
+    show(
+      changes({
+        modified: [
+          row({
+            fields: ['url'],
+            changes: [{ field: 'url', baseline: '{{baseUrl}}/old', yours: '{{baseUrl}}/mine' }],
+          }),
+        ],
+      }),
+    );
+    const user = userEvent.setup();
+    await screen.findByText('Modified (1)');
+    expect(screen.queryByText('Baseline')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Show changes' }));
+    expect(screen.getByText('Baseline')).toBeInTheDocument();
+    expect(screen.getByText('Yours')).toBeInTheDocument();
+    expect(screen.getByText('{{baseUrl}}/old')).toBeInTheDocument();
+    expect(screen.getByText('{{baseUrl}}/mine')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Hide changes' }));
+    expect(screen.queryByText('Baseline')).not.toBeInTheDocument();
+  });
+
+  it('a_missing_value_shows_none', async () => {
+    show(
+      changes({
+        modified: [
+          row({
+            fields: ['header:Accept'],
+            changes: [{ field: 'header:Accept', baseline: null, yours: 'text/plain' }],
+          }),
+        ],
+      }),
+    );
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Show changes' }));
+    expect(screen.getByText('(none)')).toBeInTheDocument();
+    expect(screen.getByText('text/plain')).toBeInTheDocument();
+  });
+
+  it('values_render_as_plain_text', async () => {
+    show(
+      changes({
+        modified: [
+          row({
+            fields: ['url'],
+            changes: [{ field: 'url', baseline: 'a', yours: '<script>alert(1)</script>' }],
+          }),
+        ],
+      }),
+    );
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Show changes' }));
+    expect(screen.getByText('<script>alert(1)</script>')).toBeInTheDocument();
+    expect(document.querySelector('script')).toBeNull();
+  });
+
+  it('rows_without_values_do_not_expand', async () => {
+    show(changes({ modified: [row({ fields: ['url'], changes: [] })] }));
+    await screen.findByText('Modified (1)');
+    expect(screen.queryByRole('button', { name: 'Show changes' })).not.toBeInTheDocument();
+  });
+
+  it('an_untrusted_baseline_shows_no_expand_button', async () => {
+    show(
+      changes({
+        baselineTrusted: false,
+        modified: [
+          row({
+            changes: [{ field: 'url', baseline: 'a', yours: 'b' }],
+          }),
+        ],
+      }),
+    );
+    await screen.findByText('Modified (1)');
+    expect(screen.queryByRole('button', { name: 'Show changes' })).not.toBeInTheDocument();
   });
 });

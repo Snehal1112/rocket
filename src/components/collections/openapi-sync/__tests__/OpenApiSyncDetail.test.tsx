@@ -2,7 +2,7 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { OpenApiSyncDetail } from '../OpenApiSyncDetail';
-import { makePlan } from './fixtures';
+import { makePlan, newItem } from './fixtures';
 
 function props(overrides: Partial<React.ComponentProps<typeof OpenApiSyncDetail>> = {}) {
   return {
@@ -145,5 +145,46 @@ describe('OpenApiSyncDetail', () => {
     expect(
       screen.getByText(/If you changed this value yourself, Rocket keeps yours.*no trusted baseline/),
     ).toBeInTheDocument();
+  });
+  it('a_new_item_shows_its_preview', () => {
+    const item = {
+      ...newItem,
+      preview: {
+        method: 'POST',
+        url: '{{baseUrl}}/pets',
+        headers: ['Accept', 'X-Trace'],
+        query: ['limit'],
+        hasBody: true,
+        authKind: 'bearer',
+      },
+    };
+    const plan = makePlan({ items: [item] });
+    render(<OpenApiSyncDetail {...props({ plan, selectedId: 'new:GET /pets' })} />);
+    expect(screen.getByText('POST')).toBeInTheDocument();
+    expect(screen.getByText('{{baseUrl}}/pets')).toBeInTheDocument();
+    expect(screen.getByText('Headers: Accept, X-Trace')).toBeInTheDocument();
+    expect(screen.getByText('Query: limit')).toBeInTheDocument();
+    expect(screen.getByText('Has a body')).toBeInTheDocument();
+    expect(screen.getByText('Auth: bearer')).toBeInTheDocument();
+  });
+
+  it('a_new_item_without_extras_says_so', () => {
+    const item = {
+      ...newItem,
+      preview: {
+        method: 'GET',
+        url: '/ping',
+        headers: [],
+        query: [],
+        hasBody: false,
+        authKind: null,
+      },
+    };
+    const plan = makePlan({ items: [item] });
+    render(<OpenApiSyncDetail {...props({ plan, selectedId: 'new:GET /pets' })} />);
+    expect(screen.getByText('No headers')).toBeInTheDocument();
+    expect(screen.getByText('No query parameters')).toBeInTheDocument();
+    expect(screen.getByText('No body')).toBeInTheDocument();
+    expect(screen.getByText('No auth of its own')).toBeInTheDocument();
   });
 });

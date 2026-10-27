@@ -5,6 +5,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { SegmentedControl } from '@/components/ui/segmented-control';
 import type {
   OpenApiFieldChange,
+  OpenApiNewPreview,
   OpenApiSyncItem,
   OpenApiSyncPlan,
   OpenApiVariableChange,
@@ -17,6 +18,7 @@ import {
   renameHint,
   variableLabel,
 } from './openApiSyncView';
+import { ValueBox } from './ValueBox';
 
 type Choice = 'spec' | 'yours';
 
@@ -39,13 +41,19 @@ const CHOICE_OPTIONS: { value: Choice; label: string }[] = [
   { value: 'yours', label: 'Keep yours' },
 ];
 
-function Value({ title, value }: { title: string; value?: string }) {
+function NewPreview({ preview }: { preview: OpenApiNewPreview }) {
   return (
-    <div className='min-w-0'>
-      <p className='text-xs font-medium text-muted-foreground'>{title}</p>
-      <pre className='whitespace-pre-wrap break-all rounded-md border bg-muted/40 p-2 font-mono text-xs'>
-        {value === undefined ? '(none)' : value}
-      </pre>
+    <div className='flex flex-col gap-1 rounded-md border bg-muted/30 p-2 text-xs'>
+      <p className='flex min-w-0 items-center gap-2'>
+        <span className='shrink-0 font-mono font-semibold'>{preview.method}</span>
+        <span className='min-w-0 break-all font-mono'>{preview.url}</span>
+      </p>
+      <p>{preview.headers.length > 0 ? `Headers: ${preview.headers.join(', ')}` : 'No headers'}</p>
+      <p>
+        {preview.query.length > 0 ? `Query: ${preview.query.join(', ')}` : 'No query parameters'}
+      </p>
+      <p>{preview.hasBody ? 'Has a body' : 'No body'}</p>
+      <p>{preview.authKind ? `Auth: ${preview.authKind}` : 'No auth of its own'}</p>
     </div>
   );
 }
@@ -70,9 +78,9 @@ function FieldBlock({
         <span className='break-all text-sm font-medium'>{fieldLabel(change.field)}</span>
         <Badge variant={outcomeVariant(change.outcome)}>{outcomeLabel(change.outcome)}</Badge>
       </div>
-      <Value title='Baseline' value={change.baseline} />
-      <Value title='Yours' value={change.yours} />
-      <Value title='Spec' value={change.spec} />
+      <ValueBox title='Baseline' value={change.baseline} />
+      <ValueBox title='Yours' value={change.yours} />
+      <ValueBox title='Spec' value={change.spec} />
       <SegmentedControl
         aria-label={fieldLabel(change.field)}
         value={value}
@@ -87,9 +95,9 @@ function VariableBlock({ change }: { change: OpenApiVariableChange }) {
   return (
     <div className='flex flex-col gap-2 rounded-md border p-3'>
       <span className='break-all text-sm font-medium'>{variableLabel(change)}</span>
-      <Value title='Baseline' value={change.baseline} />
-      <Value title='Yours' value={change.yours} />
-      <Value title='Spec' value={change.spec} />
+      <ValueBox title='Baseline' value={change.baseline} />
+      <ValueBox title='Yours' value={change.yours} />
+      <ValueBox title='Spec' value={change.spec} />
       <p className='text-xs text-muted-foreground'>
         {change.kind === 'baseUrl'
           ? 'If you changed this value yourself, Rocket keeps yours and only updates what it remembers of the spec. With no trusted baseline the value is not updated.'
@@ -187,6 +195,7 @@ export function OpenApiSyncDetail({
                   Folder:{' '}
                   {entry.item.folder.length > 0 ? entry.item.folder.join(' / ') : 'collection root'}
                 </p>
+                <NewPreview preview={entry.item.preview} />
               </div>
             )}
             {entry.item.kind === 'changed' && (
