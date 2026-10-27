@@ -1898,7 +1898,15 @@ export const importOpenApiFile = (
   path: string,
   groupBy: OpenApiGroupBy,
   targetWorkspaceId: string,
-) => invoke<OpenApiImportResult>('import_openapi_file', { path, groupBy, targetWorkspaceId });
+  keepSynced?: boolean,
+) =>
+  invoke<OpenApiImportResult>('import_openapi_file', {
+    path,
+    groupBy,
+    targetWorkspaceId,
+    // Left out when not given, so the command keeps its old behavior.
+    ...(keepSynced === undefined ? {} : { keepSynced }),
+  });
 
 export const importOpenApiUrl = (
   link: string,

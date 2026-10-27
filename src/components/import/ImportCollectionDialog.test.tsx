@@ -128,15 +128,36 @@ describe('ImportCollectionDialog OpenAPI source', () => {
     expect(screen.getByRole('button', { name: 'Import' })).toBeEnabled();
   });
 
-  it('file_mode_says_the_import_is_not_kept_in_sync', async () => {
+  it('file_mode_shows_the_keep_in_sync_checkbox_on_by_default', async () => {
     renderDialog();
     await openOpenApiTab();
     await userEvent.click(screen.getByRole('button', { name: 'File' }));
+    const box = screen.getByRole('checkbox', { name: 'Keep in sync with this file' });
+    expect(box).toBeChecked();
     expect(
-      screen.getByText(
-        'A spec imported from a file is not kept in sync. Import from a link to get updates.',
-      ),
+      screen.getByText('Rocket checks the file every 5 minutes while the app is open.'),
     ).toBeInTheDocument();
+  });
+
+  it('the_old_not_kept_in_sync_note_is_gone', async () => {
+    renderDialog();
+    await openOpenApiTab();
+    await userEvent.click(screen.getByRole('button', { name: 'File' }));
+    expect(screen.queryByText(/not kept in sync/)).toBeNull();
+  });
+
+  it('unchecking_it_sends_keep_synced_false', async () => {
+    mockOpen.mockResolvedValue('/tmp/o.yaml');
+    mockImportOpenApiFile.mockResolvedValue(openApiResult);
+    renderDialog();
+    await openOpenApiTab();
+    await userEvent.click(screen.getByRole('button', { name: 'File' }));
+    await userEvent.click(screen.getByRole('button', { name: /choose spec file/i }));
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Keep in sync with this file' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Import' }));
+    await waitFor(() =>
+      expect(mockImportOpenApiFile).toHaveBeenCalledWith('/tmp/o.yaml', 'tags', 'ws1', false),
+    );
   });
 
   it('the_import_dialog_hint_mentions_localhost', async () => {
@@ -145,10 +166,12 @@ describe('ImportCollectionDialog OpenAPI source', () => {
     expect(screen.getByText(/http:\/\/localhost for a local server/)).toBeInTheDocument();
   });
 
-  it('link_mode_does_not_show_the_note', async () => {
+  it('link_mode_is_unchanged', async () => {
     renderDialog();
     await openOpenApiTab();
     expect(screen.queryByText(/not kept in sync/)).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: 'Keep in sync with this file' })).toBeNull();
+    expect(screen.getByRole('checkbox', { name: 'Check for spec updates' })).not.toBeChecked();
   });
 
   it('imports a pasted link with the default tag layout', async () => {
@@ -188,7 +211,7 @@ describe('ImportCollectionDialog OpenAPI source', () => {
     );
     await userEvent.click(await screen.findByRole('button', { name: 'Import' }));
     await waitFor(() =>
-      expect(mockImportOpenApiFile).toHaveBeenCalledWith('/tmp/o.yaml', 'tags', 'ws1'),
+      expect(mockImportOpenApiFile).toHaveBeenCalledWith('/tmp/o.yaml', 'tags', 'ws1', true),
     );
   });
 

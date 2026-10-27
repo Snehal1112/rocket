@@ -54,5 +54,18 @@ describe('OpenAPI import API', () => {
       groupBy: 'paths',
       targetWorkspaceId: 'ws1',
     });
+    const args = vi.mocked(invoke).mock.calls[0][1] as Record<string, unknown>;
+    expect('keepSynced' in args).toBe(false);
+  });
+
+  it('the_wrapper_passes_keep_synced', async () => {
+    vi.mocked(invoke).mockResolvedValue(result);
+    await importOpenApiFile('/tmp/a.yaml', 'paths', 'ws1', true);
+    expect(invoke).toHaveBeenCalledWith('import_openapi_file', {
+      path: '/tmp/a.yaml',
+      groupBy: 'paths',
+      targetWorkspaceId: 'ws1',
+      keepSynced: true,
+    });
   });
 });

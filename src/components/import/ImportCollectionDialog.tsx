@@ -124,6 +124,7 @@ export function ImportCollectionDialog({
   // Held in state only. It is never shown again and is cleared on close and tab switch.
   const [token, setToken] = useState('');
   const [checkForUpdates, setCheckForUpdates] = useState(false);
+  const [keepSynced, setKeepSynced] = useState(true);
   const [groupBy, setGroupBy] = useState<OpenApiGroupBy>('tags');
   const [warnings, setWarnings] = useState<string[]>([]);
 
@@ -145,6 +146,7 @@ export function ImportCollectionDialog({
       setLink('');
       setToken('');
       setCheckForUpdates(false);
+      setKeepSynced(true);
       setGroupBy('tags');
       setWarnings([]);
     }, 200);
@@ -164,6 +166,7 @@ export function ImportCollectionDialog({
     setLink('');
     setToken('');
     setCheckForUpdates(false);
+    setKeepSynced(true);
     setGroupBy('tags');
   }
 
@@ -269,7 +272,7 @@ export function ImportCollectionDialog({
         const linkToken = token.trim() || undefined;
         let imported: Awaited<ReturnType<typeof importOpenApiUrl>>;
         if (openapiMode !== 'link') {
-          imported = await importOpenApiFile(source?.path ?? '', groupBy, targetWsId);
+          imported = await importOpenApiFile(source?.path ?? '', groupBy, targetWsId, keepSynced);
         } else if (checkForUpdates) {
           imported = await importOpenApiUrl(link.trim(), groupBy, targetWsId, linkToken, true);
         } else {
@@ -430,10 +433,21 @@ export function ImportCollectionDialog({
               )}
 
               {importSource === 'openapi' && openapiMode === 'file' && (
-                <p className='text-[11px] text-muted-foreground'>
-                  A spec imported from a file is not kept in sync. Import from a link to get
-                  updates.
-                </p>
+                <div className='space-y-1'>
+                  <div className='flex items-center gap-2'>
+                    <Checkbox
+                      id='openapi-keep-synced'
+                      checked={keepSynced}
+                      onCheckedChange={(v) => setKeepSynced(v === true)}
+                    />
+                    <Label htmlFor='openapi-keep-synced' className='text-xs font-medium'>
+                      Keep in sync with this file
+                    </Label>
+                  </div>
+                  <p className='text-[11px] text-muted-foreground'>
+                    Rocket checks the file every 5 minutes while the app is open.
+                  </p>
+                </div>
               )}
 
               {/* Drop zone */}
