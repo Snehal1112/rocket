@@ -262,9 +262,14 @@ async fn overview_marks_counts_unknown_without_a_trusted_baseline() {
 #[tokio::test]
 async fn overview_reads_the_spec_version_of_the_pending_copy() {
     let w = world().await;
+    // Without a pending copy the applied copy answers.
     assert_eq!(
-        w.svc.overview(&w.name).expect("overview").spec_version,
-        None
+        w.svc
+            .overview(&w.name)
+            .expect("overview")
+            .spec_version
+            .as_deref(),
+        Some("1")
     );
     w.check_with(v2().replace(r#""version":"1""#, r#""version":"2.0.0""#))
         .await;

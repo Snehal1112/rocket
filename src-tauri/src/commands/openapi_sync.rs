@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use rocket_app::{
     safe_message, BadgeView, ChangeRow, ChangesView, CheckOutcome, OpenApiSyncService,
-    OverviewView, PlanView, SyncStatusView,
+    OverviewView, PlanView, SpecView, SpecViewState, SyncStatusView,
 };
 use rocket_collection::openapi_source::{SyncInterval, SyncStatus};
 use rocket_collection::ConsentState;
@@ -358,6 +358,117 @@ fn overview_dto(view: OverviewView) -> OverviewDto {
         last_synced_at: view.last_synced_at,
         last_synced_updated: view.last_synced_updated,
     }
+}
+
+/// One parameter of an operation in the spec viewer.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpecParamDto {
+    pub name: String,
+    /// `path`, `query`, `header` or `cookie`.
+    pub location: String,
+    pub required: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpecResponseDto {
+    pub status: String,
+    pub description: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpecOperationDto {
+    pub key: String,
+    pub method: String,
+    pub path: String,
+    pub summary: Option<String>,
+    pub parameters: Vec<SpecParamDto>,
+    pub responses: Vec<SpecResponseDto>,
+    pub is_new: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpecGroupDto {
+    pub tag: String,
+    pub operations: Vec<SpecOperationDto>,
+}
+
+/// The latest stored spec for the read-only viewer.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpecViewDto {
+    pub title: String,
+    pub version: Option<String>,
+    pub fetched_at: Option<String>,
+    /// `in_sync`, `updates_waiting` or `no_copy`.
+    pub state: &'static str,
+    pub groups: Vec<SpecGroupDto>,
+}
+
+fn spec_view_dto(view: SpecView) -> SpecViewDto {
+    SpecViewDto {
+        title: view.title,
+        version: view.version,
+        fetched_at: view.fetched_at,
+        state: match view.state {
+            SpecViewState::InSync => "in_sync",
+            SpecViewState::UpdatesWaiting => "updates_waiting",
+            SpecViewState::NoCopy => "no_copy",
+        },
+        groups: view
+            .groups
+            .into_iter()
+            .map(|g| SpecGroupDto {
+                tag: g.tag,
+                operations: g
+                    .operations
+                    .into_iter()
+                    .map(|o| SpecOperationDto {
+                        key: o.key,
+                        method: o.method,
+                        path: o.path,
+                        summary: o.summary,
+                        parameters: o
+                            .parameters
+                            .into_iter()
+                            .map(|p| SpecParamDto {
+                                name: p.name,
+                                location: p.location,
+                                required: p.required,
+                            })
+                            .collect(),
+                        responses: o
+                            .responses
+                            .into_iter()
+                            .map(|r| SpecResponseDto {
+                                status: r.status,
+                                description: r.description,
+                            })
+                            .collect(),
+                        is_new: o.is_new,
+                    })
+                    .collect(),
+            })
+            .collect(),
+    }
+}
+
+/// The latest stored spec, grouped by tag. Reads local files only.
+#[tauri::command]
+pub async fn openapi_sync_spec_view(
+    collection: String,
+    workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
+    fetcher: State<'_, Arc<dyn SpecFetcher>>,
+) -> Result<SpecViewDto, String> {
+    run_blocking(
+        Arc::clone(workspace_path.inner()),
+        Arc::clone(fetcher.inner()),
+        move |service| service.spec_view(&collection).map(spec_view_dto),
+    )
+    .await
 }
 
 /// One request that differs from what the spec produced.
@@ -1324,6 +1435,33 @@ mod tests {
         assert!(matches!(none, Ok(None)));
         let err = status_or_none(Err(DomainError::Internal("x".to_string())));
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn spec_view_dto_uses_camel_case_keys() {
+        let dto = spec_view_dto(SpecView {
+            title: "Pets".to_string(),
+            version: Some("2".to_string()),
+            fetched_at: Some("2026-10-27T10:00:00+00:00".to_string()),
+            state: SpecViewState::UpdatesWaiting,
+            groups: vec![rocket_app::SpecTagGroup {
+                tag: "pets".to_string(),
+                operations: vec![rocket_app::SpecOpRow {
+                    key: "listPets".to_string(),
+                    method: "GET".to_string(),
+                    path: "/pets".to_string(),
+                    summary: None,
+                    parameters: Vec::new(),
+                    responses: Vec::new(),
+                    is_new: true,
+                }],
+            }],
+        });
+        let json = serde_json::to_value(dto).expect("json");
+        assert_eq!(json["fetchedAt"], "2026-10-27T10:00:00+00:00");
+        assert_eq!(json["state"], "updates_waiting");
+        assert_eq!(json["groups"][0]["operations"][0]["isNew"], true);
+        assert_eq!(json["groups"][0]["operations"][0]["method"], "GET");
     }
 
     #[test]

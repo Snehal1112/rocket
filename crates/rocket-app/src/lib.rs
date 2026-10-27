@@ -63,6 +63,7 @@ pub mod openapi_sync_apply;
 pub mod openapi_sync_changes;
 pub mod openapi_sync_scheduler;
 pub mod openapi_sync_service;
+pub mod openapi_sync_spec_view;
 pub mod openapi_sync_view;
 pub mod proposal_service;
 pub mod proxy_settings_service;
@@ -147,7 +148,8 @@ pub use mcp_tool_service::{
 pub use oauth2_service::OAuth2Service;
 pub use openapi_sync_apply::{ApplyDeps, RendererFactory};
 pub use openapi_sync_view::{
-    BadgeView, ChangeRow, ChangesView, OverviewView, PlanView, UnchangedView,
+    BadgeView, ChangeRow, ChangesView, OverviewView, PlanView, SpecOpRow, SpecTagGroup, SpecView,
+    SpecViewState, UnchangedView,
 };
 pub use openapi_sync_scheduler::{
     OpenApiSyncScheduler, SchedulerConfig, SchedulerHandle, ServiceFactory,

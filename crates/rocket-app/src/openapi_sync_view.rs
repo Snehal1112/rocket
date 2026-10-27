@@ -72,7 +72,7 @@ pub struct OverviewView {
     pub changed_by_you: Option<u32>,
     /// Items and variable changes that wait for a decision.
     pub updates_waiting: u32,
-    /// `info.version` of the pending copy. `None` without one.
+    /// `info.version` of the pending copy, else of the applied copy. `None` without either.
     pub spec_version: Option<String>,
     pub last_synced_at: Option<String>,
     pub last_synced_updated: u32,
@@ -83,4 +83,45 @@ pub struct OverviewView {
 pub struct BadgeView {
     pub collection: String,
     pub waiting: u32,
+}
+
+/// Which stored spec the viewer shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpecViewState {
+    /// The applied copy; nothing waits.
+    InSync,
+    /// The pending copy; a newer spec waits for review.
+    UpdatesWaiting,
+    /// No stored copy yet, as on an older import.
+    NoCopy,
+}
+
+/// One operation row of the spec viewer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpecOpRow {
+    pub key: String,
+    pub method: String,
+    pub path: String,
+    pub summary: Option<String>,
+    pub parameters: Vec<rocket_import::SpecParamView>,
+    pub responses: Vec<rocket_import::SpecResponseView>,
+    /// True when the operation is not in the last synced spec.
+    pub is_new: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpecTagGroup {
+    pub tag: String,
+    pub operations: Vec<SpecOpRow>,
+}
+
+/// The latest stored spec, grouped by tag. It is built from local files only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpecView {
+    pub title: String,
+    pub version: Option<String>,
+    /// RFC 3339 UTC time of the last check. `None` before the first one.
+    pub fetched_at: Option<String>,
+    pub state: SpecViewState,
+    pub groups: Vec<SpecTagGroup>,
 }
