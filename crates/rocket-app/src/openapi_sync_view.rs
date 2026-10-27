@@ -35,3 +35,29 @@ impl PlanView {
         }
     }
 }
+
+/// One request that differs from what the spec produced.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangeRow {
+    /// The operation key, or `None` for a request the user added.
+    pub key: Option<String>,
+    pub uid: String,
+    pub name: String,
+    pub method: String,
+    pub url: String,
+    pub request_path: Option<String>,
+    /// Names of the spec-owned fields the user changed. Empty when the baseline is not trusted
+    /// and for deleted and added rows.
+    pub fields: Vec<String>,
+}
+
+/// What the user changed since the last import or sync.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangesView {
+    /// False without a baseline of the current converter version. Then `modified` comes from
+    /// hashes and carries no field names.
+    pub baseline_trusted: bool,
+    pub modified: Vec<ChangeRow>,
+    pub added: Vec<ChangeRow>,
+    pub deleted: Vec<ChangeRow>,
+}

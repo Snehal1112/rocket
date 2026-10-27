@@ -70,6 +70,13 @@ fn flatten(folder: &Folder, prefix: &str, out: &mut Vec<CurrentRequest>) {
     }
 }
 
+/// Every HTTP request of the collection with its path, for the read models.
+pub(crate) fn flatten_requests(folder: &Folder) -> Vec<CurrentRequest> {
+    let mut out = Vec::new();
+    flatten(folder, "", &mut out);
+    out
+}
+
 fn count_of(view: &PlanView) -> u32 {
     let total = view.plan.items.len() + view.plan.variable_changes.len();
     u32::try_from(total).unwrap_or(u32::MAX)
@@ -166,7 +173,7 @@ impl Loaded {
 }
 
 impl OpenApiSyncService {
-    fn deps(&self) -> DomainResult<&ApplyDeps> {
+    pub(crate) fn deps(&self) -> DomainResult<&ApplyDeps> {
         self.apply_deps.as_ref().ok_or_else(not_set_up)
     }
 

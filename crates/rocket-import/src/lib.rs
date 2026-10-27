@@ -11,7 +11,7 @@ pub use error::{ImportError, ImportResult};
 pub use importer::{
     EnvironmentRepositoryFactory, ImportService, ImportedOperation, OpenApiImportOutcome,
 };
-pub use converter::openapi::baseline_hash;
+pub use converter::openapi::{baseline_hash, CONVERTER_VERSION};
 pub use openapi::{
     bundle_spec, find_remote_refs, inline_refs, lost_refs_message, ref_failure_message, whole_bundle_failed_message, refs_unchanged,
     refs_unchanged_labeled, Bundle, RemoteRefState,

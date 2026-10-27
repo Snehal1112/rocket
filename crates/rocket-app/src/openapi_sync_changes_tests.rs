@@ -1,4 +1,4 @@
-//! Tests for the cached counts and the pending id. They reuse the world of the apply tests.
+//! Tests for the cached counts, the pending id and the `changes` read model. They reuse the world of the apply tests.
 
 use super::*;
 use rocket_import::{fingerprint, SkipRequest, SyncItem};
@@ -103,4 +103,127 @@ async fn a_partial_apply_counts_variable_changes_like_count_pending() {
         w.svc.local_state(&w.name).expect("local").pending_count,
         count
     );
+}
+
+fn path_of(w: &World, key: &str) -> String {
+    w.source()
+        .operations
+        .iter()
+        .find(|o| o.key == key)
+        .expect("entry")
+        .request_path
+        .clone()
+}
+
+fn edit_url(w: &World, key: &str) {
+    let path = path_of(w, key);
+    let mut request = w.repo.get_request(&w.name, &path).expect("get");
+    request.url = "https://edited.example.com/x".to_string();
+    w.repo.save_request(&w.name, &path, &request).expect("save");
+}
+
+#[tokio::test]
+async fn changes_is_empty_for_a_fresh_import() {
+    let w = world().await;
+    let view = w.svc.changes(&w.name).expect("changes");
+    assert!(view.baseline_trusted);
+    assert!(view.modified.is_empty());
+    assert!(view.added.is_empty());
+    assert!(view.deleted.is_empty());
+}
+
+#[tokio::test]
+async fn changes_lists_a_modified_request_with_its_field_names() {
+    let w = world().await;
+    let path = path_of(&w, "getPet");
+    let mut request = w.repo.get_request(&w.name, &path).expect("get");
+    request.url = "https://edited.example.com/pets".to_string();
+    request
+        .headers
+        .push(rocket_shared::types::Header::new("Accept", "text/plain"));
+    w.repo.save_request(&w.name, &path, &request).expect("save");
+    let view = w.svc.changes(&w.name).expect("changes");
+    assert_eq!(view.modified.len(), 1);
+    let row = &view.modified[0];
+    assert_eq!(row.key.as_deref(), Some("getPet"));
+    assert_eq!(row.request_path.as_deref(), Some(path.as_str()));
+    assert!(row.fields.contains(&"url".to_string()), "{:?}", row.fields);
+    assert!(
+        row.fields.contains(&"header:Accept".to_string()),
+        "{:?}",
+        row.fields
+    );
+    assert!(view.added.is_empty() && view.deleted.is_empty());
+}
+
+#[tokio::test]
+async fn changes_ignores_scripts_tests_and_docs() {
+    let w = world().await;
+    let path = path_of(&w, "getPet");
+    let mut request = w.repo.get_request(&w.name, &path).expect("get");
+    request.pre_request_script = Some("console.log(1);".to_string());
+    request.docs = Some(rocket_shared::description::Description::text("docs"));
+    w.repo.save_request(&w.name, &path, &request).expect("save");
+    let view = w.svc.changes(&w.name).expect("changes");
+    assert!(view.modified.is_empty(), "{:?}", view.modified);
+}
+
+#[tokio::test]
+async fn changes_lists_an_added_request() {
+    let w = world().await;
+    let request = rocket_collection::Request::new(
+        "Mine",
+        rocket_shared::types::HttpMethod::Get,
+        "https://x.example.com",
+    );
+    w.repo
+        .save_request(&w.name, "mine", &request)
+        .expect("save");
+    let view = w.svc.changes(&w.name).expect("changes");
+    assert_eq!(view.added.len(), 1);
+    assert_eq!(view.added[0].key, None);
+    assert_eq!(view.added[0].name, "Mine");
+    assert_eq!(view.added[0].method, "GET");
+    assert!(view.modified.is_empty() && view.deleted.is_empty());
+}
+
+#[tokio::test]
+async fn changes_lists_a_deleted_request() {
+    let w = world().await;
+    let path = path_of(&w, "listPets");
+    w.repo.delete_request(&w.name, &path).expect("delete");
+    let view = w.svc.changes(&w.name).expect("changes");
+    assert_eq!(view.deleted.len(), 1);
+    assert_eq!(view.deleted[0].key.as_deref(), Some("listPets"));
+    assert_eq!(view.deleted[0].request_path.as_deref(), Some(path.as_str()));
+    assert!(view.deleted[0].fields.is_empty());
+}
+
+#[tokio::test]
+async fn changes_without_a_trusted_baseline_uses_hashes() {
+    let w = world().await;
+    std::fs::remove_file(w.root.join(".rocket/openapi-baseline.json")).expect("remove");
+    edit_url(&w, "getPet");
+    let view = w.svc.changes(&w.name).expect("changes");
+    assert!(!view.baseline_trusted);
+    assert_eq!(view.modified.len(), 1);
+    assert_eq!(view.modified[0].key.as_deref(), Some("getPet"));
+    assert!(view.modified[0].fields.is_empty());
+}
+
+#[tokio::test]
+async fn changes_does_not_write_any_file() {
+    let w = world().await;
+    edit_url(&w, "getPet");
+    let before = w.snapshot();
+    w.svc.changes(&w.name).expect("changes");
+    assert_eq!(before, w.snapshot());
+}
+
+#[tokio::test]
+async fn changes_fails_clearly_without_a_source() {
+    let w = world().await;
+    std::fs::remove_file(w.root.join(".rocket/openapi-source.yml")).expect("remove");
+    let err = w.svc.changes(&w.name).expect_err("no source");
+    assert!(matches!(err, DomainError::NotFound(_)), "{err:?}");
 }
