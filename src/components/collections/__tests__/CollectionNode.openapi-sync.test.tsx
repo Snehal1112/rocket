@@ -108,6 +108,66 @@ describe('CollectionNode OpenAPI sync entry', () => {
     expect(screen.queryByRole('menuitem', { name: /OpenAPI sync/ })).toBeNull();
   });
 
+  describe('connect entry', () => {
+    const CONNECT = /Connect to an OpenAPI spec/;
+    const openMenu = async (user: ReturnType<typeof userEvent.setup>) => {
+      await user.hover(await screen.findByLabelText('Actions for my-collection'));
+      await waitFor(() => expect(tauriApi.getOpenApiSyncStatus).toHaveBeenCalled());
+      await act(async () => {
+        await Promise.resolve();
+      });
+      await user.click(screen.getByLabelText('Actions for my-collection'));
+      await screen.findByRole('menuitem', { name: /Overview/ });
+    };
+
+    it('the_menu_item_shows_only_without_a_source', async () => {
+      vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(null);
+      const user = userEvent.setup();
+      renderNode();
+      await openMenu(user);
+      expect(screen.getByRole('menuitem', { name: CONNECT })).toBeInTheDocument();
+    });
+
+    it('the_menu_item_is_hidden_with_a_source', async () => {
+      vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
+      const user = userEvent.setup();
+      renderNode();
+      await openMenu(user);
+      expect(screen.queryByRole('menuitem', { name: CONNECT })).toBeNull();
+    });
+
+    it('the_menu_item_is_hidden_for_a_graphql_only_collection', async () => {
+      vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(null);
+      vi.mocked(tauriApi.getCollectionSummaries).mockResolvedValue({
+        name: 'my-collection',
+        root: {
+          uid: 'root',
+          name: 'my-collection',
+          items: [
+            { type: 'summary', uid: 'g1', name: 'Q', method: 'POST', url: '/g', kind: 'graphql' },
+          ],
+        },
+        settings: { headers: [], variables: [], sandboxMode: 'safe' },
+      });
+      const user = userEvent.setup();
+      renderNode();
+      // The active collection expands, which loads its items.
+      act(() => usePaneStore.setState({ activeCollection: 'my-collection' }));
+      await waitFor(() => expect(tauriApi.getCollectionSummaries).toHaveBeenCalled());
+      await openMenu(user);
+      expect(screen.queryByRole('menuitem', { name: CONNECT })).toBeNull();
+    });
+
+    it('the_menu_item_opens_the_connect_dialog', async () => {
+      vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(null);
+      const user = userEvent.setup();
+      renderNode();
+      await openMenu(user);
+      await user.click(screen.getByRole('menuitem', { name: CONNECT }));
+      expect(await screen.findByLabelText('Spec link')).toBeInTheDocument();
+    });
+  });
+
   describe('waiting count badge', () => {
     const badge = (n: number) =>
       screen.findByRole('button', {

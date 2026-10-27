@@ -6,6 +6,7 @@ import {
   FileCode,
   FolderPlus,
   LayoutGrid,
+  Link2,
   Lock,
   MoreHorizontal,
   Pencil,
@@ -18,6 +19,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { FlowListItem } from '@/components/collections/FlowListItem';
 import { NewScriptDialog } from '@/components/collections/NewScriptDialog';
+import { ConnectOpenApiDialog } from '@/components/collections/openapi-sync/ConnectOpenApiDialog';
+import { offersConnect } from '@/components/collections/openapi-sync/openApiSyncView';
 import { ScriptNode } from '@/components/collections/ScriptNode';
 import { ContractBadge } from '@/components/contract/ContractBadge';
 import { ExportCollectionDialog } from '@/components/export/ExportCollectionDialog';
@@ -121,6 +124,7 @@ export function CollectionNode({
   const [createRequestOpen, setCreateRequestOpen] = useState(false);
   const [newScriptOpen, setNewScriptOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [connectOpen, setConnectOpen] = useState(false);
   // The sync status is only asked for once the row is hovered, focused or a menu opens.
   const [menuSeen, setMenuSeen] = useState(false);
   const syncBadges = useOpenApiSyncBadges();
@@ -308,6 +312,10 @@ export function CollectionNode({
     };
     usePaneStore.getState().openTab(tab);
   };
+
+  // Only a collection without a source can connect, and only when a spec could match it.
+  const canConnect =
+    openApiSync.isSuccess && openApiSync.data === null && offersConnect(collection?.root);
 
   const openOpenApiSync = () => {
     usePaneStore.getState().openOpenApiSyncTab(summary.name);
@@ -550,6 +558,12 @@ export function CollectionNode({
                   <RefreshCw aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> OpenAPI sync
                 </DropdownMenuItem>
               )}
+              {canConnect && (
+                <DropdownMenuItem onClick={() => setConnectOpen(true)}>
+                  <Link2 aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Connect to an OpenAPI
+                  spec
+                </DropdownMenuItem>
+              )}
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 onClick={() => {
@@ -615,6 +629,11 @@ export function CollectionNode({
         {(openApiSync.data || openApiSync.isError) && (
           <ContextMenuItem onClick={openOpenApiSync}>
             <RefreshCw aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> OpenAPI sync
+          </ContextMenuItem>
+        )}
+        {canConnect && (
+          <ContextMenuItem onClick={() => setConnectOpen(true)}>
+            <Link2 aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Connect to an OpenAPI spec
           </ContextMenuItem>
         )}
         <ContextMenuSeparator />
@@ -761,6 +780,13 @@ export function CollectionNode({
         collectionName={summary.name}
         onClose={() => setExportOpen(false)}
       />
+      {(canConnect || connectOpen) && (
+        <ConnectOpenApiDialog
+          collection={summary.name}
+          open={connectOpen}
+          onOpenChange={setConnectOpen}
+        />
+      )}
     </ContextMenu>
   );
 }

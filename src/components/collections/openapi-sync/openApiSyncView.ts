@@ -1,4 +1,6 @@
 import type {
+  CollectionItem,
+  Folder,
   OpenApiFieldChange,
   OpenApiSyncInterval,
   OpenApiSyncItem,
@@ -205,4 +207,28 @@ export function filterVariables(
   const q = query.trim().toLowerCase();
   if (!q) return changes;
   return changes.filter((c) => variableLabel(c).toLowerCase().includes(q));
+}
+
+/** Counts the HTTP and the other protocol requests of a folder tree. Summaries without a kind are HTTP. */
+function countRequests(items: CollectionItem[], counts = { http: 0, other: 0 }) {
+  for (const item of items) {
+    if (item.type === 'folder') countRequests(item.items, counts);
+    else if (item.type === 'request') counts.http += 1;
+    else if (item.type === 'summary') {
+      if (item.kind === undefined || item.kind === 'http') counts.http += 1;
+      else counts.other += 1;
+    } else if (item.type !== 'scriptFile') counts.other += 1;
+  }
+  return counts;
+}
+
+/**
+ * Whether connecting to a spec makes sense. A collection that is not loaded yet, one without
+ * requests, and one with any HTTP request qualify. One with only GraphQL, gRPC or WebSocket
+ * requests does not, since a spec only describes HTTP operations.
+ */
+export function offersConnect(root: Folder | undefined): boolean {
+  if (!root) return true;
+  const { http, other } = countRequests(root.items);
+  return http > 0 || other === 0;
 }

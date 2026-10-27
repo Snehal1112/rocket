@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { GENERIC_SYNC_ERROR, syncErrorMessage } from '../syncErrors';
+import {
+  connectWarningMessage,
+  GENERIC_SYNC_ERROR,
+  isStaleConnect,
+  syncErrorMessage,
+} from '../syncErrors';
 
 describe('syncErrorMessage', () => {
   it('maps the consent_required prefix', () => {
@@ -72,5 +77,22 @@ describe('syncErrorMessage', () => {
     expect(syncErrorMessage('The sync settings could not be removed. Try again.')).toBe(
       'The sync settings could not be removed. Try again.',
     );
+  });
+
+  it('maps_the_connect_sentences_and_spots_a_stale_preview', () => {
+    expect(syncErrorMessage('The collection changed. Run the preview again.')).toBe(
+      'The collection changed. Run the preview again.',
+    );
+    expect(isStaleConnect('The spec changed. Run the preview again.')).toBe(true);
+    expect(isStaleConnect('Connecting failed. Nothing was changed.')).toBe(false);
+    expect(syncErrorMessage('Connecting failed. Nothing was changed. /home/u/x')).toBe(
+      'Connecting failed. Nothing was changed.',
+    );
+  });
+
+  it('lets_only_the_two_fixed_connect_warnings_through', () => {
+    expect(connectWarningMessage('Checks are not enabled yet.')).toBe('Checks are not enabled yet.');
+    expect(connectWarningMessage('The token was not saved.')).toBe('The token was not saved.');
+    expect(connectWarningMessage('keychain said no at /home/u')).toBeNull();
   });
 });

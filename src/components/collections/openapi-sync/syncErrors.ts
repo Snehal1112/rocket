@@ -53,6 +53,26 @@ const KNOWN: Array<[string, string]> = [
   ['There is no backup for this request.', 'There is no backup for this request.'],
   ['Reset failed. Nothing was changed.', 'Reset failed. Nothing was changed.'],
   [
+    'The collection changed. Run the preview again.',
+    'The collection changed. Run the preview again.',
+  ],
+  ['The spec changed. Run the preview again.', 'The spec changed. Run the preview again.'],
+  [
+    'This collection is already connected to an OpenAPI spec.',
+    'This collection is already connected to an OpenAPI spec.',
+  ],
+  ['Enter the spec link.', 'Enter the spec link.'],
+  ['The file is not a supported OpenAPI spec.', 'The file is not a supported OpenAPI spec.'],
+  ['The spec could not be loaded.', 'The spec could not be loaded.'],
+  ['The file could not be fetched.', 'The file could not be fetched.'],
+  ['A request or an operation is chosen twice.', 'A request or an operation is chosen twice.'],
+  [
+    'A row of the review is not complete. Run the preview again.',
+    'A row of the review is not complete. Run the preview again.',
+  ],
+  ['The collection was not found.', 'The collection was not found.'],
+  ['Connecting failed. Nothing was changed.', 'Connecting failed. Nothing was changed.'],
+  [
     'openapi-reset-backups.json',
     'The reset backups file is damaged. Remove .rocket/openapi-reset-backups.json from the collection folder, then try again.',
   ],
@@ -72,4 +92,17 @@ export function syncErrorMessage(error: unknown): string {
     if (text.includes(needle)) return sentence;
   }
   return GENERIC_SYNC_ERROR;
+}
+
+/** True when the collection or the spec changed after the preview, so the preview is out of date. */
+export function isStaleConnect(error: unknown): boolean {
+  const text = rawText(error);
+  return text?.includes('Run the preview again.') ?? false;
+}
+
+const CONNECT_WARNINGS = ['Checks are not enabled yet.', 'The token was not saved.'];
+
+/** A warning of a finished connect. Only the two fixed sentences pass; anything else is dropped. */
+export function connectWarningMessage(warning: string): string | null {
+  return CONNECT_WARNINGS.includes(warning) ? warning : null;
 }
