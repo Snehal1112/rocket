@@ -285,7 +285,7 @@ async fn the_same_repo_keeps_the_token() {
 }
 
 #[tokio::test]
-async fn a_different_repo_deletes_the_token() {
+async fn a_different_repo_gets_a_fresh_source_id_and_no_token() {
     let w = world().await;
     let secrets = Arc::new(MapSecrets::default());
     let svc = github_world(&w, Arc::clone(&secrets));
@@ -293,16 +293,66 @@ async fn a_different_repo_deletes_the_token() {
         .await
         .expect("confirm");
     assert!(!outcome.token_kept);
-    assert_eq!(secrets.get("sid-1", "token").expect("get"), None);
+    let now = source_of(&w);
+    assert_ne!(now.source_id, "sid-1");
+    assert!(!now.source_id.is_empty());
+    // Nothing is stored under the new id, so the old repo's token can never be sent to this one.
+    assert_eq!(secrets.get(&now.source_id, "token").expect("get"), None);
+    // The old id keeps its token, so a clone that still points at the old repo keeps working.
+    assert_eq!(
+        secrets.get("sid-1", "token").expect("get").as_deref(),
+        Some("t0")
+    );
+    assert_eq!(
+        svc.consent_state(&w.root).expect("state"),
+        ConsentState::Granted
+    );
 }
 
 #[tokio::test]
-async fn a_https_link_deletes_the_token() {
+async fn a_https_link_gets_a_fresh_source_id_too() {
     let w = world().await;
     let secrets = Arc::new(MapSecrets::default());
     let svc = github_world(&w, Arc::clone(&secrets));
     confirm_with(&svc, &w, OTHER).await.expect("confirm");
-    assert_eq!(secrets.get("sid-1", "token").expect("get"), None);
+    assert_ne!(source_of(&w).source_id, "sid-1");
+}
+
+#[tokio::test]
+async fn a_typed_token_is_stored_under_the_new_source_id() {
+    let w = world().await;
+    let secrets = Arc::new(MapSecrets::default());
+    let svc = github_world(&w, Arc::clone(&secrets));
+    let link = "https://github.com/acme/other/blob/main/x.json";
+    let preview = svc
+        .change_link_preview(&w.name, link, Some("t1"))
+        .await
+        .expect("preview");
+    let outcome = svc
+        .change_link_confirm(&w.name, link, Some("t1"), &preview.spec_sha256)
+        .await
+        .expect("confirm");
+    assert!(outcome.token_kept);
+    let id = source_of(&w).source_id;
+    assert_eq!(
+        secrets.get(&id, "token").expect("get").as_deref(),
+        Some("t1")
+    );
+    assert_eq!(
+        secrets.get("sid-1", "token").expect("get").as_deref(),
+        Some("t0")
+    );
+}
+
+#[tokio::test]
+async fn the_same_repo_keeps_its_source_id() {
+    let w = world().await;
+    let secrets = Arc::new(MapSecrets::default());
+    let svc = github_world(&w, Arc::clone(&secrets));
+    confirm_with(&svc, &w, "https://github.com/acme/api/blob/main/other.json")
+        .await
+        .expect("confirm");
+    assert_eq!(source_of(&w).source_id, "sid-1");
 }
 
 #[tokio::test]

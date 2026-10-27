@@ -4,7 +4,7 @@
 
 use std::collections::HashSet;
 
-use rocket_collection::openapi_source::{SpecLocation, SyncStatus};
+use rocket_collection::openapi_source::{OpenApiSource, SpecLocation, SyncStatus};
 use rocket_collection::CollectionRepository;
 use rocket_import::{fetch_spec_bundle, ParsedSpec};
 use rocket_shared::error::{DomainError, DomainResult};
@@ -14,7 +14,7 @@ use crate::openapi_connect::{
     safe_import_message, APPLY_RUNNING, NEEDS_LINK, NOT_A_SPEC, STALE_SPEC,
 };
 use crate::openapi_sync_apply::{to_yaml, PENDING_REL, SOURCE_REL};
-use crate::openapi_sync_service::{sha256_hex, OpenApiSyncService, TOKEN_KEY};
+use crate::openapi_sync_service::{sha256_hex, OpenApiSyncService};
 
 const SAME_LINK: &str = "This is already the spec link.";
 const NOT_CONNECTED: &str = "This collection is not connected to an OpenAPI spec.";
@@ -23,7 +23,6 @@ pub(crate) const UNFINISHED: &str =
 const FAILED: &str = "Changing the link failed. Nothing was changed.";
 const WARN_CONSENT: &str = "The new link needs your approval before checks run.";
 const WARN_TOKEN: &str = "The token was not saved.";
-const WARN_OLD_TOKEN: &str = "The old token could not be removed.";
 
 /// What a move to another link would do, from a fetch that writes nothing.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -158,7 +157,6 @@ impl OpenApiSyncService {
 
         let mut outcome = ChangeLinkOutcome::default();
         let old_location;
-        let source_id;
         {
             let lock = collection_lock(&root);
             let _guard = lock.lock();
@@ -180,7 +178,15 @@ impl OpenApiSyncService {
                 }
             }
             old_location = source.location.clone();
-            source_id = source.source_id.clone();
+            // A token is keyed by the source id, so a move away from a Github repo gets a fresh
+            // id in the same transaction. The old repo's token can then never be found for the
+            // new link, here or on a machine that pulls the change. The old id keeps its token,
+            // because a clone may still point at the old repo.
+            if matches!(old_location, SpecLocation::Github { .. })
+                && !same_repo(&old_location, &fetched.location)
+            {
+                source.source_id = OpenApiSource::new_source_id();
+            }
 
             let differs = hash != source.spec_sha256;
             source.location = fetched.location.clone();
@@ -230,12 +236,6 @@ impl OpenApiSyncService {
             outcome.warnings.push(WARN_CONSENT.to_string());
         }
         let keeps = same_repo(&old_location, &fetched.location);
-        if !keeps && !source_id.is_empty() {
-            if let Err(e) = self.secrets.delete(&source_id, TOKEN_KEY) {
-                tracing::debug!(error = %e, "the old token could not be removed");
-                outcome.warnings.push(WARN_OLD_TOKEN.to_string());
-            }
-        }
         outcome.token_kept = keeps;
         if let Some(token) = token.map(str::trim).filter(|t| !t.is_empty()) {
             if consented && self.set_token(&root, token).is_ok() {
