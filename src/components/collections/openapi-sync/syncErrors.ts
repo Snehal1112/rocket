@@ -10,6 +10,19 @@ const KNOWN: Array<[string, string]> = [
     'location_changed:',
     'The spec link in this collection changed. Approve the new link before Rocket contacts it.',
   ],
+  ['This is already the spec link.', 'This is already the spec link.'],
+  [
+    'This collection is not connected to an OpenAPI spec.',
+    'This collection is not connected to an OpenAPI spec.',
+  ],
+  [
+    'Changing the link failed. Nothing was changed.',
+    'Changing the link failed. Nothing was changed.',
+  ],
+  [
+    'An earlier sync is not finished. Try again after Rocket restarts.',
+    'An earlier sync is not finished. Try again after Rocket restarts.',
+  ],
   [
     'The spec link changed. Check the link and approve it again.',
     'The spec link changed while you were looking at it. Check the link and approve it again.',
@@ -118,4 +131,15 @@ const CONNECT_WARNINGS = ['Checks are not enabled yet.', 'The token was not save
 /** A warning of a finished connect. Only the two fixed sentences pass; anything else is dropped. */
 export function connectWarningMessage(warning: string): string | null {
   return CONNECT_WARNINGS.includes(warning) ? warning : null;
+}
+
+const CHANGE_LINK_WARNINGS = [
+  'The token was not saved.',
+  'The old token could not be removed.',
+  'The new link needs your approval before checks run.',
+];
+
+/** A warning of a finished link change. Only the fixed sentences pass; anything else is dropped. */
+export function changeLinkWarningMessage(warning: string): string | null {
+  return CHANGE_LINK_WARNINGS.includes(warning) ? warning : null;
 }

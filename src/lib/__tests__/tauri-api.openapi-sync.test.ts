@@ -15,9 +15,11 @@ import {
   getOpenApiSyncSpecView,
   getOpenApiSyncStatus,
   grantOpenApiSyncConsent,
+  confirmOpenApiChangeLink,
   importOpenApiUrl,
   onOpenApiSyncApplied,
   onOpenApiSyncChecked,
+  previewOpenApiChangeLink,
   previewOpenApiConnect,
   resetOpenApiSync,
   restoreOpenApiSync,
@@ -241,6 +243,33 @@ describe('OpenAPI sync API', () => {
       interval: 'daily',
       digest: 'd',
       specSha256: 's',
+    });
+  });
+  it('change_link_wrappers_call_the_commands', async () => {
+    vi.mocked(invoke).mockResolvedValue({});
+    await previewOpenApiChangeLink('Orders', 'https://x/y.json');
+    expect(invoke).toHaveBeenLastCalledWith('openapi_sync_change_link_preview', {
+      collection: 'Orders',
+      link: 'https://x/y.json',
+    });
+    await previewOpenApiChangeLink('Orders', 'https://x/y.json', 'tok');
+    expect(invoke).toHaveBeenLastCalledWith('openapi_sync_change_link_preview', {
+      collection: 'Orders',
+      link: 'https://x/y.json',
+      token: 'tok',
+    });
+    await confirmOpenApiChangeLink('Orders', 'https://x/y.json', undefined, 'abc');
+    expect(invoke).toHaveBeenLastCalledWith('openapi_sync_change_link_confirm', {
+      collection: 'Orders',
+      link: 'https://x/y.json',
+      specSha256: 'abc',
+    });
+    await confirmOpenApiChangeLink('Orders', 'https://x/y.json', 'tok', 'abc');
+    expect(invoke).toHaveBeenLastCalledWith('openapi_sync_change_link_confirm', {
+      collection: 'Orders',
+      link: 'https://x/y.json',
+      token: 'tok',
+      specSha256: 'abc',
     });
   });
 });

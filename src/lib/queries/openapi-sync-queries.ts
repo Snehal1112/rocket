@@ -5,6 +5,7 @@ import {
   type ConnectConfirmArgs,
   checkOpenApiSyncNow,
   clearOpenApiSyncToken,
+  confirmOpenApiChangeLink,
   confirmOpenApiConnect,
   discardOpenApiSyncBackup,
   disconnectOpenApiSync,
@@ -20,6 +21,7 @@ import {
   type OpenApiSyncInterval,
   onOpenApiSyncApplied,
   onOpenApiSyncChecked,
+  previewOpenApiChangeLink,
   previewOpenApiConnect,
   resetOpenApiSync,
   restoreOpenApiSync,
@@ -266,6 +268,29 @@ export function useConfirmOpenApiConnect(collection: string) {
     mutationFn: (args: Omit<ConnectConfirmArgs, 'collection'>) =>
       confirmOpenApiConnect({ ...args, collection }),
     onSettled: () => refreshAfterReset(queryClient, collection),
+  });
+}
+
+/** Fetches the new link and counts how it lines up. Writes nothing, so nothing is refreshed. */
+export function usePreviewChangeLink(collection: string) {
+  return useMutation({
+    networkMode: 'always',
+    // The token only lives in the call, so the cache drops it as soon as it settles.
+    gcTime: 0,
+    mutationFn: (args: { link: string; token?: string }) =>
+      previewOpenApiChangeLink(collection, args.link, args.token),
+  });
+}
+
+/** Moves the collection to the new link. The link, a waiting spec and the badge all change. */
+export function useConfirmChangeLink(collection: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    networkMode: 'always',
+    gcTime: 0,
+    mutationFn: (args: { link: string; token?: string; specSha256: string }) =>
+      confirmOpenApiChangeLink(collection, args.link, args.token, args.specSha256),
+    onSettled: () => invalidateSync(queryClient, collection),
   });
 }
 

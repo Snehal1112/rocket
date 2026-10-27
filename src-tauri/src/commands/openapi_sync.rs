@@ -7,9 +7,10 @@ use std::sync::{Arc, Mutex};
 use std::collections::BTreeMap;
 
 use rocket_app::{
-    safe_message, BackupRow, BadgeView, ChangeRow, ChangesView, CheckOutcome, ConnectOperationRow,
-    ConnectOutcome, ConnectPreview, ConnectRequestRow, ConnectRow, OpenApiSyncService,
-    OverviewView, PlanView, ResetReport, SpecView, SpecViewState, SyncStatusView,
+    safe_message, BackupRow, BadgeView, ChangeLinkOutcome, ChangeLinkPreview, ChangeRow,
+    ChangesView, CheckOutcome, ConnectOperationRow, ConnectOutcome, ConnectPreview,
+    ConnectRequestRow, ConnectRow, OpenApiSyncService, OverviewView, PlanView, ResetReport,
+    SpecView, SpecViewState, SyncStatusView,
 };
 use rocket_collection::openapi_source::{SyncInterval, SyncStatus};
 use rocket_collection::ConsentState;
@@ -708,6 +709,112 @@ pub async fn openapi_connect_preview(
     .map_err(|_| TASK_FAILED.to_string())?
     .map(connect_preview_dto)
     .map_err(connect_error)
+}
+
+/// What moving to another link would do, for the user to confirm.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeLinkPreviewDto {
+    pub spec_sha256: String,
+    pub title: String,
+    pub version: Option<String>,
+    pub matched: usize,
+    pub added: usize,
+    pub removed: usize,
+    pub same_spec: bool,
+}
+
+fn change_link_preview_dto(p: ChangeLinkPreview) -> ChangeLinkPreviewDto {
+    ChangeLinkPreviewDto {
+        spec_sha256: p.spec_sha256,
+        title: p.title,
+        version: p.version,
+        matched: p.matched,
+        added: p.added,
+        removed: p.removed,
+        same_spec: p.same_spec,
+    }
+}
+
+/// What a move to another link did. The warnings are fixed sentences.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeLinkOutcomeDto {
+    pub pending: bool,
+    pub token_kept: bool,
+    pub warnings: Vec<String>,
+}
+
+fn change_link_outcome_dto(o: ChangeLinkOutcome) -> ChangeLinkOutcomeDto {
+    ChangeLinkOutcomeDto {
+        pending: o.pending,
+        token_kept: o.token_kept,
+        warnings: o.warnings,
+    }
+}
+
+/// A fixed sentence for a failed link change. The service builds its input and conflict
+/// messages from fixed text, so those pass through. Anything else becomes a general sentence.
+fn change_link_error(error: DomainError) -> String {
+    match error {
+        DomainError::InvalidInput(m) | DomainError::Conflict(m) => m,
+        DomainError::NotFound(_) => "The collection was not found.".to_string(),
+        _ => "Changing the link failed. Nothing was changed.".to_string(),
+    }
+}
+
+/// Fetches the spec at the new link and counts how it lines up with the connected operations.
+/// Writes nothing, grants no approval and stores no token.
+#[tauri::command]
+pub async fn openapi_sync_change_link_preview(
+    collection: String,
+    link: String,
+    token: Option<String>,
+    workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
+    fetcher: State<'_, Arc<dyn SpecFetcher>>,
+) -> Result<ChangeLinkPreviewDto, String> {
+    let workspace_path = Arc::clone(workspace_path.inner());
+    let fetcher = Arc::clone(fetcher.inner());
+    tokio::task::spawn_blocking(move || {
+        let service = make_sync_service(workspace_path, fetcher);
+        tauri::async_runtime::block_on(service.change_link_preview(
+            &collection,
+            &link,
+            token.as_deref(),
+        ))
+    })
+    .await
+    .map_err(|_| TASK_FAILED.to_string())?
+    .map(change_link_preview_dto)
+    .map_err(change_link_error)
+}
+
+/// Moves the collection to the new link in one transaction. Approval and the token follow the
+/// files and only add warnings when they fail.
+#[tauri::command]
+pub async fn openapi_sync_change_link_confirm(
+    collection: String,
+    link: String,
+    token: Option<String>,
+    spec_sha256: String,
+    workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
+    fetcher: State<'_, Arc<dyn SpecFetcher>>,
+) -> Result<ChangeLinkOutcomeDto, String> {
+    let workspace_path = Arc::clone(workspace_path.inner());
+    let fetcher = Arc::clone(fetcher.inner());
+    tokio::task::spawn_blocking(move || {
+        let service = make_sync_service(workspace_path, fetcher);
+        tauri::async_runtime::block_on(service.change_link_confirm(
+            &collection,
+            &link,
+            token.as_deref(),
+            &spec_sha256,
+        ))
+    })
+    .await
+    .map_err(|_| TASK_FAILED.to_string())?
+    .map(change_link_outcome_dto)
+    .map_err(change_link_error)
 }
 
 /// A request the user reset, with the version they can restore.
@@ -1948,6 +2055,52 @@ mod tests {
         .expect("json");
         assert_eq!(json["linked"], 2);
         assert_eq!(json["warnings"][0], "The token was not saved.");
+    }
+
+    #[test]
+    fn change_link_preview_dto_uses_camel_case_keys() {
+        let json = serde_json::to_value(change_link_preview_dto(ChangeLinkPreview {
+            spec_sha256: "abc".to_string(),
+            title: "Pets".to_string(),
+            version: Some("2".to_string()),
+            matched: 3,
+            added: 1,
+            removed: 2,
+            same_spec: false,
+        }))
+        .expect("json");
+        assert_eq!(json["specSha256"], "abc");
+        assert_eq!(json["sameSpec"], false);
+        assert_eq!(json["matched"], 3);
+        assert_eq!(json["removed"], 2);
+    }
+
+    #[test]
+    fn change_link_outcome_dto_uses_camel_case_keys() {
+        let json = serde_json::to_value(change_link_outcome_dto(ChangeLinkOutcome {
+            pending: true,
+            token_kept: false,
+            warnings: vec!["The token was not saved.".to_string()],
+        }))
+        .expect("json");
+        assert_eq!(json["pending"], true);
+        assert_eq!(json["tokenKept"], false);
+        assert_eq!(json["warnings"][0], "The token was not saved.");
+    }
+
+    #[test]
+    fn change_link_errors_pass_only_fixed_sentences() {
+        assert_eq!(
+            change_link_error(DomainError::Conflict("This is already the spec link.".to_string())),
+            "This is already the spec link."
+        );
+        let other = change_link_error(DomainError::Internal("cannot write /home/me/secret".to_string()));
+        assert_eq!(other, "Changing the link failed. Nothing was changed.");
+        assert!(!other.contains("secret"));
+        assert_eq!(
+            change_link_error(DomainError::NotFound("x".to_string())),
+            "The collection was not found."
+        );
     }
 
     #[test]

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  changeLinkWarningMessage,
   connectWarningMessage,
   GENERIC_SYNC_ERROR,
   isStaleConnect,
@@ -110,5 +111,31 @@ describe('syncErrorMessage', () => {
   it('maps_the_missing_pending_copy_sentence', () => {
     const text = 'A newer spec is waiting but its copy is missing. Run Check now.';
     expect(syncErrorMessage(`Invalid input: ${text}`)).toBe(text);
+  });
+  it('maps_the_change_link_sentences', () => {
+    expect(syncErrorMessage('This is already the spec link.')).toBe(
+      'This is already the spec link.',
+    );
+    expect(syncErrorMessage('This collection is not connected to an OpenAPI spec.')).toBe(
+      'This collection is not connected to an OpenAPI spec.',
+    );
+    expect(syncErrorMessage('Changing the link failed. Nothing was changed. /home/u/x')).toBe(
+      'Changing the link failed. Nothing was changed.',
+    );
+    expect(
+      syncErrorMessage('An earlier sync is not finished. Try again after Rocket restarts.'),
+    ).toBe('An earlier sync is not finished. Try again after Rocket restarts.');
+    expect(isStaleConnect('The spec changed. Run the preview again.')).toBe(true);
+  });
+
+  it('passes_only_the_fixed_change_link_warnings', () => {
+    expect(changeLinkWarningMessage('The token was not saved.')).toBe('The token was not saved.');
+    expect(changeLinkWarningMessage('The old token could not be removed.')).toBe(
+      'The old token could not be removed.',
+    );
+    expect(changeLinkWarningMessage('The new link needs your approval before checks run.')).toBe(
+      'The new link needs your approval before checks run.',
+    );
+    expect(changeLinkWarningMessage('keychain said no at /home/u')).toBeNull();
   });
 });

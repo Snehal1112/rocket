@@ -9,6 +9,7 @@ import {
   openApiSyncKeys,
   useApplySync,
   useCheckNow,
+  useConfirmChangeLink,
   useConfirmOpenApiConnect,
   useClearToken,
   useDiscardOpenApiBackup,
@@ -23,6 +24,7 @@ import {
   useOpenApiSyncOverview,
   useOpenApiSyncSpecView,
   useOpenApiSyncPlan,
+  usePreviewChangeLink,
   usePreviewOpenApiConnect,
   useOpenApiSyncStatus,
   useResetOpenApiSync,
@@ -55,6 +57,8 @@ vi.mock('@/lib/tauri-api', async () => {
     restoreOpenApiSync: vi.fn(),
     discardOpenApiSyncBackup: vi.fn(),
     applyOpenApiSync: vi.fn(),
+    previewOpenApiChangeLink: vi.fn(),
+    confirmOpenApiChangeLink: vi.fn(),
     previewOpenApiConnect: vi.fn(),
     confirmOpenApiConnect: vi.fn(),
   };
@@ -686,5 +690,40 @@ describe('openapi sync queries', () => {
     });
     expect(tauriApi.previewOpenApiConnect).toHaveBeenCalledWith('A', 'https://x/y.json', 'tok');
     expect(spy).not.toHaveBeenCalled();
+  });
+  it('the_change_link_preview_hook_passes_the_link_and_token_and_refreshes_nothing', async () => {
+    vi.mocked(tauriApi.previewOpenApiChangeLink).mockResolvedValue({} as never);
+    const spy = vi.spyOn(client, 'invalidateQueries');
+    const { result } = renderHook(() => usePreviewChangeLink('A'), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ link: 'https://x/y.json', token: 'tok' });
+    });
+    expect(tauriApi.previewOpenApiChangeLink).toHaveBeenCalledWith('A', 'https://x/y.json', 'tok');
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('confirm_change_link_refreshes_the_sync_queries', async () => {
+    vi.mocked(tauriApi.confirmOpenApiChangeLink).mockResolvedValue({
+      pending: true,
+      tokenKept: false,
+      warnings: [],
+    });
+    const spy = vi.spyOn(client, 'invalidateQueries');
+    const { result } = renderHook(() => useConfirmChangeLink('A'), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ link: 'https://x/y.json', specSha256: 's' });
+    });
+    expect(tauriApi.confirmOpenApiChangeLink).toHaveBeenCalledWith(
+      'A',
+      'https://x/y.json',
+      undefined,
+      's',
+    );
+    const keys = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(keys).toContainEqual(openApiSyncKeys.statusAll('A'));
+    expect(keys).toContainEqual(openApiSyncKeys.overview('A'));
+    expect(keys).toContainEqual(openApiSyncKeys.specView('A'));
+    expect(keys).toContainEqual(openApiSyncKeys.planAll('A'));
+    expect(keys).toContainEqual(openApiSyncKeys.badges);
   });
 });

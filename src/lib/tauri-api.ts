@@ -2261,6 +2261,48 @@ export const confirmOpenApiConnect = ({ token, interval, ...args }: ConnectConfi
     ...(interval ? { interval } : {}),
   });
 
+/** What moving to another spec link would do. Nothing is written by the preview. */
+export interface OpenApiChangeLinkPreview {
+  specSha256: string;
+  title: string;
+  version: string | null;
+  /** Linked operations the new spec still has. */
+  matched: number;
+  /** Operations only the new spec has. */
+  added: number;
+  /** Linked operations the new spec no longer has. */
+  removed: number;
+  /** The new spec is the one already applied. */
+  sameSpec: boolean;
+}
+
+export interface OpenApiChangeLinkOutcome {
+  /** A differing spec is waiting in Spec updates. */
+  pending: boolean;
+  tokenKept: boolean;
+  warnings: string[];
+}
+
+export const previewOpenApiChangeLink = (collection: string, link: string, token?: string) =>
+  invoke<OpenApiChangeLinkPreview>('openapi_sync_change_link_preview', {
+    collection,
+    link,
+    ...(token ? { token } : {}),
+  });
+
+export const confirmOpenApiChangeLink = (
+  collection: string,
+  link: string,
+  token: string | undefined,
+  specSha256: string,
+) =>
+  invoke<OpenApiChangeLinkOutcome>('openapi_sync_change_link_confirm', {
+    collection,
+    link,
+    ...(token ? { token } : {}),
+    specSha256,
+  });
+
 export const getOpenApiSyncBadges = () => invoke<OpenApiBadge[]>('openapi_sync_badges');
 
 export const getOpenApiSyncPlan = (collection: string, links: Array<[string, string]> = []) =>
