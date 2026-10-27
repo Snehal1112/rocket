@@ -2316,7 +2316,9 @@ mod tests {
     fn unskip_errors_pass_only_fixed_sentences() {
         let busy = unskip_error(DomainError::Conflict("An apply is running.".to_string()));
         assert_eq!(busy, "A sync is running. Try again when it is done.");
-        let other = unskip_error(DomainError::Internal("cannot write /home/me/secret".to_string()));
+        let other = unskip_error(DomainError::Internal(
+            "cannot write /home/me/secret".to_string(),
+        ));
         assert_eq!(other, "Taking the skip back failed. Nothing was changed.");
         assert!(!other.contains("secret"));
     }
