@@ -92,6 +92,7 @@ export function renameHint(item: OpenApiSyncItem): string | null {
 export function fieldLabel(field: string): string {
   if (field.startsWith('header:')) return `Header ${field.slice('header:'.length)}`;
   if (field.startsWith('body:')) return `Body ${field.slice('body:'.length)}`;
+  if (field === 'url') return 'URL';
   return field.charAt(0).toUpperCase() + field.slice(1);
 }
 
@@ -128,7 +129,10 @@ export function isGithubLocation(location: string): boolean {
 export function splitLocation(location: string): { short: string; full: string | null } {
   try {
     const url = new URL(location);
-    if ((url.protocol === 'https:' || url.protocol === 'http:') && (url.search || url.hash)) {
+    if (
+      (url.protocol === 'https:' || url.protocol === 'http:') &&
+      (url.search || url.hash || url.username || url.password)
+    ) {
       return { short: `${url.host}${url.pathname}`, full: location };
     }
   } catch {

@@ -181,6 +181,47 @@ describe('OpenApiSyncTab', () => {
     );
   });
 
+  it('a_chosen_tab_survives_the_plan_arriving', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(
+      makeStatus({ hasPending: false, lastStatus: { state: 'unchanged' } }),
+    );
+    renderWithQuery(<OpenApiSyncTab collection='c' />);
+    await userEvent.setup().click(await screen.findByRole('tab', { name: 'Your changes' }));
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
+    vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(
+      makePlan({ items: [changedItem, newItem] }),
+    );
+    const handler = vi.mocked(tauriApi.onOpenApiSyncChecked).mock.calls[0]?.[0];
+    act(() => handler?.({ collection: 'c' } as never));
+    await screen.findByRole('tab', { name: 'Spec updates (2)' });
+    expect(screen.getByRole('tab', { name: 'Your changes' })).toHaveAttribute(
+      'data-state',
+      'active',
+    );
+  });
+
+  it('a_later_pending_copy_keeps_the_overview_and_its_dialog_mounted', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(
+      makeStatus({ hasPending: false, lastStatus: { state: 'unchanged' } }),
+    );
+    const user = userEvent.setup();
+    renderWithQuery(<OpenApiSyncTab collection='c' />);
+    await user.click(await screen.findByRole('button', { name: 'Edit connection settings' }));
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
+    vi.mocked(tauriApi.getOpenApiSyncPlan).mockReturnValue(new Promise(() => undefined));
+    // A check finds a spec: the status query is refetched.
+    const handler = vi.mocked(tauriApi.onOpenApiSyncChecked).mock.calls[0]?.[0];
+    expect(handler).toBeDefined();
+    act(() => handler?.({ collection: 'c' } as never));
+    await waitFor(() =>
+      expect(vi.mocked(tauriApi.getOpenApiSyncPlan).mock.calls.length).toBeGreaterThan(0),
+    );
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Overview', hidden: true })).toHaveAttribute('data-state', 'active');
+    expect(screen.queryByText('Loading the plan...')).toBeNull();
+  });
+
   it('after_disconnect_the_tab_shows_that_nothing_is_connected', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(null);
     renderWithQuery(<OpenApiSyncTab collection='nc1' />);
@@ -416,7 +457,7 @@ describe('OpenApiSyncTab actions', () => {
     await screen.findByText('Add pet');
     await user.click(screen.getByText('Add pet'));
     await user.click(
-      within(screen.getByRole('radiogroup', { name: 'Url' })).getByRole('radio', {
+      within(screen.getByRole('radiogroup', { name: 'URL' })).getByRole('radio', {
         name: 'Take spec',
       }),
     );

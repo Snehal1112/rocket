@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   defaultChoice,
   fieldLabel,
+  splitLocation,
   filterItems,
   filterVariables,
   firstEntryId,
@@ -34,9 +35,19 @@ describe('openApiSyncView', () => {
     expect(renameHint(changedItem)).toBeNull();
   });
 
+  it('shortens_a_link_with_credentials', () => {
+    expect(splitLocation('https://user:secret@example.com/openapi.json')).toEqual({
+      short: 'example.com/openapi.json',
+      full: 'https://user:secret@example.com/openapi.json',
+    });
+    expect(splitLocation('https://example.com/openapi.json').full).toBeNull();
+  });
+
   it('maps field names to display names', () => {
     expect(fieldLabel('header:Accept')).toBe('Header Accept');
     expect(fieldLabel('body:$.a.b')).toBe('Body $.a.b');
+    expect(fieldLabel('url')).toBe('URL');
+    expect(fieldLabel('name')).toBe('Name');
   });
 
   it('selects the first entry of the first non-empty group', () => {

@@ -75,7 +75,7 @@ describe('OpenApiSyncDetail', () => {
     expect(within(accept).getByRole('radio', { name: 'Take spec' })).toBeChecked();
     const body = screen.getByRole('radiogroup', { name: 'Body $.a.b' });
     expect(within(body).getByRole('radio', { name: 'Keep yours' })).toBeChecked();
-    const url = screen.getByRole('radiogroup', { name: 'Url' });
+    const url = screen.getByRole('radiogroup', { name: 'URL' });
     expect(within(url).getByRole('radio', { name: 'Keep yours' })).toBeChecked();
   });
 
@@ -85,7 +85,7 @@ describe('OpenApiSyncDetail', () => {
       choices: new Map([['POST /pets', { url: 'spec' as const }]]),
     });
     render(<OpenApiSyncDetail {...p} />);
-    const url = screen.getByRole('radiogroup', { name: 'Url' });
+    const url = screen.getByRole('radiogroup', { name: 'URL' });
     expect(within(url).getByRole('radio', { name: 'Take spec' })).toBeChecked();
     await userEvent.setup().click(within(url).getByRole('radio', { name: 'Keep yours' }));
     expect(p.onChoose).toHaveBeenCalledWith('POST /pets', 'url', 'yours');

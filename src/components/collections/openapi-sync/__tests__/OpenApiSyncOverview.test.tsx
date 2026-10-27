@@ -86,6 +86,44 @@ describe('OpenApiSyncOverview', () => {
     await waitFor(() => expect(screen.getByRole('dialog')).toBeInTheDocument());
   });
 
+  it('hides_credentials_until_show_full_link', async () => {
+    show({}, makeStatus({ location: 'https://user:secret@example.com/openapi.json' }));
+    await screen.findByText('Endpoints');
+    expect(screen.queryByText(/secret/)).toBeNull();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Show full link' }));
+    expect(screen.getByText(/secret/)).toBeInTheDocument();
+  });
+
+  it('last_checked_never_checked', async () => {
+    show({}, makeStatus({ lastCheckedAt: null }));
+    await screen.findByText('Endpoints');
+    expect(screen.getByText('Not checked yet')).toBeInTheDocument();
+  });
+
+  it('last_checked_with_no_problems', async () => {
+    show({}, makeStatus({ lastStatus: { state: 'unchanged' } }));
+    expect(await screen.findByText('2h ago. No problems.')).toBeInTheDocument();
+  });
+
+  it('last_checked_with_a_failure_message', async () => {
+    show(
+      {},
+      makeStatus({
+        lastStatus: { state: 'failed' },
+        lastMessage: 'The server could not be reached.',
+      }),
+    );
+    expect(await screen.findByText('2h ago. The server could not be reached.')).toBeInTheDocument();
+  });
+
+  it('says_one_request_updated_in_the_singular', async () => {
+    show({
+      lastSyncedAt: new Date(Date.now() - 3 * 3_600_000).toISOString(),
+      lastSyncedUpdated: 1,
+    });
+    expect(await screen.findByText(/1 request updated/)).toBeInTheDocument();
+  });
+
   it('shows_never_when_nothing_was_synced', async () => {
     show();
     await screen.findByText('Endpoints');

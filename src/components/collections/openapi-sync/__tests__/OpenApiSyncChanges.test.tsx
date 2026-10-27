@@ -69,7 +69,7 @@ describe('OpenApiSyncChanges', () => {
 
   it('modified_rows_name_the_changed_fields', async () => {
     show(changes({ modified: [row({ fields: ['url', 'header:Accept'] })] }));
-    expect(await screen.findByText('Url')).toBeInTheDocument();
+    expect(await screen.findByText('URL')).toBeInTheDocument();
     expect(screen.getByText('Header Accept')).toBeInTheDocument();
   });
 
@@ -80,7 +80,7 @@ describe('OpenApiSyncChanges', () => {
         'These differences are approximate because the sync data is from an older version.',
       ),
     ).toBeInTheDocument();
-    expect(screen.queryByText('Url')).toBeNull();
+    expect(screen.queryByText('URL')).toBeNull();
   });
 
   it('shows_the_empty_state', async () => {

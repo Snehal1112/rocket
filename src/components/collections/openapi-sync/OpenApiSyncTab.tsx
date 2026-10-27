@@ -52,6 +52,7 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
   const [busyNotice, setBusyNotice] = useState(false);
   const [checking, setChecking] = useState(false);
   const [tab, setTab] = useState<string | null>(null);
+  const [settled, setSettled] = useState(false);
   const queryClient = useQueryClient();
   const changes = useOpenApiSyncChanges(collection);
   const apply = useApplySync(collection);
@@ -271,7 +272,12 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
   const waiting = planData?.pending ? planData.items.length + planData.variableChanges.length : 0;
   const showUpdates = waiting > 0 || (planEnabled && plan.isError);
   // No default is chosen while the plan loads, so the tab does not jump when it arrives.
-  const choosing = tab === null && planEnabled && plan.isPending;
+  const choosing = tab === null && !settled && planEnabled && plan.isPending;
+  // The default is chosen once, so a later pending copy never switches or unmounts the tabs.
+  if (tab === null && !settled && !choosing) {
+    setSettled(true);
+    setTab(showUpdates ? 'updates' : 'overview');
+  }
   const wanted = tab ?? (showUpdates ? 'updates' : 'overview');
   const active = wanted === 'updates' && !showUpdates ? 'overview' : wanted;
 

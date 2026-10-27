@@ -89,9 +89,11 @@ export function OpenApiSyncOverview({ collection, status, onReview }: OpenApiSyn
         </Fact>
         <Fact label='Spec version'>{o.specVersion ?? '–'}</Fact>
         <Fact label='Last checked'>
-          {status.lastCheckedAt ? formatRelativeTime(status.lastCheckedAt) : 'Not checked yet'}
-          {status.lastCheckedAt &&
-            (failed ? `, ${status.lastMessage ?? 'the last check failed'}` : ', no problems')}
+          {status.lastCheckedAt
+            ? `${formatRelativeTime(status.lastCheckedAt)}. ${
+                failed ? (status.lastMessage ?? 'The last check failed.') : 'No problems.'
+              }`
+            : 'Not checked yet'}
         </Fact>
         <Fact label='Automatic checks'>
           <span>{intervalLabel(status.interval)}</span>
@@ -106,7 +108,7 @@ export function OpenApiSyncOverview({ collection, status, onReview }: OpenApiSyn
         </Fact>
         <Fact label='Last synced'>
           {o.lastSyncedAt
-            ? `${formatRelativeTime(o.lastSyncedAt)}, ${o.lastSyncedUpdated} requests updated`
+            ? `${formatRelativeTime(o.lastSyncedAt)}, ${o.lastSyncedUpdated} ${o.lastSyncedUpdated === 1 ? 'request' : 'requests'} updated`
             : 'Never'}
         </Fact>
       </dl>

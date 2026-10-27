@@ -19,6 +19,18 @@ describe('OpenApiSyncHeader', () => {
     expect(screen.getByText('Check interval: Every day')).toBeInTheDocument();
   });
 
+  it('hides_credentials_of_the_link', () => {
+    renderWithQuery(
+      <OpenApiSyncHeader
+        collection='c'
+        status={makeStatus({ location: 'https://user:secret@example.com/openapi.json' })}
+        waiting={0}
+      />,
+    );
+    expect(screen.queryByText(/secret/)).toBeNull();
+    expect(screen.getByText('example.com/openapi.json')).toBeInTheDocument();
+  });
+
   it('has a Check now button', () => {
     renderWithQuery(<OpenApiSyncHeader collection='c' status={makeStatus()} waiting={0} />);
     expect(screen.getByRole('button', { name: 'Check now' })).toBeEnabled();
