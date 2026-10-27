@@ -7,7 +7,7 @@ import type { OpenApiBackupRow, OpenApiChangeRow, OpenApiChanges } from '@/lib/t
 import { renderWithQuery } from '@/test/trust-fixtures';
 import { OpenApiSyncChanges } from '../OpenApiSyncChanges';
 
-vi.mock('sonner', () => ({ toast: { success: vi.fn() } }));
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), info: vi.fn() } }));
 
 vi.mock('@/lib/tauri-api', async () => {
   const actual = await vi.importActual<typeof tauriApi>('@/lib/tauri-api');
@@ -284,5 +284,43 @@ describe('OpenApiSyncChanges', () => {
     await waitFor(() =>
       expect(tauriApi.discardOpenApiSyncBackup).toHaveBeenCalledWith('c', 'GET /pets'),
     );
+  });
+
+  it('a_reset_tells_how_many_requests_were_reset', async () => {
+    vi.mocked(tauriApi.resetOpenApiSync).mockResolvedValue({ reset: ['GET /pets'], skipped: [] });
+    show(changes({ modified: [row()] }));
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Reset to spec' }));
+    await user.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Reset' }));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Reset 1 request.'));
+    expect(toast.info).not.toHaveBeenCalled();
+  });
+
+  it('a_reset_that_skips_requests_says_so', async () => {
+    vi.mocked(tauriApi.resetOpenApiSync).mockResolvedValue({
+      reset: [],
+      skipped: ['GET /pets', 'GET /b'],
+    });
+    show(changes({ modified: [row(), row({ uid: 'u2', key: 'GET /b' })] }));
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Reset all to spec (2)' }));
+    await user.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Reset' }));
+    await waitFor(() =>
+      expect(toast.info).toHaveBeenCalledWith(
+        '2 requests were already like the spec or could not be reset.',
+      ),
+    );
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it('a_damaged_backups_file_gets_its_own_sentence', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncChanges).mockRejectedValue(
+      'Internal error: openapi-reset-backups.json cannot be parsed: expected value at line 1',
+    );
+    renderWithQuery(<OpenApiSyncChanges collection='c' />);
+    expect(
+      await screen.findByText(/The reset backups file is damaged/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/expected value/)).toBeNull();
   });
 });

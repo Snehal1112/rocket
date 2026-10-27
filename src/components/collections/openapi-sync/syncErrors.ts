@@ -52,6 +52,10 @@ const KNOWN: Array<[string, string]> = [
   ],
   ['There is no backup for this request.', 'There is no backup for this request.'],
   ['Reset failed. Nothing was changed.', 'Reset failed. Nothing was changed.'],
+  [
+    'openapi-reset-backups.json',
+    'The reset backups file is damaged. Remove .rocket/openapi-reset-backups.json from the collection folder, then try again.',
+  ],
 ];
 
 function rawText(error: unknown): string | null {

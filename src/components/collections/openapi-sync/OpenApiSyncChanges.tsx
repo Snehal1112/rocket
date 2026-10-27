@@ -264,7 +264,22 @@ export function OpenApiSyncChanges({ collection }: { collection: string }) {
         body={pending?.body ?? ''}
         confirmLabel='Reset'
         onConfirm={() => {
-          if (pending) reset.mutate(pending.keys);
+          if (pending) {
+            reset.mutate(pending.keys, {
+              onSuccess: ({ reset: done, skipped }) => {
+                if (done.length > 0) {
+                  toast.success(
+                    `Reset ${done.length} ${done.length === 1 ? 'request' : 'requests'}.`,
+                  );
+                }
+                if (skipped.length > 0) {
+                  toast.info(
+                    `${skipped.length} ${skipped.length === 1 ? 'request was' : 'requests were'} already like the spec or could not be reset.`,
+                  );
+                }
+              },
+            });
+          }
           setPending(null);
         }}
       />
