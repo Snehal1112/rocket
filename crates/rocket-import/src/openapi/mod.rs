@@ -19,7 +19,9 @@ pub use bundle::{
     refs_unchanged_labeled, Bundle, RemoteRefState,
 };
 pub use source_url::{fetch_target, parse_spec_url, FetchTarget};
-pub use entry::{check_spec_text, fetch_failure_message, OpenApiImportResult};
+pub use entry::{
+    check_spec_text, fetch_failure_message, fetch_spec_bundle, FetchedSpec, OpenApiImportResult,
+};
 pub(crate) mod sync;
 pub use sync::{
     build_apply, item_digest, plan_with_links, AppliedItem, AppliedKind, ApplyInputs, ApplyOutput, ApplyReport,

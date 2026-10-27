@@ -59,6 +59,11 @@ impl ParsedSpec {
         Some(self.doc.version.as_str()).filter(|v| !v.is_empty())
     }
 
+    /// The server URLs of the spec in document order. Server variables use their defaults.
+    pub fn servers(&self) -> &[String] {
+        &self.doc.servers
+    }
+
     /// The `info.title` text.
     pub fn title(&self) -> &str {
         &self.doc.title
@@ -192,6 +197,15 @@ mod tests {
         let views = ParsedSpec::parse(yaml).expect("parses").operation_views();
         assert_eq!(views[0].responses[0].status, "200");
         assert_eq!(views[0].responses[0].description, "fine");
+    }
+
+    #[test]
+    fn servers_lists_the_server_urls() {
+        let text = r#"{"openapi":"3.0.3","info":{"title":"T","version":"1"},
+            "servers":[{"url":"https://api.example.com/v1"}],
+            "paths":{"/a":{"get":{"responses":{"200":{"description":"ok"}}}}}}"#;
+        let spec = ParsedSpec::parse(text).expect("parses");
+        assert_eq!(spec.servers(), ["https://api.example.com/v1".to_string()]);
     }
 
     #[test]

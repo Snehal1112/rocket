@@ -7,7 +7,8 @@ use std::sync::{Arc, Mutex};
 use std::collections::BTreeMap;
 
 use rocket_app::{
-    safe_message, BackupRow, BadgeView, ChangeRow, ChangesView, CheckOutcome, OpenApiSyncService,
+    safe_message, BackupRow, BadgeView, ChangeRow, ChangesView, CheckOutcome, ConnectOperationRow,
+    ConnectPreview, ConnectRequestRow, OpenApiSyncService,
     OverviewView, PlanView, ResetReport, SpecView, SpecViewState, SyncStatusView,
 };
 use rocket_collection::openapi_source::{SyncInterval, SyncStatus};
@@ -483,6 +484,133 @@ pub struct ChangeRowDto {
     pub url: String,
     pub request_path: Option<String>,
     pub fields: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectRequestDto {
+    pub uid: String,
+    pub request_path: String,
+    pub method: String,
+    pub url: String,
+    pub name: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectOperationDto {
+    pub key: String,
+    pub method: String,
+    pub path: String,
+    pub summary: Option<String>,
+    pub tag: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectPairDto {
+    pub request: ConnectRequestDto,
+    pub operation: ConnectOperationDto,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectAmbiguousDto {
+    pub requests: Vec<ConnectRequestDto>,
+    pub operations: Vec<ConnectOperationDto>,
+}
+
+/// What a spec link would connect to, before anything is written.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectPreviewDto {
+    pub spec_title: String,
+    pub spec_version: Option<String>,
+    pub digest: String,
+    pub matched: Vec<ConnectPairDto>,
+    pub suggested: Vec<ConnectPairDto>,
+    pub in_spec_only: Vec<ConnectOperationDto>,
+    pub yours_only: Vec<ConnectRequestDto>,
+    pub ambiguous: Vec<ConnectAmbiguousDto>,
+}
+
+fn connect_request_dto(r: ConnectRequestRow) -> ConnectRequestDto {
+    ConnectRequestDto {
+        uid: r.uid,
+        request_path: r.request_path,
+        method: r.method,
+        url: r.url,
+        name: r.name,
+    }
+}
+
+fn connect_operation_dto(o: ConnectOperationRow) -> ConnectOperationDto {
+    ConnectOperationDto {
+        key: o.key,
+        method: o.method,
+        path: o.path,
+        summary: o.summary,
+        tag: o.tag,
+    }
+}
+
+fn connect_pair_dto(p: rocket_app::ConnectPair) -> ConnectPairDto {
+    ConnectPairDto {
+        request: connect_request_dto(p.request),
+        operation: connect_operation_dto(p.operation),
+    }
+}
+
+fn connect_preview_dto(p: ConnectPreview) -> ConnectPreviewDto {
+    ConnectPreviewDto {
+        spec_title: p.spec_title,
+        spec_version: p.spec_version,
+        digest: p.digest,
+        matched: p.matched.into_iter().map(connect_pair_dto).collect(),
+        suggested: p.suggested.into_iter().map(connect_pair_dto).collect(),
+        in_spec_only: p.in_spec_only.into_iter().map(connect_operation_dto).collect(),
+        yours_only: p.yours_only.into_iter().map(connect_request_dto).collect(),
+        ambiguous: p
+            .ambiguous
+            .into_iter()
+            .map(|g| ConnectAmbiguousDto {
+                requests: g.requests.into_iter().map(connect_request_dto).collect(),
+                operations: g.operations.into_iter().map(connect_operation_dto).collect(),
+            })
+            .collect(),
+    }
+}
+
+/// A fixed sentence for a failed connect. The service builds its input and conflict messages
+/// from fixed text, so those pass through. Anything else becomes a general sentence.
+fn connect_error(error: DomainError) -> String {
+    match error {
+        DomainError::InvalidInput(m) | DomainError::Conflict(m) => m,
+        DomainError::NotFound(_) => "The collection was not found.".to_string(),
+        _ => "Connecting failed. Nothing was changed.".to_string(),
+    }
+}
+
+/// Fetches the spec at the link the user typed and matches it to the requests of a collection
+/// without a source. Writes nothing, grants no approval and stores no token.
+#[tauri::command]
+pub async fn openapi_connect_preview(
+    collection: String,
+    link: String,
+    token: Option<String>,
+    workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
+    fetcher: State<'_, Arc<dyn SpecFetcher>>,
+) -> Result<ConnectPreviewDto, String> {
+    let workspace_path = Arc::clone(workspace_path.inner());
+    let fetcher = Arc::clone(fetcher.inner());
+    tokio::task::spawn_blocking(move || {
+        let service = make_sync_service(workspace_path, fetcher);
+        tauri::async_runtime::block_on(service.preview(&collection, &link, token.as_deref()))
+    })
+    .await
+    .map_err(|_| TASK_FAILED.to_string())?
+    .map(connect_preview_dto)
+    .map_err(connect_error)
 }
 
 /// A request the user reset, with the version they can restore.
@@ -1640,6 +1768,55 @@ mod tests {
         assert_eq!(json["backups"][0]["savedAt"], "2026-10-27T10:00:00+00:00");
         assert_eq!(json["backups"][0]["requestPath"], "pets/getPet");
         assert_eq!(json["backups"][0]["fields"], json!(["url"]));
+    }
+
+    #[test]
+    fn connect_preview_dto_uses_camel_case_keys() {
+        let request = ConnectRequestRow {
+            uid: "u1".to_string(),
+            request_path: "pets/list".to_string(),
+            method: "GET".to_string(),
+            url: "{{baseUrl}}/pets".to_string(),
+            name: "List".to_string(),
+        };
+        let operation = ConnectOperationRow {
+            key: "listPets".to_string(),
+            method: "GET".to_string(),
+            path: "/pets".to_string(),
+            summary: None,
+            tag: "pets".to_string(),
+        };
+        let json = serde_json::to_value(connect_preview_dto(ConnectPreview {
+            spec_title: "Pets".to_string(),
+            spec_version: Some("1".to_string()),
+            digest: "abc".to_string(),
+            matched: vec![rocket_app::ConnectPair {
+                request: request.clone(),
+                operation: operation.clone(),
+            }],
+            suggested: Vec::new(),
+            in_spec_only: vec![operation],
+            yours_only: vec![request],
+            ambiguous: Vec::new(),
+        }))
+        .expect("json");
+        assert_eq!(json["specTitle"], "Pets");
+        assert_eq!(json["matched"][0]["request"]["requestPath"], "pets/list");
+        assert_eq!(json["matched"][0]["operation"]["key"], "listPets");
+        assert_eq!(json["inSpecOnly"][0]["tag"], "pets");
+        assert_eq!(json["yoursOnly"][0]["uid"], "u1");
+        assert_eq!(json["ambiguous"], json!([]));
+    }
+
+    #[test]
+    fn connect_errors_are_fixed_sentences() {
+        assert_eq!(
+            connect_error(DomainError::InvalidInput("Enter the spec link.".to_string())),
+            "Enter the spec link."
+        );
+        let other = connect_error(DomainError::Internal("cannot write /home/me/secret".to_string()));
+        assert_eq!(other, "Connecting failed. Nothing was changed.");
+        assert!(!other.contains("secret"));
     }
 
     #[test]

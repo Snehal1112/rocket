@@ -59,6 +59,7 @@ pub mod load_test_service;
 pub mod mcp_read_views;
 pub mod mcp_tool_service;
 pub mod oauth2_service;
+pub mod openapi_connect;
 pub mod openapi_sync_apply;
 pub mod openapi_sync_changes;
 pub mod openapi_sync_reset;
@@ -148,6 +149,10 @@ pub use mcp_tool_service::{
 };
 pub use oauth2_service::OAuth2Service;
 pub use openapi_sync_apply::{ApplyDeps, RendererFactory};
+pub use openapi_connect::{
+    request_digest, ConnectAmbiguous, ConnectOperationRow, ConnectPair, ConnectPreview,
+    ConnectRequestRow,
+};
 pub use openapi_sync_reset::ResetReport;
 pub use openapi_sync_view::{
     BackupRow, BadgeView, ChangeRow, ChangesView, OverviewView, PlanView, SpecOpRow, SpecTagGroup, SpecView,

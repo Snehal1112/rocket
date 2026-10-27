@@ -80,7 +80,7 @@ pub struct SyncTarget {
 type Clock = Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>;
 
 pub struct OpenApiSyncService {
-    fetcher: Arc<dyn SpecFetcher>,
+    pub(crate) fetcher: Arc<dyn SpecFetcher>,
     pub(crate) sources: Box<dyn OpenApiSourceRepository>,
     secrets: Arc<dyn SecretStore>,
     clock: Clock,
@@ -1885,7 +1885,7 @@ mod tests {
                 SpecFetchFailure::Network("x".into()),
                 "network",
                 None,
-                "could not be fetched: x",
+                "The file could not be fetched.",
             ),
         ];
         for (failure, code, retry, wording) in cases {

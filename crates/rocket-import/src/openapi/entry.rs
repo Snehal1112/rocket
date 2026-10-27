@@ -3,7 +3,7 @@
 use crate::converter::openapi::CONVERTER_VERSION;
 use crate::error::{ImportError, ImportResult};
 use crate::importer::ImportService;
-use crate::openapi::{bundle_spec, fetch_target, parse_spec_url, source_record, GroupBy};
+use crate::openapi::{bundle_spec, fetch_target, parse_spec_url, source_record, Bundle, GroupBy};
 use crate::report::ImportReport;
 use rocket_collection::openapi_baseline::{
     BaselineOperation, OpenApiBaseline, OpenApiBaselineRepository, BASELINE_FILE_VERSION,
@@ -41,6 +41,8 @@ pub fn fetch_failure_message(failure: &SpecFetchFailure, token_sent: bool) -> St
              For a private GitHub repository, add an access token."
                 .to_string()
         }
+        // A network error can carry a host or path, so only a fixed sentence goes on.
+        SpecFetchFailure::Network(_) => "The file could not be fetched.".to_string(),
         other => other.to_string(),
     }
 }
@@ -102,6 +104,69 @@ fn label_from_link(link: &str) -> String {
         .to_string()
 }
 
+/// A spec fetched from a link and bundled with the files it refers to.
+pub struct FetchedSpec {
+    pub location: SpecLocation,
+    /// The link without credentials or query, safe to show.
+    pub display_url: String,
+    pub bundle: Bundle,
+    pub etag: Option<String>,
+    pub last_modified: Option<String>,
+}
+
+/// Fetches the spec behind `link` and bundles its remote references. A token is sent to GitHub
+/// links only and is never stored. Nothing is written.
+pub async fn fetch_spec_bundle(
+    fetcher: &dyn SpecFetcher,
+    link: &str,
+    token: Option<&str>,
+) -> ImportResult<FetchedSpec> {
+    let location = parse_spec_url(link)?;
+    let token = token.map(str::trim).filter(|t| !t.is_empty());
+    if token.is_some() && !matches!(location, SpecLocation::Github { .. }) {
+        return Err(ImportError::SpecUnavailable(
+            "Tokens work with GitHub links only.".to_string(),
+        ));
+    }
+    let target = fetch_target(&location, token.is_some());
+    let request = SpecFetchRequest {
+        url: target.url,
+        accept: target.accept,
+        bearer_token: token.map(str::to_string),
+        if_none_match: None,
+        if_modified_since: None,
+        max_bytes: DEFAULT_MAX_SPEC_BYTES,
+    };
+    let outcome = fetcher
+        .fetch(request)
+        .await
+        .map_err(|f| ImportError::SpecUnavailable(fetch_failure_message(&f, token.is_some())))?;
+    let (body, etag, last_modified) = match outcome {
+        SpecFetchOutcome::Fetched {
+            body,
+            etag,
+            last_modified,
+            ..
+        } => (body, etag, last_modified),
+        SpecFetchOutcome::NotModified => {
+            return Err(ImportError::SpecUnavailable(
+                "The server sent no file.".to_string(),
+            ))
+        }
+    };
+    let text = String::from_utf8(body)
+        .map_err(|_| ImportError::NotAnOpenApiSpec("the file is not text".to_string()))?;
+    let display_url = location.display_url();
+    let bundle = bundle_spec(fetcher, &text, &location, token, &[]).await?;
+    Ok(FetchedSpec {
+        location,
+        display_url,
+        bundle,
+        etag,
+        last_modified,
+    })
+}
+
 impl ImportService {
     /// Import a spec file from disk as a new collection. No source file is written, because
     /// there is no link to sync from.
@@ -154,42 +219,13 @@ impl ImportService {
         token: Option<&str>,
         workspace_id: &str,
     ) -> ImportResult<OpenApiImportResult> {
-        let location = parse_spec_url(link)?;
-        let token = token.map(str::trim).filter(|t| !t.is_empty());
-        if token.is_some() && !matches!(location, SpecLocation::Github { .. }) {
-            return Err(ImportError::SpecUnavailable(
-                "Tokens work with GitHub links only.".to_string(),
-            ));
-        }
-        let target = fetch_target(&location, token.is_some());
-        let request = SpecFetchRequest {
-            url: target.url,
-            accept: target.accept,
-            bearer_token: token.map(str::to_string),
-            if_none_match: None,
-            if_modified_since: None,
-            max_bytes: DEFAULT_MAX_SPEC_BYTES,
-        };
-        let outcome = fetcher.fetch(request).await.map_err(|f| {
-            ImportError::SpecUnavailable(fetch_failure_message(&f, token.is_some()))
-        })?;
-        let (body, etag, last_modified) = match outcome {
-            SpecFetchOutcome::Fetched {
-                body,
-                etag,
-                last_modified,
-                ..
-            } => (body, etag, last_modified),
-            SpecFetchOutcome::NotModified => {
-                return Err(ImportError::SpecUnavailable(
-                    "The server sent no file.".to_string(),
-                ))
-            }
-        };
-        let text = String::from_utf8(body)
-            .map_err(|_| ImportError::NotAnOpenApiSpec("the file is not text".to_string()))?;
-        let display_url = location.display_url();
-        let bundle = bundle_spec(fetcher, &text, &location, token, &[]).await?;
+        let FetchedSpec {
+            location,
+            display_url,
+            bundle,
+            etag,
+            last_modified,
+        } = fetch_spec_bundle(fetcher, link, token).await?;
         let imported = self.import_openapi_text(
             &bundle.text,
             &label_from_link(&display_url),
