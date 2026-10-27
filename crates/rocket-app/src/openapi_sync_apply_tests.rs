@@ -554,6 +554,7 @@ async fn apply_with_a_failing_step_changes_nothing() {
 #[tokio::test]
 async fn a_finalized_apply_that_fails_at_any_step_keeps_the_previous_applied_copy() {
     let mut failed_at_least_once = false;
+    let mut succeeded = false;
     for step in 1..=16 {
         let factory = Wrapper {
             inner: rocket_infra::FsFileTxFactory::new(),
@@ -571,6 +572,7 @@ async fn a_finalized_apply_that_fails_at_any_step_keeps_the_previous_applied_cop
                 std::fs::read_to_string(w.root.join(".rocket/openapi-applied.spec")).expect("read"),
                 v2()
             );
+            succeeded = true;
             break;
         }
         failed_at_least_once = true;
@@ -583,6 +585,8 @@ async fn a_finalized_apply_that_fails_at_any_step_keeps_the_previous_applied_cop
         w.no_transaction_leftovers();
     }
     assert!(failed_at_least_once);
+    // Every staging step was tried: the apply finally went through within the loop.
+    assert!(succeeded);
 }
 
 #[tokio::test]

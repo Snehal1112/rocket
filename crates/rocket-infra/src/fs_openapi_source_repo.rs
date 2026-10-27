@@ -127,7 +127,7 @@ impl OpenApiSourceRepository for FsOpenApiSourceRepo {
             .iter()
             .map(|b| format!("{b:02x}"))
             .collect();
-        Ok(actual.eq_ignore_ascii_case(expected_sha256))
+        Ok(actual == expected_sha256)
     }
 
     fn clear_pending(&self, collection_root: &Path) -> DomainResult<()> {
@@ -188,6 +188,27 @@ mod tests {
             .expect("matches"));
         assert!(!FsOpenApiSourceRepo
             .applied_matches(dir.path(), &hash(b"another spec"))
+            .expect("matches"));
+    }
+
+    #[test]
+    fn applied_matches_compares_the_hash_exactly_like_the_other_checks() {
+        use sha2::{Digest, Sha256};
+        let dir = tempdir().expect("tempdir");
+        let spec = b"openapi: 3.0.3";
+        FsOpenApiSourceRepo
+            .save_applied(dir.path(), spec)
+            .expect("save");
+        let lower: String = Sha256::digest(spec)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert!(FsOpenApiSourceRepo
+            .applied_matches(dir.path(), &lower)
+            .expect("matches"));
+        // The other three comparisons are exact, so an upper-case hash must not match here.
+        assert!(!FsOpenApiSourceRepo
+            .applied_matches(dir.path(), &lower.to_uppercase())
             .expect("matches"));
     }
 
