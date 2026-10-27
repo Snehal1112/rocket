@@ -29,6 +29,7 @@ import {
   useSetToken,
 } from '@/lib/queries/openapi-sync-queries';
 import type { OpenApiSyncInterval, OpenApiSyncStatus } from '@/lib/tauri-api';
+import { ChangeLinkForm } from './ChangeLinkForm';
 import { DisconnectSyncDialog } from './DisconnectSyncDialog';
 import { OpenApiSyncConsentBanner } from './OpenApiSyncConsentBanner';
 import { intervalLabel, isGithubLocation, splitLocation } from './openApiSyncView';
@@ -57,10 +58,12 @@ function ConnectionBody({
   collection,
   status,
   onDisconnected,
+  onChangingBusy,
 }: {
   collection: string;
   status: OpenApiSyncStatus;
   onDisconnected: () => void;
+  onChangingBusy: (busy: boolean) => void;
 }) {
   const granted = status.consent === 'granted';
   const github = isGithubLocation(status.location);
@@ -78,6 +81,7 @@ function ConnectionBody({
   const [showFull, setShowFull] = useState(false);
   const [needConsent, setNeedConsent] = useState(false);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
+  const [changingLink, setChangingLink] = useState(false);
   // The switch turns back on with the frequency the user picked last.
   const [lastChosen, setLastChosen] = useState<OpenApiSyncInterval>(
     status.interval !== 'off' ? status.interval : DEFAULT_FREQUENCY,
@@ -142,8 +146,8 @@ function ConnectionBody({
             {granted ? 'Approved on this machine' : 'Not approved yet'}
           </Badge>
         </div>
-        {full && (
-          <div>
+        <div className='flex flex-wrap items-center gap-3'>
+          {full && (
             <Button
               variant='link'
               size='sm'
@@ -152,7 +156,25 @@ function ConnectionBody({
             >
               {showFull ? 'Hide full link' : 'Show full link'}
             </Button>
-          </div>
+          )}
+          {!changingLink && (
+            <Button
+              variant='link'
+              size='sm'
+              className='h-auto p-0 text-xs'
+              onClick={() => setChangingLink(true)}
+            >
+              Change link
+            </Button>
+          )}
+        </div>
+        {changingLink && (
+          <ChangeLinkForm
+            collection={collection}
+            currentLocation={status.location}
+            onDone={() => setChangingLink(false)}
+            onBusyChange={onChangingBusy}
+          />
         )}
       </section>
 
@@ -346,8 +368,14 @@ export function OpenApiSyncConnectionDialog({
   open,
   onOpenChange,
 }: OpenApiSyncConnectionDialogProps) {
+  // A link change cannot be cancelled once sent, so the dialog stays until it answers.
+  const [changing, setChanging] = useState(false);
+  const requestClose = (next: boolean) => {
+    if (!next && changing) return;
+    onOpenChange(next);
+  };
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={requestClose}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Edit connection settings</DialogTitle>
@@ -360,6 +388,7 @@ export function OpenApiSyncConnectionDialog({
             collection={collection}
             status={status}
             onDisconnected={() => onOpenChange(false)}
+            onChangingBusy={setChanging}
           />
         </DialogBody>
       </DialogContent>

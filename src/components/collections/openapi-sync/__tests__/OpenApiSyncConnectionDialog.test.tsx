@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearApplyState } from '@/lib/queries/openapi-sync-queries';
@@ -21,6 +21,8 @@ vi.mock('@/lib/tauri-api', async () => {
     revokeOpenApiSyncConsent: vi.fn(),
     grantOpenApiSyncConsent: vi.fn(),
     disconnectOpenApiSync: vi.fn(),
+    previewOpenApiChangeLink: vi.fn(),
+    confirmOpenApiChangeLink: vi.fn(),
   };
 });
 
@@ -284,5 +286,45 @@ describe('OpenApiSyncConnectionDialog', () => {
     expect(
       await screen.findByText('Rocket stops checking this spec. Your requests are not changed.'),
     ).toBeInTheDocument();
+  });
+  it('the_dialog_shows_change_link_in_the_spec_link_section', async () => {
+    const user = renderDialog('Orders', makeStatus());
+    const section = screen.getByRole('region', { name: 'Spec link' });
+    await user.click(within(section).getByRole('button', { name: 'Change link' }));
+    expect(screen.getByLabelText('New spec link')).toBeInTheDocument();
+    // The toggle goes away while the form is open, so only one Change link button can show.
+    expect(screen.queryByRole('button', { name: 'Change link' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByLabelText('New spec link')).not.toBeInTheDocument();
+    expect(within(section).getByRole('button', { name: 'Change link' })).toBeInTheDocument();
+  });
+
+  it('cannot_close_while_confirming', async () => {
+    vi.mocked(tauriApi.previewOpenApiChangeLink).mockResolvedValue({
+      specSha256: 's',
+      title: 'Orders',
+      version: null,
+      matched: 2,
+      added: 0,
+      removed: 0,
+      sameSpec: false,
+    });
+    vi.mocked(tauriApi.confirmOpenApiChangeLink).mockReturnValue(new Promise(() => {}));
+    const onOpenChange = vi.fn();
+    renderWithQuery(
+      <OpenApiSyncConnectionDialog
+        collection='Orders'
+        status={makeStatus()}
+        open
+        onOpenChange={onOpenChange}
+      />,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Change link' }));
+    await user.type(screen.getByLabelText('New spec link'), 'https://example.com/other.json');
+    await user.click(screen.getByRole('button', { name: 'Check link' }));
+    await user.click(await screen.findByRole('button', { name: 'Change link' }));
+    await user.keyboard('{Escape}');
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
   });
 });
