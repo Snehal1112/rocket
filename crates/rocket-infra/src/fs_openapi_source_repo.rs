@@ -109,6 +109,16 @@ impl OpenApiSourceRepository for FsOpenApiSourceRepo {
         }
     }
 
+    fn has_applied(&self, collection_root: &Path) -> DomainResult<bool> {
+        match std::fs::metadata(applied_path(collection_root)) {
+            Ok(meta) => Ok(meta.is_file()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(DomainError::Internal(format!(
+                "{APPLIED_FILE} could not be read: {e}"
+            ))),
+        }
+    }
+
     fn clear_pending(&self, collection_root: &Path) -> DomainResult<()> {
         match std::fs::remove_file(pending_path(collection_root)) {
             Ok(()) => Ok(()),
@@ -143,6 +153,16 @@ mod tests {
             FsOpenApiSourceRepo.load_applied(dir.path()).expect("load"),
             Some(b"openapi: 3.0.3".to_vec())
         );
+    }
+
+    #[test]
+    fn has_applied_is_true_only_when_the_copy_is_a_file() {
+        let dir = tempdir().expect("tempdir");
+        assert!(!FsOpenApiSourceRepo.has_applied(dir.path()).expect("has"));
+        FsOpenApiSourceRepo
+            .save_applied(dir.path(), b"openapi: 3.0.3")
+            .expect("save");
+        assert!(FsOpenApiSourceRepo.has_applied(dir.path()).expect("has"));
     }
 
     #[test]

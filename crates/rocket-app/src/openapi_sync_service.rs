@@ -499,7 +499,7 @@ impl OpenApiSyncService {
         // An import from before the saved copy existed has none. With nothing pending, one
         // fetch without validators can store it.
         let heal = source.pending_sha256.is_none()
-            && matches!(self.sources.load_applied(collection_root), Ok(None));
+            && matches!(self.sources.has_applied(collection_root), Ok(false));
         if heal || !self.pending_is_sound(collection_root, &source) {
             source.etag = None;
             source.last_modified = None;
