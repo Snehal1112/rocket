@@ -1,14 +1,28 @@
 //! Connecting a hand-made collection to an OpenAPI spec. `preview` fetches the spec at the
 //! link the user typed, matches its operations to the requests and writes nothing.
 
+use std::collections::HashSet;
+
+use rocket_collection::openapi_baseline::{
+    BaselineOperation, OpenApiBaseline, BASELINE_FILE_VERSION,
+};
+use rocket_collection::openapi_local::OpenApiLocalState;
+use rocket_collection::openapi_source::SyncInterval;
+use rocket_collection::settings::CollectionVariable;
 use rocket_collection::CollectionRepository;
 use rocket_import::{
-    fetch_spec_bundle, match_requests, ImportError, MatchRequest, ParsedSpec, SpecOperationView,
+    baseline_hash, build_apply, fetch_spec_bundle, item_digest, match_requests, plan_with_links,
+    source_record, variable_digest, ApplyInputs, ApprovedItem, FileChangeKind, GroupBy,
+    ImportError, ImportReport, ImportedOperation, MatchRequest, OpenApiImportOutcome, ParsedSpec,
+    Selection, SkipRequest, SpecOperationView, SyncInputs, SyncItem, VariableApproval,
+    CONVERTER_VERSION,
 };
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::collection_lock::collection_lock;
-use crate::openapi_sync_apply::flatten_requests;
+use crate::openapi_sync_apply::{
+    flatten_requests, to_json, to_yaml, APPLIED_REL, BASELINE_REL, LOCAL_REL, SOURCE_REL,
+};
 use crate::openapi_sync_service::{sha256_hex, OpenApiSyncService};
 
 /// A request of the collection as the Connect screens show it.
@@ -58,10 +72,40 @@ pub struct ConnectPreview {
     pub ambiguous: Vec<ConnectAmbiguous>,
 }
 
+const STALE_COLLECTION: &str = "The collection changed. Run the preview again.";
+const STALE_SPEC: &str = "The spec changed. Run the preview again.";
+const CHOSEN_TWICE: &str = "A request or an operation is chosen twice.";
+const APPLY_RUNNING: &str = "A sync is running. Try again when it is done.";
+const FAILED: &str = "Connecting failed. Nothing was changed.";
+const WARN_CHECKS: &str = "Checks are not enabled yet.";
+const WARN_TOKEN: &str = "The token was not saved.";
+const BASE_URL_KEY: &str = "baseUrl";
 const ALREADY_CONNECTED: &str = "This collection is already connected to an OpenAPI spec.";
 const NEEDS_LINK: &str = "Enter the spec link.";
 const NOT_A_SPEC: &str = "The file is not a supported OpenAPI spec.";
 const COULD_NOT_LOAD: &str = "The spec could not be loaded.";
+
+/// What the user decided for one request or operation in the Initial sync review.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConnectRow {
+    /// Tie the request to the operation. Its current content counts as the user's edit.
+    Link { uid: String, key: String },
+    /// Create a request for a spec-only operation.
+    Add { key: String },
+    /// Hide a spec-only operation, so it never comes back as new.
+    Skip { key: String },
+    /// Leave a request of the user's alone.
+    Keep { uid: String },
+}
+
+/// What a connect did. The warnings are fixed sentences about steps that ran after the files.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ConnectOutcome {
+    pub linked: u32,
+    pub added: u32,
+    pub skipped: u32,
+    pub warnings: Vec<String>,
+}
 
 /// A fixed sentence for a failed fetch or bundle. The fetch messages are already fixed, and
 /// anything else (a parse error with a path, say) becomes a general sentence.
@@ -186,5 +230,270 @@ impl OpenApiSyncService {
                 })
                 .collect(),
         })
+    }
+
+    /// Connects the collection to the spec at `link` in one file transaction, then approves the
+    /// typed link, sets the check interval and stores the token, in that order. A failure after
+    /// the files were committed adds a warning and never undoes them. An operation no row
+    /// mentions is skipped, like one the user chose to skip.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn confirm(
+        &self,
+        collection: &str,
+        link: &str,
+        token: Option<&str>,
+        rows: Vec<ConnectRow>,
+        group_by: GroupBy,
+        interval: Option<SyncInterval>,
+        digest: &str,
+    ) -> DomainResult<ConnectOutcome> {
+        let link = link.trim();
+        if link.is_empty() {
+            return Err(DomainError::InvalidInput(NEEDS_LINK.to_string()));
+        }
+        let deps = self.deps()?;
+        let pinned = deps.collections.pinned();
+        let repo: &dyn CollectionRepository =
+            pinned.as_deref().unwrap_or(deps.collections.as_ref());
+        let root = repo.collection_root_path(collection)?;
+        let fetched = fetch_spec_bundle(self.fetcher.as_ref(), link, token)
+            .await
+            .map_err(|e| DomainError::InvalidInput(safe_import_message(e)))?;
+        let spec = ParsedSpec::parse(&fetched.bundle.text)
+            .map_err(|_| DomainError::InvalidInput(NOT_A_SPEC.to_string()))?;
+
+        let mut outcome = ConnectOutcome::default();
+        let display_url = {
+            let lock = collection_lock(&root);
+            let _guard = lock.lock();
+            if self.sources.load(&root)?.is_some() {
+                return Err(DomainError::Conflict(ALREADY_CONNECTED.to_string()));
+            }
+            if deps.tx.recover_if_idle(&root)?.is_none() {
+                return Err(DomainError::Conflict(APPLY_RUNNING.to_string()));
+            }
+            let requests = match_requests_of(repo, collection)?;
+            if request_digest(&requests) != digest {
+                return Err(DomainError::Conflict(STALE_COLLECTION.to_string()));
+            }
+            let views = spec.operation_views();
+            let spec_keys: HashSet<&str> = views.iter().map(|o| o.key.as_str()).collect();
+            let known_uids: HashSet<&str> = requests.iter().map(|r| r.uid.as_str()).collect();
+
+            let mut links: Vec<(String, String)> = Vec::new();
+            let mut adds: HashSet<String> = HashSet::new();
+            let mut skips: HashSet<String> = HashSet::new();
+            let mut seen_keys: HashSet<String> = HashSet::new();
+            let mut seen_uids: HashSet<String> = HashSet::new();
+            for row in &rows {
+                let (uid, key) = match row {
+                    ConnectRow::Link { uid, key } => (Some(uid), Some(key)),
+                    ConnectRow::Add { key } | ConnectRow::Skip { key } => (None, Some(key)),
+                    ConnectRow::Keep { uid } => (Some(uid), None),
+                };
+                if key.is_some_and(|k| !spec_keys.contains(k.as_str()))
+                    || uid.is_some_and(|u| !known_uids.contains(u.as_str()))
+                {
+                    return Err(DomainError::InvalidInput(STALE_SPEC.to_string()));
+                }
+                if key.is_some_and(|k| !seen_keys.insert(k.clone()))
+                    || uid.is_some_and(|u| !seen_uids.insert(u.clone()))
+                {
+                    return Err(DomainError::InvalidInput(CHOSEN_TWICE.to_string()));
+                }
+                match row {
+                    ConnectRow::Link { uid, key } => links.push((uid.clone(), key.clone())),
+                    ConnectRow::Add { key } => {
+                        adds.insert(key.clone());
+                    }
+                    ConnectRow::Skip { key } => {
+                        skips.insert(key.clone());
+                    }
+                    ConnectRow::Keep { .. } => {}
+                }
+            }
+            for key in &spec_keys {
+                if !seen_keys.contains(*key) {
+                    skips.insert((*key).to_string());
+                }
+            }
+
+            let current = flatten_requests(&repo.get(collection)?.root);
+            let mut operations = Vec::new();
+            for (uid, key) in &links {
+                let (Some(cur), Some(request)) = (
+                    current.iter().find(|c| c.uid == *uid),
+                    spec.converted_request(key),
+                ) else {
+                    return Err(DomainError::InvalidInput(STALE_SPEC.to_string()));
+                };
+                operations.push(ImportedOperation {
+                    key: key.clone(),
+                    request_path: cur.request_path.clone(),
+                    uid: uid.clone(),
+                    baseline_hash: baseline_hash(&request),
+                    baseline: request,
+                });
+            }
+            let base_url = spec.servers().first().cloned().unwrap_or_default();
+            let imported = OpenApiImportOutcome {
+                report: ImportReport::default(),
+                collection: collection.to_string(),
+                operations,
+                base_url: base_url.clone(),
+            };
+            let source = source_record(
+                &fetched.location,
+                group_by,
+                fetched.bundle.text.as_bytes(),
+                fetched.etag.clone(),
+                fetched.last_modified.clone(),
+                fetched.bundle.refs.clone(),
+                fetched.bundle.fetch_failed,
+                &imported,
+            );
+            let baseline = OpenApiBaseline {
+                version: BASELINE_FILE_VERSION,
+                converter_version: CONVERTER_VERSION,
+                base_url: base_url.clone(),
+                operations: imported
+                    .operations
+                    .iter()
+                    .map(|o| BaselineOperation {
+                        key: o.key.clone(),
+                        request: o.baseline.clone(),
+                    })
+                    .collect(),
+            };
+
+            // Added requests point at {{baseUrl}}, so the variable has to exist.
+            let mut settings = repo.get_settings(collection)?;
+            let mut settings_changed = false;
+            if !adds.is_empty() && settings.variables.iter().all(|v| v.key != BASE_URL_KEY) {
+                settings.variables.push(CollectionVariable {
+                    key: BASE_URL_KEY.to_string(),
+                    value: base_url.clone(),
+                    initial_value: base_url,
+                    enabled: true,
+                    secret: false,
+                });
+                settings_changed = true;
+            }
+            let variable_names: Vec<String> =
+                settings.variables.iter().map(|v| v.key.clone()).collect();
+            let current_base = settings
+                .variables
+                .iter()
+                .find(|v| v.key == BASE_URL_KEY)
+                .map(|v| v.value.clone());
+            let local = OpenApiLocalState::default();
+            let inputs = SyncInputs {
+                source: &source,
+                baseline: Some(&baseline),
+                incoming: &spec,
+                current: &current,
+                current_base_url: current_base.as_deref(),
+                existing_variables: &variable_names,
+                skips: &local.skips,
+            };
+            let plan = plan_with_links(&inputs, &[])
+                .map_err(|_| DomainError::Internal(FAILED.to_string()))?;
+            let mut selection = Selection::default();
+            for item in &plan.items {
+                if let SyncItem::New {
+                    key, fingerprint, ..
+                } = item
+                {
+                    if adds.contains(key) {
+                        selection.items.push(ApprovedItem {
+                            key: key.clone(),
+                            digest: item_digest(item),
+                            choices: Default::default(),
+                        });
+                    } else {
+                        selection.skips.push(SkipRequest {
+                            key: key.clone(),
+                            fingerprint: fingerprint.clone(),
+                        });
+                    }
+                }
+            }
+            selection.variables = plan
+                .variable_changes
+                .iter()
+                .map(|c| VariableApproval {
+                    name: c.name.clone(),
+                    digest: variable_digest(c),
+                })
+                .collect();
+            let renderer = (deps.renderer)(&root);
+            let existing_paths = deps.tx.list_files(&root)?;
+            let out = build_apply(&ApplyInputs {
+                plan_inputs: inputs,
+                pending_sha256: sha256_hex(fetched.bundle.text.as_bytes()),
+                selection: &selection,
+                renderer: renderer.as_ref(),
+                existing_paths: &existing_paths,
+                settings: &settings,
+            })
+            .map_err(|_| DomainError::Internal(FAILED.to_string()))?;
+            if !out.finalized || !out.report.stale.is_empty() {
+                return Err(DomainError::Internal(FAILED.to_string()));
+            }
+
+            let mut tx = deps.tx.begin(&root)?;
+            let staged = (|| -> DomainResult<()> {
+                for file in &out.files {
+                    match &file.kind {
+                        FileChangeKind::Put(bytes) => tx.stage_put(&file.rel_path, bytes)?,
+                        FileChangeKind::Delete => tx.stage_delete(&file.rel_path)?,
+                    }
+                }
+                if settings_changed {
+                    let (rel, bytes) = renderer.render_settings(&settings)?;
+                    if out.files.iter().all(|f| f.rel_path != rel) {
+                        tx.stage_put(&rel, &bytes)?;
+                    }
+                }
+                tx.stage_put(SOURCE_REL, &to_yaml(&out.source)?)?;
+                tx.stage_put(BASELINE_REL, &to_json(&out.baseline)?)?;
+                tx.stage_put(LOCAL_REL, &to_json(&out.local)?)?;
+                tx.stage_put(APPLIED_REL, fetched.bundle.text.as_bytes())?;
+                Ok(())
+            })();
+            if let Err(e) = staged {
+                tx.abort();
+                tracing::debug!(error = %e, "a connect could not be staged");
+                return Err(DomainError::Internal(FAILED.to_string()));
+            }
+            if let Err(e) = tx.commit() {
+                tracing::debug!(error = %e, "a connect could not be committed");
+                return Err(DomainError::Internal(FAILED.to_string()));
+            }
+            outcome.linked = u32::try_from(links.len()).unwrap_or(u32::MAX);
+            outcome.added = u32::try_from(out.report.applied.len()).unwrap_or(u32::MAX);
+            outcome.skipped = u32::try_from(selection.skips.len()).unwrap_or(u32::MAX);
+            out.source.location.display_url()
+        };
+
+        // The files are committed. What follows only adds warnings, and consent comes last of
+        // the three that need it, so a failed step never leaves a half-enabled check.
+        let mut consented = false;
+        if self.grant_consent(&root, &display_url).is_ok() {
+            consented = true;
+            if let Some(interval) = interval.filter(|i| *i != SyncInterval::Off) {
+                if self.set_interval(&root, interval).is_err() {
+                    outcome.warnings.push(WARN_CHECKS.to_string());
+                }
+            }
+        } else if interval.is_some_and(|i| i != SyncInterval::Off) {
+            outcome.warnings.push(WARN_CHECKS.to_string());
+        }
+        if let Some(token) = token.map(str::trim).filter(|t| !t.is_empty()) {
+            if !consented || self.set_token(&root, token).is_err() {
+                outcome.warnings.push(WARN_TOKEN.to_string());
+            }
+        }
+        Ok(outcome)
     }
 }

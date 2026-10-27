@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use rocket_app::{
     safe_message, BackupRow, BadgeView, ChangeRow, ChangesView, CheckOutcome, ConnectOperationRow,
-    ConnectPreview, ConnectRequestRow, OpenApiSyncService,
+    ConnectOutcome, ConnectPreview, ConnectRequestRow, ConnectRow, OpenApiSyncService,
     OverviewView, PlanView, ResetReport, SpecView, SpecViewState, SyncStatusView,
 };
 use rocket_collection::openapi_source::{SyncInterval, SyncStatus};
@@ -579,6 +579,99 @@ fn connect_preview_dto(p: ConnectPreview) -> ConnectPreviewDto {
             })
             .collect(),
     }
+}
+
+/// One decision of the Initial sync review.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectRowDto {
+    /// `link`, `add`, `skip` or `keep`.
+    pub kind: String,
+    pub uid: Option<String>,
+    pub key: Option<String>,
+}
+
+const BAD_CONNECT_ROW: &str = "A row of the review is not complete. Run the preview again.";
+
+fn connect_row_from_dto(dto: ConnectRowDto) -> Result<ConnectRow, String> {
+    let bad = || BAD_CONNECT_ROW.to_string();
+    Ok(match dto.kind.as_str() {
+        "link" => ConnectRow::Link {
+            uid: dto.uid.ok_or_else(bad)?,
+            key: dto.key.ok_or_else(bad)?,
+        },
+        "add" => ConnectRow::Add {
+            key: dto.key.ok_or_else(bad)?,
+        },
+        "skip" => ConnectRow::Skip {
+            key: dto.key.ok_or_else(bad)?,
+        },
+        "keep" => ConnectRow::Keep {
+            uid: dto.uid.ok_or_else(bad)?,
+        },
+        _ => return Err(bad()),
+    })
+}
+
+/// What a connect did. The warnings are fixed sentences.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectOutcomeDto {
+    pub linked: u32,
+    pub added: u32,
+    pub skipped: u32,
+    pub warnings: Vec<String>,
+}
+
+fn connect_outcome_dto(o: ConnectOutcome) -> ConnectOutcomeDto {
+    ConnectOutcomeDto {
+        linked: o.linked,
+        added: o.added,
+        skipped: o.skipped,
+        warnings: o.warnings,
+    }
+}
+
+/// Connects a collection to the spec at the link the user typed, in one transaction. Approval,
+/// interval and token follow the files and only add warnings when they fail.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn openapi_connect_confirm(
+    collection: String,
+    link: String,
+    token: Option<String>,
+    rows: Vec<ConnectRowDto>,
+    group_by: String,
+    interval: Option<String>,
+    digest: String,
+    workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
+    fetcher: State<'_, Arc<dyn SpecFetcher>>,
+) -> Result<ConnectOutcomeDto, String> {
+    let rows = rows
+        .into_iter()
+        .map(connect_row_from_dto)
+        .collect::<Result<Vec<_>, _>>()?;
+    let group_by = rocket_import::GroupBy::parse(&group_by)
+        .ok_or_else(|| "The folder layout must be tags or paths.".to_string())?;
+    let interval = interval.as_deref().map(interval_from_name).transpose()?;
+    let workspace_path = Arc::clone(workspace_path.inner());
+    let fetcher = Arc::clone(fetcher.inner());
+    tokio::task::spawn_blocking(move || {
+        let service = make_sync_service(workspace_path, fetcher);
+        tauri::async_runtime::block_on(service.confirm(
+            &collection,
+            &link,
+            token.as_deref(),
+            rows,
+            group_by,
+            interval,
+            &digest,
+        ))
+    })
+    .await
+    .map_err(|_| TASK_FAILED.to_string())?
+    .map(connect_outcome_dto)
+    .map_err(connect_error)
 }
 
 /// A fixed sentence for a failed connect. The service builds its input and conflict messages
@@ -1806,6 +1899,49 @@ mod tests {
         assert_eq!(json["inSpecOnly"][0]["tag"], "pets");
         assert_eq!(json["yoursOnly"][0]["uid"], "u1");
         assert_eq!(json["ambiguous"], json!([]));
+    }
+
+    #[test]
+    fn connect_rows_parse_every_kind_and_reject_incomplete_ones() {
+        let row = |kind: &str, uid: Option<&str>, key: Option<&str>| ConnectRowDto {
+            kind: kind.to_string(),
+            uid: uid.map(str::to_string),
+            key: key.map(str::to_string),
+        };
+        assert_eq!(
+            connect_row_from_dto(row("link", Some("u"), Some("k"))),
+            Ok(ConnectRow::Link { uid: "u".into(), key: "k".into() })
+        );
+        assert_eq!(
+            connect_row_from_dto(row("add", None, Some("k"))),
+            Ok(ConnectRow::Add { key: "k".into() })
+        );
+        assert_eq!(
+            connect_row_from_dto(row("skip", None, Some("k"))),
+            Ok(ConnectRow::Skip { key: "k".into() })
+        );
+        assert_eq!(
+            connect_row_from_dto(row("keep", Some("u"), None)),
+            Ok(ConnectRow::Keep { uid: "u".into() })
+        );
+        assert!(connect_row_from_dto(row("link", Some("u"), None)).is_err());
+        assert!(connect_row_from_dto(row("nope", None, None)).is_err());
+        let parsed: ConnectRowDto =
+            serde_json::from_value(json!({"kind": "link", "uid": "u", "key": "k"})).expect("json");
+        assert_eq!(parsed.kind, "link");
+    }
+
+    #[test]
+    fn connect_outcome_dto_uses_camel_case_keys() {
+        let json = serde_json::to_value(connect_outcome_dto(ConnectOutcome {
+            linked: 2,
+            added: 1,
+            skipped: 3,
+            warnings: vec!["The token was not saved.".to_string()],
+        }))
+        .expect("json");
+        assert_eq!(json["linked"], 2);
+        assert_eq!(json["warnings"][0], "The token was not saved.");
     }
 
     #[test]

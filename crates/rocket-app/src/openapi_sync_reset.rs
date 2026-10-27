@@ -6,7 +6,7 @@ use rocket_collection::file_tx::CollectionFileTx;
 use rocket_collection::openapi_backup::{BackupEntry, OpenApiBackups};
 use rocket_collection::{request_filename_for, CollectionRepository, Request};
 use rocket_import::{
-    request_is_edited, reset_spec_owned_fields, CurrentRequest, RequestRenderer, CONVERTER_VERSION,
+    request_is_edited, reset_spec_owned_fields, CurrentRequest, CONVERTER_VERSION,
 };
 use rocket_shared::error::{DomainError, DomainResult};
 

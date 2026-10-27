@@ -21,11 +21,11 @@ use crate::collection_lock::collection_lock;
 use crate::openapi_sync_service::{sha256_hex, OpenApiSyncService};
 use crate::openapi_sync_view::{PlanView, UnchangedView};
 
-const SOURCE_REL: &str = ".rocket/openapi-source.yml";
-const BASELINE_REL: &str = ".rocket/openapi-baseline.json";
-const LOCAL_REL: &str = ".rocket/openapi-local.json";
+pub(crate) const SOURCE_REL: &str = ".rocket/openapi-source.yml";
+pub(crate) const BASELINE_REL: &str = ".rocket/openapi-baseline.json";
+pub(crate) const LOCAL_REL: &str = ".rocket/openapi-local.json";
 const PENDING_REL: &str = ".rocket/openapi-pending.spec";
-const APPLIED_REL: &str = ".rocket/openapi-applied.spec";
+pub(crate) const APPLIED_REL: &str = ".rocket/openapi-applied.spec";
 pub(crate) const BACKUPS_REL: &str = ".rocket/openapi-reset-backups.json";
 const BASE_URL_KEY: &str = "baseUrl";
 

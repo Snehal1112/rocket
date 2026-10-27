@@ -59,6 +59,22 @@ impl ParsedSpec {
         Some(self.doc.version.as_str()).filter(|v| !v.is_empty())
     }
 
+    /// The request the importer writes for the operation with this key, as a sync plan builds
+    /// it (the sequence number is the operation's place in the spec).
+    pub fn converted_request(&self, key: &str) -> Option<rocket_collection::Request> {
+        let (index, op) = self
+            .doc
+            .operations
+            .iter()
+            .enumerate()
+            .find(|(_, o)| o.key == key)?;
+        let seq = u32::try_from(index + 1).unwrap_or(u32::MAX);
+        Some(
+            crate::converter::openapi::convert_operation(op, &self.doc.security_schemes, seq)
+                .request,
+        )
+    }
+
     /// The server URLs of the spec in document order. Server variables use their defaults.
     pub fn servers(&self) -> &[String] {
         &self.doc.servers
@@ -197,6 +213,15 @@ mod tests {
         let views = ParsedSpec::parse(yaml).expect("parses").operation_views();
         assert_eq!(views[0].responses[0].status, "200");
         assert_eq!(views[0].responses[0].description, "fine");
+    }
+
+    #[test]
+    fn converted_request_builds_the_importer_request_for_a_key() {
+        let spec = ParsedSpec::parse(PETS).expect("parses");
+        let request = spec.converted_request("getPet").expect("request");
+        assert_eq!(request.method.to_string().to_uppercase(), "GET");
+        assert!(request.url.ends_with("/pets/:id"), "{}", request.url);
+        assert!(spec.converted_request("missing").is_none());
     }
 
     #[test]

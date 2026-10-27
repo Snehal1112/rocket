@@ -150,8 +150,8 @@ pub use mcp_tool_service::{
 pub use oauth2_service::OAuth2Service;
 pub use openapi_sync_apply::{ApplyDeps, RendererFactory};
 pub use openapi_connect::{
-    request_digest, ConnectAmbiguous, ConnectOperationRow, ConnectPair, ConnectPreview,
-    ConnectRequestRow,
+    request_digest, ConnectAmbiguous, ConnectOperationRow, ConnectOutcome, ConnectPair,
+    ConnectPreview, ConnectRequestRow, ConnectRow,
 };
 pub use openapi_sync_reset::ResetReport;
 pub use openapi_sync_view::{
