@@ -16,6 +16,12 @@ describe('syncErrorMessage', () => {
     expect(text).not.toContain('consent_required');
   });
 
+  it('syncerrors_maps_the_not_https_sentence', () => {
+    expect(
+      syncErrorMessage('The link must use https. Plain http works only for localhost.'),
+    ).toBe('The link must use https. Plain http works only for localhost.');
+  });
+
   it('maps_the_unshowable_spec_sentence', () => {
     expect(syncErrorMessage('Invalid input: The saved spec cannot be shown.')).toBe(
       'The saved spec cannot be shown.',

@@ -118,4 +118,20 @@ describe('isGithubLocation', () => {
     expect(isGithubLocation('https://example.com/x.yaml')).toBe(false);
     expect(isGithubLocation('https://github.com.evil.example/x.yaml')).toBe(false);
   });
+
+  it('split_location_handles_a_localhost_link', () => {
+    expect(splitLocation('http://localhost:3000/openapi.json')).toEqual({
+      short: 'http://localhost:3000/openapi.json',
+      full: null,
+    });
+    expect(splitLocation('http://127.0.0.1:8080/openapi.json?format=yaml')).toEqual({
+      short: '127.0.0.1:8080/openapi.json',
+      full: 'http://127.0.0.1:8080/openapi.json?format=yaml',
+    });
+  });
+
+  it('a_localhost_link_is_not_github', () => {
+    expect(isGithubLocation('http://localhost:3000/openapi.json')).toBe(false);
+    expect(isGithubLocation('http://github.com/acme/api/blob/main/o.yaml')).toBe(false);
+  });
 });

@@ -392,6 +392,9 @@ export function ImportCollectionDialog({
                     placeholder='https://github.com/owner/repo/blob/main/openapi.yaml'
                     aria-label='Spec link'
                   />
+                  <p className='text-[11px] text-muted-foreground'>
+                    An https link, or http://localhost for a local server.
+                  </p>
                   <div className='space-y-1'>
                     <Label htmlFor='openapi-token' className='text-xs font-medium'>
                       Access token (optional)

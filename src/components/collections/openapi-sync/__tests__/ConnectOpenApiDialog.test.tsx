@@ -56,6 +56,11 @@ describe('ConnectOpenApiDialog', () => {
     });
   });
 
+  it('the_connect_dialog_hint_mentions_localhost', () => {
+    renderDialog();
+    expect(screen.getByText(/http:\/\/localhost for a local server/)).toBeInTheDocument();
+  });
+
   it('preview_is_disabled_without_a_link', () => {
     renderDialog();
     expect(screen.getByRole('button', { name: 'Preview' })).toBeDisabled();

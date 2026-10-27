@@ -139,6 +139,12 @@ describe('ImportCollectionDialog OpenAPI source', () => {
     ).toBeInTheDocument();
   });
 
+  it('the_import_dialog_hint_mentions_localhost', async () => {
+    renderDialog();
+    await openOpenApiTab();
+    expect(screen.getByText(/http:\/\/localhost for a local server/)).toBeInTheDocument();
+  });
+
   it('link_mode_does_not_show_the_note', async () => {
     renderDialog();
     await openOpenApiTab();

@@ -162,6 +162,9 @@ export function ConnectOpenApiDialog({
                 placeholder='https://github.com/owner/repo/blob/main/openapi.yaml'
                 aria-label='Spec link'
               />
+              <p className='text-[11px] text-muted-foreground'>
+                An https link, or http://localhost for a local server.
+              </p>
               {github && (
                 <div className='space-y-1'>
                   <Label htmlFor='connect-openapi-token' className='text-xs font-medium'>

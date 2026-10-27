@@ -12,6 +12,10 @@ const KNOWN: Array<[string, string]> = [
   ],
   ['This is already the spec link.', 'This is already the spec link.'],
   [
+    'The link must use https. Plain http works only for localhost.',
+    'The link must use https. Plain http works only for localhost.',
+  ],
+  [
     'This collection is not connected to an OpenAPI spec.',
     'This collection is not connected to an OpenAPI spec.',
   ],

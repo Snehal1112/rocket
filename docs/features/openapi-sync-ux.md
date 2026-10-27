@@ -79,6 +79,10 @@ Show changes on a modified row lists, for each changed field, the version last s
 
 The "N skipped, hidden from this list." line opens the Skipped list. Each row has **Un-skip**, and **Un-skip all** takes every skip back. Un-skip refreshes the waiting count and refuses while an apply runs. A skip whose item changed again is back in the review list and is not listed here. The import dialog says a spec imported from a file is not kept in sync.
 
+## Localhost links
+
+A spec served by a dev server can be imported and followed over plain http: `http://localhost:PORT/...`, `http://127.0.0.1:PORT/...` or `http://[::1]:PORT/...`. Any other http link is refused (look-alike hosts such as `localhost.evil.com`, private addresses and links with user info too). A link with a secret-like query name is refused as for https. A redirect must still be https and not local, a token is never sent over http, and `$ref` files of a localhost spec are not followed. The link is approved on this machine like any other.
+
 ## Notifications
 
 A count badge shows on the collection row. A toast "N spec updates" with Review shows once per pending spec version. The ids that were shown are kept in `localStorage` under `rocket.openapi-sync.notified` (newest 200).
@@ -122,3 +126,4 @@ A count badge shows on the collection row. A toast "N spec updates" with Review 
 18. With nothing waiting, the Spec updates empty state shows the last checked time and a Check now button.
 19. Skip an item, open the skipped line, Un-skip it, and see it return to the list and the badge count rise.
 20. Open Connection settings: the status row, the five-minute hint on a GitHub link without a token, and the title reads Connection settings from the menu, the button and the Overview link.
+21. Run a local dev server that serves an OpenAPI file, import `http://localhost:PORT/openapi.json`, approve it, then Check now. Try `http://example.com/openapi.json`: it is refused.
