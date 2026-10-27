@@ -2,7 +2,37 @@
 //! document, so they parse the spec text into this and hand it to the sync functions.
 
 use crate::error::ImportResult;
+use crate::openapi::model::ParamLocation;
 use crate::openapi::{parse_openapi, OpenApiDoc};
+
+/// One parameter of an operation, as shown in the spec viewer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpecParamView {
+    pub name: String,
+    /// `path`, `query`, `header` or `cookie`.
+    pub location: String,
+    pub required: bool,
+}
+
+/// One documented response of an operation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpecResponseView {
+    pub status: String,
+    pub description: String,
+}
+
+/// A read-only summary of one operation. It holds names and short texts, never the raw spec.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpecOperationView {
+    pub key: String,
+    pub method: String,
+    pub path: String,
+    /// The first tag, or `Untagged`.
+    pub tag: String,
+    pub summary: Option<String>,
+    pub parameters: Vec<SpecParamView>,
+    pub responses: Vec<SpecResponseView>,
+}
 
 /// A spec that was read and checked. It is opaque on purpose.
 #[derive(Debug, Clone)]
@@ -29,6 +59,53 @@ impl ParsedSpec {
         Some(self.doc.version.as_str()).filter(|v| !v.is_empty())
     }
 
+    /// The `info.title` text.
+    pub fn title(&self) -> &str {
+        &self.doc.title
+    }
+
+    /// The operations in document order, as read-only summaries.
+    pub fn operation_views(&self) -> Vec<SpecOperationView> {
+        self.doc
+            .operations
+            .iter()
+            .map(|op| SpecOperationView {
+                key: op.key.clone(),
+                method: op.method.to_string().to_uppercase(),
+                path: op.path.clone(),
+                tag: op
+                    .tags
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "Untagged".to_string()),
+                summary: op.summary.clone(),
+                parameters: op
+                    .parameters
+                    .iter()
+                    .map(|p| SpecParamView {
+                        name: p.name.clone(),
+                        location: match p.location {
+                            ParamLocation::Path => "path",
+                            ParamLocation::Query => "query",
+                            ParamLocation::Header => "header",
+                            ParamLocation::Cookie => "cookie",
+                        }
+                        .to_string(),
+                        required: p.required,
+                    })
+                    .collect(),
+                responses: op
+                    .responses
+                    .iter()
+                    .map(|(status, description)| SpecResponseView {
+                        status: status.clone(),
+                        description: description.clone(),
+                    })
+                    .collect(),
+            })
+            .collect()
+    }
+
     /// Number of operations in the spec.
     pub fn operation_count(&self) -> usize {
         self.doc.operations.len()
@@ -53,5 +130,72 @@ mod tests {
             ParsedSpec::parse(text).expect("parses").operation_count(),
             1
         );
+    }
+
+    const PETS: &str = r#"{"openapi":"3.0.3","info":{"title":"Pets API","version":"2.1"},
+        "paths":{
+          "/pets":{"get":{"operationId":"listPets","summary":"List pets","tags":["pets"],
+            "parameters":[{"name":"limit","in":"query","schema":{"type":"integer"}}],
+            "responses":{"200":{"description":"A list"},"404":{"description":"Missing"}}}},
+          "/pets/{id}":{"get":{"operationId":"getPet","tags":["pets","extra"],
+            "parameters":[{"name":"id","in":"path","required":true,"schema":{"type":"string"}}],
+            "responses":{"200":{"description":"One pet"}}}},
+          "/health":{"get":{"responses":{"200":{"description":"ok"}}}}
+        }}"#;
+
+    #[test]
+    fn operation_views_list_method_path_tag_and_summary() {
+        let views = ParsedSpec::parse(PETS).expect("parses").operation_views();
+        assert_eq!(views.len(), 3);
+        assert_eq!(views[0].key, "listPets");
+        assert_eq!(views[0].method, "GET");
+        assert_eq!(views[0].path, "/pets");
+        assert_eq!(views[0].tag, "pets");
+        assert_eq!(views[0].summary.as_deref(), Some("List pets"));
+        // The first tag wins.
+        assert_eq!(views[1].tag, "pets");
+    }
+
+    #[test]
+    fn an_operation_without_tags_goes_to_untagged() {
+        let views = ParsedSpec::parse(PETS).expect("parses").operation_views();
+        assert_eq!(views[2].tag, "Untagged");
+        assert_eq!(views[2].key, "GET /health");
+    }
+
+    #[test]
+    fn parameters_and_responses_are_listed() {
+        let views = ParsedSpec::parse(PETS).expect("parses").operation_views();
+        let get_pet = &views[1];
+        assert_eq!(
+            get_pet.parameters,
+            vec![SpecParamView {
+                name: "id".to_string(),
+                location: "path".to_string(),
+                required: true
+            }]
+        );
+        let list = &views[0];
+        assert_eq!(list.parameters[0].location, "query");
+        assert!(!list.parameters[0].required);
+        let statuses: Vec<(&str, &str)> = list
+            .responses
+            .iter()
+            .map(|r| (r.status.as_str(), r.description.as_str()))
+            .collect();
+        assert_eq!(statuses, vec![("200", "A list"), ("404", "Missing")]);
+    }
+
+    #[test]
+    fn unquoted_numeric_response_codes_are_listed() {
+        let yaml = "openapi: 3.0.3\ninfo: {title: T, version: '1'}\npaths:\n  /a:\n    get:\n      responses:\n        200: {description: fine}\n";
+        let views = ParsedSpec::parse(yaml).expect("parses").operation_views();
+        assert_eq!(views[0].responses[0].status, "200");
+        assert_eq!(views[0].responses[0].description, "fine");
+    }
+
+    #[test]
+    fn title_returns_info_title() {
+        assert_eq!(ParsedSpec::parse(PETS).expect("parses").title(), "Pets API");
     }
 }

@@ -101,6 +101,27 @@ fn str_of(v: &Yaml, key: &str) -> Option<String> {
     v.get(key).and_then(Yaml::as_str).map(str::to_string)
 }
 
+/// The documented responses of an operation as status code and description. A status code
+/// written as a bare number is read too.
+fn responses_of(root: &Yaml, op: &Yaml, warnings: &mut Vec<String>) -> Vec<(String, String)> {
+    let Some(map) = op.get("responses").and_then(Yaml::as_mapping) else {
+        return Vec::new();
+    };
+    map.iter()
+        .filter_map(|(code, value)| {
+            let status = match code {
+                Yaml::String(s) => s.clone(),
+                Yaml::Number(n) => n.to_string(),
+                _ => return None,
+            };
+            let description = deref(root, value, warnings)
+                .and_then(|v| str_of(v, "description"))
+                .unwrap_or_default();
+            Some((status, description))
+        })
+        .collect()
+}
+
 fn bool_of(v: &Yaml, key: &str) -> bool {
     v.get(key).and_then(Yaml::as_bool).unwrap_or(false)
 }
@@ -516,6 +537,7 @@ fn operations(root: &Yaml, is_v2: bool, warnings: &mut Vec<String>) -> Vec<Opera
                 request_body: parse_request_body(root, op, &all_raw, is_v2, warnings),
                 security: security_names(root, op),
                 deprecated: bool_of(op, "deprecated"),
+                responses: responses_of(root, op, warnings),
             });
         }
     }

@@ -21,4 +21,4 @@ pub use plan::{
     build_sync_plan, fingerprint, item_digest, merge_item, variable_digest, CurrentRequest, SyncInputs, SyncItem,
     SyncPlan, VariableChange, VariableKind,
 };
-pub use spec::ParsedSpec;
+pub use spec::{ParsedSpec, SpecOperationView, SpecParamView, SpecResponseView};

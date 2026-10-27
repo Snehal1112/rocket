@@ -426,6 +426,7 @@ mod tests {
             request_body: None,
             security: Vec::new(),
             deprecated: false,
+            responses: Vec::new(),
         }
     }
 

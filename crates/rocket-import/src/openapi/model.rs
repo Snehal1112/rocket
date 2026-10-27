@@ -30,6 +30,8 @@ pub struct Operation {
     /// Names of the security schemes this operation uses.
     pub security: Vec<String>,
     pub deprecated: bool,
+    /// Status code and description of each documented response, in document order.
+    pub responses: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
