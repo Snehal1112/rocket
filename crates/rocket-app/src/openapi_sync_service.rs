@@ -498,11 +498,14 @@ impl OpenApiSyncService {
         // validators are dropped and the spec is fetched again.
         // An import from before the saved copy existed has none. With nothing pending, one
         // fetch without validators can store it.
+        // A copy that cannot be read at all is left alone: a fetch could not replace it either,
+        // and every check would then download the spec again without its validators.
         let heal = source.pending_sha256.is_none()
-            && !self
-                .sources
-                .applied_matches(collection_root, &source.spec_sha256)
-                .unwrap_or(false);
+            && matches!(
+                self.sources
+                    .applied_matches(collection_root, &source.spec_sha256),
+                Ok(false)
+            );
         if heal || !self.pending_is_sound(collection_root, &source) {
             source.etag = None;
             source.last_modified = None;

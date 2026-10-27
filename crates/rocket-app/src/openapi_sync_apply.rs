@@ -279,7 +279,7 @@ impl OpenApiSyncService {
         let mut extra = extra;
         if output.finalized {
             // The spec that was just applied becomes the saved copy.
-            extra.push((APPLIED_REL, Some(loaded.pending_text.clone().into_bytes())));
+            extra.push((APPLIED_REL, Some(loaded.pending_text.into_bytes())));
             extra.push((PENDING_REL, None));
         }
         // A sync that updates an endpoint drops its reset backup in the same transaction.

@@ -494,6 +494,22 @@ async fn check_sends_no_validators_when_the_copy_is_missing() {
 }
 
 #[tokio::test]
+async fn an_unreadable_applied_copy_does_not_make_every_check_fetch_without_validators() {
+    let w = world().await;
+    *w.fetcher.etag.lock().expect("lock") = Some("\"e1\"".to_string());
+    w.check_with(v1()).await;
+    assert!(w.source().etag.is_some());
+    // A directory in the place of the copy cannot be read or replaced.
+    drop_applied(&w);
+    std::fs::create_dir(w.root.join(".rocket/openapi-applied.spec")).expect("dir");
+    w.fetcher.requests.lock().expect("lock").clear();
+    w.check_with(v1()).await;
+    let requests = w.fetcher.requests.lock().expect("lock");
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].if_none_match.is_some());
+}
+
+#[tokio::test]
 async fn check_without_consent_never_fetches_to_heal() {
     let w = world().await;
     drop_applied(&w);

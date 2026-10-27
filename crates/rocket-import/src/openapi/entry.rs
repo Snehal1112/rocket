@@ -248,7 +248,8 @@ impl ImportService {
         match sources.save(&root, &record) {
             // The saved copy lets the spec be shown offline. It is only useful next to a source.
             Ok(()) => {
-                if sources.save_applied(&root, bundle.text.as_bytes()).is_err() {
+                if let Err(e) = sources.save_applied(&root, bundle.text.as_bytes()) {
+                    tracing::debug!(error = %e, "the saved spec copy could not be written");
                     warnings.push("The saved copy of the spec could not be written.".to_string());
                 }
             }

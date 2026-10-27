@@ -552,6 +552,40 @@ async fn apply_with_a_failing_step_changes_nothing() {
 }
 
 #[tokio::test]
+async fn a_finalized_apply_that_fails_at_any_step_keeps_the_previous_applied_copy() {
+    let mut failed_at_least_once = false;
+    for step in 1..=16 {
+        let factory = Wrapper {
+            inner: rocket_infra::FsFileTxFactory::new(),
+            fail_stage_at: Some(step),
+            recover_blocked: Arc::new(AtomicBool::new(false)),
+        };
+        let w = world_with(Arc::new(factory)).await;
+        w.check_with(v2()).await;
+        let before = w.snapshot();
+        let plan = w.plan();
+        let result = w.svc.apply(&w.name, &w.approve(&plan, &[])).await;
+        if result.is_ok() {
+            // The apply needs fewer than `step` staging calls, so the loop has covered them all.
+            assert_eq!(
+                std::fs::read_to_string(w.root.join(".rocket/openapi-applied.spec")).expect("read"),
+                v2()
+            );
+            break;
+        }
+        failed_at_least_once = true;
+        assert_eq!(w.snapshot(), before, "step {step}");
+        assert_eq!(
+            std::fs::read_to_string(w.root.join(".rocket/openapi-applied.spec")).expect("read"),
+            v1(),
+            "step {step}"
+        );
+        w.no_transaction_leftovers();
+    }
+    assert!(failed_at_least_once);
+}
+
+#[tokio::test]
 async fn crash_mid_commit_is_finished_on_recovery() {
     let blocked = Arc::new(AtomicBool::new(true));
     let factory = Wrapper {
