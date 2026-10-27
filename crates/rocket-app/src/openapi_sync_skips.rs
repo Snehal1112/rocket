@@ -48,8 +48,15 @@ impl OpenApiSyncService {
         Ok(loaded
             .local
             .skips
-            .keys()
-            .map(|key| match items.get(key.as_str()) {
+            .iter()
+            // A skip hides an item only while the item still has the fingerprint that was
+            // skipped. A changed item is back in the plan, so it is not listed here.
+            .filter(|(key, fp)| {
+                items
+                    .get(key.as_str())
+                    .is_none_or(|item| item.fingerprint() == fp.as_str())
+            })
+            .map(|(key, _)| match items.get(key.as_str()) {
                 Some(SyncItem::New { name, request, .. }) => SkippedRow {
                     key: key.clone(),
                     name: name.clone(),

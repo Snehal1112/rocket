@@ -147,3 +147,15 @@ async fn unskip_refuses_while_an_apply_runs() {
     assert!(matches!(err, DomainError::Conflict(_)), "{err:?}");
     assert!(local_skips(&w).contains(&"listPets".to_string()));
 }
+
+#[tokio::test]
+async fn a_skip_whose_item_changed_again_is_not_listed() {
+    let w = world().await;
+    w.check_with(v2()).await;
+    skip(&w, &["listPets"]).await;
+    // The spec changes that endpoint again, so it is back in the plan and no longer hidden.
+    w.check_with(v3()).await;
+    assert!(w.plan().items.iter().any(|i| i.key() == "listPets"));
+    let rows = w.svc.skipped(&w.name).expect("skipped");
+    assert!(rows.iter().all(|r| r.key != "listPets"), "{rows:?}");
+}
