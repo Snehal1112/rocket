@@ -20,6 +20,7 @@ import { OpenApiSyncConsentBanner } from './OpenApiSyncConsentBanner';
 import { OpenApiSyncDetail } from './OpenApiSyncDetail';
 import { OpenApiSyncHeader } from './OpenApiSyncHeader';
 import { OpenApiSyncList } from './OpenApiSyncList';
+import { OpenApiSyncOverview } from './OpenApiSyncOverview';
 import {
   filterItems,
   filterVariables,
@@ -263,6 +264,8 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
 
   const waiting = planData?.pending ? planData.items.length + planData.variableChanges.length : 0;
   const showUpdates = waiting > 0 || (planEnabled && plan.isError);
+  // No default is chosen while the plan loads, so the tab does not jump when it arrives.
+  const choosing = tab === null && planEnabled && plan.isPending;
   const wanted = tab ?? (showUpdates ? 'updates' : 'overview');
   const active = wanted === 'updates' && !showUpdates ? 'overview' : wanted;
 
@@ -277,26 +280,36 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
           consent={s.consent}
         />
       )}
-      <Tabs value={active} onValueChange={setTab} className='flex min-h-0 flex-1 flex-col'>
-        <TabsList className='mx-4 mt-3 self-start'>
-          <TabsTrigger value='overview'>Overview</TabsTrigger>
-          {showUpdates && (
-            <TabsTrigger value='updates'>
-              {waiting > 0 ? `Spec updates (${waiting})` : 'Spec updates'}
-            </TabsTrigger>
-          )}
-          <TabsTrigger value='changes'>Your changes</TabsTrigger>
-        </TabsList>
-        <TabsContent value='overview' className='p-4'>
-          <StateBlock tone='empty'>Nothing to show yet</StateBlock>
-        </TabsContent>
-        <TabsContent value='updates' className='flex min-h-0 flex-1 flex-col'>
-          {body}
-        </TabsContent>
-        <TabsContent value='changes' className='p-4'>
-          <StateBlock tone='empty'>Nothing to show yet</StateBlock>
-        </TabsContent>
-      </Tabs>
+      {choosing ? (
+        <div className='p-4'>
+          <StateBlock tone='loading'>Loading the plan...</StateBlock>
+        </div>
+      ) : (
+        <Tabs value={active} onValueChange={setTab} className='flex min-h-0 flex-1 flex-col'>
+          <TabsList className='mx-4 mt-3 self-start'>
+            <TabsTrigger value='overview'>Overview</TabsTrigger>
+            {showUpdates && (
+              <TabsTrigger value='updates'>
+                {waiting > 0 ? `Spec updates (${waiting})` : 'Spec updates'}
+              </TabsTrigger>
+            )}
+            <TabsTrigger value='changes'>Your changes</TabsTrigger>
+          </TabsList>
+          <TabsContent value='overview' className='p-4'>
+            <OpenApiSyncOverview
+              collection={collection}
+              status={s}
+              onReview={() => setTab('updates')}
+            />
+          </TabsContent>
+          <TabsContent value='updates' className='flex min-h-0 flex-1 flex-col'>
+            {body}
+          </TabsContent>
+          <TabsContent value='changes' className='p-4'>
+            <StateBlock tone='empty'>Nothing to show yet</StateBlock>
+          </TabsContent>
+        </Tabs>
+      )}
       <ApplyResultDialog
         report={last?.report ?? null}
         variableCount={last?.variableCount ?? 0}

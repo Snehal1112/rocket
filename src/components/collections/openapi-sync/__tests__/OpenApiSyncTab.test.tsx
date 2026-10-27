@@ -15,6 +15,7 @@ vi.mock('@/lib/tauri-api', async () => {
     ...actual,
     getOpenApiSyncStatus: vi.fn(),
     getOpenApiSyncPlan: vi.fn(),
+    getOpenApiSyncOverview: vi.fn(),
     onOpenApiSyncChecked: vi.fn(() => Promise.resolve(() => undefined)),
     onOpenApiSyncApplied: vi.fn(() => Promise.resolve(() => undefined)),
     applyOpenApiSync: vi.fn(),
@@ -33,6 +34,15 @@ configure({ asyncUtilTimeout: 10000 });
 describe('OpenApiSyncTab', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(tauriApi.getOpenApiSyncOverview).mockResolvedValue({
+      endpoints: 42,
+      inSync: 36,
+      changedByYou: 3,
+      updatesWaiting: 0,
+      specVersion: null,
+      lastSyncedAt: null,
+      lastSyncedUpdated: 0,
+    });
   });
 
   it('shows a loading state first', () => {
@@ -46,7 +56,7 @@ describe('OpenApiSyncTab', () => {
       makeStatus({ hasPending: false, lastStatus: { state: 'unchanged' } }),
     );
     renderWithQuery(<OpenApiSyncTab collection='c' />);
-    expect(await screen.findByText('Nothing to show yet')).toBeInTheDocument();
+    expect(await screen.findByText('Spec updates waiting')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute('data-state', 'active');
     expect(screen.queryByRole('tab', { name: /^Spec updates/ })).toBeNull();
     expect(tauriApi.getOpenApiSyncPlan).not.toHaveBeenCalled();
@@ -56,7 +66,7 @@ describe('OpenApiSyncTab', () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
     vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(makePlan({ pending: false }));
     renderWithQuery(<OpenApiSyncTab collection='c' />);
-    expect(await screen.findByText('Nothing to show yet')).toBeInTheDocument();
+    expect(await screen.findByText('Spec updates waiting')).toBeInTheDocument();
   });
 
   it('defaults_to_spec_updates_when_updates_wait', async () => {
@@ -92,12 +102,55 @@ describe('OpenApiSyncTab', () => {
     expect(await screen.findByText('Folder: pets / read')).toBeInTheDocument();
   });
 
-  it('overview_and_changes_show_the_empty_state', async () => {
+  it('changes_shows_the_empty_state', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus({ hasPending: false }));
     renderWithQuery(<OpenApiSyncTab collection='c' />);
-    expect(await screen.findByText('Nothing to show yet')).toBeInTheDocument();
+    expect(await screen.findByText('Spec updates waiting')).toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole('tab', { name: 'Your changes' }));
     expect(screen.getByText('Nothing to show yet')).toBeInTheDocument();
+  });
+
+  it('the_tab_mounts_the_overview_and_review_switches_to_spec_updates', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
+    vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(
+      makePlan({ items: [changedItem, newItem] }),
+    );
+    vi.mocked(tauriApi.getOpenApiSyncOverview).mockResolvedValue({
+      endpoints: 42,
+      inSync: 36,
+      changedByYou: 3,
+      updatesWaiting: 2,
+      specVersion: null,
+      lastSyncedAt: null,
+      lastSyncedUpdated: 0,
+    });
+    const user = userEvent.setup();
+    renderWithQuery(<OpenApiSyncTab collection='c' />);
+    await user.click(await screen.findByRole('tab', { name: 'Overview' }));
+    await user.click(await screen.findByRole('button', { name: 'Review updates' }));
+    expect(screen.getByRole('tab', { name: 'Spec updates (2)' })).toHaveAttribute(
+      'data-state',
+      'active',
+    );
+  });
+
+  it('waits_for_the_plan_before_choosing_the_default_tab', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
+    let resolvePlan: (p: ReturnType<typeof makePlan>) => void = () => undefined;
+    vi.mocked(tauriApi.getOpenApiSyncPlan).mockReturnValue(
+      new Promise((r) => {
+        resolvePlan = r;
+      }),
+    );
+    renderWithQuery(<OpenApiSyncTab collection='c' />);
+    expect(await screen.findByText('Loading the plan...')).toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: 'Overview', selected: true })).toBeNull();
+    expect(screen.queryByText('Spec updates waiting')).toBeNull();
+    act(() => resolvePlan(makePlan({ items: [changedItem, newItem] })));
+    expect(await screen.findByRole('tab', { name: 'Spec updates (2)' })).toHaveAttribute(
+      'data-state',
+      'active',
+    );
   });
 
   it('after_disconnect_the_tab_shows_that_nothing_is_connected', async () => {
