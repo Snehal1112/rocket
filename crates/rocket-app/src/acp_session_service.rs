@@ -494,10 +494,12 @@ impl AcpSessionService {
         config_id: &str,
         value: &str,
     ) -> DomainResult<Vec<ConfigOption>> {
+        let forms = self.stream_forms(session_id)?;
         let options = self
             .session_client
             .set_config_option(session_id, config_id, value)
             .await?;
+        let options = mask_config_options(options, &forms);
         self.event_publisher
             .publish(DomainEvent::AcpConfigOptionsChanged {
                 session_id: session_id.to_string(),
@@ -570,7 +572,7 @@ impl AcpSessionService {
             }
             AcpUpdate::ConfigOptions { options } => DomainEvent::AcpConfigOptionsChanged {
                 session_id,
-                options,
+                options: mask_config_options(options, forms),
             },
             AcpUpdate::Usage {
                 used,
@@ -596,7 +598,13 @@ impl AcpSessionService {
                 title: cap_title(mask_text(title, forms)),
                 kind,
                 summary: mask_text(summary, forms),
-                options,
+                options: options
+                    .into_iter()
+                    .map(|mut option| {
+                        option.name = mask_text(option.name, forms);
+                        option
+                    })
+                    .collect(),
             },
             AcpUpdate::PermissionResolved {
                 request_id,
@@ -752,6 +760,25 @@ fn mask_text(text: String, forms: &HashSet<String>) -> String {
         return text;
     }
     redact_secrets(&text, forms)
+}
+
+/// Masks the display text of config options (names and descriptions). Ids and
+/// values stay as they are, because the UI sends them back to the agent.
+fn mask_config_options(options: Vec<ConfigOption>, forms: &HashSet<String>) -> Vec<ConfigOption> {
+    options
+        .into_iter()
+        .map(|mut option| {
+            option.name = mask_text(option.name, forms);
+            for choice in &mut option.choices {
+                choice.name = mask_text(std::mem::take(&mut choice.name), forms);
+                choice.description = choice
+                    .description
+                    .take()
+                    .map(|description| mask_text(description, forms));
+            }
+            option
+        })
+        .collect()
 }
 
 /// Masks the secret forms in an error's message. The message reaches the
@@ -1955,6 +1982,74 @@ mod tests {
             !format!("{events:?}").contains(TOOL_SECRET),
             "got {events:?}"
         );
+    }
+
+    fn secret_option() -> ConfigOption {
+        ConfigOption {
+            id: "model".to_string(),
+            name: format!("Model {TOOL_SECRET}"),
+            category: Some("model".to_string()),
+            current_value: "opus".to_string(),
+            choices: vec![ConfigChoice {
+                value: "opus".to_string(),
+                name: format!("Opus {TOOL_SECRET}"),
+                description: Some(format!("uses {TOOL_SECRET}")),
+            }],
+        }
+    }
+
+    #[tokio::test]
+    async fn permission_option_names_are_masked() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let mut request = permission_request("perm-1");
+        if let AcpUpdate::PermissionRequest { options, .. } = &mut request {
+            options[0].name = format!("Allow {TOOL_SECRET}");
+        }
+        let client = FakeSessionClient {
+            prompt_updates: vec![request],
+            ..Default::default()
+        };
+        let service = masked_service(client, &publisher, &[TOOL_SECRET]);
+
+        let events = events_for(&service, &publisher).await;
+
+        assert!(
+            !format!("{events:?}").contains(TOOL_SECRET),
+            "got {events:?}"
+        );
+        assert!(events.iter().any(|e| matches!(
+            e,
+            DomainEvent::AcpPermissionRequested { options, .. } if options[0].id == "proceed_once"
+        )));
+    }
+
+    #[tokio::test]
+    async fn config_option_text_is_masked_but_ids_and_values_are_kept() {
+        let publisher = Arc::new(FakeEventPublisher::new());
+        let client = FakeSessionClient {
+            prompt_updates: vec![AcpUpdate::ConfigOptions {
+                options: vec![secret_option()],
+            }],
+            options_after_set: vec![secret_option()],
+            ..Default::default()
+        };
+        let service = masked_service(client, &publisher, &[TOOL_SECRET]);
+
+        let mut events = events_for(&service, &publisher).await;
+        let returned = service
+            .set_config_option("session-1", "model", "opus")
+            .await
+            .expect("set");
+        events.extend(publisher.events.lock().expect("lock").clone());
+
+        assert!(
+            !format!("{events:?}").contains(TOOL_SECRET),
+            "got {events:?}"
+        );
+        assert!(!format!("{returned:?}").contains(TOOL_SECRET));
+        assert_eq!(returned[0].id, "model");
+        assert_eq!(returned[0].current_value, "opus");
+        assert_eq!(returned[0].choices[0].value, "opus");
     }
 
     #[tokio::test]

@@ -32,7 +32,10 @@ use rocket_acp::{
     PromptCapabilities, PromptPart, SessionInfo, ToolCallStatus,
 };
 use rocket_shared::error::{DomainError, DomainResult};
-use tokio::sync::{mpsc::UnboundedSender, oneshot, Mutex};
+use tokio::sync::{
+    mpsc::{UnboundedSender, WeakUnboundedSender},
+    oneshot, Mutex,
+};
 use tokio::task::JoinHandle;
 
 use crate::acp_permissions::PermissionBroker;
@@ -1012,7 +1015,8 @@ fn handle_permission_request(
     slot: UpdateSlot,
     secrets: &[String],
 ) -> Result<(), agent_client_protocol::Error> {
-    let Some((request_id, answer)) = open_permission_request(&request, &broker, &slot, secrets)
+    let Some((request_id, answer, turn)) =
+        open_permission_request(&request, &broker, &slot, secrets)
     else {
         tracing::warn!("the agent asked for a permission outside a turn; Rocket denied it");
         return responder.respond(RequestPermissionResponse::new(deny_outcome(
@@ -1023,16 +1027,9 @@ fn handle_permission_request(
     let spawned = cx.spawn(async move {
         // A dropped sender never grants anything: it reads as cancelled.
         let chosen = answer.await.unwrap_or(None);
-        // The task reads the slot instead of keeping a sender clone, because
-        // a held clone would keep the turn's update channel open.
         // The UI hears the answer before the agent does, so the card is
         // closed before the agent can end the turn.
-        if let Some(tx) = current_update_sender(&slot) {
-            let _ = tx.send(AcpUpdate::PermissionResolved {
-                request_id: task_request_id,
-                option_id: chosen.clone(),
-            });
-        }
+        report_resolved(&turn, task_request_id, chosen.clone());
         let outcome = match chosen {
             Some(option_id) => {
                 RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(option_id))
@@ -1054,6 +1051,24 @@ fn handle_permission_request(
     Ok(())
 }
 
+/// Tells the turn that opened a request that it was answered. The turn is held
+/// as a weak sender: a strong clone would keep the update channel open, and
+/// the weak one never reaches a later turn. Once `end_turn` has cleared the
+/// slot the turn is gone and nothing is sent, because `end_turn` already
+/// reported the request itself.
+fn report_resolved(
+    turn: &WeakUnboundedSender<AcpUpdate>,
+    request_id: String,
+    option_id: Option<String>,
+) {
+    if let Some(tx) = turn.upgrade() {
+        let _ = tx.send(AcpUpdate::PermissionResolved {
+            request_id,
+            option_id,
+        });
+    }
+}
+
 /// Registers a permission request and sends its card update to the running
 /// turn. Returns `None` when no turn can show it. The slot lock is held for
 /// the whole step, so `end_turn` either drains this request or runs first.
@@ -1062,7 +1077,11 @@ fn open_permission_request(
     broker: &PermissionBroker,
     slot: &UpdateSlot,
     secrets: &[String],
-) -> Option<(String, oneshot::Receiver<Option<String>>)> {
+) -> Option<(
+    String,
+    oneshot::Receiver<Option<String>>,
+    WeakUnboundedSender<AcpUpdate>,
+)> {
     let guard = slot.lock().unwrap_or_else(PoisonError::into_inner);
     let update_tx = guard.as_ref()?;
     let options = permission_options_from_wire(&request.options);
@@ -1087,7 +1106,7 @@ fn open_permission_request(
         let _ = broker.resolve(&request_id, None);
         return None;
     }
-    Some((request_id, answer))
+    Some((request_id, answer, update_tx.downgrade()))
 }
 
 fn permission_options_from_wire(options: &[PermissionOption]) -> Vec<AcpPermissionOption> {
@@ -1498,7 +1517,7 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let slot: UpdateSlot = Arc::new(std::sync::Mutex::new(Some(tx)));
         let secrets = vec!["tok-secret-123".to_string()];
-        let (request_id, answer) = open_permission_request(
+        let (request_id, answer, _turn) = open_permission_request(
             &permission_request("curl -H tok-secret-123"),
             &broker,
             &slot,
@@ -1538,7 +1557,7 @@ mod tests {
         let broker = Arc::new(PermissionBroker::default());
         let (tx, _rx) = mpsc::unbounded_channel();
         let slot: UpdateSlot = Arc::new(std::sync::Mutex::new(Some(tx)));
-        let (request_id, answer) =
+        let (request_id, answer, _turn) =
             open_permission_request(&permission_request("ls"), &broker, &slot, &[])
                 .expect("a turn is running");
 
@@ -1551,6 +1570,49 @@ mod tests {
             .resolve(&request_id, Some("allow-once"))
             .expect_err("a request from an ended turn");
         assert!(matches!(err, DomainError::NotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn a_drained_request_is_not_reported_again_after_the_turn_ended() {
+        let broker = Arc::new(PermissionBroker::default());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let slot: UpdateSlot = Arc::new(std::sync::Mutex::new(Some(tx)));
+        let (request_id, _answer, turn) =
+            open_permission_request(&permission_request("ls"), &broker, &slot, &[])
+                .expect("a turn is running");
+        assert!(matches!(
+            rx.try_recv().expect("the card"),
+            AcpUpdate::PermissionRequest { .. }
+        ));
+
+        end_turn(&slot, &broker);
+        report_resolved(&turn, request_id, None);
+
+        assert!(matches!(
+            rx.try_recv().expect("end_turn's report"),
+            AcpUpdate::PermissionResolved { .. }
+        ));
+        assert!(
+            rx.try_recv().is_err(),
+            "no second report for the same request"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_late_report_never_reaches_the_next_turn() {
+        let broker = Arc::new(PermissionBroker::default());
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let slot: UpdateSlot = Arc::new(std::sync::Mutex::new(Some(tx)));
+        let (request_id, _answer, turn) =
+            open_permission_request(&permission_request("ls"), &broker, &slot, &[])
+                .expect("a turn is running");
+        end_turn(&slot, &broker);
+
+        let (next_tx, mut next_rx) = mpsc::unbounded_channel();
+        set_update_sender(&slot, Some(next_tx));
+        report_resolved(&turn, request_id, None);
+
+        assert!(next_rx.try_recv().is_err());
     }
 
     #[test]
@@ -1629,7 +1691,7 @@ mod tests {
         let broker = PermissionBroker::default();
         let (tx, mut rx) = mpsc::unbounded_channel();
         let slot: UpdateSlot = Arc::new(std::sync::Mutex::new(Some(tx)));
-        let (request_id, _answer) =
+        let (request_id, _answer, _turn) =
             open_permission_request(&permission_request("ls"), &broker, &slot, &[])
                 .expect("a turn is running");
         assert!(matches!(
