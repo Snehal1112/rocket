@@ -227,3 +227,107 @@ async fn changes_fails_clearly_without_a_source() {
     let err = w.svc.changes(&w.name).expect_err("no source");
     assert!(matches!(err, DomainError::NotFound(_)), "{err:?}");
 }
+
+#[tokio::test]
+async fn overview_counts_after_a_changed_check() {
+    let w = world().await;
+    w.check_with(v2()).await;
+    let view = w.svc.overview(&w.name).expect("overview");
+    assert_eq!(view.endpoints, 3);
+    assert_eq!(view.updates_waiting, 3);
+    assert_eq!(view.changed_by_you, Some(0));
+    assert_eq!(view.in_sync, Some(1));
+}
+
+#[tokio::test]
+async fn overview_counts_your_changes_apart_from_waiting_ones() {
+    let w = world().await;
+    edit_url(&w, "getPet");
+    let view = w.svc.overview(&w.name).expect("overview");
+    assert_eq!(view.changed_by_you, Some(1));
+    assert_eq!(view.in_sync, Some(2));
+    assert_eq!(view.updates_waiting, 0);
+}
+
+#[tokio::test]
+async fn overview_marks_counts_unknown_without_a_trusted_baseline() {
+    let w = world().await;
+    std::fs::remove_file(w.root.join(".rocket/openapi-baseline.json")).expect("remove");
+    let view = w.svc.overview(&w.name).expect("overview");
+    assert_eq!(view.in_sync, None);
+    assert_eq!(view.changed_by_you, None);
+    assert_eq!(view.endpoints, 3);
+}
+
+#[tokio::test]
+async fn overview_reads_the_spec_version_of_the_pending_copy() {
+    let w = world().await;
+    assert_eq!(
+        w.svc.overview(&w.name).expect("overview").spec_version,
+        None
+    );
+    w.check_with(v2().replace(r#""version":"1""#, r#""version":"2.0.0""#))
+        .await;
+    let view = w.svc.overview(&w.name).expect("overview");
+    assert_eq!(view.spec_version.as_deref(), Some("2.0.0"));
+}
+
+#[tokio::test]
+async fn overview_carries_the_last_sync_facts() {
+    let w = world().await;
+    w.check_with(v2()).await;
+    let plan = w.plan();
+    w.svc
+        .apply(&w.name, &w.approve(&plan, &[]))
+        .await
+        .expect("apply");
+    let view = w.svc.overview(&w.name).expect("overview");
+    assert!(view.last_synced_at.is_some());
+    assert_eq!(view.last_synced_updated, 3);
+    assert_eq!(view.updates_waiting, 0);
+}
+
+#[tokio::test]
+async fn overview_makes_no_request_and_reads_no_token() {
+    let w = world().await;
+    w.check_with(v2()).await;
+    let requests = w.fetcher.requests.lock().expect("lock").len();
+    let reads = w.secret_reads.load(std::sync::atomic::Ordering::SeqCst);
+    w.svc.overview(&w.name).expect("overview");
+    w.svc.changes(&w.name).expect("changes");
+    w.svc.badges();
+    assert_eq!(w.fetcher.requests.lock().expect("lock").len(), requests);
+    assert_eq!(
+        w.secret_reads.load(std::sync::atomic::Ordering::SeqCst),
+        reads
+    );
+}
+
+#[tokio::test]
+async fn badges_lists_only_collections_with_waiting_updates() {
+    let w = world().await;
+    assert!(w.svc.badges().is_empty());
+    w.check_with(v2()).await;
+    let badges = w.svc.badges();
+    assert_eq!(badges.len(), 1);
+    assert_eq!(badges[0].collection, w.name);
+    assert_eq!(badges[0].waiting, 3);
+}
+
+#[tokio::test]
+async fn badges_ignores_an_unreadable_state_file() {
+    let w = world().await;
+    w.check_with(v2()).await;
+    w.repo.create("Other").expect("create");
+    let other_root = w.ws_path.join("collections").join("Other");
+    std::fs::create_dir_all(other_root.join(".rocket")).expect("dir");
+    std::fs::copy(
+        w.root.join(".rocket/openapi-source.yml"),
+        other_root.join(".rocket/openapi-source.yml"),
+    )
+    .expect("copy");
+    std::fs::write(other_root.join(".rocket/openapi-local.json"), "{").expect("corrupt");
+    let badges = w.svc.badges();
+    assert_eq!(badges.len(), 1);
+    assert_eq!(badges[0].collection, w.name);
+}

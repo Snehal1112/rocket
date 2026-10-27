@@ -24,6 +24,11 @@ impl ParsedSpec {
         &self.doc
     }
 
+    /// The `info.version` text, or `None` when the spec leaves it empty.
+    pub fn version(&self) -> Option<&str> {
+        Some(self.doc.version.as_str()).filter(|v| !v.is_empty())
+    }
+
     /// Number of operations in the spec.
     pub fn operation_count(&self) -> usize {
         self.doc.operations.len()
@@ -44,6 +49,9 @@ mod tests {
     fn parsed_spec_counts_operations() {
         let text = r#"{"openapi":"3.0.3","info":{"title":"T","version":"1"},
             "paths":{"/a":{"get":{"responses":{"200":{"description":"ok"}}}}}}"#;
-        assert_eq!(ParsedSpec::parse(text).expect("parses").operation_count(), 1);
+        assert_eq!(
+            ParsedSpec::parse(text).expect("parses").operation_count(),
+            1
+        );
     }
 }

@@ -160,10 +160,12 @@ impl SpecFetcher for SharedFetcher {
     }
 }
 
-struct NoSecrets;
+/// Holds no secret and counts the keychain reads.
+struct NoSecrets(Arc<std::sync::atomic::AtomicUsize>);
 
 impl SecretStore for NoSecrets {
     fn get(&self, _: &str, _: &str) -> DomainResult<Option<String>> {
+        self.0.fetch_add(1, Ordering::SeqCst);
         Ok(None)
     }
     fn set(&self, _: &str, _: &str, _: &str) -> DomainResult<()> {
@@ -243,6 +245,7 @@ struct World {
     svc: OpenApiSyncService,
     fetcher: Arc<FakeFetcher>,
     repo: rocket_infra::FsCollectionRepo,
+    secret_reads: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 fn deps(ws: &Path, tx: Arc<dyn CollectionFileTxFactory>) -> ApplyDeps {
@@ -287,10 +290,11 @@ async fn world_from(
         .expect("import");
     let ws_path = ws.path().to_path_buf();
     let root = ws_path.join("collections").join(&imported.collection);
+    let secret_reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let svc = OpenApiSyncService::new(
         Arc::new(SharedFetcher(Arc::clone(&fetcher))),
         Box::new(rocket_infra::FsOpenApiSourceRepo),
-        Arc::new(NoSecrets),
+        Arc::new(NoSecrets(Arc::clone(&secret_reads))),
     )
     .with_consent(Arc::new(rocket_collection::InMemoryConsentStore::new()))
     .with_apply(deps(&ws_path, tx));
@@ -303,6 +307,7 @@ async fn world_from(
         name: imported.collection,
         svc,
         fetcher,
+        secret_reads,
     }
 }
 

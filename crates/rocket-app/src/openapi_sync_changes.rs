@@ -4,13 +4,13 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use rocket_collection::CollectionRepository;
-use rocket_import::{baseline_hash, merge_request, CurrentRequest, CONVERTER_VERSION};
+use rocket_import::{baseline_hash, merge_request, CurrentRequest, ParsedSpec, CONVERTER_VERSION};
 use rocket_shared::error::DomainResult;
 
 use crate::collection_lock::collection_lock;
 use crate::openapi_sync_apply::flatten_requests;
 use crate::openapi_sync_service::OpenApiSyncService;
-use crate::openapi_sync_view::{ChangeRow, ChangesView};
+use crate::openapi_sync_view::{BadgeView, ChangeRow, ChangesView, OverviewView};
 
 fn row(
     key: Option<&str>,
@@ -114,5 +114,87 @@ impl OpenApiSyncService {
             added,
             deleted,
         })
+    }
+
+    /// The counts of the Overview tab. It reads local state only: no request, no keychain and
+    /// no consent. The three reads each take the collection lock in turn.
+    pub fn overview(&self, collection: &str) -> DomainResult<OverviewView> {
+        let changes = self.changes(collection)?;
+        let plan = self.plan(collection)?;
+        let local = self.local_state(collection)?;
+        let deps = self.deps()?;
+        let pinned = deps.collections.pinned();
+        let repo: &dyn CollectionRepository =
+            pinned.as_deref().unwrap_or(deps.collections.as_ref());
+        let root = repo.collection_root_path(collection)?;
+        let source = self.load(&root)?;
+        let spec_version = self
+            .sources
+            .load_pending(&root)?
+            .and_then(|bytes| String::from_utf8(bytes).ok())
+            .and_then(|text| ParsedSpec::parse(&text).ok())
+            .and_then(|spec| spec.version().map(str::to_string));
+        let endpoints = u32::try_from(source.operations.len()).unwrap_or(u32::MAX);
+        // Skipped items are not in the plan, so they are not counted as waiting.
+        let waiting_ops = source
+            .operations
+            .iter()
+            .filter(|o| plan.plan.items.iter().any(|i| i.key() == o.key))
+            .count();
+        let waiting_ops = u32::try_from(waiting_ops).unwrap_or(u32::MAX);
+        let waiting = plan.plan.items.len() + plan.plan.variable_changes.len();
+        let changed = u32::try_from(changes.modified.len()).unwrap_or(u32::MAX);
+        let (in_sync, changed_by_you) = if changes.baseline_trusted {
+            (
+                Some(
+                    endpoints
+                        .saturating_sub(changed)
+                        .saturating_sub(waiting_ops),
+                ),
+                Some(changed),
+            )
+        } else {
+            (None, None)
+        };
+        Ok(OverviewView {
+            endpoints,
+            in_sync,
+            changed_by_you,
+            updates_waiting: u32::try_from(waiting).unwrap_or(u32::MAX),
+            spec_version,
+            last_synced_at: local.last_synced_at,
+            last_synced_updated: local.last_synced_updated,
+        })
+    }
+
+    /// The collections with updates waiting, from the stored counts. A collection whose state
+    /// cannot be read is left out, so it does not hide the others.
+    pub fn badges(&self) -> Vec<BadgeView> {
+        let (Some(deps), Ok(locals)) = (&self.apply_deps, self.local_repo()) else {
+            return Vec::new();
+        };
+        let pinned = deps.collections.pinned();
+        let repo: &dyn CollectionRepository =
+            pinned.as_deref().unwrap_or(deps.collections.as_ref());
+        let Ok(names) = repo.list() else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for summary in names {
+            let Ok(root) = repo.collection_root_path(&summary.name) else {
+                continue;
+            };
+            if !matches!(self.sources.load(&root), Ok(Some(_))) {
+                continue;
+            }
+            match locals.load(&root) {
+                Ok(Some(local)) if local.pending_count > 0 => out.push(BadgeView {
+                    collection: summary.name,
+                    waiting: local.pending_count,
+                }),
+                _ => {}
+            }
+        }
+        out
     }
 }

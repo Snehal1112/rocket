@@ -6,7 +6,10 @@ use std::sync::{Arc, Mutex};
 
 use std::collections::BTreeMap;
 
-use rocket_app::{safe_message, CheckOutcome, OpenApiSyncService, PlanView, SyncStatusView};
+use rocket_app::{
+    safe_message, BadgeView, ChangeRow, ChangesView, CheckOutcome, OpenApiSyncService,
+    OverviewView, PlanView, SyncStatusView,
+};
 use rocket_collection::openapi_source::{SyncInterval, SyncStatus};
 use rocket_collection::ConsentState;
 use rocket_http::SpecFetcher;
@@ -50,6 +53,9 @@ pub struct SyncStatusDto {
     pub consent: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_message: Option<String>,
+    /// The first 12 hex characters of the pending spec's hash. Left out without a pending copy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -182,6 +188,7 @@ fn status_dto(view: SyncStatusView) -> SyncStatusDto {
             ConsentState::LocationChanged => "locationChanged",
         },
         last_message: view.last_message,
+        pending_id: view.pending_id,
     }
 }
 
@@ -326,6 +333,133 @@ async fn run_blocking<T: Send + 'static>(
         .await
         .map_err(|_| TASK_FAILED.to_string())?
         .map_err(|e| e.to_string())
+}
+
+/// The counts of the Overview tab. `inSync` and `changedByYou` are null when unknown.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OverviewDto {
+    pub endpoints: u32,
+    pub in_sync: Option<u32>,
+    pub changed_by_you: Option<u32>,
+    pub updates_waiting: u32,
+    pub spec_version: Option<String>,
+    pub last_synced_at: Option<String>,
+    pub last_synced_updated: u32,
+}
+
+fn overview_dto(view: OverviewView) -> OverviewDto {
+    OverviewDto {
+        endpoints: view.endpoints,
+        in_sync: view.in_sync,
+        changed_by_you: view.changed_by_you,
+        updates_waiting: view.updates_waiting,
+        spec_version: view.spec_version,
+        last_synced_at: view.last_synced_at,
+        last_synced_updated: view.last_synced_updated,
+    }
+}
+
+/// One request that differs from what the spec produced.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeRowDto {
+    /// The operation key, or null for a request the user added.
+    pub key: Option<String>,
+    pub uid: String,
+    pub name: String,
+    pub method: String,
+    pub url: String,
+    pub request_path: Option<String>,
+    pub fields: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangesDto {
+    pub baseline_trusted: bool,
+    pub modified: Vec<ChangeRowDto>,
+    pub added: Vec<ChangeRowDto>,
+    pub deleted: Vec<ChangeRowDto>,
+}
+
+fn change_row_dto(row: ChangeRow) -> ChangeRowDto {
+    ChangeRowDto {
+        key: row.key,
+        uid: row.uid,
+        name: row.name,
+        method: row.method,
+        url: row.url,
+        request_path: row.request_path,
+        fields: row.fields,
+    }
+}
+
+fn changes_dto(view: ChangesView) -> ChangesDto {
+    ChangesDto {
+        baseline_trusted: view.baseline_trusted,
+        modified: view.modified.into_iter().map(change_row_dto).collect(),
+        added: view.added.into_iter().map(change_row_dto).collect(),
+        deleted: view.deleted.into_iter().map(change_row_dto).collect(),
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BadgeDto {
+    pub collection: String,
+    pub waiting: u32,
+}
+
+fn badge_dto(view: BadgeView) -> BadgeDto {
+    BadgeDto {
+        collection: view.collection,
+        waiting: view.waiting,
+    }
+}
+
+/// The Overview counts of a collection. Reads local state only.
+#[tauri::command]
+pub async fn openapi_sync_overview(
+    collection: String,
+    workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
+    fetcher: State<'_, Arc<dyn SpecFetcher>>,
+) -> Result<OverviewDto, String> {
+    run_blocking(
+        Arc::clone(workspace_path.inner()),
+        Arc::clone(fetcher.inner()),
+        move |service| service.overview(&collection).map(overview_dto),
+    )
+    .await
+}
+
+/// The requests the user changed, added or deleted since the last import or sync.
+#[tauri::command]
+pub async fn openapi_sync_changes(
+    collection: String,
+    workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
+    fetcher: State<'_, Arc<dyn SpecFetcher>>,
+) -> Result<ChangesDto, String> {
+    run_blocking(
+        Arc::clone(workspace_path.inner()),
+        Arc::clone(fetcher.inner()),
+        move |service| service.changes(&collection).map(changes_dto),
+    )
+    .await
+}
+
+/// The collections with updates waiting, for the sidebar badges.
+#[tauri::command]
+pub async fn openapi_sync_badges(
+    workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
+    fetcher: State<'_, Arc<dyn SpecFetcher>>,
+) -> Result<Vec<BadgeDto>, String> {
+    run_blocking(
+        Arc::clone(workspace_path.inner()),
+        Arc::clone(fetcher.inner()),
+        move |service| Ok(service.badges().into_iter().map(badge_dto).collect()),
+    )
+    .await
 }
 
 /// The sync status of a collection, or `None` when it has no OpenAPI source. `hasToken` is
@@ -866,6 +1000,7 @@ mod tests {
             consent: rocket_collection::ConsentState::Granted,
             last_message: Some("The server could not be reached.".to_string()),
             interval_unknown: false,
+            pending_id: None,
         });
         let json = serde_json::to_value(dto).expect("json");
         assert_eq!(
@@ -1048,6 +1183,7 @@ mod tests {
             consent: ConsentState::Granted,
             last_message: None,
             interval_unknown: false,
+            pending_id: None,
         };
         let json = serde_json::to_value(status_dto(view(None))).expect("json");
         assert!(json.get("hasToken").is_none());
@@ -1119,6 +1255,7 @@ mod tests {
                 consent: state,
                 last_message: None,
                 interval_unknown: false,
+                pending_id: None,
             });
             let json = serde_json::to_value(dto).expect("json");
             assert_eq!(json["consent"], name);
@@ -1157,6 +1294,7 @@ mod tests {
             consent: ConsentState::Granted,
             last_message: None,
             interval_unknown: true,
+            pending_id: None,
         });
         let json = serde_json::to_value(dto).expect("json");
         assert_eq!(json["interval"], "off");
@@ -1186,5 +1324,83 @@ mod tests {
         assert!(matches!(none, Ok(None)));
         let err = status_or_none(Err(DomainError::Internal("x".to_string())));
         assert!(err.is_err());
+    }
+
+    #[test]
+    fn overview_dto_uses_camel_case_and_nulls_unknown_counts() {
+        let dto = overview_dto(OverviewView {
+            endpoints: 4,
+            in_sync: None,
+            changed_by_you: None,
+            updates_waiting: 3,
+            spec_version: Some("2.0.0".to_string()),
+            last_synced_at: Some("2026-10-27T10:00:00+00:00".to_string()),
+            last_synced_updated: 2,
+        });
+        let json = serde_json::to_value(dto).expect("json");
+        assert_eq!(json["endpoints"], 4);
+        assert_eq!(json["inSync"], serde_json::Value::Null);
+        assert_eq!(json["changedByYou"], serde_json::Value::Null);
+        assert_eq!(json["updatesWaiting"], 3);
+        assert_eq!(json["specVersion"], "2.0.0");
+        assert_eq!(json["lastSyncedAt"], "2026-10-27T10:00:00+00:00");
+        assert_eq!(json["lastSyncedUpdated"], 2);
+    }
+
+    #[test]
+    fn changes_dto_serializes_rows_with_field_names() {
+        let row = |key: Option<&str>| ChangeRow {
+            key: key.map(str::to_string),
+            uid: "u1".to_string(),
+            name: "getPet".to_string(),
+            method: "GET".to_string(),
+            url: "{{baseUrl}}/pets".to_string(),
+            request_path: Some("pets/getPet".to_string()),
+            fields: vec!["url".to_string()],
+        };
+        let json = serde_json::to_value(changes_dto(ChangesView {
+            baseline_trusted: true,
+            modified: vec![row(Some("getPet"))],
+            added: vec![row(None)],
+            deleted: Vec::new(),
+        }))
+        .expect("json");
+        assert_eq!(json["baselineTrusted"], true);
+        assert_eq!(json["modified"][0]["key"], "getPet");
+        assert_eq!(json["modified"][0]["requestPath"], "pets/getPet");
+        assert_eq!(json["modified"][0]["fields"], json!(["url"]));
+        assert_eq!(json["added"][0]["key"], serde_json::Value::Null);
+        assert_eq!(json["deleted"], json!([]));
+    }
+
+    #[test]
+    fn badge_dto_shape() {
+        let json = serde_json::to_value(badge_dto(BadgeView {
+            collection: "Pets".to_string(),
+            waiting: 3,
+        }))
+        .expect("json");
+        assert_eq!(json, json!({"collection": "Pets", "waiting": 3}));
+    }
+
+    #[test]
+    fn status_dto_includes_pending_id_only_when_present() {
+        let view = |pending_id: Option<String>| SyncStatusView {
+            location: "https://example.com/spec.json".to_string(),
+            interval: SyncInterval::Off,
+            last_checked_at: None,
+            last_status: None,
+            has_pending: pending_id.is_some(),
+            has_token: None,
+            consent: ConsentState::Granted,
+            last_message: None,
+            interval_unknown: false,
+            pending_id,
+        };
+        let json = serde_json::to_value(status_dto(view(None))).expect("json");
+        assert!(json.get("pendingId").is_none());
+        let json =
+            serde_json::to_value(status_dto(view(Some("abc123def456".to_string())))).expect("json");
+        assert_eq!(json["pendingId"], "abc123def456");
     }
 }

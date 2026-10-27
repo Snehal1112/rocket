@@ -61,3 +61,26 @@ pub struct ChangesView {
     pub added: Vec<ChangeRow>,
     pub deleted: Vec<ChangeRow>,
 }
+
+/// The counts and facts of the Overview tab. `in_sync` and `changed_by_you` are `None` when
+/// the baseline cannot be trusted, so the screen shows them as unknown and not as zero.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OverviewView {
+    /// Operations in the stored source.
+    pub endpoints: u32,
+    pub in_sync: Option<u32>,
+    pub changed_by_you: Option<u32>,
+    /// Items and variable changes that wait for a decision.
+    pub updates_waiting: u32,
+    /// `info.version` of the pending copy. `None` without one.
+    pub spec_version: Option<String>,
+    pub last_synced_at: Option<String>,
+    pub last_synced_updated: u32,
+}
+
+/// A collection with updates waiting, for the sidebar badge.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BadgeView {
+    pub collection: String,
+    pub waiting: u32,
+}
