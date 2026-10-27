@@ -1,11 +1,12 @@
 import { type ReactNode, useState } from 'react';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { StateBlock } from '@/components/ui/state-block';
 import { useOpenApiSyncOverview } from '@/lib/queries/openapi-sync-queries';
 import { formatRelativeTime } from '@/lib/relative-time';
 import type { OpenApiSyncStatus } from '@/lib/tauri-api';
 import { OpenApiSyncConnectionDialog } from './OpenApiSyncConnectionDialog';
-import { intervalLabel, splitLocation } from './openApiSyncView';
+import { intervalLabel, isFileLocation, splitLocation } from './openApiSyncView';
 import { syncErrorMessage } from './syncErrors';
 
 interface OpenApiSyncOverviewProps {
@@ -75,6 +76,11 @@ export function OpenApiSyncOverview({ collection, status, onReview }: OpenApiSyn
       )}
       <dl className='divide-y divide-border/70'>
         <Fact label='Spec link'>
+          {isFileLocation(status.location) && (
+            <Badge variant='secondary' className='mr-2'>
+              Local file
+            </Badge>
+          )}
           <span>{full && showFull ? full : short}</span>
           {full && (
             <Button

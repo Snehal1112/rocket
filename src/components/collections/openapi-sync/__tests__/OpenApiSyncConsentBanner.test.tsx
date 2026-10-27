@@ -97,4 +97,17 @@ describe('OpenApiSyncConsentBanner', () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/branch name with a slash/)).toBeInTheDocument();
   });
+
+  it('a_file_source_asks_to_trust_the_file', () => {
+    renderWithQuery(
+      <OpenApiSyncConsentBanner
+        collection='c'
+        location='file:///home/me/specs/api.yaml'
+        consent='missing'
+      />,
+    );
+    expect(screen.getByText('Trust this spec file')).toBeInTheDocument();
+    expect(screen.getByText('file:///home/me/specs/api.yaml')).toBeInTheDocument();
+    expect(screen.queryByText('Trust this spec link')).toBeNull();
+  });
 });

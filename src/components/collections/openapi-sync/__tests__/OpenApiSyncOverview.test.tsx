@@ -147,4 +147,9 @@ describe('OpenApiSyncOverview', () => {
     expect(await screen.findByText(/Something went wrong with the OpenAPI sync/)).toBeInTheDocument();
     expect(screen.queryByText(/secret/)).toBeNull();
   });
+
+  it('a_file_source_shows_the_local_file_badge', async () => {
+    show({}, makeStatus({ location: 'file:///home/me/specs/api.yaml' }));
+    expect(await screen.findByText('Local file')).toBeInTheDocument();
+  });
 });

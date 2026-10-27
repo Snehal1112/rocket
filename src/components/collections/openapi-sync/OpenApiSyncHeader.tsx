@@ -16,7 +16,7 @@ import { type ChipState, chipState } from './chipState';
 import { DisconnectSyncDialog } from './DisconnectSyncDialog';
 import { nextStep } from './nextStep';
 import { OpenApiSyncConnectionDialog } from './OpenApiSyncConnectionDialog';
-import { intervalLabel, splitLocation } from './openApiSyncView';
+import { intervalLabel, isFileLocation, splitLocation } from './openApiSyncView';
 
 interface OpenApiSyncHeaderProps {
   collection: string;
@@ -45,13 +45,13 @@ export function OpenApiSyncHeader({
 }: OpenApiSyncHeaderProps) {
   const [showFull, setShowFull] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [dialogFocus, setDialogFocus] = useState<'token' | undefined>();
+  const [dialogFocus, setDialogFocus] = useState<'token' | 'link' | undefined>();
   const [disconnectOpen, setDisconnectOpen] = useState(false);
   const runner = useCheckRunner(collection, status.consent);
   const chip = chipState(status, waiting);
   const failed = status.lastStatus?.state === 'failed';
   const step = nextStep(status);
-  const openDialog = (focus?: 'token') => {
+  const openDialog = (focus?: 'token' | 'link') => {
     setDialogFocus(focus);
     setDialogOpen(true);
   };
@@ -86,7 +86,14 @@ export function OpenApiSyncHeader({
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
-          <p className='break-all text-sm font-medium'>{full && showFull ? full : short}</p>
+          <p className='break-all text-sm font-medium'>
+            {isFileLocation(status.location) && (
+              <Badge variant='secondary' className='mr-2 align-middle'>
+                Local file
+              </Badge>
+            )}
+            {full && showFull ? full : short}
+          </p>
           {full && (
             <div>
               <Button
@@ -134,7 +141,13 @@ export function OpenApiSyncHeader({
               size='sm'
               className='mt-2'
               disabled={step.kind === 'check_now' && runner.pending}
-              onClick={step.kind === 'add_token' ? () => openDialog('token') : runner.run}
+              onClick={
+                step.kind === 'add_token'
+                  ? () => openDialog('token')
+                  : step.kind === 'change_link'
+                    ? () => openDialog('link')
+                    : runner.run
+              }
             >
               {step.label}
             </Button>

@@ -85,6 +85,54 @@ describe('OpenApiSyncHeader', () => {
     ).toBeInTheDocument();
   });
 
+  describe('a spec file', () => {
+    const FILE = 'file:///home/me/specs/api.yaml';
+
+    it('a_file_source_shows_the_local_file_badge', () => {
+      renderWithQuery(
+        <OpenApiSyncHeader collection='c' waiting={0} status={makeStatus({ location: FILE })} />,
+      );
+      expect(screen.getByText('Local file')).toBeInTheDocument();
+      expect(screen.getByText('api.yaml in /home/me/specs')).toBeInTheDocument();
+    });
+
+    it('a_link_source_has_no_local_file_badge', () => {
+      renderWithQuery(<OpenApiSyncHeader collection='c' waiting={0} status={makeStatus()} />);
+      expect(screen.queryByText('Local file')).toBeNull();
+    });
+
+    it('a_file_source_needs_approval_on_a_new_machine', () => {
+      renderWithQuery(
+        <OpenApiSyncHeader
+          collection='c'
+          waiting={0}
+          status={makeStatus({ location: FILE, consent: 'missing' })}
+        />,
+      );
+      expect(screen.getByText('Needs approval')).toBeInTheDocument();
+    });
+
+    it('a_missing_file_offers_choose_another_file', async () => {
+      vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus({ location: FILE }));
+      renderWithQuery(
+        <OpenApiSyncHeader
+          collection='c'
+          waiting={0}
+          status={makeStatus({
+            location: FILE,
+            lastStatus: { state: 'failed', code: 'file_missing' },
+            lastMessage: 'The spec file was not found on this computer.',
+          })}
+        />,
+      );
+      const alert = screen.getByRole('alert');
+      await userEvent
+        .setup()
+        .click(within(alert).getByRole('button', { name: 'Choose another file' }));
+      expect(await screen.findByLabelText('New spec link')).toBeInTheDocument();
+    });
+  });
+
   describe('next step in the failed-check alert', () => {
     const GITHUB = 'https://github.com/acme/api/blob/main/openapi.yaml';
     const failedWith = (code: string, over: Record<string, unknown> = {}) =>

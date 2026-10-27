@@ -79,6 +79,17 @@ Show changes on a modified row lists, for each changed field, the version last s
 
 The "N skipped, hidden from this list." line opens the Skipped list. Each row has **Un-skip**, and **Un-skip all** takes every skip back. Un-skip refreshes the waiting count and refuses while an apply runs. A skip whose item changed again is back in the review list and is not listed here. The import dialog says a spec imported from a file is not kept in sync.
 
+## Spec files
+
+A spec can be a file on this computer instead of a link. Pick it in the import dialog (File mode, **Keep in sync with this file**, on by default), in Connect, or in Change link (the Link / File switch and **Choose spec file**). The source file stores the path relative to the collection folder when the file is inside the collection or beside it (`../api.yaml`), and the absolute path otherwise. A source with a file is written as `version: 2`, so older Rocket builds refuse it, and link sources stay version 1.
+
+- Approval is the gate, as for a link: a cloned or moved collection shows **Needs approval** with the full resolved path (`file:///home/me/specs/api.yaml`) and reads nothing until it is approved on this machine.
+- A check reads the file and compares its SHA-256 with the last one. A rewrite with the same bytes is no update. A file has no validators, no redirects, no token and no backoff.
+- A missing file fails with "The spec file was not found on this computer." and changes nothing. The alert offers **Choose another file**, which opens Connection settings at the Change link form. An unreadable file, a directory, a device, or a file over 25 MB also fails with a fixed sentence that names no path.
+- A stored path is refused (never shown as approvable, never read) when it has more than one leading `..`, a `..` after a folder, a network share (`//server/share`) or a NUL.
+- The `$ref` files of a spec file are not loaded, with one note.
+- Disconnect and Change link never write the spec file.
+
 ## Localhost links
 
 A spec served by a dev server can be imported and followed over plain http: `http://localhost:PORT/...`, `http://127.0.0.1:PORT/...` or `http://[::1]:PORT/...`. Any other http link is refused (look-alike hosts such as `localhost.evil.com`, private addresses and links with user info too). A link with a secret-like query name is refused as for https. A redirect must still be https and not local, a token is never sent over http, and the app proxy is not used for a localhost link. A stored localhost link must be in its normalised form (for example `http://127.0.0.1:8080/x`, not `http://2130706433:8080/x`), or it is refused. `$ref` files of a localhost spec, including relative ones, are not followed, so a dev-server spec that splits into files shows those refs as not followed. The link is approved on this machine like any other.
@@ -127,3 +138,8 @@ A count badge shows on the collection row. A toast "N spec updates" with Review 
 19. Skip an item, open the skipped line, Un-skip it, and see it return to the list and the badge count rise.
 20. Open Connection settings: the status row, the five-minute hint on a GitHub link without a token, and the title reads Connection settings from the menu, the button and the Overview link.
 21. Run a local dev server that serves an OpenAPI file, import `http://localhost:PORT/openapi.json`, approve it, then Check now. Try `http://example.com/openapi.json`: it is refused.
+22. Import a spec file with Keep in sync on, then edit the file and Check now: the update shows in Spec updates and the header shows a Local file badge.
+23. Rewrite the file with the same content: Check now reports no changes.
+24. Rename the file, Check now: the alert says the file was not found and offers Choose another file, which opens the Change link form.
+25. Copy the collection folder to another place: the sync tab shows Needs approval with the full path, and nothing is read until you approve.
+26. In Connect and Change link, switch to File, choose a spec, preview it, and check that there is no token field.

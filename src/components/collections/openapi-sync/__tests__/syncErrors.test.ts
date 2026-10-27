@@ -22,6 +22,16 @@ describe('syncErrorMessage', () => {
     ).toBe('The link must use https. Plain http works only for localhost.');
   });
 
+  it('syncerrors_maps_the_file_missing_sentence', () => {
+    for (const sentence of [
+      'The spec file was not found on this computer.',
+      'The path is not a file.',
+      'The spec file could not be read.',
+    ]) {
+      expect(syncErrorMessage(sentence)).toBe(sentence);
+    }
+  });
+
   it('maps_the_unshowable_spec_sentence', () => {
     expect(syncErrorMessage('Invalid input: The saved spec cannot be shown.')).toBe(
       'The saved spec cannot be shown.',

@@ -35,7 +35,7 @@ import { ChangeLinkForm } from './ChangeLinkForm';
 import { CheckNowButton } from './CheckNowButton';
 import { DisconnectSyncDialog } from './DisconnectSyncDialog';
 import { OpenApiSyncConsentBanner } from './OpenApiSyncConsentBanner';
-import { intervalLabel, isGithubLocation, splitLocation } from './openApiSyncView';
+import { intervalLabel, isFileLocation, isGithubLocation, splitLocation } from './openApiSyncView';
 import { syncErrorMessage } from './syncErrors';
 
 const FREQUENCIES: OpenApiSyncInterval[] = [
@@ -56,7 +56,7 @@ interface OpenApiSyncConnectionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Puts the cursor in the access token field when the dialog opens. */
-  focus?: 'token';
+  focus?: 'token' | 'link';
 }
 
 function ConnectionBody({
@@ -64,11 +64,13 @@ function ConnectionBody({
   status,
   onDisconnected,
   onChangingBusy,
+  focus,
 }: {
   collection: string;
   status: OpenApiSyncStatus;
   onDisconnected: () => void;
   onChangingBusy: (busy: boolean) => void;
+  focus?: 'token' | 'link';
 }) {
   const granted = status.consent === 'granted';
   const github = isGithubLocation(status.location);
@@ -86,7 +88,8 @@ function ConnectionBody({
   const [showFull, setShowFull] = useState(false);
   const [needConsent, setNeedConsent] = useState(false);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
-  const [changingLink, setChangingLink] = useState(false);
+  // Opened from Choose another file, the form for the new source is already open.
+  const [changingLink, setChangingLink] = useState(focus === 'link');
   // The switch turns back on with the frequency the user picked last.
   const [lastChosen, setLastChosen] = useState<OpenApiSyncInterval>(
     status.interval !== 'off' ? status.interval : DEFAULT_FREQUENCY,
@@ -167,6 +170,11 @@ function ConnectionBody({
       >
         <div className='flex items-start justify-between gap-3'>
           <p className='min-w-0 break-all text-sm font-medium leading-snug'>
+            {isFileLocation(status.location) && (
+              <Badge variant='secondary' className='mr-2 align-middle'>
+                Local file
+              </Badge>
+            )}
             {full && showFull ? full : short}
           </p>
           <Badge variant={granted ? 'outline' : 'warning'} className='shrink-0 gap-1'>
@@ -445,6 +453,7 @@ export function OpenApiSyncConnectionDialog({
             status={status}
             onDisconnected={() => onOpenChange(false)}
             onChangingBusy={setChanging}
+            focus={focus}
           />
         </DialogBody>
       </DialogContent>

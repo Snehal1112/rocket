@@ -12,6 +12,12 @@ const KNOWN: Array<[string, string]> = [
   ],
   ['This is already the spec link.', 'This is already the spec link.'],
   [
+    'The spec file was not found on this computer.',
+    'The spec file was not found on this computer.',
+  ],
+  ['The path is not a file.', 'The path is not a file.'],
+  ['The spec file could not be read.', 'The spec file could not be read.'],
+  [
     'The link must use https. Plain http works only for localhost.',
     'The link must use https. Plain http works only for localhost.',
   ],

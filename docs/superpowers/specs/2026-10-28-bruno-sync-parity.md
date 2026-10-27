@@ -8,7 +8,7 @@ Status words: **Done** (exists on the branch today), **Planned** (a plan covers 
 
 | Feature | Bruno 3.2.0 (verified in code) | Rocket today | Status and plan |
 |---|---|---|---|
-| Source kinds | URL or local file (`.json`, `.yaml`, `.yml`); any `http`/`https` URL, no host rule | https link; a file only as a one-shot import with no link | Planned: file source (series 4 plan 02, 03) |
+| Source kinds | URL or local file (`.json`, `.yaml`, `.yml`); any `http`/`https` URL, no host rule | https link; a file only as a one-shot import with no link | Done: file source (series 4 plans 02 and 03) |
 | Local-file storage | Picked absolute path stored collection-relative, resolved at read time | none | Planned: series 4 plan 02 |
 | Local-file reload | No watcher; re-read on a check (manual, timer, opening the tab) | n/a | Planned: same rule, series 4 plan 02 |
 | http / localhost | Any http or https URL | https only | Differs: loopback http only (series 4 plan 01), because Rocket asks consent but Bruno does not and a private-address first hop is a bigger risk here |
@@ -31,7 +31,7 @@ Status words: **Done** (exists on the branch today), **Planned** (a plan covers 
 | Tabs | Overview, Collection Changes, Spec Updates | Overview, Spec updates (N), Your changes (N) | Done |
 | Overview cards | Total, In sync, Changed, Spec updated pending; last synced; title and version | Endpoints, In sync with spec, Changed by you, Spec updates waiting; link, version, last checked, last synced | Done |
 | Check failure banner | Overview: "Failed to check for spec updates" plus the error and `Update connection settings`; Spec Updates empty state: "Unable to check for updates / Fix the connection issue above and check again." | Header alert with text only | Planned: actions in the alert (series 3 plan 03) and on Overview and Spec updates (series 5 plan 05) |
-| Missing file | "Source file not found at <path>" with `Update connection settings` | n/a | Planned: fixed sentence without a path and `Choose another file` (series 4 plan 03) |
+| Missing file | "Source file not found at <path>" with `Update connection settings` | n/a | Done: fixed sentence without a path and `Choose another file` (series 4 plan 03) |
 | No updates | "No updates from the spec" | "No spec updates waiting" | Done |
 | No local changes | "No changes in collection. The collection endpoints match the last synced spec." | "You have not changed anything." | Planned: clearer text (series 3 plan 03) |
 | View spec | Read-only viewer of the stored spec; falls back to the live source; "No spec file found. Sync your collection first." | Tag-grouped list with parameters and response codes only | Gap: series 5 plan 01 adds request body, response schemas, auth and servers |

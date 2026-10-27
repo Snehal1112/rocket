@@ -4,7 +4,7 @@ import { Alert } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { useGrantConsent } from '@/lib/queries/openapi-sync-queries';
 import type { OpenApiConsent } from '@/lib/tauri-api';
-import { isGithubLocation } from './openApiSyncView';
+import { isFileLocation, isGithubLocation } from './openApiSyncView';
 import { syncErrorMessage } from './syncErrors';
 
 interface OpenApiSyncConsentBannerProps {
@@ -19,6 +19,13 @@ const WHY: Record<OpenApiSyncConsentBannerProps['consent'], string> = {
     'This collection came from another place or was moved. Rocket does not contact the link until you approve it on this machine.',
   locationChanged:
     'The spec link in this collection changed. Approve the new link before Rocket contacts it.',
+};
+
+const FILE_WHY: Record<OpenApiSyncConsentBannerProps['consent'], string> = {
+  missing:
+    'This collection came from another place or was moved. Rocket does not read the file until you approve it on this machine.',
+  locationChanged:
+    'The spec file in this collection changed. Approve the new file before Rocket reads it.',
 };
 
 /** Asks the user to trust the spec link on this machine before Rocket contacts it. */
@@ -47,13 +54,17 @@ export function OpenApiSyncConsentBanner({
     <Alert className='mx-4 mt-3 w-auto'>
       <ShieldQuestion className='mt-0.5 h-4 w-4 shrink-0' aria-hidden='true' />
       <div className='flex min-w-0 flex-1 flex-col gap-2'>
-        <p className='font-semibold'>Trust this spec link</p>
+        <p className='font-semibold'>
+          {isFileLocation(seen) ? 'Trust this spec file' : 'Trust this spec link'}
+        </p>
         {/* The full exact text is shown on purpose, so the user knows what they approve. */}
         <p className='break-all rounded bg-muted px-2 py-1 font-mono'>
           {changed ? location : seen}
         </p>
         {changed && <p className='font-medium'>The link changed. Review it.</p>}
-        <p className='text-muted-foreground'>{WHY[consent]}</p>
+        <p className='text-muted-foreground'>
+          {isFileLocation(seen) ? FILE_WHY[consent] : WHY[consent]}
+        </p>
         {error && (
           <p role='alert' className='text-destructive'>
             {error}

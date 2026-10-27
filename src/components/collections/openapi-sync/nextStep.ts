@@ -2,7 +2,7 @@ import type { OpenApiSyncStatus } from '@/lib/tauri-api';
 import { isGithubLocation } from './openApiSyncView';
 
 export interface NextStep {
-  kind: 'add_token' | 'check_now' | 'none';
+  kind: 'add_token' | 'check_now' | 'change_link' | 'none';
   label: string;
 }
 
@@ -23,6 +23,8 @@ export function nextStep(status: OpenApiSyncStatus): NextStep {
     case 'rate_limited':
     case 'too_many_redirects':
       return { kind: 'check_now', label: 'Check now' };
+    case 'file_missing':
+      return { kind: 'change_link', label: 'Choose another file' };
     default:
       return NONE;
   }

@@ -45,4 +45,12 @@ describe('nextStep', () => {
     expect(nextStep(failed('network', GITHUB, 'missing')).kind).toBe('none');
     expect(nextStep(failed('not_found', GITHUB, 'locationChanged')).kind).toBe('none');
   });
+
+  it('a_missing_file_offers_choose_another_file', () => {
+    expect(nextStep(failed('file_missing', 'file:///a/api.yaml'))).toEqual({
+      kind: 'change_link',
+      label: 'Choose another file',
+    });
+    expect(nextStep(failed('file_missing', 'file:///a/api.yaml', 'missing')).kind).toBe('none');
+  });
 });

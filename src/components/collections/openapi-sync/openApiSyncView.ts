@@ -159,8 +159,25 @@ export function isGithubLocation(location: string): boolean {
   }
 }
 
-/** A link with a query or hash is split into a short form and the full text. */
+const FILE_PREFIX = 'file://';
+
+/** True for the display form of a spec file on this computer. */
+export function isFileLocation(location: string): boolean {
+  return location.startsWith(FILE_PREFIX);
+}
+
+/** A link with a query or hash is split into a short form and the full text. A file shows its
+ * name and its folder. */
 export function splitLocation(location: string): { short: string; full: string | null } {
+  if (isFileLocation(location)) {
+    const path = location.slice(FILE_PREFIX.length);
+    const cut = path.lastIndexOf('/');
+    const name = path.slice(cut + 1);
+    let folder = cut <= 0 ? '/' : path.slice(0, cut);
+    // A Windows path has a slash before the drive letter.
+    if (/^\/[A-Za-z]:/.test(folder)) folder = folder.slice(1);
+    return { short: `${name} in ${folder}`, full: null };
+  }
   try {
     const url = new URL(location);
     if (

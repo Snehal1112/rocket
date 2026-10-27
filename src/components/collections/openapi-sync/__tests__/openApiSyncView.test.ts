@@ -7,6 +7,7 @@ import {
   filterVariables,
   firstEntryId,
   groupItems,
+  isFileLocation,
   isGithubLocation,
   isPendingChangedError,
   outcomeLabel,
@@ -133,5 +134,20 @@ describe('isGithubLocation', () => {
   it('a_localhost_link_is_not_github', () => {
     expect(isGithubLocation('http://localhost:3000/openapi.json')).toBe(false);
     expect(isGithubLocation('http://github.com/acme/api/blob/main/o.yaml')).toBe(false);
+  });
+
+  it('split_location_shows_the_file_name_and_folder', () => {
+    expect(splitLocation('file:///a/b/api.yaml')).toEqual({
+      short: 'api.yaml in /a/b',
+      full: null,
+    });
+    expect(splitLocation('file:///api.yaml').short).toBe('api.yaml in /');
+    expect(splitLocation('file:///C:/specs/api.yaml').short).toBe('api.yaml in C:/specs');
+  });
+
+  it('isFileLocation_recognises_the_file_form_only', () => {
+    expect(isFileLocation('file:///a/b/api.yaml')).toBe(true);
+    expect(isFileLocation('https://example.com/file://x')).toBe(false);
+    expect(isFileLocation('http://localhost:3000/o.json')).toBe(false);
   });
 });
