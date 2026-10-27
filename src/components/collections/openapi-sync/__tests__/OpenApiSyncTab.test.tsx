@@ -83,6 +83,32 @@ describe('OpenApiSyncTab', () => {
     expect(tauriApi.getOpenApiSyncPlan).not.toHaveBeenCalled();
   });
 
+  it('the_tab_label_counts_backups', async () => {
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(
+      makeStatus({ hasPending: false, lastStatus: { state: 'unchanged' } }),
+    );
+    vi.mocked(tauriApi.getOpenApiSyncChanges).mockResolvedValue({
+      baselineTrusted: true,
+      modified: [],
+      added: [],
+      deleted: [],
+      backups: [
+        {
+          key: 'k',
+          name: 'n',
+          method: 'GET',
+          url: '/x',
+          requestPath: 'x',
+          savedAt: '2026-10-27T10:00:00+00:00',
+          fields: [],
+        },
+      ],
+      resetAvailable: true,
+    });
+    renderWithQuery(<TabWithListeners collection='c' />);
+    expect(await screen.findByRole('tab', { name: 'Your changes (1)' })).toBeInTheDocument();
+  });
+
   it('view_spec_opens_the_viewer_and_back_returns_to_the_same_tab', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(
       makeStatus({ hasPending: false, lastStatus: { state: 'unchanged' } }),

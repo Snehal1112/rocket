@@ -366,7 +366,10 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
   }
 
   const changeCount = changes.data
-    ? changes.data.modified.length + changes.data.added.length + changes.data.deleted.length
+    ? changes.data.modified.length +
+      changes.data.added.length +
+      changes.data.deleted.length +
+      changes.data.backups.length
     : 0;
   const waiting = planData?.pending ? planData.items.length + planData.variableChanges.length : 0;
   const showUpdates = waiting > 0 || (planEnabled && plan.isError);

@@ -1,14 +1,21 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { toast } from 'sonner';
 import * as tauriApi from '@/lib/tauri-api';
-import type { OpenApiChangeRow, OpenApiChanges } from '@/lib/tauri-api';
+import type { OpenApiBackupRow, OpenApiChangeRow, OpenApiChanges } from '@/lib/tauri-api';
 import { renderWithQuery } from '@/test/trust-fixtures';
 import { OpenApiSyncChanges } from '../OpenApiSyncChanges';
 
+vi.mock('sonner', () => ({ toast: { success: vi.fn() } }));
+
 vi.mock('@/lib/tauri-api', async () => {
   const actual = await vi.importActual<typeof tauriApi>('@/lib/tauri-api');
-  return { ...actual, getOpenApiSyncChanges: vi.fn(), resetOpenApiSync: vi.fn() };
+  return { ...actual, getOpenApiSyncChanges: vi.fn(),
+    resetOpenApiSync: vi.fn(),
+    restoreOpenApiSync: vi.fn(),
+    discardOpenApiSyncBackup: vi.fn(),
+  };
 });
 
 function row(over: Partial<OpenApiChangeRow> = {}): OpenApiChangeRow {
@@ -20,6 +27,19 @@ function row(over: Partial<OpenApiChangeRow> = {}): OpenApiChangeRow {
     url: '{{baseUrl}}/pets',
     requestPath: 'pets/list-pets.yml',
     fields: [],
+    ...over,
+  };
+}
+
+function backup(over: Partial<OpenApiBackupRow> = {}): OpenApiBackupRow {
+  return {
+    key: 'GET /pets',
+    name: 'List pets',
+    method: 'GET',
+    url: '{{baseUrl}}/mine',
+    requestPath: 'pets/list-pets',
+    savedAt: new Date(Date.now() - 3_600_000).toISOString(),
+    fields: ['url'],
     ...over,
   };
 }
@@ -207,5 +227,62 @@ describe('OpenApiSyncChanges', () => {
     renderWithQuery(<OpenApiSyncChanges collection='c' />);
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(screen.queryByText(/secret\.yml/)).toBeNull();
+  });
+
+  it('shows_the_reset_by_you_group_only_with_backups', async () => {
+    show(changes({ modified: [row()] }));
+    await screen.findByText('Modified (1)');
+    expect(screen.queryByText(/^Reset by you/)).toBeNull();
+  });
+
+  it('backups_show_when_the_request_is_no_longer_modified', async () => {
+    show(changes({ backups: [backup()] }));
+    expect(await screen.findByText('Reset by you (1)')).toBeInTheDocument();
+    expect(screen.queryByText('You have not changed anything.')).toBeNull();
+    expect(screen.getByText('{{baseUrl}}/mine')).toBeInTheDocument();
+    expect(screen.getByText('URL')).toBeInTheDocument();
+    expect(screen.getByText('Saved 1h ago')).toBeInTheDocument();
+  });
+
+  it('restore_my_version_sends_the_key_and_toasts', async () => {
+    vi.mocked(tauriApi.restoreOpenApiSync).mockResolvedValue(undefined);
+    show(changes({ backups: [backup()] }));
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Restore my version' }));
+    await waitFor(() => expect(tauriApi.restoreOpenApiSync).toHaveBeenCalledWith('c', 'GET /pets'));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Your version is back.'));
+  });
+
+  it('a_failed_restore_shows_a_fixed_sentence', async () => {
+    vi.mocked(tauriApi.restoreOpenApiSync).mockRejectedValue('failed at /home/me/secret.yml');
+    show(changes({ backups: [backup()] }));
+    await userEvent.setup().click(await screen.findByRole('button', { name: 'Restore my version' }));
+    await screen.findByRole('alert');
+    expect(screen.queryByText(/secret\.yml/)).toBeNull();
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
+  it('discard_asks_first', async () => {
+    show(changes({ backups: [backup()] }));
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Discard backup' }));
+    const dialog = await screen.findByRole('alertdialog');
+    expect(
+      within(dialog).getByText(
+        'Discard the backup of GET {{baseUrl}}/mine? You cannot restore it afterwards.',
+      ),
+    ).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(tauriApi.discardOpenApiSyncBackup).not.toHaveBeenCalled();
+  });
+
+  it('discard_confirm_sends_the_key', async () => {
+    vi.mocked(tauriApi.discardOpenApiSyncBackup).mockResolvedValue(undefined);
+    show(changes({ backups: [backup()] }));
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Discard backup' }));
+    await user.click(within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Discard' }));
+    await waitFor(() =>
+      expect(tauriApi.discardOpenApiSyncBackup).toHaveBeenCalledWith('c', 'GET /pets'),
+    );
   });
 });
