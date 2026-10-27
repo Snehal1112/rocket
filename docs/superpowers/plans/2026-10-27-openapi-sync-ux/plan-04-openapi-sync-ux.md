@@ -85,4 +85,4 @@
 6. The toast must not appear for a collection the user is already looking at, and never twice for one spec version. Pinned by `does_not_toast_when_the_tab_is_active` and `does_not_toast_twice_for_the_same_pending_id`.
 7. The badge must not toggle the collection row or nest a button. Pinned by `clicking_the_badge_opens_the_tab_and_keeps_the_row_closed`.
 
-Next plan: none
+Next plan: docs/superpowers/plans/2026-10-27-openapi-sync-ux-2/plan-01-openapi-sync-ux-2.md (series 2)
