@@ -119,6 +119,43 @@ describe('OpenApiSyncConnectionDialog', () => {
     });
   });
 
+  describe('rate limit hint', () => {
+    const HINT = /60 requests an hour without a token/;
+
+    it('the_hint_shows_for_five_minutes_on_github_without_a_token', async () => {
+      renderDialog('h1', makeStatus({ location: GH, interval: 'every_5_minutes' }));
+      expect(await screen.findByText(HINT)).toBeInTheDocument();
+    });
+
+    it('no_rate_limit_hint_with_a_token', async () => {
+      vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(
+        makeStatus({ location: GH, interval: 'every_5_minutes', hasToken: true }),
+      );
+      renderDialog('h2', makeStatus({ location: GH, interval: 'every_5_minutes' }));
+      await screen.findByText('A token is stored');
+      expect(screen.queryByText(HINT)).toBeNull();
+    });
+
+    it('no_rate_limit_hint_for_a_non_github_link', async () => {
+      renderDialog('h3', makeStatus({ interval: 'every_5_minutes' }));
+      await waitFor(() => expect(tauriApi.getOpenApiSyncStatus).toHaveBeenCalled());
+      expect(screen.queryByText(HINT)).toBeNull();
+    });
+
+    it('no_rate_limit_hint_for_a_longer_interval', async () => {
+      renderDialog('h4', makeStatus({ location: GH, interval: 'hourly' }));
+      await waitFor(() => expect(tauriApi.getOpenApiSyncStatus).toHaveBeenCalled());
+      expect(screen.queryByText(HINT)).toBeNull();
+    });
+
+    it('add_token_in_the_hint_focuses_the_token_field', async () => {
+      const user = renderDialog('h5', makeStatus({ location: GH, interval: 'every_5_minutes' }));
+      await screen.findByText(HINT);
+      await user.click(screen.getByRole('button', { name: 'Add token' }));
+      expect(screen.getByLabelText('Access token')).toHaveFocus();
+    });
+  });
+
   it('focus_token_scrolls_to_the_access_section', async () => {
     const github = makeStatus({ location: 'https://github.com/acme/api/blob/main/o.yaml' });
     renderDialog('d30', github, 'token');

@@ -133,6 +133,9 @@ function ConnectionBody({
   const revokeError = revoke.isError ? syncErrorMessage(revoke.error) : null;
 
   const failed = status.lastStatus?.state === 'failed';
+  // Five-minute checks use up GitHub's anonymous limit. It waits for the token flag to load.
+  const showRateHint =
+    github && status.interval === 'every_5_minutes' && tokenStatus.data !== undefined && !hasToken;
   const checkedText = status.lastCheckedAt
     ? `Last checked ${formatRelativeTime(status.lastCheckedAt)}.`
     : 'Not checked yet.';
@@ -251,6 +254,20 @@ function ConnectionBody({
               </SelectContent>
             </Select>
           </div>
+          {showRateHint && (
+            <p className='text-xs text-muted-foreground'>
+              GitHub allows 60 requests an hour without a token. Pick a longer interval or add a
+              token.{' '}
+              <Button
+                variant='link'
+                size='sm'
+                className='h-auto p-0 text-xs'
+                onClick={() => document.getElementById('openapi-sync-token')?.focus()}
+              >
+                Add token
+              </Button>
+            </p>
+          )}
           {unknown && (
             <p id='openapi-sync-unknown' className='text-xs text-muted-foreground'>
               This setting is not understood. Pick a frequency.
