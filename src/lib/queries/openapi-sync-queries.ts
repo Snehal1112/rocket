@@ -5,6 +5,9 @@ import {
   checkOpenApiSyncNow,
   clearOpenApiSyncToken,
   disconnectOpenApiSync,
+  getOpenApiSyncBadges,
+  getOpenApiSyncChanges,
+  getOpenApiSyncOverview,
   getOpenApiSyncPlan,
   getOpenApiSyncStatus,
   grantOpenApiSyncConsent,
@@ -29,6 +32,10 @@ export const openApiSyncKeys = {
   statusAll: (collection: string) => ['openapi-sync', 'status', collection] as const,
   /** Matches every plan query of the collection, whatever the links were. */
   planAll: (collection: string) => ['openapi-sync', 'plan', collection] as const,
+  overview: (collection: string) => ['openapi-sync', 'overview', collection] as const,
+  changes: (collection: string) => ['openapi-sync', 'changes', collection] as const,
+  /** The waiting counts of every collection, so it is not scoped to one. */
+  badges: ['openapi-sync', 'badges'] as const,
   status: (collection: string, includeToken = false) =>
     ['openapi-sync', 'status', collection, { includeToken }] as const,
   plan: (collection: string, links: Links = NO_LINKS) =>
@@ -90,7 +97,46 @@ export function useOpenApiSyncPlan(
   });
 }
 
+/** The overview numbers of a collection. */
+export function useOpenApiSyncOverview(collection: string | null | undefined) {
+  return useQuery({
+    // Local IPC work must not pause when WebKit reports the machine as offline.
+    networkMode: 'always',
+    queryKey: openApiSyncKeys.overview(collection ?? ''),
+    queryFn: () => getOpenApiSyncOverview(collection ?? ''),
+    enabled: !!collection,
+    staleTime: 0,
+    retry: false,
+  });
+}
+
+/** The modified, added and deleted requests of a collection against its baseline. */
+export function useOpenApiSyncChanges(collection: string | null | undefined) {
+  return useQuery({
+    networkMode: 'always',
+    queryKey: openApiSyncKeys.changes(collection ?? ''),
+    queryFn: () => getOpenApiSyncChanges(collection ?? ''),
+    enabled: !!collection,
+    staleTime: 0,
+    retry: false,
+  });
+}
+
+/** How many updates wait in each collection that has a spec source. */
+export function useOpenApiSyncBadges() {
+  return useQuery({
+    networkMode: 'always',
+    queryKey: openApiSyncKeys.badges,
+    queryFn: getOpenApiSyncBadges,
+    staleTime: 0,
+    retry: false,
+  });
+}
+
 function invalidateSync(queryClient: QueryClient, collection: string): void {
+  void queryClient.invalidateQueries({ queryKey: openApiSyncKeys.overview(collection) });
+  void queryClient.invalidateQueries({ queryKey: openApiSyncKeys.changes(collection) });
+  void queryClient.invalidateQueries({ queryKey: openApiSyncKeys.badges });
   void queryClient.invalidateQueries({ queryKey: openApiSyncKeys.statusAll(collection) });
   void queryClient.invalidateQueries({ queryKey: openApiSyncKeys.planAll(collection) });
 }

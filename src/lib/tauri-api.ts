@@ -1948,6 +1948,8 @@ export interface OpenApiSyncStatus {
   consent: OpenApiConsent;
   /** A fixed sentence for the last failed check. */
   lastMessage?: string;
+  /** The first 12 hex characters of the pending spec's hash. Absent without a pending copy. */
+  pendingId?: string;
 }
 
 export type OpenApiConsent = 'granted' | 'missing' | 'locationChanged';
@@ -2074,6 +2076,47 @@ export const getOpenApiSyncStatus = (collection: string, includeToken = false) =
     collection,
     ...(includeToken ? { includeToken: true } : {}),
   });
+
+/** The numbers shown on the overview tab. The counts are null when the baseline is untrusted. */
+export interface OpenApiOverview {
+  endpoints: number;
+  inSync: number | null;
+  changedByYou: number | null;
+  updatesWaiting: number;
+  specVersion: string | null;
+  lastSyncedAt: string | null;
+  lastSyncedUpdated: number;
+}
+
+export interface OpenApiChangeRow {
+  key: string | null;
+  uid: string;
+  name: string;
+  method: string;
+  url: string;
+  requestPath: string | null;
+  fields: string[];
+}
+
+export interface OpenApiChanges {
+  baselineTrusted: boolean;
+  modified: OpenApiChangeRow[];
+  added: OpenApiChangeRow[];
+  deleted: OpenApiChangeRow[];
+}
+
+export interface OpenApiBadge {
+  collection: string;
+  waiting: number;
+}
+
+export const getOpenApiSyncOverview = (collection: string) =>
+  invoke<OpenApiOverview>('openapi_sync_overview', { collection });
+
+export const getOpenApiSyncChanges = (collection: string) =>
+  invoke<OpenApiChanges>('openapi_sync_changes', { collection });
+
+export const getOpenApiSyncBadges = () => invoke<OpenApiBadge[]>('openapi_sync_badges');
 
 export const getOpenApiSyncPlan = (collection: string, links: Array<[string, string]> = []) =>
   invoke<OpenApiSyncPlan>('openapi_sync_plan', {

@@ -14,7 +14,10 @@ import {
   useGrantConsent,
   useIsApplying,
   useLastApply,
+  useOpenApiSyncBadges,
+  useOpenApiSyncChanges,
   useOpenApiSyncEvents,
+  useOpenApiSyncOverview,
   useOpenApiSyncPlan,
   useOpenApiSyncStatus,
   useRevokeConsent,
@@ -28,6 +31,9 @@ vi.mock('@/lib/tauri-api', async () => {
     ...actual,
     getOpenApiSyncStatus: vi.fn(),
     getOpenApiSyncPlan: vi.fn(),
+    getOpenApiSyncOverview: vi.fn(),
+    getOpenApiSyncChanges: vi.fn(),
+    getOpenApiSyncBadges: vi.fn(),
     onOpenApiSyncChecked: vi.fn(),
     onOpenApiSyncApplied: vi.fn(),
     checkOpenApiSyncNow: vi.fn(),
@@ -413,5 +419,80 @@ describe('openapi sync queries', () => {
     expect(keys).toContainEqual(openApiSyncKeys.planAll('A'));
     expect(keys).toContainEqual(collectionKeys.all);
     expect(JSON.stringify(keys)).not.toContain('"B"');
+  });
+
+  describe('overview, changes and badges', () => {
+    const overview = {
+      endpoints: 3,
+      inSync: 2,
+      changedByYou: 1,
+      updatesWaiting: 0,
+      specVersion: '1.0',
+      lastSyncedAt: null,
+      lastSyncedUpdated: 0,
+    };
+    const changes = { baselineTrusted: true, modified: [], added: [], deleted: [] };
+
+    beforeEach(() => {
+      vi.mocked(tauriApi.getOpenApiSyncOverview).mockResolvedValue(overview);
+      vi.mocked(tauriApi.getOpenApiSyncChanges).mockResolvedValue(changes);
+      vi.mocked(tauriApi.getOpenApiSyncBadges).mockResolvedValue([]);
+    });
+
+    it('the_overview_hook_returns_the_rows_unchanged', async () => {
+      const { result } = renderHook(() => useOpenApiSyncOverview('A'), { wrapper });
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      expect(result.current.data).toBe(overview);
+    });
+
+    it('an_applied_event_refreshes_overview_changes_and_badges_for_that_collection', async () => {
+      renderHook(
+        () => {
+          useOpenApiSyncEvents();
+          useOpenApiSyncOverview('A');
+          useOpenApiSyncChanges('A');
+          useOpenApiSyncBadges();
+        },
+        { wrapper },
+      );
+      await waitFor(() => expect(tauriApi.getOpenApiSyncOverview).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(tauriApi.getOpenApiSyncChanges).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(tauriApi.getOpenApiSyncBadges).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(tauriApi.onOpenApiSyncApplied).toHaveBeenCalled());
+      vi.mocked(tauriApi.onOpenApiSyncApplied).mock.calls[0]?.[0]({
+        collection: 'A',
+        applied: 1,
+        stale: 0,
+      });
+      await waitFor(() => expect(tauriApi.getOpenApiSyncOverview).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(tauriApi.getOpenApiSyncChanges).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(tauriApi.getOpenApiSyncBadges).toHaveBeenCalledTimes(2));
+    });
+
+    it('a_checked_event_refreshes_overview_and_badges_but_not_other_collections', async () => {
+      renderHook(
+        () => {
+          useOpenApiSyncEvents();
+          useOpenApiSyncOverview('A');
+          useOpenApiSyncOverview('B');
+          useOpenApiSyncBadges();
+        },
+        { wrapper },
+      );
+      await waitFor(() => expect(tauriApi.getOpenApiSyncOverview).toHaveBeenCalledTimes(2));
+      await waitFor(() => expect(tauriApi.getOpenApiSyncBadges).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(tauriApi.onOpenApiSyncChecked).toHaveBeenCalled());
+      vi.mocked(tauriApi.onOpenApiSyncChecked).mock.calls[0]?.[0]({
+        collection: 'A',
+        status: 'changed',
+      });
+      await waitFor(() => expect(tauriApi.getOpenApiSyncOverview).toHaveBeenCalledTimes(3));
+      await waitFor(() => expect(tauriApi.getOpenApiSyncBadges).toHaveBeenCalledTimes(2));
+      expect(vi.mocked(tauriApi.getOpenApiSyncOverview).mock.calls.map((c) => c[0])).toEqual([
+        'A',
+        'B',
+        'A',
+      ]);
+    });
   });
 });

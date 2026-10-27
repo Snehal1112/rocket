@@ -6,6 +6,9 @@ import {
   checkOpenApiSyncNow,
   clearOpenApiSyncToken,
   disconnectOpenApiSync,
+  getOpenApiSyncBadges,
+  getOpenApiSyncChanges,
+  getOpenApiSyncOverview,
   getOpenApiSyncPlan,
   getOpenApiSyncStatus,
   grantOpenApiSyncConsent,
@@ -30,6 +33,24 @@ describe('OpenAPI sync API', () => {
     vi.mocked(invoke).mockResolvedValue(null);
     await expect(getOpenApiSyncStatus('Orders')).resolves.toBeNull();
     expect(invoke).toHaveBeenCalledWith('openapi_sync_status', { collection: 'Orders' });
+  });
+
+  it('overview_calls_openapi_sync_overview_with_the_collection', async () => {
+    vi.mocked(invoke).mockResolvedValue({});
+    await getOpenApiSyncOverview('Orders');
+    expect(invoke).toHaveBeenCalledWith('openapi_sync_overview', { collection: 'Orders' });
+  });
+
+  it('changes_calls_openapi_sync_changes', async () => {
+    vi.mocked(invoke).mockResolvedValue({});
+    await getOpenApiSyncChanges('Orders');
+    expect(invoke).toHaveBeenCalledWith('openapi_sync_changes', { collection: 'Orders' });
+  });
+
+  it('badges_calls_openapi_sync_badges_without_arguments', async () => {
+    vi.mocked(invoke).mockResolvedValue([]);
+    await getOpenApiSyncBadges();
+    expect(invoke).toHaveBeenCalledWith('openapi_sync_badges');
   });
 
   it('getOpenApiSyncPlan invokes the plan command', async () => {
