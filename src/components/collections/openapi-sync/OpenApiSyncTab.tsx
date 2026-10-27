@@ -1,6 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { type ReactNode, useMemo, useState } from 'react';
-import { EmptyState } from '@/components/ui/empty-state';
 import { StateBlock } from '@/components/ui/state-block';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -18,6 +17,7 @@ import { ApplyResultDialog } from './ApplyResultDialog';
 import { BulkConfirmDialog } from './BulkConfirmDialog';
 import { buildSelection } from './buildSelection';
 import { countOverwrites } from './bulkSelection';
+import { NoUpdatesState } from './NoUpdatesState';
 import { OpenApiSpecView } from './OpenApiSpecView';
 import { OpenApiSyncActionsBar } from './OpenApiSyncActionsBar';
 import { OpenApiSyncChanges } from './OpenApiSyncChanges';
@@ -221,14 +221,7 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
     );
   }
 
-  const noUpdates = (
-    <EmptyState
-      cause='none-yet'
-      size='compact'
-      title='No spec updates waiting'
-      reason='When the spec changes, the changes show up here for you to review.'
-    />
-  );
+  const noUpdates = <NoUpdatesState collection={collection} status={s} />;
   let body: ReactNode;
   if (!planEnabled) {
     body = noUpdates;

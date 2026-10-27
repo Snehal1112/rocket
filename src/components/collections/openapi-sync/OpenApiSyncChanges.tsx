@@ -260,7 +260,13 @@ export function OpenApiSyncChanges({ collection }: { collection: string }) {
   if (!c) return <StateBlock tone='loading'>Loading your changes...</StateBlock>;
 
   const total = c.modified.length + c.added.length + c.deleted.length + c.backups.length;
-  if (total === 0) return <StateBlock tone='empty'>You have not changed anything.</StateBlock>;
+  if (total === 0)
+    return (
+      <StateBlock tone='empty'>
+        You have not changed anything. Edit a synced request and it shows up here with the values
+        you changed.
+      </StateBlock>
+    );
   const control: ResetControl = {
     enabled: c.resetAvailable && !reset.isPending,
     onReset: (row) => {

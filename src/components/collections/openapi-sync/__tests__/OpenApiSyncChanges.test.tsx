@@ -118,7 +118,7 @@ describe('OpenApiSyncChanges', () => {
 
   it('shows_the_empty_state', async () => {
     show(changes());
-    expect(await screen.findByText('You have not changed anything.')).toBeInTheDocument();
+    expect(await screen.findByText('You have not changed anything. Edit a synced request and it shows up here with the values you changed.')).toBeInTheDocument();
     expect(screen.queryByText('Modified (0)')).toBeNull();
   });
 
@@ -270,7 +270,7 @@ describe('OpenApiSyncChanges', () => {
   it('backups_show_when_the_request_is_no_longer_modified', async () => {
     show(changes({ backups: [backup()] }));
     expect(await screen.findByText('Reset by you (1)')).toBeInTheDocument();
-    expect(screen.queryByText('You have not changed anything.')).toBeNull();
+    expect(screen.queryByText('You have not changed anything. Edit a synced request and it shows up here with the values you changed.')).toBeNull();
     expect(screen.getByText('{{baseUrl}}/mine')).toBeInTheDocument();
     expect(screen.getByText('URL')).toBeInTheDocument();
     expect(screen.getByText('Saved 1h ago')).toBeInTheDocument();

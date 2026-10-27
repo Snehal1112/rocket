@@ -33,6 +33,7 @@ vi.mock('@/lib/tauri-api', async () => {
     onOpenApiSyncApplied: vi.fn(() => Promise.resolve(() => undefined)),
     applyOpenApiSync: vi.fn(),
     disconnectOpenApiSync: vi.fn(),
+    checkOpenApiSyncNow: vi.fn(),
   };
 });
 
@@ -159,6 +160,40 @@ describe('OpenApiSyncTab', () => {
     expect(screen.queryByText('Add pet')).toBeNull();
   });
 
+  describe('empty updates state', () => {
+    async function openEmptyUpdates(over = {}) {
+      vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus(over));
+      vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(makePlan({ pending: false }));
+      renderWithQuery(<TabWithListeners collection='c' />);
+      await userEvent.setup().click(await screen.findByRole('tab', { name: 'Spec updates' }));
+      await screen.findByText('No spec updates waiting');
+    }
+
+    it('the_empty_updates_state_offers_check_now', async () => {
+      vi.mocked(tauriApi.checkOpenApiSyncNow).mockResolvedValue({ state: 'unchanged' });
+      await openEmptyUpdates();
+      const buttons = screen.getAllByRole('button', { name: 'Check now' });
+      expect(buttons).toHaveLength(2);
+      await userEvent.setup().click(buttons[1]);
+      await waitFor(() => expect(tauriApi.checkOpenApiSyncNow).toHaveBeenCalledWith('c'));
+    });
+
+    it('the_empty_updates_state_says_when_it_was_last_checked', async () => {
+      await openEmptyUpdates();
+      expect(screen.getByText('Last checked 2h ago.')).toBeInTheDocument();
+    });
+
+    it('the_empty_updates_state_says_when_it_was_never_checked', async () => {
+      await openEmptyUpdates({ lastCheckedAt: null });
+      expect(screen.getByText('Not checked yet.')).toBeInTheDocument();
+    });
+
+    it('the_empty_updates_state_has_no_check_now_without_consent', async () => {
+      await openEmptyUpdates({ consent: 'missing' });
+      expect(screen.getAllByRole('button', { name: 'Check now' })).toHaveLength(1);
+    });
+  });
+
   it('keeps_the_notes_reachable_after_everything_is_skipped', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
     vi.mocked(tauriApi.getOpenApiSyncPlan)
@@ -244,7 +279,7 @@ describe('OpenApiSyncTab', () => {
     renderWithQuery(<TabWithListeners collection='c' />);
     expect(await screen.findByText('Spec updates waiting')).toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole('tab', { name: 'Your changes' }));
-    expect(await screen.findByText('You have not changed anything.')).toBeInTheDocument();
+    expect(await screen.findByText('You have not changed anything. Edit a synced request and it shows up here with the values you changed.')).toBeInTheDocument();
   });
 
   it('shows_the_change_count_on_the_tab_label_only_when_above_zero', async () => {
