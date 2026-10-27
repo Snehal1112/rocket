@@ -247,7 +247,8 @@ impl OpenApiSyncService {
         if output.finalized {
             output.local.last_synced_at = Some(self.now().to_rfc3339());
             output.local.last_synced_updated =
-                u32::try_from(output.report.applied.len()).unwrap_or(u32::MAX);
+                u32::try_from(output.report.applied.len() + output.report.deleted.len())
+                    .unwrap_or(u32::MAX);
             output.local.last_status = Some(SyncStatus::Unchanged);
             output.local.consecutive_failures = 0;
             output.local.not_before = None;
@@ -276,7 +277,10 @@ impl OpenApiSyncService {
             }
             // A failed commit can leave a journal that recovery finishes or undoes.
             return match deps.tx.recover(&root) {
-                Ok(RecoveryOutcome::Finished { .. }) => Ok(output.report),
+                Ok(RecoveryOutcome::Finished { .. }) => {
+                    self.refresh_count(deps, repo, collection, &root);
+                    Ok(output.report)
+                }
                 Ok(_) => Err(DomainError::Internal(format!("{e}; nothing was changed"))),
                 Err(re) => {
                     tracing::warn!(error = %re, "recovery after a failed apply did not finish");
@@ -286,7 +290,32 @@ impl OpenApiSyncService {
                 }
             };
         }
+        self.refresh_count(deps, repo, collection, &root);
         Ok(output.report)
+    }
+
+    /// Stores the waiting count of the plan as it stands after an apply, with the same logic
+    /// as `count_pending`. The caller holds the collection lock. A failure keeps the count the
+    /// apply staged from its report.
+    fn refresh_count(
+        &self,
+        deps: &ApplyDeps,
+        repo: &dyn CollectionRepository,
+        collection: &str,
+        root: &Path,
+    ) {
+        let result = self
+            .plan_locked(deps, repo, collection, root, &[])
+            .map(|view| count_of(&view))
+            .and_then(|count| {
+                let locals = self.local_repo()?;
+                let mut local = locals.load(root)?.unwrap_or_default();
+                local.pending_count = count;
+                locals.save(root, &local)
+            });
+        if let Err(e) = result {
+            tracing::debug!(error = %e, "the waiting count could not be refreshed");
+        }
     }
 
     /// What an apply would do with the pending spec, with the digests an approval carries. It

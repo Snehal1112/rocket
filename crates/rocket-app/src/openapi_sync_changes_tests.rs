@@ -51,8 +51,7 @@ async fn a_finalized_apply_stores_the_sync_facts() {
     let local = w.svc.local_state(&w.name).expect("local");
     assert_eq!(local.pending_count, 0);
     assert!(local.last_synced_at.is_some());
-    // Two items are applied and the third is a removal, which `applied` does not list.
-    assert_eq!(local.last_synced_updated, 2);
+    assert_eq!(local.last_synced_updated, 3);
 }
 
 #[tokio::test]
@@ -78,9 +77,30 @@ async fn skipped_items_are_not_counted_as_waiting() {
 #[tokio::test]
 async fn check_survives_a_failing_count() {
     let w = world().await;
+    w.check_with(v2()).await;
+    assert_eq!(w.svc.local_state(&w.name).expect("local").pending_count, 3);
     std::fs::write(w.root.join(".rocket/openapi-baseline.json"), "{").expect("corrupt");
-    *w.fetcher.body.lock().expect("lock") = v2();
+    *w.fetcher.body.lock().expect("lock") = v3();
     let out = w.svc.check(&w.root).await.expect("check");
     assert!(matches!(out, CheckOutcome::Changed { .. }), "{out:?}");
-    assert_eq!(w.svc.local_state(&w.name).expect("local").pending_count, 0);
+    assert_eq!(w.svc.local_state(&w.name).expect("local").pending_count, 3);
+}
+
+#[tokio::test]
+async fn a_partial_apply_counts_variable_changes_like_count_pending() {
+    let w = world().await;
+    w.check_with(v2().replace("https://api.example.com", "https://api2.example.com"))
+        .await;
+    let plan = w.plan();
+    assert_eq!(plan.variable_changes.len(), 1);
+    w.svc
+        .apply(&w.name, &w.approve(&plan, &["listPets"]))
+        .await
+        .expect("apply");
+    let count = w.svc.count_pending(&w.name).expect("count");
+    assert_eq!(count, 3);
+    assert_eq!(
+        w.svc.local_state(&w.name).expect("local").pending_count,
+        count
+    );
 }
