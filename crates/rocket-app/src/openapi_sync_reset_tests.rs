@@ -454,3 +454,83 @@ async fn restore_keeps_scripts_and_tags_added_after_the_reset() {
     );
     assert_eq!(after.tags, vec!["later".to_string()]);
 }
+
+fn rename(w: &World, key: &str, name: &str) {
+    let path = path_of(w, key);
+    let mut request = w.repo.get_request(&w.name, &path).expect("get");
+    request.name = name.to_string();
+    w.repo.save_request(&w.name, &path, &request).expect("save");
+}
+
+#[tokio::test]
+async fn reset_keeps_name_method_and_description() {
+    let w = world().await;
+    let original = load(&w, "listPets");
+    let path = path_of(&w, "listPets");
+    let mut mine = original.clone();
+    mine.name = "My pets".to_string();
+    mine.description = Some(rocket_shared::description::Description::text("Mine"));
+    mine.url = "https://edited.example.com/x".to_string();
+    w.repo.save_request(&w.name, &path, &mine).expect("save");
+    let report = w.svc.reset(&w.name, &keys(&["listPets"])).expect("reset");
+    assert_eq!(report.reset, keys(&["listPets"]));
+    let after = load(&w, "listPets");
+    assert_eq!(after.url, original.url);
+    assert_eq!(after.name, "My pets");
+    assert_eq!(after.description, mine.description);
+}
+
+#[tokio::test]
+async fn a_name_only_change_is_not_reset_eligible() {
+    let w = world().await;
+    rename(&w, "listPets", "My pets");
+    let report = w.svc.reset(&w.name, &keys(&["listPets"])).expect("reset");
+    assert!(report.reset.is_empty());
+    assert_eq!(report.skipped, keys(&["listPets"]));
+    assert!(backups(&w).is_none());
+    assert_eq!(load(&w, "listPets").name, "My pets");
+}
+
+#[tokio::test]
+async fn reset_all_skips_rows_that_only_changed_the_name() {
+    let w = world().await;
+    rename(&w, "listPets", "My pets");
+    edit(&w, "getPet", "https://edited.example.com/pet");
+    let report = w
+        .svc
+        .reset(&w.name, &keys(&["listPets", "getPet"]))
+        .expect("reset");
+    assert_eq!(report.reset, keys(&["getPet"]));
+    assert_eq!(report.skipped, keys(&["listPets"]));
+}
+
+#[tokio::test]
+async fn an_old_backup_still_restores() {
+    let w = world().await;
+    // A backup from before the narrower reset holds the user's name too, and the reset it came
+    // from had put the spec's name back.
+    let original = load(&w, "listPets");
+    let mut old_backup = original.clone();
+    old_backup.name = "Old mine".to_string();
+    old_backup.url = "https://old.example.com/x".to_string();
+    let entry = rocket_collection::openapi_backup::BackupEntry {
+        key: "listPets".to_string(),
+        uid: original.uid.clone(),
+        request_path: path_of(&w, "listPets"),
+        saved_at: "2026-10-01T00:00:00+00:00".to_string(),
+        request: old_backup,
+    };
+    let file = rocket_collection::OpenApiBackups {
+        version: rocket_collection::openapi_backup::BACKUP_FILE_VERSION,
+        entries: vec![entry],
+    };
+    std::fs::write(
+        w.root.join(".rocket/openapi-reset-backups.json"),
+        serde_json::to_vec_pretty(&file).expect("json"),
+    )
+    .expect("write");
+    w.svc.restore(&w.name, "listPets").expect("restore");
+    let after = load(&w, "listPets");
+    assert_eq!(after.name, "Old mine");
+    assert_eq!(after.url, "https://old.example.com/x");
+}

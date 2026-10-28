@@ -6,7 +6,8 @@ use rocket_collection::file_tx::CollectionFileTx;
 use rocket_collection::openapi_backup::{BackupEntry, OpenApiBackups};
 use rocket_collection::{request_filename_for, CollectionRepository, Request};
 use rocket_import::{
-    request_is_edited, reset_spec_owned_fields, CurrentRequest, CONVERTER_VERSION,
+    request_is_edited, reset_spec_owned_fields, restore_spec_owned_fields, CurrentRequest,
+    CONVERTER_VERSION,
 };
 use rocket_shared::error::{DomainError, DomainResult};
 
@@ -167,7 +168,7 @@ impl OpenApiSyncService {
             if let Some(cur) = find_current(&current, &entry.uid) {
                 // Only the spec-owned fields come back, so scripts, examples and other edits
                 // made after the reset stay.
-                let request = reset_spec_owned_fields(&cur.request, &entry.request);
+                let request = restore_spec_owned_fields(&cur.request, &entry.request);
                 let bytes = renderer.render(&cur.request_path, &request)?;
                 tx.stage_put(&request_filename_for(&cur.request_path), &bytes)?;
                 watch = Some((cur.request_path.clone(), cur.request.clone()));

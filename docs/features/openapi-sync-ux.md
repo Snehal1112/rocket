@@ -42,9 +42,9 @@ The page header lists the spec's **Servers** (at most 10). An expanded operation
 
 ## Reset and Restore
 
-- Reset puts the spec-owned fields back to the last synced spec: name, method, URL, description, headers, query, path variables, form, body and auth. Scripts, tests, assertions and docs are kept.
-- A confirm dialog names the fields that change. A backup of your version is kept until the next sync.
-- Restore writes only the spec-owned fields of the backup over the request. It finds the request by uid, never by path, so a new request at the old path is not touched.
+- Reset puts the URL, query and path parameters, headers, body (form fields too) and auth back to the last synced spec, as Bruno does. The name, method, description, scripts, tests, assertions and docs are kept, so a rename is never undone. A row whose only changes are the name, method or description has no Reset button and is not counted in Reset all.
+- A confirm dialog says which groups are replaced. A backup of your version is kept until the next sync.
+- Restore writes the backup's URL, parameters, headers, body and auth back, and also its name, method and description, because a backup from an older build holds those too. It finds the request by uid. It finds the request by uid, never by path, so a new request at the old path is not touched.
 - Reset is refused for sync data from an older version (no trusted baseline), while an apply runs, and for a request that changed on disk.
 
 ## Connect to an OpenAPI spec

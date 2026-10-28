@@ -12,29 +12,40 @@ import {
   isPendingChangedError,
   outcomeLabel,
   renameHint,
+  isResetEligible,
+  resetAllConfirmText,
   resetConfirmText,
 } from '../openApiSyncView';
 import { changedItem, makePlan, newItem, removedItem } from './fixtures';
 
 describe('openApiSyncView', () => {
-  it('reset_confirm_text_names_the_method_url_and_fields', () => {
-    expect(
-      resetConfirmText({ method: 'GET', url: '/orders', fields: ['url', 'header:Accept'] }),
-    ).toBe(
-      "Reset GET /orders to the spec? URL and header Accept go back to the spec's version. Your scripts, tests, assertions and docs are kept. A backup is kept until the next sync.",
+  it('the_reset_confirm_names_the_replaced_fields', () => {
+    const text = resetConfirmText({ method: 'GET', url: '/orders', fields: ['url', 'name'] });
+    expect(text).toContain('Reset GET /orders to the spec?');
+    expect(text).toContain(
+      'Your changes to the URL, parameters, headers, body and auth of this request will be replaced with the last synced version.',
     );
+    expect(text).toContain('Your name, method, description, scripts, tests, assertions and docs are kept.');
+    expect(text).toContain('A backup is kept so you can restore it.');
+    expect(text).not.toContain('Everything the spec sets');
   });
 
-  it('reset_confirm_text_handles_one_field_and_none', () => {
-    expect(resetConfirmText({ method: 'POST', url: '/a', fields: ['body:$.a'] })).toContain(
-      'body $.a goes back to the spec',
-    );
-    expect(resetConfirmText({ method: 'POST', url: '/a', fields: [] })).toContain(
-      "Everything the spec sets goes back to the spec's version.",
-    );
-    expect(
-      resetConfirmText({ method: 'GET', url: '/a', fields: ['url', 'name', 'auth'] }),
-    ).toContain('URL, name and auth go back');
+  it('the_reset_all_confirm_uses_the_same_scope', () => {
+    const text = resetAllConfirmText(3);
+    expect(text).toContain('Reset 3 requests to the spec?');
+    expect(text).toContain('URL, parameters, headers, body and auth');
+    expect(resetAllConfirmText(1)).toContain('Reset 1 request to the spec?');
+  });
+
+  it('only_changes_to_reset_fields_make_a_row_reset_eligible', () => {
+    expect(isResetEligible(['url'])).toBe(true);
+    expect(isResetEligible(['header:Accept', 'name'])).toBe(true);
+    expect(isResetEligible(['body:$.a'])).toBe(true);
+    expect(isResetEligible(['form:x', 'query:limit', 'path:id', 'auth'])).toBe(true);
+    expect(isResetEligible(['name'])).toBe(false);
+    expect(isResetEligible(['name', 'method', 'description'])).toBe(false);
+    // No field list means the row cannot say, so the backend decides.
+    expect(isResetEligible([])).toBe(true);
   });
 
   it('groups New, Changed, Removed in that order with counts', () => {

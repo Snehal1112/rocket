@@ -98,33 +98,31 @@ export function fieldLabel(field: string): string {
   return field.charAt(0).toUpperCase() + field.slice(1);
 }
 
+const RESET_SCOPE =
+  'Your changes to the URL, parameters, headers, body and auth of this request will be replaced with the last synced version.';
+const RESET_SCOPE_MANY =
+  'Your changes to the URL, parameters, headers, body and auth of these requests will be replaced with the last synced version.';
 const RESET_KEPT =
-  'Your scripts, tests, assertions and docs are kept. A backup is kept until the next sync.';
+  'Your name, method, description, scripts, tests, assertions and docs are kept. A backup is kept so you can restore it.';
 
-/** A field name inside a sentence: `URL`, `header Accept`, `body $.a`, `name`. */
-function resetFieldPhrase(field: string): string {
-  if (field === 'url') return 'URL';
-  return field.replace(':', ' ');
-}
+/** The changed-field names a reset covers. A field is the name or `name:detail`. */
+const RESET_FIELDS = ['url', 'header', 'query', 'path', 'form', 'body', 'auth'];
 
-function joinPhrases(items: string[]): string {
-  if (items.length <= 1) return items.join('');
-  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+/** True when a reset would change something: a field it covers changed, or the row has no list. */
+export function isResetEligible(fields: string[]): boolean {
+  if (fields.length === 0) return true;
+  return fields.some((f) => RESET_FIELDS.some((r) => f === r || f.startsWith(`${r}:`)));
 }
 
 /** The confirm text for resetting one request to the last synced spec. */
 export function resetConfirmText(row: { method: string; url: string; fields: string[] }): string {
   const target = `${row.method} ${row.url}`.trim();
-  const back =
-    row.fields.length === 0
-      ? "Everything the spec sets goes back to the spec's version."
-      : `${joinPhrases(row.fields.map(resetFieldPhrase))} ${row.fields.length === 1 ? 'goes' : 'go'} back to the spec's version.`;
-  return `Reset ${target} to the spec? ${back} ${RESET_KEPT}`;
+  return `Reset ${target} to the spec? ${RESET_SCOPE} ${RESET_KEPT}`;
 }
 
 /** The confirm text for resetting several requests at once. */
 export function resetAllConfirmText(count: number): string {
-  return `Reset ${count} ${count === 1 ? 'request' : 'requests'} to the spec? Everything the spec sets goes back to the spec's version. ${RESET_KEPT}`;
+  return `Reset ${count} ${count === 1 ? 'request' : 'requests'} to the spec? ${count === 1 ? RESET_SCOPE : RESET_SCOPE_MANY} ${RESET_KEPT}`;
 }
 
 export function variableLabel(change: OpenApiVariableChange): string {

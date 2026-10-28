@@ -138,6 +138,52 @@ describe('OpenApiSyncChanges', () => {
     expect(names).toEqual(['Delete all (1)', 'Open request', 'Delete']);
   });
 
+  describe('reset scope', () => {
+    it('a_name_only_row_has_no_reset_button_and_is_not_counted', async () => {
+      show(
+        changes({
+          modified: [
+            row({ uid: 'u1', key: 'GET /a', fields: ['name'] }),
+            row({ uid: 'u2', key: 'GET /b', fields: ['url', 'name'] }),
+            row({ uid: 'u3', key: 'GET /c', fields: ['header:Accept'] }),
+          ],
+        }),
+      );
+      await screen.findByText('Modified (3)');
+      expect(screen.getAllByRole('button', { name: 'Reset to spec' })).toHaveLength(2);
+      expect(screen.getByRole('button', { name: 'Reset all to spec (2)' })).toBeInTheDocument();
+    });
+
+    it('reset_all_sends_only_the_eligible_keys', async () => {
+      vi.mocked(tauriApi.resetOpenApiSync).mockResolvedValue({ reset: ['GET /b'], skipped: [] });
+      show(
+        changes({
+          modified: [
+            row({ uid: 'u1', key: 'GET /a', fields: ['name'] }),
+            row({ uid: 'u2', key: 'GET /b', fields: ['url'] }),
+          ],
+        }),
+      );
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole('button', { name: 'Reset all to spec (1)' }));
+      await user.click(
+        within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Reset' }),
+      );
+      await waitFor(() =>
+        expect(tauriApi.resetOpenApiSync).toHaveBeenCalledWith('c', ['GET /b']),
+      );
+    });
+
+    it('the_reset_confirm_names_the_replaced_fields', async () => {
+      show(changes({ modified: [row({ fields: ['url'] })] }));
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole('button', { name: 'Reset to spec' }));
+      expect(await screen.findByRole('alertdialog')).toHaveTextContent(
+        'Your changes to the URL, parameters, headers, body and auth of this request will be replaced with the last synced version.',
+      );
+    });
+  });
+
   describe('delete', () => {
     const mine = () =>
       row({
@@ -292,7 +338,7 @@ describe('OpenApiSyncChanges', () => {
     const dialog = await screen.findByRole('alertdialog');
     expect(
       within(dialog).getByText(
-        "Reset GET /orders to the spec? URL and header Accept go back to the spec's version. Your scripts, tests, assertions and docs are kept. A backup is kept until the next sync.",
+        'Reset GET /orders to the spec? Your changes to the URL, parameters, headers, body and auth of this request will be replaced with the last synced version. Your name, method, description, scripts, tests, assertions and docs are kept. A backup is kept so you can restore it.',
       ),
     ).toBeInTheDocument();
     await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));

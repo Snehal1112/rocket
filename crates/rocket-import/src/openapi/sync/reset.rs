@@ -3,35 +3,33 @@
 
 use rocket_collection::Request;
 
-/// The spec-owned fields a reset restores, named like the field changes of a merge. `form`
-/// entries live inside the body, so a body reset restores them too.
-pub const RESET_FIELD_NAMES: [&str; 10] = [
-    "name",
-    "method",
-    "url",
-    "description",
-    "header",
-    "query",
-    "path",
-    "form",
-    "body",
-    "auth",
-];
+/// The fields a reset replaces, named like the field changes of a merge: the URL, the query and
+/// path parameters, the headers and the body (its `form` entries too) and the auth. The name,
+/// the method and the description stay, as in Bruno, so a rename is never undone by a reset.
+pub const RESET_FIELD_NAMES: [&str; 7] = ["url", "header", "query", "path", "form", "body", "auth"];
 
-/// `current` with its spec-owned fields replaced by those of `baseline`. The uid, file name,
-/// sequence, scripts, tests, assertions, actions, docs, variables, examples, settings and tags
-/// of `current` are kept.
+/// `current` with its URL, parameters, headers, body and auth replaced by those of `baseline`.
+/// The uid, file name, sequence, name, method, description, scripts, tests, assertions, actions,
+/// docs, variables, examples, settings and tags of `current` are kept.
 pub fn reset_spec_owned_fields(current: &Request, baseline: &Request) -> Request {
     let mut out = current.clone();
-    out.name = baseline.name.clone();
-    out.method = baseline.method.clone();
     out.url = baseline.url.clone();
-    out.description = baseline.description.clone();
     out.headers = baseline.headers.clone();
     out.query_params = baseline.query_params.clone();
     out.path_params = baseline.path_params.clone();
     out.body = baseline.body.clone();
     out.auth = baseline.auth.clone();
+    out
+}
+
+/// `current` with all ten spec-owned fields (the reset fields, and also the name, the method and
+/// the description) taken from a backup. An older reset replaced those three too, so a restore
+/// must bring them back, and a backup does not say which kind of reset made it.
+pub fn restore_spec_owned_fields(current: &Request, backup: &Request) -> Request {
+    let mut out = reset_spec_owned_fields(current, backup);
+    out.name = backup.name.clone();
+    out.method = backup.method.clone();
+    out.description = backup.description.clone();
     out
 }
 
@@ -78,8 +76,6 @@ mod tests {
             secret: false,
         }];
         let reset = reset_spec_owned_fields(&current, &base);
-        assert_eq!(reset.name, base.name);
-        assert_eq!(reset.method, base.method);
         assert_eq!(reset.url, base.url);
         assert_eq!(reset.headers, base.headers);
         assert_eq!(reset.body, base.body);
@@ -90,6 +86,39 @@ mod tests {
         assert_eq!(reset.tests, current.tests);
         assert_eq!(reset.tags, current.tags);
         assert_eq!(reset.variables, current.variables);
+    }
+
+    #[test]
+    fn reset_keeps_name_method_and_description() {
+        let base = baseline();
+        let mut current = base.clone();
+        current.name = "My orders".to_string();
+        current.method = HttpMethod::Post;
+        current.description = Some(rocket_shared::description::Description::text("Mine"));
+        current.url = "{{baseUrl}}/mine".to_string();
+        let reset = reset_spec_owned_fields(&current, &base);
+        assert_eq!(reset.name, "My orders");
+        assert_eq!(reset.method, HttpMethod::Post);
+        assert_eq!(reset.description, current.description);
+        assert_eq!(reset.url, base.url);
+    }
+
+    #[test]
+    fn a_restore_brings_back_all_ten_fields() {
+        let base = baseline();
+        let mut backup = base.clone();
+        backup.name = "My orders".to_string();
+        backup.method = HttpMethod::Post;
+        backup.description = Some(rocket_shared::description::Description::text("Mine"));
+        backup.url = "{{baseUrl}}/mine".to_string();
+        let mut current = base.clone();
+        current.tests = Some("test('x', () => {})".to_string());
+        let restored = restore_spec_owned_fields(&current, &backup);
+        assert_eq!(restored.name, "My orders");
+        assert_eq!(restored.method, HttpMethod::Post);
+        assert_eq!(restored.description, backup.description);
+        assert_eq!(restored.url, "{{baseUrl}}/mine");
+        assert_eq!(restored.tests, current.tests);
     }
 
     #[test]
@@ -111,21 +140,13 @@ mod tests {
     }
 
     #[test]
-    fn the_field_names_cover_the_ten_spec_owned_fields() {
-        assert_eq!(RESET_FIELD_NAMES.len(), 10);
-        for name in [
-            "name",
-            "method",
-            "url",
-            "description",
-            "header",
-            "query",
-            "path",
-            "form",
-            "body",
-            "auth",
-        ] {
+    fn the_field_names_cover_the_reset_fields_only() {
+        assert_eq!(RESET_FIELD_NAMES.len(), 7);
+        for name in ["url", "header", "query", "path", "form", "body", "auth"] {
             assert!(RESET_FIELD_NAMES.contains(&name), "{name}");
+        }
+        for name in ["name", "method", "description"] {
+            assert!(!RESET_FIELD_NAMES.contains(&name), "{name}");
         }
     }
 }

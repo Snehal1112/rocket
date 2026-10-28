@@ -14,7 +14,12 @@ import { formatRelativeTime } from '@/lib/relative-time';
 import type { OpenApiBackupRow, OpenApiChangeRow } from '@/lib/tauri-api';
 import { closeDeletedRequestTabs } from './closeDeletedRequestTabs';
 import { type DeleteRequestRow, DeleteRequestsDialog } from './DeleteRequestsDialog';
-import { fieldLabel, resetAllConfirmText, resetConfirmText } from './openApiSyncView';
+import {
+  fieldLabel,
+  isResetEligible,
+  resetAllConfirmText,
+  resetConfirmText,
+} from './openApiSyncView';
 import { openSyncRequest } from './openSyncRequest';
 import { ResetConfirmDialog } from './ResetConfirmDialog';
 import { syncErrorMessage } from './syncErrors';
@@ -103,7 +108,7 @@ function ChangeRow({
             Delete
           </Button>
         )}
-        {kind === 'modified' && reset && row.key && (
+        {kind === 'modified' && reset && row.key && isResetEligible(row.fields) && (
           <Button
             variant='outline'
             size='sm'
@@ -174,13 +179,14 @@ function Group({
   onDeleteAll?: () => void;
 }) {
   if (rows.length === 0) return null;
+  const resettable = rows.filter((r) => r.key && isResetEligible(r.fields)).length;
   return (
     <section className='flex flex-col gap-1'>
       <div className='flex items-center justify-between gap-2'>
         <h3 className='text-sm font-medium'>{`${GROUP_TITLE[kind]} (${rows.length})`}</h3>
-        {onResetAll && reset && (
+        {onResetAll && reset && resettable > 0 && (
           <Button variant='outline' size='sm' disabled={!reset.enabled} onClick={onResetAll}>
-            {`Reset all to spec (${rows.length})`}
+            {`Reset all to spec (${resettable})`}
           </Button>
         )}
         {onDeleteAll && del && (
@@ -330,7 +336,7 @@ export function OpenApiSyncChanges({ collection }: { collection: string }) {
     setDeleting(c.added.flatMap(deleteRow));
   };
   const resetAll = () => {
-    const keys = c.modified.flatMap((r) => (r.key ? [r.key] : []));
+    const keys = c.modified.flatMap((r) => (r.key && isResetEligible(r.fields) ? [r.key] : []));
     reset.reset();
     setPending({ keys, body: resetAllConfirmText(keys.length) });
   };
