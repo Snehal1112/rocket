@@ -13,6 +13,7 @@ import type {
   OpenApiSyncPlan,
   OpenApiVariableChange,
 } from '@/lib/tauri-api';
+import { closeDeletedRequestTabs } from './closeDeletedRequestTabs';
 import { DeleteRequestsDialog } from './DeleteRequestsDialog';
 import {
   defaultChoice,
@@ -87,7 +88,12 @@ function DeleteRemovedRequest({
         busy={del.isPending}
         onCancel={() => setAsking(false)}
         onConfirm={() => {
-          del.mutate([{ uid, requestPath }], { onSuccess: () => toast.success('Deleted.') });
+          del.mutate([{ uid, requestPath }], {
+            onSuccess: () => {
+              closeDeletedRequestTabs(collection, [requestPath]);
+              toast.success('Deleted.');
+            },
+          });
           setAsking(false);
         }}
       />
@@ -284,6 +290,7 @@ export function OpenApiSyncDetail({
                 <p className='break-all text-xs text-muted-foreground'>{entry.item.requestPath}</p>
                 {entry.item.edited === true && (
                   <DeleteRemovedRequest
+                    key={entry.item.key}
                     collection={collection}
                     uid={entry.item.uid}
                     requestPath={entry.item.requestPath}

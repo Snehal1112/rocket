@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { toast } from 'sonner';
 import * as tauriApi from '@/lib/tauri-api';
 import type { OpenApiBackupRow, OpenApiChangeRow, OpenApiChanges } from '@/lib/tauri-api';
+import { collectAllTabs } from '@/lib/pane-utils';
+import { usePaneStore } from '@/stores/pane-store';
 import { renderWithQuery } from '@/test/trust-fixtures';
 import { OpenApiSyncChanges } from '../OpenApiSyncChanges';
 import { openSyncRequest } from '../openSyncRequest';
@@ -173,6 +175,31 @@ describe('OpenApiSyncChanges', () => {
         ]),
       );
       await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Deleted.'));
+    });
+
+    it('deleting_closes_the_open_tab_of_the_request', async () => {
+      vi.mocked(tauriApi.deleteOpenApiRequests).mockResolvedValue(1);
+      usePaneStore.getState().reset();
+      usePaneStore.getState().openTab({
+        id: 'tab-mine',
+        title: 'Mine',
+        tabType: 'request',
+        request: {} as never,
+        response: null,
+        isDirty: true,
+        source: { collection: 'c', path: 'mine' },
+      } as never);
+      show(changes({ added: [mine()] }));
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole('button', { name: 'Delete' }));
+      await user.click(
+        within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete' }),
+      );
+      await waitFor(() =>
+        expect(
+          collectAllTabs(usePaneStore.getState().root).some((t) => t.id === 'tab-mine'),
+        ).toBe(false),
+      );
     });
 
     it('cancel_deletes_nothing', async () => {

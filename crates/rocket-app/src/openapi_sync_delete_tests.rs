@@ -124,9 +124,11 @@ async fn an_edited_request_that_is_still_in_the_spec_is_refused() {
     let w = world().await;
     edit_url(&w, "listPets");
     let target = target_of(&w, "listPets");
-    w.svc
+    let err = w
+        .svc
         .delete_requests(&w.name, std::slice::from_ref(&target))
         .expect_err("refused");
+    assert!(err.to_string().contains("still part of the spec"), "{err}");
     assert!(exists(&w, &target.request_path));
 }
 
@@ -135,9 +137,11 @@ async fn an_unedited_removed_request_is_refused() {
     let w = world().await;
     w.check_with(v2()).await;
     let target = target_of(&w, "getInventory");
-    w.svc
+    let err = w
+        .svc
         .delete_requests(&w.name, std::slice::from_ref(&target))
         .expect_err("refused");
+    assert!(err.to_string().contains("still part of the spec"), "{err}");
     assert!(exists(&w, &target.request_path));
 }
 
@@ -198,6 +202,7 @@ async fn delete_refuses_while_an_apply_runs() {
         .expect_err("recovery is blocked");
     let err = w.svc.delete_requests(&w.name, &[target]).expect_err("busy");
     assert!(matches!(err, DomainError::Conflict(_)), "{err:?}");
+    assert!(err.to_string().contains("not finished"), "{err}");
     assert!(exists(&w, "mine"));
 }
 
@@ -227,4 +232,70 @@ async fn delete_never_touches_the_network() {
     w.svc.delete_requests(&w.name, &[target]).expect("delete");
     assert!(w.fetcher.requests.lock().expect("lock").is_empty());
     assert_eq!(w.secret_reads.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn an_edit_the_hash_ignores_still_allows_the_delete() {
+    let w = world().await;
+    // Only the name changes, which the request hash does not cover but the plan does.
+    let target = target_of(&w, "getInventory");
+    let mut request = w
+        .repo
+        .get_request(&w.name, &target.request_path)
+        .expect("get");
+    request.name = "Renamed by me".to_string();
+    w.repo
+        .save_request(&w.name, &target.request_path, &request)
+        .expect("save");
+    w.check_with(v2()).await;
+    w.svc
+        .delete_requests(&w.name, std::slice::from_ref(&target))
+        .expect("delete");
+    assert!(!exists(&w, &target.request_path));
+    assert!(w
+        .source()
+        .operations
+        .iter()
+        .all(|o| o.key != "getInventory"));
+}
+
+#[tokio::test]
+async fn two_added_files_with_one_uid_are_both_deleted() {
+    let w = world().await;
+    add_request(&w, "one", "One");
+    // A copy made outside the app keeps the uid.
+    let dir = w.root.clone();
+    std::fs::copy(dir.join("one.yml"), dir.join("two.yml")).expect("copy");
+    let view = w.svc.changes(&w.name).expect("changes");
+    assert_eq!(view.added.len(), 2);
+    let targets: Vec<DeleteTarget> = view
+        .added
+        .iter()
+        .map(|r| DeleteTarget {
+            uid: r.uid.clone(),
+            request_path: r.request_path.clone().expect("path"),
+        })
+        .collect();
+    let count = w.svc.delete_requests(&w.name, &targets).expect("delete");
+    assert_eq!(count, 2);
+    assert!(!exists(&w, "one") && !exists(&w, "two"));
+}
+
+#[tokio::test]
+async fn deleting_a_removed_request_drops_its_reset_backup_and_refreshes_the_count() {
+    let w = world().await;
+    edit_url(&w, "getInventory");
+    // Reset it so a backup exists, then edit again and let the spec remove it.
+    w.svc
+        .reset(&w.name, &["getInventory".to_string()])
+        .expect("reset");
+    edit_url(&w, "getInventory");
+    w.check_with(v2()).await;
+    assert!(!w.svc.changes(&w.name).expect("changes").backups.is_empty());
+    let before = w.svc.local_state(&w.name).expect("local").pending_count;
+    let target = target_of(&w, "getInventory");
+    w.svc.delete_requests(&w.name, &[target]).expect("delete");
+    assert!(w.svc.changes(&w.name).expect("changes").backups.is_empty());
+    let after = w.svc.local_state(&w.name).expect("local").pending_count;
+    assert!(after < before, "{before} -> {after}");
 }

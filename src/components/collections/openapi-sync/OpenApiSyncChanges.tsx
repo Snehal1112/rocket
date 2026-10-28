@@ -12,6 +12,7 @@ import {
 } from '@/lib/queries/openapi-sync-queries';
 import { formatRelativeTime } from '@/lib/relative-time';
 import type { OpenApiBackupRow, OpenApiChangeRow } from '@/lib/tauri-api';
+import { closeDeletedRequestTabs } from './closeDeletedRequestTabs';
 import { type DeleteRequestRow, DeleteRequestsDialog } from './DeleteRequestsDialog';
 import { fieldLabel, resetAllConfirmText, resetConfirmText } from './openApiSyncView';
 import { openSyncRequest } from './openSyncRequest';
@@ -191,7 +192,7 @@ function Group({
       <ul className='rounded-md border border-border/70'>
         {rows.map((r) => (
           <ChangeRow
-            key={r.uid}
+            key={`${r.uid}:${r.requestPath}`}
             collection={collection}
             row={r}
             kind={kind}
@@ -394,7 +395,15 @@ export function OpenApiSyncChanges({ collection }: { collection: string }) {
           if (!deleting) return;
           del.mutate(
             deleting.map(({ uid, requestPath }) => ({ uid, requestPath })),
-            { onSuccess: () => toast.success('Deleted.') },
+            {
+              onSuccess: () => {
+                closeDeletedRequestTabs(
+                  collection,
+                  deleting.map((r) => r.requestPath),
+                );
+                toast.success('Deleted.');
+              },
+            },
           );
           setDeleting(null);
         }}

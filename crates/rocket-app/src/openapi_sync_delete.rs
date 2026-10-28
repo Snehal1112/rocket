@@ -2,10 +2,10 @@
 //! user had edited. Every call runs under the collection lock and in one file transaction, and
 //! nothing here touches the network or the keychain.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use rocket_collection::{request_filename_for, CollectionRepository};
-use rocket_import::{baseline_hash, SyncItem};
+use rocket_import::SyncItem;
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::collection_lock::collection_lock;
@@ -51,6 +51,9 @@ impl OpenApiSyncService {
         collection: &str,
         targets: &[DeleteTarget],
     ) -> DomainResult<usize> {
+        if targets.is_empty() {
+            return Ok(0);
+        }
         if targets.iter().any(|t| !path_is_inside(&t.request_path)) {
             return Err(DomainError::InvalidInput(BAD_PATH.to_string()));
         }
@@ -72,24 +75,27 @@ impl OpenApiSyncService {
         }
         let mut source = self.load(&root)?;
         let current = flatten_requests(&repo.get(collection)?.root);
-        // The operations the pending spec removes. No pending spec means none.
-        let removed: HashSet<String> = self
+        // The operations the pending spec removes, with whether the plan counts them as edited.
+        // That is the rule the page shows, so the button and this check agree.
+        let removed: HashMap<String, Option<bool>> = self
             .plan_locked(deps, repo, collection, &root, &[])
             .map(|view| {
                 view.plan
                     .items
                     .iter()
-                    .filter(|i| matches!(i, SyncItem::Removed { .. }))
-                    .map(|i| i.key().to_string())
+                    .filter_map(|i| match i {
+                        SyncItem::Removed { key, edited, .. } => Some((key.clone(), *edited)),
+                        _ => None,
+                    })
                     .collect()
             })
             .unwrap_or_default();
 
-        let mut seen_uids: HashSet<&str> = HashSet::new();
+        let mut seen: HashSet<(&str, &str)> = HashSet::new();
         let mut dropped_keys: Vec<String> = Vec::new();
         let mut files: Vec<String> = Vec::new();
         for target in targets {
-            if !seen_uids.insert(target.uid.as_str()) {
+            if !seen.insert((target.uid.as_str(), target.request_path.as_str())) {
                 continue;
             }
             let Some(cur) = current
@@ -101,8 +107,7 @@ impl OpenApiSyncService {
             match source.operations.iter().find(|o| o.uid == target.uid) {
                 None => {}
                 Some(op) => {
-                    let edited = baseline_hash(&cur.request) != op.baseline_hash;
-                    if !(removed.contains(&op.key) && edited) {
+                    if removed.get(&op.key) != Some(&Some(true)) {
                         return Err(DomainError::InvalidInput(NOT_DELETABLE.to_string()));
                     }
                     dropped_keys.push(op.key.clone());
