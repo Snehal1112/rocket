@@ -415,7 +415,7 @@ impl OpenApiSyncService {
     }
 
     /// The plan work for a caller that already holds the collection lock.
-    fn plan_locked(
+    pub(crate) fn plan_locked(
         &self,
         deps: &ApplyDeps,
         repo: &dyn CollectionRepository,

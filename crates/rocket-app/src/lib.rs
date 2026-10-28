@@ -63,6 +63,7 @@ pub mod openapi_change_link;
 pub mod openapi_connect;
 pub mod openapi_sync_apply;
 pub mod openapi_sync_changes;
+pub mod openapi_sync_delete;
 pub mod openapi_sync_reset;
 pub mod openapi_sync_skips;
 pub mod openapi_sync_scheduler;
@@ -156,6 +157,7 @@ pub use openapi_connect::{
     request_digest, ConnectAmbiguous, ConnectOperationRow, ConnectOutcome, ConnectPair,
     ConnectPreview, ConnectRequestRow, ConnectRow,
 };
+pub use openapi_sync_delete::DeleteTarget;
 pub use openapi_sync_reset::ResetReport;
 pub use openapi_sync_skips::SkippedRow;
 pub use openapi_sync_view::{

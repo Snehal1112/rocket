@@ -1265,6 +1265,9 @@ mod skips_tests;
 #[path = "openapi_file_source_tests.rs"]
 mod file_source_tests;
 
+#[path = "openapi_sync_delete_tests.rs"]
+mod delete_tests;
+
 #[cfg(test)]
 #[path = "openapi_connect_tests.rs"]
 mod connect_tests;
