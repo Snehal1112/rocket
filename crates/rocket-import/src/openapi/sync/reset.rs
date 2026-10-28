@@ -3,11 +3,6 @@
 
 use rocket_collection::Request;
 
-/// The fields a reset replaces, named like the field changes of a merge: the URL, the query and
-/// path parameters, the headers and the body (its `form` entries too) and the auth. The name,
-/// the method and the description stay, as in Bruno, so a rename is never undone by a reset.
-pub const RESET_FIELD_NAMES: [&str; 7] = ["url", "header", "query", "path", "form", "body", "auth"];
-
 /// `current` with its URL, parameters, headers, body and auth replaced by those of `baseline`.
 /// The uid, file name, sequence, name, method, description, scripts, tests, assertions, actions,
 /// docs, variables, examples, settings and tags of `current` are kept.
@@ -170,16 +165,5 @@ mod tests {
     fn reset_of_an_untouched_request_is_equal_to_it() {
         let base = baseline();
         assert_eq!(reset_spec_owned_fields(&base, &base), base);
-    }
-
-    #[test]
-    fn the_field_names_cover_the_reset_fields_only() {
-        assert_eq!(RESET_FIELD_NAMES.len(), 7);
-        for name in ["url", "header", "query", "path", "form", "body", "auth"] {
-            assert!(RESET_FIELD_NAMES.contains(&name), "{name}");
-        }
-        for name in ["name", "method", "description"] {
-            assert!(!RESET_FIELD_NAMES.contains(&name), "{name}");
-        }
     }
 }

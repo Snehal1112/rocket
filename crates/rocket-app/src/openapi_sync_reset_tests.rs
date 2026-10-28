@@ -68,6 +68,31 @@ async fn reset_keeps_scripts_and_docs() {
 }
 
 #[tokio::test]
+async fn reset_still_keeps_scripts_tests_and_assertions() {
+    let w = world().await;
+    let path = path_of(&w, "listPets");
+    let mut request = w.repo.get_request(&w.name, &path).expect("get");
+    request.url = "https://edited.example.com/x".to_string();
+    request.pre_request_script = Some("rok.log('pre')".to_string());
+    request.post_response_script = Some("rok.log('post')".to_string());
+    request.tests = Some("test('mine', () => {});".to_string());
+    request.assertions = vec![rocket_shared::assertion::Assertion {
+        expression: "res.status".to_string(),
+        operator: "eq".to_string(),
+        value: Some("200".to_string()),
+        disabled: None,
+        description: None,
+    }];
+    w.repo.save_request(&w.name, &path, &request).expect("save");
+    w.svc.reset(&w.name, &keys(&["listPets"])).expect("reset");
+    let after = load(&w, "listPets");
+    assert_eq!(after.pre_request_script, request.pre_request_script);
+    assert_eq!(after.post_response_script, request.post_response_script);
+    assert_eq!(after.tests, request.tests);
+    assert_eq!(after.assertions, request.assertions);
+}
+
+#[tokio::test]
 async fn resetting_an_unchanged_request_writes_no_backup() {
     let w = world().await;
     let report = w.svc.reset(&w.name, &keys(&["listPets"])).expect("reset");
