@@ -1,6 +1,8 @@
 import { Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 
 interface OpenApiSyncActionsBarProps {
   query: string;
@@ -24,6 +26,13 @@ interface OpenApiSyncActionsBarProps {
   onAcceptAll: () => void;
   onSkipAll: () => void;
   onKeepCurrent: () => void;
+  /** True when Accept all keeps what the user changed. */
+  keepMine: boolean;
+  onKeepMineChange: (on: boolean) => void;
+  /** Changed requests where the spec and the user changed the same field. */
+  conflictCount: number;
+  conflictsOnly: boolean;
+  onToggleConflictsOnly: () => void;
 }
 
 /** Search, the update summary and the bulk actions: Accept all, Skip all, Keep current, Confirm. */
@@ -43,6 +52,11 @@ export function OpenApiSyncActionsBar({
   onAcceptAll,
   onSkipAll,
   onKeepCurrent,
+  keepMine,
+  onKeepMineChange,
+  conflictCount,
+  conflictsOnly,
+  onToggleConflictsOnly,
 }: OpenApiSyncActionsBarProps) {
   const bulkOff = busy || locked || updateCount === 0;
   return (
@@ -69,6 +83,35 @@ export function OpenApiSyncActionsBar({
       <span className='text-xs text-muted-foreground'>
         {`${updateCount} ${updateCount === 1 ? 'update' : 'updates'} from the spec · ${selectedCount} selected`}
       </span>
+      {conflictCount > 0 && (
+        <Button
+          variant={conflictsOnly ? 'secondary' : 'outline'}
+          size='sm'
+          aria-pressed={conflictsOnly}
+          onClick={onToggleConflictsOnly}
+        >
+          {`${conflictCount} ${conflictCount === 1 ? 'conflict' : 'conflicts'}`}
+        </Button>
+      )}
+      {conflictsOnly && <span className='text-xs text-muted-foreground'>Show conflicts only</span>}
+      <div className='flex items-center gap-2'>
+        <Switch
+          id='openapi-sync-keep-mine'
+          checked={keepMine}
+          onCheckedChange={onKeepMineChange}
+          aria-label='Keep my values'
+          aria-describedby='openapi-sync-keep-mine-help'
+          disabled={busy}
+        />
+        <div className='flex flex-col'>
+          <Label htmlFor='openapi-sync-keep-mine' className='text-xs font-medium'>
+            Keep my values
+          </Label>
+          <span id='openapi-sync-keep-mine-help' className='text-[11px] text-muted-foreground'>
+            Accept all keeps what you changed. Turn off to take the spec's values.
+          </span>
+        </div>
+      </div>
       <div className='ml-auto flex flex-wrap items-center gap-2'>
         <Button variant='outline' size='sm' onClick={onAcceptAll} disabled={bulkOff}>
           Accept all

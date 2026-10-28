@@ -1,7 +1,12 @@
 import { type Dispatch, type SetStateAction, useCallback, useMemo, useRef, useState } from 'react';
 import type { OpenApiSelection, OpenApiSyncPlan } from '@/lib/tauri-api';
 import { buildSelection } from './buildSelection';
-import { acceptAllSelection, countOverwrites, defaultSelection } from './bulkSelection';
+import {
+  acceptAllKeepingMine,
+  acceptAllSelection,
+  countOverwrites,
+  defaultSelection,
+} from './bulkSelection';
 
 type Links = Array<[string, string]>;
 type Choice = 'spec' | 'yours';
@@ -100,8 +105,16 @@ export function useSyncSelection(
   plan: OpenApiSyncPlan | undefined,
   links: Links,
   setLinks: Dispatch<SetStateAction<Links>>,
+  collection?: string,
 ) {
   const [state, setState] = useState<State>(() => defaultState(plan));
+  // Accept all keeps what the user changed, until they turn this off for this collection.
+  const [keepMine, setKeepMine] = useState(true);
+  const [seenCollection, setSeenCollection] = useState(collection);
+  if (seenCollection !== collection) {
+    setSeenCollection(collection);
+    setKeepMine(true);
+  }
   const signature = useMemo(() => (plan ? planSignature(plan) : ''), [plan]);
   const [seen, setSeen] = useState(signature);
   const [seenPlan, setSeenPlan] = useState(plan);
@@ -180,10 +193,13 @@ export function useSyncSelection(
   const clearLinks = useCallback(() => setLinks([]), [setLinks]);
 
   const acceptAll = useCallback((): { overwritten: number } => {
-    const overwritten = plan ? countOverwrites(plan) : 0;
+    // With Keep my values on nothing the user changed is overwritten.
+    const overwritten = plan && !keepMine ? countOverwrites(plan) : 0;
     if (plan) {
       setState((s) => {
-        const next = acceptAllSelection(plan, s.approved, s.choices);
+        const next = keepMine
+          ? acceptAllKeepingMine(plan, s.approved, s.choices)
+          : acceptAllSelection(plan, s.approved, s.choices);
         // The accepted items must not stay skipped.
         return {
           ...s,
@@ -195,7 +211,7 @@ export function useSyncSelection(
       });
     }
     return { overwritten };
-  }, [plan]);
+  }, [plan, keepMine]);
 
   const keepCurrent = useCallback(() => {
     // The conflict choices go back to keeping the user's version.
@@ -256,6 +272,8 @@ export function useSyncSelection(
     selection,
     selectedCount: state.approved.size + state.variables.size,
     acceptAll,
+    keepMine,
+    setKeepMine,
     keepCurrent,
     skipAll,
   };

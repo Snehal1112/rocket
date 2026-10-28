@@ -20,6 +20,11 @@ function props(overrides: Partial<React.ComponentProps<typeof OpenApiSyncActions
     onAcceptAll: vi.fn(),
     onSkipAll: vi.fn(),
     onKeepCurrent: vi.fn(),
+    keepMine: true,
+    onKeepMineChange: vi.fn(),
+    conflictCount: 0,
+    conflictsOnly: false,
+    onToggleConflictsOnly: vi.fn(),
     ...overrides,
   };
 }
@@ -98,5 +103,42 @@ describe('OpenApiSyncActionsBar', () => {
     await user.click(screen.getByRole('button', { name: 'Skip selected (2)' }));
     expect(p.onSelectMatches).toHaveBeenCalled();
     expect(p.onSkipSelected).toHaveBeenCalled();
+  });
+
+  it('the_switch_shows_on_by_default', () => {
+    render(<OpenApiSyncActionsBar {...props()} />);
+    const sw = screen.getByRole('switch', { name: 'Keep my values' });
+    expect(sw).toBeChecked();
+    expect(
+      screen.getByText("Accept all keeps what you changed. Turn off to take the spec's values."),
+    ).toBeInTheDocument();
+  });
+
+  it('the_switch_has_an_accessible_name_and_calls_back', async () => {
+    const p = props();
+    render(<OpenApiSyncActionsBar {...p} />);
+    await userEvent.setup().click(screen.getByRole('switch', { name: 'Keep my values' }));
+    expect(p.onKeepMineChange).toHaveBeenCalledWith(false);
+  });
+
+  it('no_conflict_badge_at_zero', () => {
+    render(<OpenApiSyncActionsBar {...props({ conflictCount: 0 })} />);
+    expect(screen.queryByRole('button', { name: /conflict/ })).toBeNull();
+  });
+
+  it('the_badge_shows_the_count_and_toggles_the_filter', async () => {
+    const p = props({ conflictCount: 3 });
+    render(<OpenApiSyncActionsBar {...p} />);
+    const badge = screen.getByRole('button', { name: '3 conflicts' });
+    expect(badge).toHaveAttribute('aria-pressed', 'false');
+    await userEvent.setup().click(badge);
+    expect(p.onToggleConflictsOnly).toHaveBeenCalled();
+  });
+
+  it('one_conflict_reads_in_the_singular_and_the_filter_state_shows', () => {
+    render(<OpenApiSyncActionsBar {...props({ conflictCount: 1, conflictsOnly: true })} />);
+    const badge = screen.getByRole('button', { name: '1 conflict' });
+    expect(badge).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('Show conflicts only')).toBeInTheDocument();
   });
 });

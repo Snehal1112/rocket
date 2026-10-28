@@ -12,6 +12,7 @@ import {
   useOpenApiSyncPlan,
   useOpenApiSyncStatus,
 } from '@/lib/queries/openapi-sync-queries';
+import type { OpenApiSyncItem } from '@/lib/tauri-api';
 import { ApplyConfirmDialog } from './ApplyConfirmDialog';
 import { ApplyResultDialog } from './ApplyResultDialog';
 import { BulkConfirmDialog } from './BulkConfirmDialog';
@@ -66,11 +67,20 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
 
   // The first entry is selected by default, and again when the chosen one is gone.
   const planData = plan.data;
-  const sel = useSyncSelection(planData, links, setLinks);
+  const sel = useSyncSelection(planData, links, setLinks, collection);
   const { toggle, toggleVariable, approved, variables } = sel;
   // The dialog remembers the plan it was opened for, so it never acts on another one.
   const [bulk, setBulk] = useState<{ kind: 'accept' | 'skip'; plan: unknown } | null>(null);
   const locked = plan.isPlaceholderData;
+  // Changed requests where the user and the spec changed the same field.
+  const [conflictsOnly, setConflictsOnly] = useState(false);
+  const hasConflict = (i: OpenApiSyncItem) =>
+    i.kind === 'changed' && i.changes.some((c) => c.outcome === 'conflict');
+  const conflictCount = planData ? planData.items.filter(hasConflict).length : 0;
+  const listPlan =
+    planData && conflictsOnly && conflictCount > 0
+      ? { ...planData, items: planData.items.filter(hasConflict), variableChanges: [] }
+      : planData;
   const busy = apply.isPending || applyingAnywhere || plan.isFetching;
 
   const approvedItems = useMemo(
@@ -163,7 +173,7 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
   // A warning comes first when Accept all would overwrite edits. Skip all always asks first.
   const requestAcceptAll = () => {
     if (!planData) return;
-    if (countOverwrites(planData) > 0) setBulk({ kind: 'accept', plan: planData });
+    if (!sel.keepMine && countOverwrites(planData) > 0) setBulk({ kind: 'accept', plan: planData });
     else sel.acceptAll();
   };
   const acceptAll = () => {
@@ -313,6 +323,11 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
           onAcceptAll={requestAcceptAll}
           onSkipAll={() => setBulk({ kind: 'skip', plan: planData })}
           onKeepCurrent={sel.keepCurrent}
+          keepMine={sel.keepMine}
+          onKeepMineChange={sel.setKeepMine}
+          conflictCount={conflictCount}
+          conflictsOnly={conflictsOnly}
+          onToggleConflictsOnly={() => setConflictsOnly((v) => !v)}
         />
         {(busyNotice || (last !== null && last.report === undefined)) && (
           <div className='px-4 pt-2'>
@@ -325,7 +340,7 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
           <div className='w-72 shrink-0 border-r border-border'>
             <OpenApiSyncList
               collection={collection}
-              plan={planData}
+              plan={listPlan ?? planData}
               selectedId={activeId}
               onSelect={setSelectedId}
               query={query}

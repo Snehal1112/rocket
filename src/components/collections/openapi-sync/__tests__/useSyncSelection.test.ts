@@ -7,13 +7,13 @@ import { changedItem, makePlan, newItem, removedItem } from './fixtures';
 
 type Links = Array<[string, string]>;
 
-function setup(plan: OpenApiSyncPlan | undefined = makePlan()) {
+function setup(plan: OpenApiSyncPlan | undefined = makePlan(), collection = 'c') {
   return renderHook(
-    ({ p }) => {
+    ({ p, c }) => {
       const [links, setLinks] = useState<Links>([]);
-      return useSyncSelection(p, links, setLinks);
+      return useSyncSelection(p, links, setLinks, c ?? collection);
     },
-    { initialProps: { p: plan as OpenApiSyncPlan | undefined } },
+    { initialProps: { p: plan as OpenApiSyncPlan | undefined, c: collection } as { p: OpenApiSyncPlan | undefined; c?: string } },
   );
 }
 
@@ -210,6 +210,7 @@ describe('useSyncSelection defaults and bulk actions', () => {
 
   it('accept_all_selects_new_and_changed_and_takes_the_spec_on_conflicts', () => {
     const { result } = setup(bulkPlan());
+    act(() => result.current.setKeepMine(false));
     let out = { overwritten: -1 };
     act(() => {
       out = result.current.acceptAll();
@@ -290,6 +291,7 @@ describe('useSyncSelection defaults and bulk actions', () => {
 
   it('keep_current_resets_take_spec_choices_in_the_hook', () => {
     const { result } = setup(bulkPlan());
+    act(() => result.current.setKeepMine(false));
     act(() => {
       result.current.acceptAll();
     });
@@ -344,5 +346,56 @@ describe('useSyncSelection defaults and bulk actions', () => {
     });
     const { result } = setup(plan);
     expect(result.current.selectedCount).toBe(2);
+  });
+
+  describe('keep my values', () => {
+    it('the_switch_defaults_to_on', () => {
+      const { result } = setup(bulkPlan());
+      expect(result.current.keepMine).toBe(true);
+    });
+
+    it('accept_all_keeps_edited_fields_when_keep_my_values_is_on', () => {
+      const { result } = setup(bulkPlan());
+      let out = { overwritten: -1 };
+      act(() => {
+        out = result.current.acceptAll();
+      });
+      // Nothing is overwritten, so there is nothing to warn about.
+      expect(out.overwritten).toBe(0);
+      expect([...result.current.approved].sort()).toEqual(['GET /pets', 'POST /pets', 'PUT /pets']);
+      expect(result.current.choices.get('POST /pets')).toEqual({
+        url: 'yours',
+        'body:$.a.b': 'yours',
+      });
+    });
+
+    it('accept_all_takes_the_spec_when_the_switch_is_off', () => {
+      const { result } = setup(bulkPlan());
+      act(() => result.current.setKeepMine(false));
+      let out = { overwritten: -1 };
+      act(() => {
+        out = result.current.acceptAll();
+      });
+      expect(out.overwritten).toBe(1);
+      expect(result.current.choices.get('POST /pets')).toEqual({ url: 'spec' });
+    });
+
+    it('a_manual_field_choice_survives_the_switch', () => {
+      const { result } = setup(bulkPlan());
+      act(() => result.current.setChoice('POST /pets', 'url', 'spec'));
+      act(() => result.current.setKeepMine(false));
+      act(() => result.current.setKeepMine(true));
+      expect(result.current.choices.get('POST /pets')).toEqual({ url: 'spec' });
+    });
+
+    it('the_switch_resets_per_collection', () => {
+      const { result, rerender } = setup(bulkPlan(), 'one');
+      act(() => result.current.setKeepMine(false));
+      expect(result.current.keepMine).toBe(false);
+      rerender({ p: bulkPlan(), c: 'one' });
+      expect(result.current.keepMine).toBe(false);
+      rerender({ p: bulkPlan(), c: 'two' });
+      expect(result.current.keepMine).toBe(true);
+    });
   });
 });

@@ -71,3 +71,44 @@ export function acceptAllSelection(
   }
   return { approved: nextApproved, choices: nextChoices };
 }
+
+/** The fields of a changed item the user edited: conflicts, and fields where yours is not the baseline. */
+function editedFields(item: OpenApiSyncItem): string[] {
+  if (item.kind !== 'changed') return [];
+  return item.changes
+    .filter(
+      (c) =>
+        c.outcome === 'conflict' ||
+        (c.yours !== null && c.baseline !== null && c.yours !== c.baseline),
+    )
+    .map((c) => c.field);
+}
+
+/**
+ * Applies Accept all with Keep my values on. Every new and changed item is selected and every
+ * field the user edited keeps the user's value, so nothing of theirs is overwritten. A removed
+ * item the user edited is dropped from the selection, as in `acceptAllSelection`.
+ */
+export function acceptAllKeepingMine(
+  plan: OpenApiSyncPlan,
+  approved: Set<string>,
+  choices: Map<string, Record<string, Choice>>,
+): Omit<DefaultSelection, 'variables'> {
+  const nextApproved = new Set(approved);
+  const nextChoices = new Map(choices);
+  for (const item of plan.items) {
+    if (item.kind === 'removed') {
+      if (isEditedRemoved(item)) nextApproved.delete(item.key);
+      continue;
+    }
+    nextApproved.add(item.key);
+    const edited = editedFields(item);
+    if (edited.length > 0) {
+      nextChoices.set(item.key, {
+        ...nextChoices.get(item.key),
+        ...Object.fromEntries(edited.map((f) => [f, 'yours' as const])),
+      });
+    }
+  }
+  return { approved: nextApproved, choices: nextChoices };
+}

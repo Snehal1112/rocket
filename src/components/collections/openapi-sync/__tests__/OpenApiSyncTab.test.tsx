@@ -1040,6 +1040,7 @@ describe('OpenApiSyncTab actions', () => {
     renderWithQuery(<TabWithListeners collection='bulk2' />);
     const user = userEvent.setup();
     await screen.findByText('Add pet');
+    await user.click(screen.getByRole('switch', { name: 'Keep my values' }));
     await user.click(screen.getByRole('button', { name: 'Accept all' }));
     const dialog = screen.getByRole('alertdialog');
     expect(within(dialog).getByText('1 of your edits will be overwritten.')).toBeInTheDocument();
@@ -1103,6 +1104,7 @@ describe('OpenApiSyncTab actions', () => {
     renderWithQuery(<TabWithListeners collection='bulk6' />);
     const user = userEvent.setup();
     await screen.findByText('Add pet');
+    await user.click(screen.getByRole('switch', { name: 'Keep my values' }));
     await user.click(screen.getByRole('button', { name: 'Accept all' }));
     await user.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Accept all' }));
     await user.click(screen.getByRole('button', { name: 'Keep current' }));
@@ -1119,8 +1121,58 @@ describe('OpenApiSyncTab actions', () => {
     renderWithQuery(<TabWithListeners collection='bulk7' />);
     const user = userEvent.setup();
     await screen.findByText('Add pet');
+    await user.click(screen.getByRole('switch', { name: 'Keep my values' }));
     await user.click(screen.getByRole('button', { name: 'Accept all' }));
     expect(within(screen.getByRole('alertdialog')).getByText(/selects 2 requests/)).toBeInTheDocument();
+  });
+
+  it('accept_all_with_keep_my_values_asks_nothing_and_keeps_the_edit', async () => {
+    mockSync();
+    vi.mocked(tauriApi.applyOpenApiSync).mockResolvedValue(report);
+    renderWithQuery(<TabWithListeners collection='bulk9' />);
+    const user = userEvent.setup();
+    await screen.findByText('Add pet');
+    await user.click(screen.getByRole('button', { name: 'Accept all' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(screen.getByText(/· 2 selected$/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Confirm and sync (2)' }));
+    await user.click(screen.getByRole('button', { name: 'Apply now' }));
+    await waitFor(() => expect(tauriApi.applyOpenApiSync).toHaveBeenCalledTimes(1));
+    const items = vi.mocked(tauriApi.applyOpenApiSync).mock.calls[0]?.[1].items ?? [];
+    expect(items.find((i) => i.key === 'POST /pets')?.choices.url).toBe('yours');
+  });
+
+  it('the_conflict_count_matches_the_conflict_rows', async () => {
+    mockSync();
+    renderWithQuery(<TabWithListeners collection='conf1' />);
+    await screen.findByText('Add pet');
+    // The fixture plan has one changed item with a conflict field.
+    expect(screen.getByRole('button', { name: '1 conflict' })).toBeInTheDocument();
+  });
+
+  it('the_badge_filters_the_list_to_conflicts', async () => {
+    mockSync();
+    renderWithQuery(<TabWithListeners collection='conf2' />);
+    const user = userEvent.setup();
+    await screen.findByText('Add pet');
+    expect(screen.getByRole('checkbox', { name: 'Include List pets in apply' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '1 conflict' }));
+    expect(screen.getByRole('checkbox', { name: 'Include Add pet in apply' })).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: 'Include List pets in apply' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: '1 conflict' }));
+    expect(screen.getByRole('checkbox', { name: 'Include List pets in apply' })).toBeInTheDocument();
+  });
+
+  it('the_accept_all_warning_shows_only_when_the_switch_is_off', async () => {
+    mockSync();
+    renderWithQuery(<TabWithListeners collection='conf3' />);
+    const user = userEvent.setup();
+    await screen.findByText('Add pet');
+    await user.click(screen.getByRole('button', { name: 'Accept all' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    await user.click(screen.getByRole('switch', { name: 'Keep my values' }));
+    await user.click(screen.getByRole('button', { name: 'Accept all' }));
+    expect(screen.getByRole('alertdialog')).toBeInTheDocument();
   });
 
   it('a_variables_only_plan_is_accepted_but_cannot_be_skipped', async () => {
