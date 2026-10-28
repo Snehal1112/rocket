@@ -2,7 +2,7 @@ import { screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as tauriApi from '@/lib/tauri-api';
-import type { OpenApiSpecOperation, OpenApiSpecView as SpecViewData } from '@/lib/tauri-api';
+import type { OpenApiBodyView, OpenApiSchemaView, OpenApiSpecOperation, OpenApiSpecView as SpecViewData } from '@/lib/tauri-api';
 import { renderWithQuery } from '@/test/trust-fixtures';
 import { OpenApiSpecView } from '../OpenApiSpecView';
 
@@ -22,12 +22,35 @@ function op(over: Partial<OpenApiSpecOperation> = {}): OpenApiSpecOperation {
     summary: 'List pets',
     parameters: [{ name: 'limit', location: 'query', required: false }],
     responses: [
-      { status: '200', description: 'A list' },
-      { status: '404', description: 'Missing' },
+      { status: '200', description: 'A list', bodies: [] },
+      { status: '404', description: 'Missing', bodies: [] },
     ],
+    requestBody: [],
+    security: [],
     isNew: false,
     ...over,
   };
+}
+
+function node(over: Partial<OpenApiSchemaView> = {}): OpenApiSchemaView {
+  return {
+    kind: 'string',
+    format: null,
+    description: null,
+    required: false,
+    nullable: false,
+    enumValues: [],
+    refName: null,
+    properties: [],
+    items: null,
+    variants: [],
+    cut: false,
+    ...over,
+  };
+}
+
+function body(schema: OpenApiSchemaView | null, contentType = 'application/json'): OpenApiBodyView {
+  return { contentType, required: true, schema };
 }
 
 function view(over: Partial<SpecViewData> = {}): SpecViewData {
@@ -40,6 +63,7 @@ function view(over: Partial<SpecViewData> = {}): SpecViewData {
       { tag: 'pets', operations: [op(), op({ key: 'getPet', path: '/pets/{id}', summary: null })] },
       { tag: 'store', operations: [op({ key: 'getInventory', path: '/inventory', summary: 'Stock' })] },
     ],
+    servers: [],
     ...over,
   };
 }
@@ -187,5 +211,72 @@ describe('OpenApiSpecView', () => {
     await screen.findByText('pets (2)');
     await userEvent.setup().click(screen.getByRole('button', { name: 'Back' }));
     expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  async function expand(name: RegExp) {
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name }));
+    return user;
+  }
+
+  it('an_expanded_operation_shows_the_request_body_schema', async () => {
+    const schema = node({
+      kind: 'object',
+      properties: [{ name: 'name', schema: node({ required: true, description: 'The pet name.' }) }],
+    });
+    show(view({ groups: [{ tag: 'pets', operations: [op({ requestBody: [body(schema)] })] }] }));
+    await expand(/^GET \/pets List pets$/);
+    expect(screen.getByRole('heading', { name: 'Request body' })).toBeInTheDocument();
+    expect(screen.getByText('application/json')).toBeInTheDocument();
+    expect(screen.getByText('name')).toBeInTheDocument();
+    expect(screen.getByText('The pet name.')).toBeInTheDocument();
+  });
+
+  it('a_response_schema_opens_on_demand', async () => {
+    const schema = node({ kind: 'object', properties: [{ name: 'id', schema: node({ kind: 'integer' }) }] });
+    show(
+      view({
+        groups: [
+          {
+            tag: 'pets',
+            operations: [
+              op({
+                responses: [{ status: '200', description: 'A list', bodies: [body(schema)] }],
+              }),
+            ],
+          },
+        ],
+      }),
+    );
+    const user = await expand(/^GET \/pets List pets$/);
+    expect(screen.queryByText('id')).toBeNull();
+    await user.click(screen.getByRole('button', { name: /Show schema/ }));
+    expect(screen.getByText('id')).toBeInTheDocument();
+  });
+
+  it('security_none_is_shown', async () => {
+    show(view({ groups: [{ tag: 'pets', operations: [op({ security: [] })] }] }));
+    await expand(/^GET \/pets List pets$/);
+    expect(screen.getByRole('heading', { name: 'Security' })).toBeInTheDocument();
+    expect(screen.getByText('None.')).toBeInTheDocument();
+  });
+
+  it('security_names_are_listed', async () => {
+    show(view({ groups: [{ tag: 'pets', operations: [op({ security: ['bearer', 'key'] })] }] }));
+    await expand(/^GET \/pets List pets$/);
+    expect(screen.getByText('bearer, key')).toBeInTheDocument();
+  });
+
+  it('servers_are_listed_in_the_header', async () => {
+    show(view({ servers: ['https://api.example.com', 'https://staging.example.com'] }));
+    expect(await screen.findByText('https://api.example.com')).toBeInTheDocument();
+    expect(screen.getByText('https://staging.example.com')).toBeInTheDocument();
+    expect(screen.getByText('Servers')).toBeInTheDocument();
+  });
+
+  it('an_operation_without_a_body_shows_no_body_section', async () => {
+    show(view());
+    await expand(/^GET \/pets List pets$/);
+    expect(screen.queryByRole('heading', { name: 'Request body' })).toBeNull();
   });
 });

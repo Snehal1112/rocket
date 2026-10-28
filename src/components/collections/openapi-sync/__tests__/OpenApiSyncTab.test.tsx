@@ -130,11 +130,14 @@ describe('OpenApiSyncTab', () => {
               summary: null,
               parameters: [],
               responses: [],
+              requestBody: [],
+              security: [],
               isNew: false,
             },
           ],
         },
       ],
+      servers: [],
     });
     renderWithQuery(<TabWithListeners collection='c' />);
     const user = userEvent.setup();
@@ -419,6 +422,7 @@ describe('OpenApiSyncTab', () => {
       fetchedAt: null,
       state: 'no_copy',
       groups: [],
+      servers: [],
     });
     const user = userEvent.setup();
     renderWithQuery(<TabWithListeners collection='vr1' />);

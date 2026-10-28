@@ -2163,9 +2163,35 @@ export interface OpenApiSpecParam {
   required: boolean;
 }
 
+/** A bounded schema for the spec viewer. Examples and defaults are never sent. */
+export interface OpenApiSchemaView {
+  /** `object`, `array`, `string`, `integer`, `number`, `boolean`, `null` or `any`. */
+  kind: string;
+  format: string | null;
+  description: string | null;
+  required: boolean;
+  nullable: boolean;
+  enumValues: string[];
+  /** Set when the node refers back to a schema that is already open above it. */
+  refName: string | null;
+  properties: { name: string; schema: OpenApiSchemaView }[];
+  items: OpenApiSchemaView | null;
+  variants: OpenApiSchemaView[];
+  /** True when part of the node was left out by the depth or size limit. */
+  cut: boolean;
+}
+
+/** One media type of a body with its schema. */
+export interface OpenApiBodyView {
+  contentType: string;
+  required: boolean;
+  schema: OpenApiSchemaView | null;
+}
+
 export interface OpenApiSpecResponse {
   status: string;
   description: string;
+  bodies: OpenApiBodyView[];
 }
 
 export interface OpenApiSpecOperation {
@@ -2175,6 +2201,9 @@ export interface OpenApiSpecOperation {
   summary: string | null;
   parameters: OpenApiSpecParam[];
   responses: OpenApiSpecResponse[];
+  requestBody: OpenApiBodyView[];
+  /** Names of the security schemes. Empty means none. */
+  security: string[];
   isNew: boolean;
 }
 
@@ -2190,6 +2219,7 @@ export interface OpenApiSpecView {
   fetchedAt: string | null;
   state: 'in_sync' | 'updates_waiting' | 'no_copy';
   groups: OpenApiSpecGroup[];
+  servers: string[];
 }
 
 export const getOpenApiSyncSpecView = (collection: string) =>

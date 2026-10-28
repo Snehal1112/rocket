@@ -38,6 +38,8 @@ Besides `openapi-source.yml`, `openapi-baseline.json`, `openapi-local.json` and 
 
 The header has a **View spec** button. It lists the operations of the newest spec the source accepts (the pending copy counts only when the source holds its hash) in tag groups, at most 500 rows at once with **Show more (N)**. It reads local files only, so it works offline.
 
+The page header lists the spec's **Servers** (at most 10). An expanded operation shows its parameters, **Request body** (each media type with its schema as an indented text tree), **Responses** (status, description, and a **Show schema** button per media type) and **Security** (scheme names, or "None."). A schema tree is cut at depth 6 and 200 nodes and says so, a reference back to a schema that is already open shows "Same as <name>", at most 20 enum values are shown, and examples and defaults are never sent. Descriptions are plain text.
+
 ## Reset and Restore
 
 - Reset puts the spec-owned fields back to the last synced spec: name, method, URL, description, headers, query, path variables, form, body and auth. Scripts, tests, assertions and docs are kept.

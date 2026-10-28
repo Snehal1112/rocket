@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { StateBlock } from '@/components/ui/state-block';
 import { useOpenApiSyncOverview, useOpenApiSyncSpecView } from '@/lib/queries/openapi-sync-queries';
-import type { OpenApiSpecGroup, OpenApiSpecOperation } from '@/lib/tauri-api';
+import type { OpenApiBodyView, OpenApiSpecGroup, OpenApiSpecOperation } from '@/lib/tauri-api';
+import { SchemaTree } from './SchemaTree';
 import { syncErrorMessage } from './syncErrors';
 
 /** Large specs list this many operations in total, then offer more. */
@@ -15,6 +16,31 @@ function matches(op: OpenApiSpecOperation, needle: string): boolean {
   if (!needle) return true;
   return [op.method, op.path, op.key, op.summary ?? ''].some((t) =>
     t.toLowerCase().includes(needle),
+  );
+}
+
+/** One media type of a body. The schema opens on demand when `collapsed`. */
+function BodyBlock({ body, collapsed }: { body: OpenApiBodyView; collapsed: boolean }) {
+  const [open, setOpen] = useState(!collapsed);
+  return (
+    <div className='flex flex-col gap-1'>
+      <div className='flex items-center gap-2'>
+        <span className='font-mono'>{body.contentType}</span>
+        {body.required && <Badge variant='secondary'>required</Badge>}
+        {collapsed && body.schema && (
+          <Button
+            variant='link'
+            size='sm'
+            className='h-auto p-0 text-xs'
+            aria-expanded={open}
+            onClick={() => setOpen((v) => !v)}
+          >
+            {open ? 'Hide schema' : 'Show schema'}
+          </Button>
+        )}
+      </div>
+      {open && body.schema && <SchemaTree schema={body.schema} />}
+    </div>
   );
 }
 
@@ -36,6 +62,14 @@ function OperationDetail({ op }: { op: OpenApiSpecOperation }) {
           </ul>
         )}
       </div>
+      {op.requestBody.length > 0 && (
+        <div className='flex flex-col gap-1'>
+          <h4 className='font-medium'>Request body</h4>
+          {op.requestBody.map((b) => (
+            <BodyBlock key={b.contentType} body={b} collapsed={false} />
+          ))}
+        </div>
+      )}
       <div className='flex flex-col gap-1'>
         <h4 className='font-medium'>Responses</h4>
         {op.responses.length === 0 ? (
@@ -43,12 +77,27 @@ function OperationDetail({ op }: { op: OpenApiSpecOperation }) {
         ) : (
           <ul aria-label='Responses' className='flex flex-col gap-0.5'>
             {op.responses.map((r) => (
-              <li key={r.status} className='flex items-center gap-2'>
-                <span className='font-mono font-semibold'>{r.status}</span>
-                <span>{r.description}</span>
+              <li key={r.status} className='flex flex-col gap-1'>
+                <div className='flex items-center gap-2'>
+                  <span className='font-mono font-semibold'>{r.status}</span>
+                  <span>{r.description}</span>
+                </div>
+                {r.bodies.map((b) => (
+                  <div key={b.contentType} className='ml-4'>
+                    <BodyBlock body={b} collapsed />
+                  </div>
+                ))}
               </li>
             ))}
           </ul>
+        )}
+      </div>
+      <div className='flex flex-col gap-1'>
+        <h4 className='font-medium'>Security</h4>
+        {op.security.length === 0 ? (
+          <p className='text-muted-foreground'>None.</p>
+        ) : (
+          <p className='font-mono'>{op.security.join(', ')}</p>
         )}
       </div>
     </div>
@@ -180,6 +229,18 @@ export function OpenApiSpecView({
           {data.version && <Badge variant='outline'>{data.version}</Badge>}
         </div>
         <p className='text-xs text-muted-foreground'>Showing the latest spec Rocket fetched.</p>
+        {data.servers.length > 0 && (
+          <div className='flex flex-col gap-0.5 text-xs'>
+            <h3 className='font-medium'>Servers</h3>
+            <ul aria-label='Servers' className='flex flex-col font-mono text-muted-foreground'>
+              {data.servers.map((url) => (
+                <li key={url} className='break-all'>
+                  {url}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <p className='text-xs text-muted-foreground'>
           {data.state === 'updates_waiting'
             ? (waitingText ?? 'Updates are waiting.')
