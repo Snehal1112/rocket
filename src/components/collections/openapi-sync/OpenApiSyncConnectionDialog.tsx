@@ -1,5 +1,5 @@
 import { ShieldAlert, ShieldCheck } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -80,6 +80,9 @@ function ConnectionBody({
   const tokenStatus = useOpenApiSyncStatus(collection, true);
   const hasToken = tokenStatus.data?.hasToken === true;
   const interval = useSetInterval(collection);
+  const enabling = useRef(false);
+  // The status has caught up with the switch, so the next turn on may check again.
+  if (autoOn) enabling.current = false;
   // One runner serves the status row and the check that follows turning checks on.
   const runner = useCheckRunner(collection, status.consent);
   const setToken = useSetToken(collection);
@@ -112,7 +115,15 @@ function ConnectionBody({
     }
     if (on && status.interval === 'off') {
       // Turning checks on from off checks once now, so the user sees the link works.
-      interval.mutate(lastChosen, { onSuccess: () => runner.run() });
+      // A second click before the status shows the new interval must not check again.
+      if (enabling.current) return;
+      enabling.current = true;
+      interval.mutate(lastChosen, {
+        onSuccess: () => runner.run(),
+        onError: () => {
+          enabling.current = false;
+        },
+      });
       return;
     }
     interval.mutate(on ? lastChosen : 'off');

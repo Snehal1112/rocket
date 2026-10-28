@@ -96,9 +96,7 @@ export function OpenApiSyncOverview({ collection, status, onReview }: OpenApiSyn
         <Fact label='Spec version'>{o.specVersion ?? '–'}</Fact>
         <Fact label='Last checked'>
           {status.lastCheckedAt
-            ? `${formatRelativeTime(status.lastCheckedAt)}. ${
-                failed ? (status.lastMessage ?? 'The last check failed.') : 'No problems.'
-              }`
+            ? `${formatRelativeTime(status.lastCheckedAt)}.${failed ? '' : ' No problems.'}`
             : 'Not checked yet'}
         </Fact>
         <Fact label='Automatic checks'>

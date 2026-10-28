@@ -105,7 +105,7 @@ describe('OpenApiSyncOverview', () => {
     expect(await screen.findByText('2h ago. No problems.')).toBeInTheDocument();
   });
 
-  it('last_checked_with_a_failure_message', async () => {
+  it('last_checked_with_a_failure_leaves_the_message_to_the_banner', async () => {
     show(
       {},
       makeStatus({
@@ -113,7 +113,8 @@ describe('OpenApiSyncOverview', () => {
         lastMessage: 'The server could not be reached.',
       }),
     );
-    expect(await screen.findByText('2h ago. The server could not be reached.')).toBeInTheDocument();
+    expect(await screen.findByText('2h ago.')).toBeInTheDocument();
+    expect(screen.queryByText(/The server could not be reached/)).toBeNull();
   });
 
   it('says_one_request_updated_in_the_singular', async () => {

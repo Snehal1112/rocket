@@ -92,6 +92,15 @@ describe('OpenApiSyncConnectionDialog', () => {
       expect(tauriApi.checkOpenApiSyncNow).toHaveBeenCalledTimes(1);
     });
 
+    it('one_enable_runs_exactly_one_check_even_on_a_double_click', async () => {
+      const user = renderDialog('r0', makeStatus({ interval: 'off' }));
+      const toggle = screen.getByRole('switch', { name: SWITCH });
+      await user.dblClick(toggle);
+      await waitFor(() => expect(tauriApi.checkOpenApiSyncNow).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(tauriApi.setOpenApiSyncInterval).toHaveBeenCalledTimes(1));
+      expect(tauriApi.checkOpenApiSyncNow).toHaveBeenCalledTimes(1);
+    });
+
     it('the_outcome_shows_in_the_status_row', async () => {
       const user = renderDialog('r2', makeStatus({ interval: 'off' }));
       await user.click(screen.getByRole('switch', { name: SWITCH }));
