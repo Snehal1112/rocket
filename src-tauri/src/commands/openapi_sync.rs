@@ -10,7 +10,7 @@ use rocket_app::{
     safe_message, BackupRow, BadgeView, ChangeLinkOutcome, ChangeLinkPreview, ChangeRow,
     ChangeValue, ChangesView, CheckOutcome, ConnectOperationRow, ConnectOutcome, ConnectPreview,
     ConnectRequestRow, ConnectRow, OpenApiSyncService, OverviewView, PlanView, ResetReport,
-    DeleteTarget, SkippedRow, SpecView, SpecViewState, SyncStatusView,
+    DeleteTarget, SkippedRow, SpecSource, SpecSourceFormat, SpecView, SpecViewState, SyncStatusView,
 };
 use rocket_collection::openapi_source::{SyncInterval, SyncStatus};
 use rocket_collection::ConsentState;
@@ -591,6 +591,44 @@ pub async fn openapi_sync_spec_view(
         Arc::clone(workspace_path.inner()),
         Arc::clone(fetcher.inner()),
         move |service| service.spec_view(&collection).map(spec_view_dto),
+    )
+    .await
+}
+
+/// The raw text of the latest stored spec.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpecSourceDto {
+    pub text: Option<String>,
+    /// `yaml` or `json`.
+    pub format: &'static str,
+    pub size_bytes: u64,
+    pub too_large: bool,
+}
+
+fn spec_source_dto(source: SpecSource) -> SpecSourceDto {
+    SpecSourceDto {
+        text: source.text,
+        format: match source.format {
+            SpecSourceFormat::Yaml => "yaml",
+            SpecSourceFormat::Json => "json",
+        },
+        size_bytes: source.size_bytes,
+        too_large: source.too_large,
+    }
+}
+
+/// The raw text of the latest stored spec. Reads local files only.
+#[tauri::command]
+pub async fn openapi_sync_spec_source(
+    collection: String,
+    workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
+    fetcher: State<'_, Arc<dyn SpecFetcher>>,
+) -> Result<SpecSourceDto, String> {
+    run_blocking(
+        Arc::clone(workspace_path.inner()),
+        Arc::clone(fetcher.inner()),
+        move |service| service.spec_source(&collection).map(spec_source_dto),
     )
     .await
 }
@@ -2169,6 +2207,21 @@ mod tests {
         assert_eq!(json["state"], "updates_waiting");
         assert_eq!(json["groups"][0]["operations"][0]["isNew"], true);
         assert_eq!(json["groups"][0]["operations"][0]["method"], "GET");
+    }
+
+    #[test]
+    fn spec_source_dto_uses_camel_case_keys() {
+        let dto = spec_source_dto(SpecSource {
+            text: Some("{}".to_string()),
+            format: SpecSourceFormat::Json,
+            size_bytes: 2,
+            too_large: false,
+        });
+        let json = serde_json::to_value(dto).expect("json");
+        assert_eq!(json["text"], "{}");
+        assert_eq!(json["format"], "json");
+        assert_eq!(json["sizeBytes"], 2);
+        assert_eq!(json["tooLarge"], false);
     }
 
     #[test]

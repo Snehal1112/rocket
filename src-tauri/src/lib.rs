@@ -1175,6 +1175,7 @@ pub fn run() {
             commands::openapi_sync::openapi_sync_plan,
             commands::openapi_sync::openapi_sync_overview,
             commands::openapi_sync::openapi_sync_spec_view,
+            commands::openapi_sync::openapi_sync_spec_source,
             commands::openapi_sync::openapi_connect_preview,
             commands::openapi_sync::openapi_connect_confirm,
             commands::openapi_sync::openapi_sync_change_link_preview,

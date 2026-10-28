@@ -68,6 +68,7 @@ pub mod openapi_sync_reset;
 pub mod openapi_sync_skips;
 pub mod openapi_sync_scheduler;
 pub mod openapi_sync_service;
+pub mod openapi_sync_spec_source;
 pub mod openapi_sync_spec_view;
 pub mod openapi_sync_view;
 pub mod proposal_service;
@@ -161,8 +162,8 @@ pub use openapi_sync_delete::DeleteTarget;
 pub use openapi_sync_reset::ResetReport;
 pub use openapi_sync_skips::SkippedRow;
 pub use openapi_sync_view::{
-    BackupRow, BadgeView, ChangeRow, ChangeValue, ChangesView, OverviewView, PlanView, SpecOpRow, SpecTagGroup, SpecView,
-    SpecViewState, UnchangedView,
+    BackupRow, BadgeView, ChangeRow, ChangeValue, ChangesView, OverviewView, PlanView, SpecOpRow,
+    SpecSource, SpecSourceFormat, SpecTagGroup, SpecView, SpecViewState, UnchangedView,
 };
 pub use openapi_sync_scheduler::{
     OpenApiSyncScheduler, SchedulerConfig, SchedulerHandle, ServiceFactory,

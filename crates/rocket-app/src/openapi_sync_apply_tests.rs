@@ -1256,6 +1256,10 @@ mod changes_tests;
 mod spec_view_tests;
 
 #[cfg(test)]
+#[path = "openapi_sync_spec_source_tests.rs"]
+mod spec_source_tests;
+
+#[cfg(test)]
 #[path = "openapi_sync_reset_tests.rs"]
 mod reset_tests;
 

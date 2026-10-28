@@ -149,6 +149,23 @@ pub struct SpecTagGroup {
     pub operations: Vec<SpecOpRow>,
 }
 
+/// The text format of a stored spec.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpecSourceFormat {
+    Yaml,
+    Json,
+}
+
+/// The raw text of the latest stored spec. It is built from local files only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SpecSource {
+    /// `None` when there is no saved copy or the copy is too large to show.
+    pub text: Option<String>,
+    pub format: SpecSourceFormat,
+    pub size_bytes: u64,
+    pub too_large: bool,
+}
+
 /// The latest stored spec, grouped by tag. It is built from local files only.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SpecView {
