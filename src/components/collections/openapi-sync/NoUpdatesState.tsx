@@ -12,6 +12,8 @@ export function NoUpdatesState({
   status: OpenApiSyncStatus;
 }) {
   const runner = useCheckRunner(collection, status.consent);
+  // While the last check failed the banner above says why, and a calm line would contradict it.
+  const failed = status.lastStatus?.state === 'failed' && status.consent === 'granted';
   const lastChecked = status.lastCheckedAt
     ? `Last checked ${formatRelativeTime(status.lastCheckedAt)}.`
     : 'Not checked yet.';
@@ -22,8 +24,10 @@ export function NoUpdatesState({
       title='No spec updates waiting'
       reason={
         <>
-          When the spec changes, the changes show up here for you to review.
-          <span className='block'>{lastChecked}</span>
+          {failed
+            ? 'Unable to check for updates. Fix the connection issue above and check again.'
+            : 'When the spec changes, the changes show up here for you to review.'}
+          {!failed && <span className='block'>{lastChecked}</span>}
           {runner.text && (
             <span role='status' className='block'>
               {runner.text}

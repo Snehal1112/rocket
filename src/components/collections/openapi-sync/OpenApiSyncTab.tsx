@@ -18,6 +18,7 @@ import { ApplyResultDialog } from './ApplyResultDialog';
 import { BulkConfirmDialog } from './BulkConfirmDialog';
 import { buildSelection } from './buildSelection';
 import { countOverwrites } from './bulkSelection';
+import { CheckFailureBanner } from './CheckFailureBanner';
 import { NoUpdatesState } from './NoUpdatesState';
 import { OpenApiSpecView } from './OpenApiSpecView';
 import { OpenApiSyncActionsBar } from './OpenApiSyncActionsBar';
@@ -447,7 +448,8 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
               {changeCount > 0 ? `Your changes (${changeCount})` : 'Your changes'}
             </TabsTrigger>
           </TabsList>
-          <TabsContent value='overview' className='p-4'>
+          <TabsContent value='overview' className='flex flex-col gap-4 p-4'>
+            <CheckFailureBanner collection={collection} status={s} />
             <OpenApiSyncOverview
               collection={collection}
               status={s}
@@ -455,6 +457,9 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
             />
           </TabsContent>
           <TabsContent value='updates' className='flex min-h-0 flex-1 flex-col'>
+            <div className='px-4 pt-3 empty:hidden'>
+              <CheckFailureBanner collection={collection} status={s} />
+            </div>
             {body}
           </TabsContent>
           <TabsContent value='changes' className='p-4'>

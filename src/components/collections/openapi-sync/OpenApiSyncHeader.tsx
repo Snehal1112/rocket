@@ -1,6 +1,5 @@
 import { MoreHorizontal, Settings2 } from 'lucide-react';
 import { useState } from 'react';
-import { Alert } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -14,7 +13,6 @@ import type { OpenApiSyncStatus } from '@/lib/tauri-api';
 import { CheckNowButtonView, useCheckRunner } from './CheckNowButton';
 import { type ChipState, chipState } from './chipState';
 import { DisconnectSyncDialog } from './DisconnectSyncDialog';
-import { nextStep } from './nextStep';
 import { OpenApiSyncConnectionDialog } from './OpenApiSyncConnectionDialog';
 import { intervalLabel, isFileLocation, splitLocation } from './openApiSyncView';
 
@@ -45,16 +43,10 @@ export function OpenApiSyncHeader({
 }: OpenApiSyncHeaderProps) {
   const [showFull, setShowFull] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [dialogFocus, setDialogFocus] = useState<'token' | 'link' | undefined>();
   const [disconnectOpen, setDisconnectOpen] = useState(false);
   const runner = useCheckRunner(collection, status.consent);
   const chip = chipState(status, waiting);
-  const failed = status.lastStatus?.state === 'failed';
-  const step = nextStep(status);
-  const openDialog = (focus?: 'token' | 'link') => {
-    setDialogFocus(focus);
-    setDialogOpen(true);
-  };
+  const openDialog = () => setDialogOpen(true);
   const { short, full } = splitLocation(status.location);
   return (
     <div className='flex flex-col gap-2 border-b border-border/70 px-4 py-3'>
@@ -129,31 +121,6 @@ export function OpenApiSyncHeader({
           <CheckNowButtonView runner={runner} />
         </div>
       </div>
-      {failed && (
-        <Alert variant='destructive'>
-          <p>
-            {status.lastMessage ?? 'The last check failed.'}
-            {status.lastStatus?.code ? ` (${status.lastStatus.code})` : ''}
-          </p>
-          {step.kind !== 'none' && (
-            <Button
-              variant='outline'
-              size='sm'
-              className='mt-2'
-              disabled={step.kind === 'check_now' && runner.pending}
-              onClick={
-                step.kind === 'add_token'
-                  ? () => openDialog('token')
-                  : step.kind === 'change_link'
-                    ? () => openDialog('link')
-                    : runner.run
-              }
-            >
-              {step.label}
-            </Button>
-          )}
-        </Alert>
-      )}
       <DisconnectSyncDialog
         collection={collection}
         open={disconnectOpen}
@@ -164,7 +131,6 @@ export function OpenApiSyncHeader({
         status={status}
         open={dialogOpen}
         onOpenChange={setDialogOpen}
-        focus={dialogFocus}
       />
     </div>
   );

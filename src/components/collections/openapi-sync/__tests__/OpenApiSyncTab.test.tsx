@@ -153,6 +153,64 @@ describe('OpenApiSyncTab', () => {
     );
   });
 
+  describe('failure banner', () => {
+    const failedStatus = (over: Record<string, unknown> = {}) =>
+      makeStatus({
+        hasPending: false,
+        lastStatus: { state: 'failed', code: 'network' },
+        lastMessage: 'The server could not be reached.',
+        ...over,
+      });
+
+    it('overview_shows_the_failure_banner', async () => {
+      vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(failedStatus());
+      renderWithQuery(<TabWithListeners collection='fb1' />);
+      const alert = await screen.findByRole('alert');
+      expect(alert).toHaveTextContent('Failed to check for spec updates');
+      expect(alert).toHaveTextContent('The server could not be reached.');
+    });
+
+    it('spec_updates_shows_the_failure_banner_and_the_empty_text', async () => {
+      vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(failedStatus());
+      vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(makePlan({ pending: false }));
+      renderWithQuery(<TabWithListeners collection='fb2' />);
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole('tab', { name: 'Spec updates' }));
+      expect(await screen.findByRole('alert')).toHaveTextContent('Failed to check for spec updates');
+      expect(
+        screen.getByText(
+          'Unable to check for updates. Fix the connection issue above and check again.',
+        ),
+      ).toBeInTheDocument();
+      expect(screen.queryByText('Last checked 2h ago.')).toBeNull();
+    });
+
+    it('only_one_failure_banner_per_page', async () => {
+      vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(failedStatus());
+      vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(makePlan({ pending: false }));
+      renderWithQuery(<TabWithListeners collection='fb3' />);
+      await screen.findByRole('alert');
+      expect(screen.getAllByRole('alert')).toHaveLength(1);
+      await userEvent.setup().click(screen.getByRole('tab', { name: 'Spec updates' }));
+      await waitFor(() => expect(screen.getAllByRole('alert')).toHaveLength(1));
+    });
+
+    it('a_successful_check_clears_the_banner', async () => {
+      vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(failedStatus());
+      vi.mocked(tauriApi.checkOpenApiSyncNow).mockImplementation(async () => {
+        vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(
+          makeStatus({ hasPending: false, lastStatus: { state: 'unchanged' } }),
+        );
+        return { state: 'unchanged' };
+      });
+      renderWithQuery(<TabWithListeners collection='fb4' />);
+      const user = userEvent.setup();
+      const alert = await screen.findByRole('alert');
+      await user.click(within(alert).getByRole('button', { name: 'Check now' }));
+      await waitFor(() => expect(screen.queryByText('Failed to check for spec updates')).toBeNull());
+    });
+  });
+
   it('trusts the plan when it says nothing is pending', async () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(makeStatus());
     vi.mocked(tauriApi.getOpenApiSyncPlan).mockResolvedValue(makePlan({ pending: false }));
