@@ -77,7 +77,7 @@ The header button (and the menu item and the Overview link) opens **Connection s
 
 ## Next steps on a failed check
 
-A failed check shows a banner at the top of the Overview and of Spec updates ("Failed to check for spec updates", the stored sentence, never a raw message) with a button: **Add access token** (not found or unauthorized on a GitHub link, opens Connection settings at the token field) or **Check now** (network, status, rate limit, too many redirects). An unknown code, a non-GitHub link or a missing approval shows no button. Every Check now trigger of a collection shares one running check.
+A failed check shows a banner at the top of the Overview and of Spec updates ("Failed to check for spec updates", the stored sentence, never a raw message) with a button: **Add access token** (not found or unauthorized on a GitHub link, opens Connection settings at the token field) or **Check now** (network, status, rate limit, too many redirects). An unknown code, or a not-found or unauthorized failure on a non-GitHub link, shows **Connection settings**. A missing approval shows no banner (the approval banner owns that state). The Connection settings dialog opened from the banner stays open when the check starts to succeed. Every Check now trigger of a collection shares one running check.
 
 While the last check failed the Spec updates empty state says "Unable to check for updates. Fix the connection issue above and check again." Otherwise it says when the spec was last checked and offers Check now. The Your changes empty state explains how changes appear.
 

@@ -1,4 +1,5 @@
-import { screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as tauriApi from '@/lib/tauri-api';
@@ -87,5 +88,38 @@ describe('CheckFailureBanner', () => {
     const user = show(failed('file_missing', { location: 'file:///home/me/specs/api.yaml' }));
     await user.click(screen.getByRole('button', { name: 'Choose another file' }));
     expect(await screen.findByRole('button', { name: /choose spec file/i })).toBeInTheDocument();
+  });
+
+  it('a_non_github_link_offers_connection_settings_for_not_found', () => {
+    show(failed('not_found', { location: 'https://example.com/o.json' }));
+    expect(screen.queryByRole('button', { name: 'Add access token' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Connection settings' })).toBeInTheDocument();
+  });
+
+  it('the_dialog_stays_open_when_the_failure_clears', async () => {
+    const failedStatus = failed('not_found');
+    vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(failedStatus);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrap = (status: ReturnType<typeof makeStatus>) => (
+      <QueryClientProvider client={client}>
+        <CheckFailureBanner collection='c' status={status} />
+      </QueryClientProvider>
+    );
+    const view = render(wrap(failedStatus));
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Add access token' }));
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    const fixed = makeStatus({ location: GITHUB, lastStatus: { state: 'unchanged' } });
+    view.rerender(wrap(fixed));
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  it('a_repeat_failure_shows_that_the_check_ran_again', async () => {
+    vi.mocked(tauriApi.checkOpenApiSyncNow).mockResolvedValue({ state: 'failed', code: 'network' });
+    const user = show(failed('network'));
+    await user.click(screen.getByRole('button', { name: 'Check now' }));
+    const status = await screen.findByRole('status');
+    expect(within(status).getByText(/try again/i)).toBeInTheDocument();
   });
 });

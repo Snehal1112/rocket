@@ -45,6 +45,9 @@ interface OpenApiSyncTabProps {
 }
 
 /** What the pending spec would change, with the choices to apply it. It never runs a check. */
+const hasConflict = (i: OpenApiSyncItem) =>
+  i.kind === 'changed' && i.changes.some((c) => c.outcome === 'conflict');
+
 export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
   const status = useOpenApiSyncStatus(collection);
   const planEnabled = !!status.data?.hasPending;
@@ -75,8 +78,6 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
   const locked = plan.isPlaceholderData;
   // Changed requests where the user and the spec changed the same field.
   const [conflictsOnly, setConflictsOnly] = useState(false);
-  const hasConflict = (i: OpenApiSyncItem) =>
-    i.kind === 'changed' && i.changes.some((c) => c.outcome === 'conflict');
   const conflictCount = planData ? planData.items.filter(hasConflict).length : 0;
   const listPlan = useMemo(
     () =>

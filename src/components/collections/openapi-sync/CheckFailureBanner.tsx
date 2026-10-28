@@ -20,7 +20,7 @@ export function CheckFailureBanner({
   const runner = useCheckRunner(collection, status.consent);
   const [open, setOpen] = useState(false);
   const [focus, setFocus] = useState<'token' | 'link' | undefined>();
-  if (status.lastStatus?.state !== 'failed' || status.consent !== 'granted') return null;
+  const shown = status.lastStatus?.state === 'failed' && status.consent === 'granted';
   const step = nextStep(status);
   const openSettings = (next?: 'token' | 'link') => {
     setFocus(next);
@@ -40,21 +40,29 @@ export function CheckFailureBanner({
     default:
       action = { label: 'Connection settings', onClick: () => openSettings() };
   }
+  // The dialog stays mounted when the failure clears, so a fix made in it does not close it.
   return (
     <>
-      <Alert variant='destructive'>
-        <p className='font-semibold'>Failed to check for spec updates</p>
-        <p>{status.lastMessage ?? 'The last check failed.'}</p>
-        <Button
-          variant='outline'
-          size='sm'
-          className='mt-2'
-          disabled={action.disabled}
-          onClick={action.onClick}
-        >
-          {action.label}
-        </Button>
-      </Alert>
+      {shown && (
+        <Alert variant='destructive'>
+          <p className='font-semibold'>Failed to check for spec updates</p>
+          <p>{status.lastMessage ?? 'The last check failed.'}</p>
+          <Button
+            variant='outline'
+            size='sm'
+            className='mt-2'
+            disabled={action.disabled}
+            onClick={action.onClick}
+          >
+            {runner.pending && step.kind === 'check_now' ? 'Checking...' : action.label}
+          </Button>
+          {runner.text && (
+            <p role='status' className='mt-2 text-sm'>
+              {runner.text}
+            </p>
+          )}
+        </Alert>
+      )}
       <OpenApiSyncConnectionDialog
         collection={collection}
         status={status}

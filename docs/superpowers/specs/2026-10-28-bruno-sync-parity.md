@@ -30,11 +30,11 @@ Status words: **Done** (exists on the branch today), **Planned** (a plan covers 
 |---|---|---|---|
 | Tabs | Overview, Collection Changes, Spec Updates | Overview, Spec updates (N), Your changes (N) | Done |
 | Overview cards | Total, In sync, Changed, Spec updated pending; last synced; title and version | Endpoints, In sync with spec, Changed by you, Spec updates waiting; link, version, last checked, last synced | Done |
-| Check failure banner | Overview: "Failed to check for spec updates" plus the error and `Update connection settings`; Spec Updates empty state: "Unable to check for updates / Fix the connection issue above and check again." | Header alert with text only | Done: a banner with the action on Overview and Spec updates (series 5 plan 05) |
+| Check failure banner | Overview: "Failed to check for spec updates" plus the error and `Update connection settings`; Spec Updates empty state: "Unable to check for updates / Fix the connection issue above and check again." | Done (was a header alert with text only) | Done: a banner with the action on Overview and Spec updates (series 5 plan 05) |
 | Missing file | "Source file not found at <path>" with `Update connection settings` | n/a | Done: fixed sentence without a path and `Choose another file` (series 4 plan 03) |
 | No updates | "No updates from the spec" | "No spec updates waiting" | Done |
 | No local changes | "No changes in collection. The collection endpoints match the last synced spec." | "You have not changed anything." | Done: clearer text (series 3 plan 03) |
-| View spec | Read-only viewer of the stored spec; falls back to the live source; "No spec file found. Sync your collection first." | Tag-grouped list with parameters and response codes only | Gap: series 5 plan 01 adds request body, response schemas, auth and servers |
+| View spec | Read-only viewer of the stored spec; falls back to the live source; "No spec file found. Sync your collection first." | Tag-grouped list with parameters and response codes only | Done: series 5 plan 01 |
 | First connect of an existing collection | Matching by `METHOD:normalizedPath` only; no differences means sync starts at once; otherwise an "Initial sync required" banner and a Review page | Initial sync review with matched, ambiguous groups and a digest-checked confirm | Done (Beyond) |
 | Collection Changes lists | Added, Deleted, Modified with counts | Modified, Added by you, Deleted by you, Reset by you | Done |
 | Values in Your changes | Diff shown on the review page | Field names only | Done: series 3 plan 02 |
@@ -47,13 +47,13 @@ Status words: **Done** (exists on the branch today), **Planned** (a plan covers 
 |---|---|---|---|
 | Bulk actions | `Accept All`, `Skip All`, `Keep Current`, `Confirm & Sync Collection` | Same names, Accept all warns on edited requests, Skip all asks first | Done |
 | Per-endpoint choice | New: `Skip`/`Add`; modified: `Keep Current`/`Update`; removed: `Keep`/`Delete` | Per item approve or skip, per field Take spec/Keep yours; removed items are never preselected | Done (Beyond) |
-| Preserve values | Toggle on the review page, ships in 3.2.0, default on | No global toggle; Accept all takes the spec on conflicts after a warning | Gap: series 5 plan 04 adds a "Keep my values" switch (default on) |
-| Conflicts | `N Conflicts`; button "Resolve N conflict(s) and sync" | Conflicts start as Keep yours; no count | Gap: series 5 plan 04 |
+| Preserve values | Toggle on the review page, ships in 3.2.0, default on | No global toggle; Accept all takes the spec on conflicts after a warning | Done: series 5 plan 04 |
+| Conflicts | `N Conflicts`; button "Resolve N conflict(s) and sync" | Conflicts start as Keep yours; no count | Done: series 5 plan 04 |
 | Diff preview | `View Spec Diff` button | Baseline / Yours / Spec per field, unchanged fields hidden | Done (Beyond) |
 | Confirm dialog | `Confirm Sync`, `Confirm & Sync Collection` | Confirm and sync | Done; series 5 plan 04 adds counts if missing |
 | Skipped items | In memory only. After sync a skipped new endpoint shows under `Deleted from Collection` with `Restore` and `Restore All` | Persisted in `openapi-local.json`; shown as a count only | Done: skipped list with Un-skip (series 3 plan 04) |
 | Removed from spec | Accepting a removed endpoint deletes the file only if method and path still match | Deleted only when unedited; edited ones are detached and kept | Done (Beyond); Gap: no way to delete an edited removed request (series 5 plan 02) |
-| Local-only requests | `Delete`/`Delete All Local Endpoints` with "cannot be undone" confirm; `Revert All Changes` | Listed as "Added by you", no delete action | Gap: series 5 plan 02 |
+| Local-only requests | `Delete`/`Delete All Local Endpoints` with "cannot be undone" confirm; `Revert All Changes` | Listed as "Added by you", no delete action | Done: series 5 plan 02 |
 | Reset | `Reset`/`Reset All` replaces URL, params, headers, body, auth; keeps scripts, tests, assertions; confirm "Your local changes will be lost." | Replaces 10 fields (also name, method, description), backup and Restore, refused with an untrusted baseline | Done (Beyond); Differs: scope, series 5 plan 03 aligns it |
 | Reset source | The spec | The last synced baseline | Differs on purpose (documented in series 5 plan 03) |
 | First sync | Overwrites, irreversible | Review first | Done (Safer) |
@@ -64,7 +64,7 @@ Status words: **Done** (exists on the branch today), **Planned** (a plan covers 
 |---|---|---|---|
 | JSON body | Keeps user values, adds new fields with examples, drops removed | Three-way key-path merge to depth 64 (`json_merge.rs`) | Done (Beyond) |
 | JSON arrays and top-level array bodies | Not documented | Whole value is a leaf; user edit wins | Differs, safe; documented in series 5 plan 03 |
-| Urlencoded body | Keyed by field name | One text blob (`merge.rs:574`) | Gap: series 5 plan 03 |
+| Urlencoded body | Keyed by field name | One text blob (`merge.rs:574`) | Done: series 5 plan 03 |
 | Headers, query, path, form-data | Values and enabled kept, new added, removed deleted | Same, by name | Done |
 | Auth | Same mode keeps values; mode change updates and shows in review | Same plus conflict handling | Done |
 | `{{baseUrl}}` | Stays as written | Same | Done |

@@ -115,6 +115,49 @@ describe('OpenApiSyncHeader', () => {
     });
   });
 
+  it('shows_a_credentials_link_as_host_and_path_until_show_full_link', async () => {
+    renderWithQuery(
+      <OpenApiSyncHeader
+        collection='c'
+        waiting={0}
+        status={makeStatus({ location: 'https://user:pass@api.example.com/spec.json' })}
+      />,
+    );
+    expect(screen.getByText('api.example.com/spec.json')).toBeInTheDocument();
+    expect(screen.queryByText(/user:pass/)).toBeNull();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Show full link' }));
+    expect(screen.getByText('https://user:pass@api.example.com/spec.json')).toBeInTheDocument();
+  });
+
+  it('shows_the_query_only_after_show_full_link', async () => {
+    renderWithQuery(
+      <OpenApiSyncHeader
+        collection='c'
+        waiting={0}
+        status={makeStatus({ location: 'https://api.example.com/v1/spec.json?token=abc' })}
+      />,
+    );
+    expect(screen.queryByText(/token=abc/)).toBeNull();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Show full link' }));
+    expect(screen.getByText('https://api.example.com/v1/spec.json?token=abc')).toBeInTheDocument();
+  });
+
+  it('shows_the_chip_and_the_count', () => {
+    renderWithQuery(
+      <OpenApiSyncHeader
+        collection='c'
+        waiting={2}
+        status={makeStatus({ lastStatus: { state: 'unchanged' } })}
+      />,
+    );
+    expect(screen.getByText('2 updates')).toBeInTheDocument();
+  });
+
+  it('shows_updates_waiting_while_the_count_is_unknown', () => {
+    renderWithQuery(<OpenApiSyncHeader collection='c' waiting={null} status={makeStatus()} />);
+    expect(screen.getByText('Updates waiting')).toBeInTheDocument();
+  });
+
   describe('connection menu', () => {
     beforeAll(() => {
       HTMLElement.prototype.hasPointerCapture = vi.fn(() => false);
