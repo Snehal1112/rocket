@@ -15,7 +15,7 @@ Four counts: Endpoints, In sync, Changed by you, Spec updates waiting. A banner 
 - On open, every New item, every Changed item without a conflict and every variable change is selected.
 - A Changed item with a conflict starts unselected and keeps your version.
 - A Removed item is never preselected. A Removed item you edited can never be deleted by a bulk action.
-- Accept all selects New and Changed items and variable changes, and takes the spec on every conflict field. It first warns "N of your edits will be overwritten" when there are conflicts.
+- Accept all selects New and Changed items and variable changes. With Keep my values on (the default, see below) it keeps your value on every conflict field and shows no warning. With Keep my values off it takes the spec on every conflict field and first warns "N of your edits will be overwritten" when there are conflicts.
 - Skip all asks first, then skips every request until the spec changes. Variable changes cannot be skipped and stay waiting.
 - Keep current clears the selection and sends nothing.
 - Select matches selects the New and Changed items that match the search. It never selects a Removed item.
