@@ -448,9 +448,33 @@ fn parse_request_body(
 
 /// At most this many media types are kept for one body.
 const MAX_MEDIA_TYPES: usize = 5;
+/// JSON nodes one operation may spend on the schemas the viewer shows, and the most one such
+/// schema may take. The viewer cuts a schema far below this, so the rest would be wasted work
+/// on every parse.
+const MEDIA_OPERATION_BUDGET: usize = 10_000;
+const MEDIA_SCHEMA_BUDGET: usize = 2_000;
+
+/// Like `schema_json`, but charged to a budget shared by the whole operation.
+fn viewer_schema_json(
+    root: &Yaml,
+    value: &Yaml,
+    shared: &mut usize,
+    warnings: &mut Vec<String>,
+) -> Json {
+    let mut budget = (*shared).min(MEDIA_SCHEMA_BUDGET);
+    let before = budget;
+    let out = to_json(root, value, 0, &mut Vec::new(), &mut budget, warnings);
+    *shared -= before - budget;
+    out
+}
 
 /// Every media type of an OpenAPI 3 `content` map with its schema.
-fn media_list(root: &Yaml, content: Option<&Yaml>, warnings: &mut Vec<String>) -> Vec<MediaSpec> {
+fn media_list(
+    root: &Yaml,
+    content: Option<&Yaml>,
+    shared: &mut usize,
+    warnings: &mut Vec<String>,
+) -> Vec<MediaSpec> {
     let Some(map) = content.and_then(Yaml::as_mapping) else {
         return Vec::new();
     };
@@ -458,7 +482,9 @@ fn media_list(root: &Yaml, content: Option<&Yaml>, warnings: &mut Vec<String>) -
         .filter_map(|(k, media)| {
             Some(MediaSpec {
                 content_type: k.as_str()?.to_string(),
-                schema: media.get("schema").map(|s| schema_json(root, s, warnings)),
+                schema: media
+                    .get("schema")
+                    .map(|s| viewer_schema_json(root, s, shared, warnings)),
             })
         })
         .take(MAX_MEDIA_TYPES)
@@ -471,6 +497,7 @@ fn request_media_of(
     op: &Yaml,
     raw_params: &[&Yaml],
     is_v2: bool,
+    shared: &mut usize,
     warnings: &mut Vec<String>,
 ) -> (Vec<MediaSpec>, bool) {
     if is_v2 {
@@ -486,7 +513,9 @@ fn request_media_of(
             .unwrap_or_else(|| "application/json".to_string());
         let media = MediaSpec {
             content_type,
-            schema: body.get("schema").map(|s| schema_json(root, s, warnings)),
+            schema: body
+                .get("schema")
+                .map(|s| viewer_schema_json(root, s, shared, warnings)),
         };
         return (vec![media], bool_of(body, "required"));
     }
@@ -494,7 +523,7 @@ fn request_media_of(
         return (Vec::new(), false);
     };
     (
-        media_list(root, body.get("content"), warnings),
+        media_list(root, body.get("content"), shared, warnings),
         bool_of(body, "required"),
     )
 }
@@ -504,6 +533,7 @@ fn response_media_of(
     root: &Yaml,
     op: &Yaml,
     is_v2: bool,
+    shared: &mut usize,
     warnings: &mut Vec<String>,
 ) -> Vec<(String, Vec<MediaSpec>)> {
     let Some(map) = op.get("responses").and_then(Yaml::as_mapping) else {
@@ -525,13 +555,13 @@ fn response_media_of(
                             .unwrap_or_else(|| "application/json".to_string());
                         vec![MediaSpec {
                             content_type,
-                            schema: Some(schema_json(root, schema, warnings)),
+                            schema: Some(viewer_schema_json(root, schema, shared, warnings)),
                         }]
                     }
                     None => Vec::new(),
                 }
             } else {
-                media_list(root, response.get("content"), warnings)
+                media_list(root, response.get("content"), shared, warnings)
             };
             Some((status, media))
         })
@@ -635,8 +665,9 @@ fn operations(root: &Yaml, is_v2: bool, warnings: &mut Vec<String>) -> Vec<Opera
                 key = format!("{base_key}-{n}");
             }
 
+            let mut media_budget = MEDIA_OPERATION_BUDGET;
             let (request_media, request_body_required) =
-                request_media_of(root, op, &all_raw, is_v2, warnings);
+                request_media_of(root, op, &all_raw, is_v2, &mut media_budget, warnings);
             out.push(Operation {
                 key,
                 method,
@@ -652,7 +683,7 @@ fn operations(root: &Yaml, is_v2: bool, warnings: &mut Vec<String>) -> Vec<Opera
                 responses: responses_of(root, op, warnings),
                 request_media,
                 request_body_required,
-                response_media: response_media_of(root, op, is_v2, warnings),
+                response_media: response_media_of(root, op, is_v2, &mut media_budget, warnings),
             });
         }
     }
@@ -837,6 +868,47 @@ paths:
         let doc = parse_openapi(text).expect("spec should parse");
         assert_eq!(doc.operations[0].method, HttpMethod::Trace);
         assert_eq!(doc.operations[0].key, "TRACE /a");
+    }
+
+    fn json_nodes(value: &Json) -> usize {
+        match value {
+            Json::Array(items) => 1 + items.iter().map(json_nodes).sum::<usize>(),
+            Json::Object(map) => 1 + map.values().map(json_nodes).sum::<usize>(),
+            _ => 1,
+        }
+    }
+
+    #[test]
+    fn viewer_schemas_share_a_small_budget_per_operation() {
+        // Ten statuses and two media types all refer to a schema that doubles at each level.
+        let mut text = String::from(
+            "openapi: 3.0.3\ninfo: { title: T, version: '1' }\npaths:\n  /a:\n    post:\n      requestBody:\n        content:\n          application/json:\n            schema: { $ref: '#/components/schemas/S0' }\n          application/xml:\n            schema: { $ref: '#/components/schemas/S0' }\n      responses:\n",
+        );
+        for code in 200..210 {
+            text.push_str(&format!(
+                "        '{code}':\n          description: d\n          content:\n            application/json:\n              schema: {{ $ref: '#/components/schemas/S0' }}\n"
+            ));
+        }
+        text.push_str("components:\n  schemas:\n");
+        for i in 0..20 {
+            text.push_str(&format!(
+                "    S{i}: {{ type: object, properties: {{ a: {{ $ref: '#/components/schemas/S{n}' }}, b: {{ $ref: '#/components/schemas/S{n}' }} }} }}\n",
+                n = i + 1
+            ));
+        }
+        text.push_str("    S20: { type: string }\n");
+        let doc = parse_openapi(&text).expect("spec should parse");
+        let op = &doc.operations[0];
+        let total: usize = op
+            .request_media
+            .iter()
+            .chain(op.response_media.iter().flat_map(|(_, m)| m.iter()))
+            .filter_map(|m| m.schema.as_ref())
+            .map(json_nodes)
+            .sum();
+        assert!(total <= 12_000, "the viewer schemas hold {total} nodes");
+        // The converter still gets the full request body schema.
+        assert!(op.request_body.as_ref().expect("body").schema.is_some());
     }
 
     #[test]

@@ -245,3 +245,30 @@ async fn an_old_pending_copy_without_bodies_still_loads() {
     assert!(op.security.is_empty());
     assert!(view.servers.is_empty());
 }
+
+#[tokio::test]
+async fn a_huge_view_leaves_later_schemas_out() {
+    let w = world().await;
+    // 400 operations with a 150-property body each is more than the view carries.
+    let mut text = String::from("openapi: 3.0.3\ninfo: { title: Big, version: '1' }\npaths:\n");
+    for i in 0..400 {
+        text.push_str(&format!(
+            "  /p{i}:\n    post:\n      operationId: op{i}\n      requestBody:\n        content:\n          application/json:\n            schema:\n              type: object\n              properties:\n"
+        ));
+        for j in 0..150 {
+            text.push_str(&format!("                f{j}: {{ type: string }}\n"));
+        }
+        text.push_str("      responses:\n        '200': { description: ok }\n");
+    }
+    use_applied_copy(&w, &text);
+    let view = w.svc.spec_view(&w.name).expect("view");
+    let ops = &view.groups[0].operations;
+    assert_eq!(ops.len(), 400);
+    let first = ops[0].request_body[0].schema.as_ref().expect("schema");
+    assert_eq!(first.properties.len(), 150);
+    let last = ops[399].request_body[0].schema.as_ref().expect("schema");
+    assert!(
+        last.cut && last.properties.is_empty(),
+        "the last schema is left out"
+    );
+}

@@ -11,6 +11,10 @@ use crate::collection_lock::collection_lock;
 use crate::openapi_sync_service::OpenApiSyncService;
 use crate::openapi_sync_view::{SpecOpRow, SpecTagGroup, SpecView, SpecViewState};
 
+/// Schema nodes the whole view carries over IPC. Schemas past it are sent as left out, so a huge
+/// spec cannot make the page heavy.
+const MAX_VIEW_NODES: usize = 40_000;
+
 const PENDING_COPY_MISSING: &str =
     "A newer spec is waiting but its copy is missing. Run Check now.";
 
@@ -70,7 +74,9 @@ impl OpenApiSyncService {
         let known: HashSet<&str> = source.operations.iter().map(|o| o.key.as_str()).collect();
         let waiting = state == SpecViewState::UpdatesWaiting;
         let mut groups: Vec<SpecTagGroup> = Vec::new();
-        for op in spec.operation_views() {
+        let mut node_budget = MAX_VIEW_NODES;
+        for mut op in spec.operation_views() {
+            limit_nodes(&mut op, &mut node_budget);
             let row = SpecOpRow {
                 is_new: waiting && !known.contains(op.key.as_str()),
                 key: op.key,
@@ -103,6 +109,25 @@ impl OpenApiSyncService {
             groups,
             servers: spec.server_urls(),
         })
+    }
+}
+
+/// Charges the schemas of an operation to the budget of the view. A schema that no longer fits is
+/// replaced by a left-out one, which the page shows as partly shown.
+fn limit_nodes(op: &mut rocket_import::SpecOperationView, budget: &mut usize) {
+    let bodies = op
+        .request_body
+        .iter_mut()
+        .chain(op.responses.iter_mut().flat_map(|r| r.bodies.iter_mut()));
+    for body in bodies {
+        let Some(schema) = &body.schema else { continue };
+        let nodes = schema.node_count();
+        if nodes <= *budget {
+            *budget -= nodes;
+        } else {
+            *budget = 0;
+            body.schema = Some(rocket_import::omitted_schema());
+        }
     }
 }
 

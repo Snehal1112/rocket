@@ -24,5 +24,5 @@ pub use plan::{
     SyncPlan, VariableChange, VariableKind,
 };
 pub use reset::{reset_spec_owned_fields, RESET_FIELD_NAMES};
-pub use schema_view::{BodyView, SchemaView};
+pub use schema_view::{omitted as omitted_schema, BodyView, SchemaView};
 pub use spec::{ParsedSpec, SpecOperationView, SpecParamView, SpecResponseView};

@@ -41,7 +41,29 @@ pub struct BodyView {
     pub schema: Option<SchemaView>,
 }
 
+/// A schema left out because the whole view is large. It shows as cut with nothing inside.
+pub fn omitted() -> SchemaView {
+    let mut node = SchemaView::empty("any");
+    node.cut = true;
+    node
+}
+
 impl SchemaView {
+    /// The number of nodes in this tree, itself included.
+    pub fn node_count(&self) -> usize {
+        1 + self
+            .properties
+            .iter()
+            .map(|(_, p)| p.node_count())
+            .sum::<usize>()
+            + self.items.as_ref().map_or(0, |i| i.node_count())
+            + self
+                .variants
+                .iter()
+                .map(SchemaView::node_count)
+                .sum::<usize>()
+    }
+
     fn empty(kind: &str) -> Self {
         Self {
             kind: kind.to_string(),
@@ -437,5 +459,25 @@ components:
         let schema = op.responses[0].bodies[0].schema.as_ref().expect("schema");
         let next = &schema.properties[0].1;
         assert_eq!(next.ref_name.as_deref(), Some("Node"));
+    }
+
+    #[test]
+    fn server_urls_hide_credentials_and_queries() {
+        let text = "openapi: 3.0.3\ninfo: { title: T, version: '1' }\nservers:\n  - url: https://user:pass@api.example.com/v1?api_key=abc#top\n  - url: https://ok.example.com/v2\npaths: {}\n";
+        let spec = ParsedSpec::parse(text).expect("parse");
+        assert_eq!(
+            spec.server_urls(),
+            ["https://api.example.com/v1", "https://ok.example.com/v2"]
+        );
+    }
+
+    #[test]
+    fn node_count_counts_every_node() {
+        let view = schema_view(&json!({
+            "type": "object",
+            "properties": {"a": {"type": "string"}, "b": {"type": "array", "items": {"type": "string"}}}
+        }));
+        assert_eq!(view.node_count(), 4);
+        assert!(omitted().cut && omitted().properties.is_empty());
     }
 }

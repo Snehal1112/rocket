@@ -41,6 +41,29 @@ pub struct SpecOperationView {
     pub security: Vec<String>,
 }
 
+/// A server URL as shown: without user info, query or fragment, which can hold credentials,
+/// and at most 300 characters.
+fn display_server(url: &str) -> String {
+    let shown = match url::Url::parse(url) {
+        Ok(mut parsed) => {
+            let _ = parsed.set_username("");
+            let _ = parsed.set_password(None);
+            parsed.set_query(None);
+            parsed.set_fragment(None);
+            parsed.to_string()
+        }
+        // A relative server such as `/v1` is shown as it is, without a query.
+        Err(_) => url.split(['?', '#']).next().unwrap_or_default().to_string(),
+    };
+    // `Url` adds a slash to an empty path, which the spec did not write.
+    let shown = if url::Url::parse(url).is_ok_and(|u| u.path() == "/") && !url.ends_with('/') {
+        shown.trim_end_matches('/').to_string()
+    } else {
+        shown
+    };
+    shown.chars().take(300).collect()
+}
+
 /// A spec that was read and checked. It is opaque on purpose.
 #[derive(Debug, Clone)]
 pub struct ParsedSpec {
@@ -89,7 +112,12 @@ impl ParsedSpec {
 
     /// The server URLs for display, at most 10.
     pub fn server_urls(&self) -> Vec<String> {
-        self.doc.servers.iter().take(10).cloned().collect()
+        self.doc
+            .servers
+            .iter()
+            .take(10)
+            .map(|u| display_server(u))
+            .collect()
     }
 
     /// The `info.title` text.
