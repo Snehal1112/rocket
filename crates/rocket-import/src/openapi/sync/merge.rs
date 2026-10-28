@@ -570,6 +570,87 @@ fn json_object(body: &Body) -> Option<serde_json::Map<String, Value>> {
     }
 }
 
+/// One `name=value` piece of an urlencoded body. `raw` is the piece as written, so rebuilding
+/// the body keeps every escape the user or the spec wrote.
+#[derive(Clone, PartialEq)]
+struct UrlPair {
+    /// The name with its escapes decoded, for matching.
+    name: String,
+    raw: String,
+}
+
+fn percent_decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'+' => out.push(b' '),
+            b'%' if i + 2 < bytes.len() => {
+                let hex = std::str::from_utf8(&bytes[i + 1..i + 3])
+                    .ok()
+                    .and_then(|h| u8::from_str_radix(h, 16).ok());
+                if let Some(value) = hex {
+                    out.push(value);
+                    i += 3;
+                    continue;
+                }
+                out.push(b'%');
+            }
+            other => out.push(other),
+        }
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+impl UrlPair {
+    fn parse(piece: &str) -> Self {
+        let raw_name = piece.split_once('=').map_or(piece, |(name, _)| name);
+        Self {
+            name: percent_decode(raw_name),
+            raw: piece.to_string(),
+        }
+    }
+}
+
+impl Entry for UrlPair {
+    fn name(&self) -> &str {
+        &self.name
+    }
+    fn value(&self) -> &str {
+        self.raw.split_once('=').map_or("", |(_, value)| value)
+    }
+    fn set_value(&mut self, value: &str) {
+        let raw_name = self
+            .raw
+            .split_once('=')
+            .map_or(self.raw.as_str(), |(n, _)| n);
+        self.raw = format!("{raw_name}={value}");
+    }
+    fn is_enabled(&self) -> bool {
+        true
+    }
+    fn set_enabled(&mut self, _enabled: bool) {}
+}
+
+/// Splits an urlencoded body into its pieces. An empty piece (a doubled or trailing `&`) is not
+/// a field list a rebuild could reproduce, so it gives `None` and the body merges as one value.
+fn url_pairs(body: &Body) -> Option<Vec<UrlPair>> {
+    if body.mode != BodyMode::FormUrlEncoded {
+        return None;
+    }
+    let text = body.content.as_deref()?;
+    if text.is_empty() {
+        return Some(Vec::new());
+    }
+    let pieces: Vec<&str> = text.split('&').collect();
+    if pieces.iter().any(|p| p.is_empty()) {
+        return None;
+    }
+    Some(pieces.into_iter().map(UrlPair::parse).collect())
+}
+
 // Rules 3 and 4: the body.
 fn merge_body(
     b: &Option<Body>,
@@ -598,6 +679,19 @@ fn merge_body(
                 }
             }
             changes.extend(result.changes);
+            return Some(merged);
+        }
+        if let (Some(bp), Some(cp), Some(sp)) = (url_pairs(bb), url_pairs(cb), url_pairs(sb)) {
+            let (pairs, mut ch) = merge_entries("form", false, &bp, &cp, &sp, choices);
+            changes.append(&mut ch);
+            let mut merged = cb.clone();
+            merged.content = Some(
+                pairs
+                    .iter()
+                    .map(|p| p.raw.as_str())
+                    .collect::<Vec<_>>()
+                    .join("&"),
+            );
             return Some(merged);
         }
         if let (BodyMode::FormData, BodyMode::FormData, BodyMode::FormData) =
@@ -1539,5 +1633,110 @@ mod tests {
         let out = merge_request(&b, &c, &s, &choice("url", Choice::Spec));
         assert_eq!(out.merged.url, "theirs");
         assert_eq!(change(&out, "url").outcome, FieldOutcome::TakeSpec);
+    }
+
+    // Urlencoded bodies.
+
+    fn url_body(text: &str) -> Option<Body> {
+        Some(Body {
+            mode: BodyMode::FormUrlEncoded,
+            content: Some(text.to_string()),
+            form_data: None,
+            file_path: None,
+        })
+    }
+
+    fn url_text(out: MergeOutcome) -> String {
+        out.merged.body.expect("body").content.expect("content")
+    }
+
+    #[test]
+    fn urlencoded_fields_merge_independently() {
+        let mut b = base();
+        b.body = url_body("a=1&b=2");
+        let mut c = base();
+        c.body = url_body("a=mine&b=2");
+        let mut s = base();
+        s.body = url_body("a=1&b=3&c=4");
+        let out = run(&b, &c, &s);
+        assert!(has_change(&out, "form:b") && has_change(&out, "form:c"));
+        assert_eq!(url_text(out), "a=mine&b=3&c=4");
+    }
+
+    #[test]
+    fn urlencoded_pairs_round_trip_exactly() {
+        let text = "q=a%26b&token=x=y&flag&name=caf%C3%A9+au+lait";
+        let mut b = base();
+        b.body = url_body(text);
+        let c = b.clone();
+        let mut s = base();
+        // The spec changes something else, so the merge runs.
+        s.body = url_body(&format!("{text}&extra=1"));
+        let out = run(&b, &c, &s);
+        assert_eq!(url_text(out), format!("{text}&extra=1"));
+        // With nothing new in the spec the user's text comes back byte for byte.
+        let same = run(&b, &c, &b);
+        assert_eq!(url_text(same), text);
+    }
+
+    #[test]
+    fn a_removed_urlencoded_field_is_dropped_when_untouched() {
+        let mut b = base();
+        b.body = url_body("a=1&b=2");
+        let c = b.clone();
+        let mut s = base();
+        s.body = url_body("a=1");
+        let out = run(&b, &c, &s);
+        assert_eq!(url_text(out), "a=1");
+    }
+
+    #[test]
+    fn a_user_edited_urlencoded_field_survives_a_spec_removal_as_a_conflict() {
+        let mut b = base();
+        b.body = url_body("a=1&b=2");
+        let mut c = base();
+        c.body = url_body("a=1&b=mine");
+        let mut s = base();
+        s.body = url_body("a=1");
+        let out = run(&b, &c, &s);
+        assert_eq!(change(&out, "form:b").outcome, FieldOutcome::Conflict);
+        assert_eq!(url_text(out), "a=1&b=mine");
+    }
+
+    #[test]
+    fn an_unparsable_urlencoded_body_falls_back_to_the_scalar_merge() {
+        // An empty piece (a doubled ampersand) is not a field list, so the body is one value.
+        let mut b = base();
+        b.body = url_body("a=1&&b=2");
+        let c = b.clone();
+        let mut s = base();
+        s.body = url_body("a=2");
+        let out = run(&b, &c, &s);
+        assert!(has_change(&out, "body"));
+        assert!(!has_change(&out, "form:a"));
+        assert_eq!(url_text(out), "a=2");
+    }
+
+    #[test]
+    fn urlencoded_changes_are_named_form_colon_name() {
+        let mut b = base();
+        b.body = url_body("limit=1");
+        let c = b.clone();
+        let mut s = base();
+        s.body = url_body("limit=2");
+        let out = run(&b, &c, &s);
+        assert_eq!(change(&out, "form:limit").outcome, FieldOutcome::TakeSpec);
+    }
+
+    #[test]
+    fn encoded_and_plain_names_match_each_other() {
+        let mut b = base();
+        b.body = url_body("my%20key=1");
+        let c = b.clone();
+        let mut s = base();
+        s.body = url_body("my%20key=2");
+        let out = run(&b, &c, &s);
+        assert!(has_change(&out, "form:my key"));
+        assert_eq!(url_text(out), "my%20key=2");
     }
 }
