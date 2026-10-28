@@ -300,8 +300,12 @@ describe('OpenApiSyncChanges', () => {
       await user.click(
         within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete' }),
       );
-      await waitFor(() => expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled());
-      expect(screen.getByRole('button', { name: 'Delete all (1)' })).toBeDisabled();
+      const dialog = screen.getByRole('alertdialog');
+      const busy = await within(dialog).findByRole('button', { name: 'Deleting...' });
+      expect(busy).toBeDisabled();
+      expect(within(dialog).getByRole('button', { name: 'Cancel' })).toBeDisabled();
+      // The dialog stays open while the delete has not settled.
+      expect(screen.getByRole('alertdialog')).toBeInTheDocument();
     });
   });
 

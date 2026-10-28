@@ -50,6 +50,30 @@ describe('OpenApiSyncDetail', () => {
       );
     });
 
+    it('keeps_the_confirm_dialog_open_and_busy_until_the_delete_settles', async () => {
+      let finish: (n: number) => void = () => {};
+      vi.mocked(tauriApi.deleteOpenApiRequests).mockReturnValue(
+        new Promise<number>((resolve) => {
+          finish = resolve;
+        }),
+      );
+      renderWithQuery(
+        <OpenApiSyncDetail {...props({ plan: planWith(true), selectedId: 'removed:DELETE /pets' })} />,
+      );
+      const user = userEvent.setup();
+      await user.click(screen.getByRole('button', { name: 'Delete this request' }));
+      await user.click(
+        within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete' }),
+      );
+      const busy = await within(screen.getByRole('alertdialog')).findByRole('button', {
+        name: 'Deleting...',
+      });
+      expect(busy).toBeDisabled();
+      expect(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Cancel' })).toBeDisabled();
+      finish(1);
+      await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
+    });
+
     it('an_unedited_removed_request_offers_no_delete', () => {
       renderWithQuery(
         <OpenApiSyncDetail {...props({ plan: planWith(false), selectedId: 'removed:DELETE /pets' })} />,

@@ -379,7 +379,9 @@ export function OpenApiSyncChanges({ collection }: { collection: string }) {
           setDiscarding(row);
         }}
       />
-      {del.isError && <StateBlock tone='error'>{syncErrorMessage(del.error)}</StateBlock>}
+      {del.isError && deleting === null && (
+        <StateBlock tone='error'>{syncErrorMessage(del.error)}</StateBlock>
+      )}
       <Group
         collection={collection}
         kind='added'
@@ -396,6 +398,7 @@ export function OpenApiSyncChanges({ collection }: { collection: string }) {
         requests={deleting ?? []}
         open={deleting !== null}
         busy={del.isPending}
+        error={del.isError ? syncErrorMessage(del.error) : null}
         onCancel={() => setDeleting(null)}
         onConfirm={() => {
           if (!deleting) return;
@@ -408,10 +411,10 @@ export function OpenApiSyncChanges({ collection }: { collection: string }) {
                   deleting.map((r) => r.requestPath),
                 );
                 toast.success('Deleted.');
+                setDeleting(null);
               },
             },
           );
-          setDeleting(null);
         }}
       />
       <ResetConfirmDialog

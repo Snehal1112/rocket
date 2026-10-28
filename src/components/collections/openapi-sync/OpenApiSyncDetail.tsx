@@ -77,7 +77,7 @@ function DeleteRemovedRequest({
           Delete this request
         </Button>
       </div>
-      {del.isError && (
+      {del.isError && !asking && (
         <p role='alert' className='text-xs text-destructive'>
           {syncErrorMessage(del.error)}
         </p>
@@ -86,15 +86,16 @@ function DeleteRemovedRequest({
         requests={[{ uid, requestPath, label }]}
         open={asking}
         busy={del.isPending}
+        error={del.isError ? syncErrorMessage(del.error) : null}
         onCancel={() => setAsking(false)}
         onConfirm={() => {
           del.mutate([{ uid, requestPath }], {
             onSuccess: () => {
               closeDeletedRequestTabs(collection, [requestPath]);
               toast.success('Deleted.');
+              setAsking(false);
             },
           });
-          setAsking(false);
         }}
       />
     </div>

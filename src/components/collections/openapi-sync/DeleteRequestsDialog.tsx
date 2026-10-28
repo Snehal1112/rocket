@@ -22,6 +22,8 @@ interface DeleteRequestsDialogProps {
   onConfirm: () => void;
   onCancel: () => void;
   busy: boolean;
+  /** Failure text from the last attempt, shown while the dialog stays open. */
+  error?: string | null;
 }
 
 /** Asks before request files are deleted from the collection. */
@@ -31,13 +33,14 @@ export function DeleteRequestsDialog({
   onConfirm,
   onCancel,
   busy,
+  error,
 }: DeleteRequestsDialogProps) {
   const title =
     requests.length === 1
       ? `Delete "${requests[0].label}"?`
       : `Delete ${requests.length} requests?`;
   return (
-    <AlertDialog open={open} onOpenChange={(next) => !next && onCancel()}>
+    <AlertDialog open={open} onOpenChange={(next) => !next && !busy && onCancel()}>
       <AlertDialogContent>
         <AlertDialogHeader className='min-w-0'>
           <AlertDialogTitle className='[overflow-wrap:anywhere]'>{title}</AlertDialogTitle>
@@ -45,10 +48,22 @@ export function DeleteRequestsDialog({
             This removes the file from the collection. The sync page cannot undo it, git can.
           </AlertDialogDescription>
         </AlertDialogHeader>
+        {error && (
+          <p role='alert' className='text-sm text-destructive'>
+            {error}
+          </p>
+        )}
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction disabled={busy} onClick={onConfirm}>
-            Delete
+          <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={busy}
+            onClick={(e) => {
+              // Keep the dialog open until the delete settles.
+              e.preventDefault();
+              onConfirm();
+            }}
+          >
+            {busy ? 'Deleting...' : 'Delete'}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
