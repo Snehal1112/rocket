@@ -23,6 +23,14 @@ Four counts: Endpoints, In sync, Changed by you, Spec updates waiting. A banner 
 - Confirm and sync is disabled at 0 selected. It opens the confirm dialog, then the result dialog.
 - When the plan changes, an item whose content changed goes back to its default. An item whose content did not change keeps your choice, so a check or a skip never ticks again something you unticked. A plan change closes an open confirm dialog.
 
+## Review: Keep my values
+
+The actions bar has a **Keep my values** switch, on by default and reset for each collection tab. With it on, **Accept all** selects every new and changed request but keeps your value for every field you changed (a conflict, or a field where yours differs from the last synced spec), so nothing of yours is overwritten and no warning is shown. With it off, Accept all takes the spec's value on conflicts and asks first, as before. A choice you made by hand on a field stays when you flip the switch, and Accept all with the switch on sets edited fields back to yours.
+
+The **N conflicts** button counts the changed requests where you and the spec changed the same field. It filters the list to those requests and shows **Show conflicts only** while on.
+
+**Confirm and sync** asks first and lists what will happen: new and changed requests, removed ones that are deleted or kept, variable changes, **N changes kept as yours** and **N skipped**.
+
 ## Your changes
 
 It lists requests you changed, added or deleted compared with the last synced spec. A Modified row has **Reset to spec**, and the group has **Reset all to spec (n)**. A request you reset shows in **Reset by you** with **Restore my version** and **Discard backup**.
@@ -158,3 +166,7 @@ A count badge shows on the collection row. A toast "N spec updates" with Review 
 28. Edit a request, remove its operation from the spec, check, then open it in Spec updates and press Delete this request.
 29. Edit one field of an urlencoded request body, change another field in the spec, check and sync: both changes survive.
 30. Rename a synced request and change its URL, then Reset it: the URL goes back, the new name stays. A request with only a new name has no Reset button.
+31. Edit a field of a synced request, change the same field in the spec, check, then press Accept all with Keep my values on: no warning, and Confirm and sync lists the change as kept as yours.
+32. Turn Keep my values off and press Accept all: the overwrite warning appears, and the spec's value is taken.
+33. Press the N conflicts button: the list shows only requests with a conflict. Press it again to see all.
+34. Skip an item, press Confirm and sync: the dialog lists N skipped.

@@ -9,6 +9,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import type { OpenApiSyncItem } from '@/lib/tauri-api';
+import { defaultChoice } from './openApiSyncView';
 
 interface ApplyConfirmDialogProps {
   open: boolean;
@@ -17,6 +18,10 @@ interface ApplyConfirmDialogProps {
   items: OpenApiSyncItem[];
   variableCount: number;
   onConfirm: () => void;
+  /** The field choices by item key. A field without one takes its default. */
+  choices?: Map<string, Record<string, 'spec' | 'yours'>>;
+  /** Requests the user skipped. */
+  skippedCount?: number;
 }
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -28,6 +33,8 @@ export function ApplyConfirmDialog({
   items,
   variableCount,
   onConfirm,
+  choices,
+  skippedCount = 0,
 }: ApplyConfirmDialogProps) {
   const added = items.filter((i) => i.kind === 'new').length;
   const changed = items.filter((i) => i.kind === 'changed').length;
@@ -35,6 +42,18 @@ export function ApplyConfirmDialog({
   // Only a request known to be unedited is deleted. Unknown counts as edited.
   const deleted = removed.filter((i) => i.kind === 'removed' && i.edited === false).length;
   const kept = removed.length - deleted;
+  // Fields the user changed that stay as they are, because the choice for them is Keep yours.
+  const keptFields = items.reduce((sum, item) => {
+    if (item.kind !== 'changed') return sum;
+    const chosen = choices?.get(item.key);
+    return (
+      sum +
+      item.changes.filter(
+        (c) =>
+          c.outcome !== 'takeSpec' && (chosen?.[c.field] ?? defaultChoice(c.outcome)) === 'yours',
+      ).length
+    );
+  }, 0);
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
@@ -53,6 +72,8 @@ export function ApplyConfirmDialog({
           {kept > 0 && (
             <li>{`${plural(kept, 'removed request', 'removed requests')} ${kept === 1 ? 'stays' : 'stay'} in your collection but ${kept === 1 ? 'is' : 'are'} no longer tracked, because you edited ${kept === 1 ? 'it' : 'them'} or Rocket cannot tell.`}</li>
           )}
+          {keptFields > 0 && <li>{`${plural(keptFields, 'change', 'changes')} kept as yours.`}</li>}
+          {skippedCount > 0 && <li>{`${skippedCount} skipped.`}</li>}
           {variableCount > 0 && (
             <li>{`${plural(variableCount, 'variable change', 'variable changes')} will be applied. A value you changed yourself is kept.`}</li>
           )}

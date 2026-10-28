@@ -383,6 +383,8 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
           onOpenChange={setConfirmOpen}
           items={approvedItems}
           variableCount={variables.size}
+          choices={sel.choices}
+          skippedCount={sel.skips.size}
           onConfirm={confirmApply}
         />
       </div>
