@@ -93,7 +93,9 @@ export function OpenApiSyncActionsBar({
           {`${conflictCount} ${conflictCount === 1 ? 'conflict' : 'conflicts'}`}
         </Button>
       )}
-      {conflictsOnly && <span className='text-xs text-muted-foreground'>Show conflicts only</span>}
+      {conflictsOnly && conflictCount > 0 && (
+        <span className='text-xs text-muted-foreground'>Show conflicts only</span>
+      )}
       <div className='flex items-center gap-2'>
         <Switch
           id='openapi-sync-keep-mine'

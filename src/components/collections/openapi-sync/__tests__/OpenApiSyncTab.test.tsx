@@ -1163,6 +1163,27 @@ describe('OpenApiSyncTab actions', () => {
     expect(screen.getByRole('checkbox', { name: 'Include List pets in apply' })).toBeInTheDocument();
   });
 
+  it('the_detail_follows_the_filtered_list', async () => {
+    mockSync();
+    renderWithQuery(<TabWithListeners collection='conf4' />);
+    const user = userEvent.setup();
+    await screen.findByText('Add pet');
+    await user.click(screen.getByRole('button', { name: '1 conflict' }));
+    // The first row of the full list was New, but the list now holds only the conflict.
+    expect(screen.getByText('pets/add-pet.yml')).toBeInTheDocument();
+    expect(screen.queryByText('Folder: pets / read')).toBeNull();
+  });
+
+  it('select_matches_counts_only_the_rows_the_filter_shows', async () => {
+    mockSync();
+    renderWithQuery(<TabWithListeners collection='conf5' />);
+    const user = userEvent.setup();
+    await screen.findByText('Add pet');
+    expect(screen.getByRole('button', { name: 'Select matches (2)' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '1 conflict' }));
+    expect(screen.getByRole('button', { name: 'Select matches (1)' })).toBeInTheDocument();
+  });
+
   it('the_accept_all_warning_shows_only_when_the_switch_is_off', async () => {
     mockSync();
     renderWithQuery(<TabWithListeners collection='conf3' />);

@@ -77,10 +77,13 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
   const hasConflict = (i: OpenApiSyncItem) =>
     i.kind === 'changed' && i.changes.some((c) => c.outcome === 'conflict');
   const conflictCount = planData ? planData.items.filter(hasConflict).length : 0;
-  const listPlan =
-    planData && conflictsOnly && conflictCount > 0
-      ? { ...planData, items: planData.items.filter(hasConflict), variableChanges: [] }
-      : planData;
+  const listPlan = useMemo(
+    () =>
+      planData && conflictsOnly && conflictCount > 0
+        ? { ...planData, items: planData.items.filter(hasConflict), variableChanges: [] }
+        : planData,
+    [planData, conflictsOnly, conflictCount],
+  );
   const busy = apply.isPending || applyingAnywhere || plan.isFetching;
 
   const approvedItems = useMemo(
@@ -136,18 +139,20 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
   // Removed requests are left out, so a search never selects a deletion.
   const selectMatches = () => {
     if (!planData) return;
-    const keys = filterItems(planData.items, query)
+    const shown = listPlan ?? planData;
+    const keys = filterItems(shown.items, query)
       .filter((i) => i.kind !== 'removed')
       .map((i) => i.key);
     sel.setMany(keys, true);
     sel.setManyVariables(
-      filterVariables(planData.variableChanges, query).map((v) => v.name),
+      filterVariables(shown.variableChanges, query).map((v) => v.name),
       true,
     );
   };
-  const matchCount = planData
-    ? filterItems(planData.items, query).filter((i) => i.kind !== 'removed').length +
-      filterVariables(planData.variableChanges, query).length
+  const shownPlan = listPlan ?? planData;
+  const matchCount = shownPlan
+    ? filterItems(shownPlan.items, query).filter((i) => i.kind !== 'removed').length +
+      filterVariables(shownPlan.variableChanges, query).length
     : 0;
   const skipAll = () => {
     setBulk(null);
@@ -194,10 +199,10 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
   };
 
   const activeId =
-    planData && findEntry(planData, selectedId)
+    shownPlan && findEntry(shownPlan, selectedId)
       ? selectedId
-      : planData
-        ? firstEntryId(planData)
+      : shownPlan
+        ? firstEntryId(shownPlan)
         : null;
 
   // The viewer must not wait to reopen by itself when the collection is disconnected and

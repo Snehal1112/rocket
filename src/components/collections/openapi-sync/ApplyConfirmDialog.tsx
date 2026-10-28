@@ -49,8 +49,7 @@ export function ApplyConfirmDialog({
     return (
       sum +
       item.changes.filter(
-        (c) =>
-          c.outcome !== 'takeSpec' && (chosen?.[c.field] ?? defaultChoice(c.outcome)) === 'yours',
+        (c) => (chosen?.[c.field] ?? defaultChoice(c.outcome)) === 'yours' && c.yours !== c.spec,
       ).length
     );
   }, 0);

@@ -87,6 +87,24 @@ describe('ApplyConfirmDialog', () => {
     expect(screen.getByText('1 change kept as yours.')).toBeInTheDocument();
   });
 
+  it('a_value_that_already_equals_the_spec_is_not_counted_as_kept', () => {
+    const same = {
+      ...changedItem,
+      changes: [
+        { field: 'url', outcome: 'keepYours' as const, baseline: 'a', yours: 'b', spec: 'b' },
+      ],
+    } as OpenApiSyncItem;
+    renderDialog([same], 0, vi.fn(), { choices: new Map() });
+    expect(screen.queryByText(/kept as yours/)).toBeNull();
+  });
+
+  it('an_explicit_keep_on_a_spec_field_is_counted', () => {
+    renderDialog([changedItem], 0, vi.fn(), {
+      choices: new Map([['POST /pets', { 'header:Accept': 'yours' as const }]]),
+    });
+    expect(screen.getByText('3 changes kept as yours.')).toBeInTheDocument();
+  });
+
   it('no_kept_line_when_nothing_is_kept', () => {
     renderDialog([newItem], 0, vi.fn(), { choices: new Map() });
     expect(screen.queryByText(/kept as yours/)).toBeNull();

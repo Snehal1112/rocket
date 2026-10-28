@@ -126,6 +126,11 @@ describe('OpenApiSyncActionsBar', () => {
     expect(screen.queryByRole('button', { name: /conflict/ })).toBeNull();
   });
 
+  it('the_filter_label_goes_when_no_conflict_is_left', () => {
+    render(<OpenApiSyncActionsBar {...props({ conflictCount: 0, conflictsOnly: true })} />);
+    expect(screen.queryByText('Show conflicts only')).toBeNull();
+  });
+
   it('the_badge_shows_the_count_and_toggles_the_filter', async () => {
     const p = props({ conflictCount: 3 });
     render(<OpenApiSyncActionsBar {...p} />);

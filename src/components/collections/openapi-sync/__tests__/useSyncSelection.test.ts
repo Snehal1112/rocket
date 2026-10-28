@@ -363,10 +363,7 @@ describe('useSyncSelection defaults and bulk actions', () => {
       // Nothing is overwritten, so there is nothing to warn about.
       expect(out.overwritten).toBe(0);
       expect([...result.current.approved].sort()).toEqual(['GET /pets', 'POST /pets', 'PUT /pets']);
-      expect(result.current.choices.get('POST /pets')).toEqual({
-        url: 'yours',
-        'body:$.a.b': 'yours',
-      });
+      expect(result.current.choices.get('POST /pets')).toEqual({ url: 'yours' });
     });
 
     it('accept_all_takes_the_spec_when_the_switch_is_off', () => {
@@ -386,6 +383,28 @@ describe('useSyncSelection defaults and bulk actions', () => {
       act(() => result.current.setKeepMine(false));
       act(() => result.current.setKeepMine(true));
       expect(result.current.choices.get('POST /pets')).toEqual({ url: 'spec' });
+    });
+
+    it('accept_all_leaves_a_spec_update_on_an_untouched_entry_alone', () => {
+      // The user disabled header X. The spec changed its value. Only the conflicts are pinned.
+      const entry = {
+        ...changedItem,
+        key: 'GET /entry',
+        changes: [
+          {
+            field: 'header:X',
+            outcome: 'takeSpec' as const,
+            baseline: 'v',
+            yours: 'v (disabled)',
+            spec: 'w',
+          },
+        ],
+      } as OpenApiSyncItem;
+      const { result } = setup(makePlan({ items: [entry] }));
+      act(() => {
+        result.current.acceptAll();
+      });
+      expect(result.current.choices.get('GET /entry')?.['header:X']).toBeUndefined();
     });
 
     it('the_switch_resets_per_collection', () => {

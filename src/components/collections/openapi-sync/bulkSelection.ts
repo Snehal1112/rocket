@@ -72,21 +72,19 @@ export function acceptAllSelection(
   return { approved: nextApproved, choices: nextChoices };
 }
 
-/** The fields of a changed item the user edited: conflicts, and fields where yours is not the baseline. */
+/**
+ * The fields where Keep my values must pin the user's value: the conflicts. Any other field the
+ * user edited is kept by the backend already, and pinning a field the spec also changes in an
+ * untouched part (a header the user disabled while the spec changed its value) would drop that
+ * update.
+ */
 function editedFields(item: OpenApiSyncItem): string[] {
-  if (item.kind !== 'changed') return [];
-  return item.changes
-    .filter(
-      (c) =>
-        c.outcome === 'conflict' ||
-        (c.yours !== null && c.baseline !== null && c.yours !== c.baseline),
-    )
-    .map((c) => c.field);
+  return conflictFields(item);
 }
 
 /**
  * Applies Accept all with Keep my values on. Every new and changed item is selected and every
- * field the user edited keeps the user's value, so nothing of theirs is overwritten. A removed
+ * conflict keeps the user's value, so the spec never replaces a field both sides changed. A removed
  * item the user edited is dropped from the selection, as in `acceptAllSelection`.
  */
 export function acceptAllKeepingMine(
