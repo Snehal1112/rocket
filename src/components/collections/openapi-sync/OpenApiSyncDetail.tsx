@@ -1,8 +1,11 @@
 import { Link2, Unlink } from 'lucide-react';
+import { useState } from 'react';
+import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SegmentedControl } from '@/components/ui/segmented-control';
+import { useDeleteRequests } from '@/lib/queries/openapi-sync-queries';
 import type {
   OpenApiFieldChange,
   OpenApiNewPreview,
@@ -10,6 +13,7 @@ import type {
   OpenApiSyncPlan,
   OpenApiVariableChange,
 } from '@/lib/tauri-api';
+import { DeleteRequestsDialog } from './DeleteRequestsDialog';
 import {
   defaultChoice,
   fieldLabel,
@@ -18,11 +22,13 @@ import {
   renameHint,
   variableLabel,
 } from './openApiSyncView';
+import { syncErrorMessage } from './syncErrors';
 import { ValueBox } from './ValueBox';
 
 type Choice = 'spec' | 'yours';
 
 interface OpenApiSyncDetailProps {
+  collection: string;
   plan: OpenApiSyncPlan;
   selectedId: string | null;
   /** The explicit field choices by item key. A field without one takes its default. */
@@ -40,6 +46,54 @@ const CHOICE_OPTIONS: { value: Choice; label: string }[] = [
   { value: 'spec', label: 'Take spec' },
   { value: 'yours', label: 'Keep yours' },
 ];
+
+/** Deletes a request the spec removed and the user edited, after asking. */
+function DeleteRemovedRequest({
+  collection,
+  uid,
+  requestPath,
+  label,
+}: {
+  collection: string;
+  uid: string;
+  requestPath: string;
+  label: string;
+}) {
+  const del = useDeleteRequests(collection);
+  const [asking, setAsking] = useState(false);
+  return (
+    <div className='flex flex-col gap-1'>
+      <div>
+        <Button
+          variant='outline'
+          size='sm'
+          disabled={del.isPending}
+          onClick={() => {
+            del.reset();
+            setAsking(true);
+          }}
+        >
+          Delete this request
+        </Button>
+      </div>
+      {del.isError && (
+        <p role='alert' className='text-xs text-destructive'>
+          {syncErrorMessage(del.error)}
+        </p>
+      )}
+      <DeleteRequestsDialog
+        requests={[{ uid, requestPath, label }]}
+        open={asking}
+        busy={del.isPending}
+        onCancel={() => setAsking(false)}
+        onConfirm={() => {
+          del.mutate([{ uid, requestPath }], { onSuccess: () => toast.success('Deleted.') });
+          setAsking(false);
+        }}
+      />
+    </div>
+  );
+}
 
 function NewPreview({ preview }: { preview: OpenApiNewPreview }) {
   return (
@@ -109,6 +163,7 @@ function VariableBlock({ change }: { change: OpenApiVariableChange }) {
 
 /** The detail of the selected entry. Only this one entry is rendered. */
 export function OpenApiSyncDetail({
+  collection,
   plan,
   selectedId,
   choices,
@@ -227,6 +282,14 @@ export function OpenApiSyncDetail({
                   <p>You did not edit it, so it will be deleted if Rocket can rewrite it.</p>
                 )}
                 <p className='break-all text-xs text-muted-foreground'>{entry.item.requestPath}</p>
+                {entry.item.edited === true && (
+                  <DeleteRemovedRequest
+                    collection={collection}
+                    uid={entry.item.uid}
+                    requestPath={entry.item.requestPath}
+                    label={entry.item.name}
+                  />
+                )}
               </div>
             )}
           </>

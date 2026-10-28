@@ -271,6 +271,7 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
           </div>
           <div className='min-w-0 flex-1'>
             <OpenApiSyncDetail
+              collection={collection}
               plan={planData}
               selectedId={null}
               choices={sel.choices}
@@ -337,6 +338,7 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
           </div>
           <div className='min-w-0 flex-1'>
             <OpenApiSyncDetail
+              collection={collection}
               plan={planData}
               selectedId={activeId}
               choices={sel.choices}

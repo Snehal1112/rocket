@@ -1,11 +1,19 @@
-import { render, screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import * as tauriApi from '@/lib/tauri-api';
+import { renderWithQuery } from '@/test/trust-fixtures';
 import { OpenApiSyncDetail } from '../OpenApiSyncDetail';
-import { makePlan, newItem } from './fixtures';
+import { makePlan, newItem, removedItem } from './fixtures';
+
+vi.mock('@/lib/tauri-api', async () => {
+  const actual = await vi.importActual<typeof tauriApi>('@/lib/tauri-api');
+  return { ...actual, deleteOpenApiRequests: vi.fn() };
+});
 
 function props(overrides: Partial<React.ComponentProps<typeof OpenApiSyncDetail>> = {}) {
   return {
+    collection: 'c',
     plan: makePlan(),
     selectedId: null,
     choices: new Map<string, Record<string, 'spec' | 'yours'>>(),
@@ -19,8 +27,46 @@ function props(overrides: Partial<React.ComponentProps<typeof OpenApiSyncDetail>
 }
 
 describe('OpenApiSyncDetail', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  describe('delete', () => {
+    const planWith = (edited: boolean | null) =>
+      makePlan({ items: [{ ...removedItem, edited } as never] });
+
+    it('a_removed_edited_request_offers_delete_in_its_detail', async () => {
+      vi.mocked(tauriApi.deleteOpenApiRequests).mockResolvedValue(1);
+      renderWithQuery(
+        <OpenApiSyncDetail {...props({ plan: planWith(true), selectedId: 'removed:DELETE /pets' })} />,
+      );
+      const user = userEvent.setup();
+      await user.click(screen.getByRole('button', { name: 'Delete this request' }));
+      await user.click(
+        within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete' }),
+      );
+      await waitFor(() =>
+        expect(tauriApi.deleteOpenApiRequests).toHaveBeenCalledWith('c', [
+          { uid: 'u-removed', requestPath: 'pets/delete-pet.yml' },
+        ]),
+      );
+    });
+
+    it('an_unedited_removed_request_offers_no_delete', () => {
+      renderWithQuery(
+        <OpenApiSyncDetail {...props({ plan: planWith(false), selectedId: 'removed:DELETE /pets' })} />,
+      );
+      expect(screen.queryByRole('button', { name: 'Delete this request' })).toBeNull();
+    });
+
+    it('a_removed_request_of_unknown_edit_state_offers_no_delete', () => {
+      renderWithQuery(
+        <OpenApiSyncDetail {...props({ plan: planWith(null), selectedId: 'removed:DELETE /pets' })} />,
+      );
+      expect(screen.queryByRole('button', { name: 'Delete this request' })).toBeNull();
+    });
+  });
+
   it('shows each changed field with baseline, yours, spec and the outcome', () => {
-    render(<OpenApiSyncDetail {...props({ selectedId: 'changed:POST /pets' })} />);
+    renderWithQuery(<OpenApiSyncDetail {...props({ selectedId: 'changed:POST /pets' })} />);
     expect(screen.getByText('pets/add-pet.yml')).toBeInTheDocument();
     expect(screen.getByText('Header Accept')).toBeInTheDocument();
     expect(screen.getByText('Body $.a.b')).toBeInTheDocument();
@@ -33,14 +79,14 @@ describe('OpenApiSyncDetail', () => {
   });
 
   it('shows the request summary and folder of a new item', () => {
-    render(<OpenApiSyncDetail {...props({ selectedId: 'new:GET /pets' })} />);
+    renderWithQuery(<OpenApiSyncDetail {...props({ selectedId: 'new:GET /pets' })} />);
     expect(screen.getByText('List pets')).toBeInTheDocument();
     expect(screen.getByText('Folder: pets / read')).toBeInTheDocument();
     expect(screen.getByText('Possibly renamed from GET /animals')).toBeInTheDocument();
   });
 
   it('says a removed item of unknown edit state is kept', () => {
-    render(<OpenApiSyncDetail {...props({ selectedId: 'removed:DELETE /pets' })} />);
+    renderWithQuery(<OpenApiSyncDetail {...props({ selectedId: 'removed:DELETE /pets' })} />);
     expect(screen.getByText('Treated as edited, will be kept.')).toBeInTheDocument();
   });
 
@@ -48,14 +94,14 @@ describe('OpenApiSyncDetail', () => {
     const plan = makePlan({
       items: [{ ...makePlan().items[0], edited: false } as never],
     });
-    render(<OpenApiSyncDetail {...props({ plan, selectedId: 'removed:DELETE /pets' })} />);
+    renderWithQuery(<OpenApiSyncDetail {...props({ plan, selectedId: 'removed:DELETE /pets' })} />);
     expect(
       screen.getByText('You did not edit it, so it will be deleted if Rocket can rewrite it.'),
     ).toBeInTheDocument();
   });
 
   it('shows the cautious warning', () => {
-    render(
+    renderWithQuery(
       <OpenApiSyncDetail
         {...props({ plan: makePlan({ cautious: true }), selectedId: 'new:GET /pets' })}
       />,
@@ -64,13 +110,13 @@ describe('OpenApiSyncDetail', () => {
   });
 
   it('renders only the selected item', () => {
-    render(<OpenApiSyncDetail {...props({ selectedId: 'new:GET /pets' })} />);
+    renderWithQuery(<OpenApiSyncDetail {...props({ selectedId: 'new:GET /pets' })} />);
     expect(screen.queryByText('Add pet')).toBeNull();
     expect(screen.queryByText('Delete pet')).toBeNull();
   });
 
   it('defaults each field choice from its outcome, conflicts to yours', () => {
-    render(<OpenApiSyncDetail {...props({ selectedId: 'changed:POST /pets' })} />);
+    renderWithQuery(<OpenApiSyncDetail {...props({ selectedId: 'changed:POST /pets' })} />);
     const accept = screen.getByRole('radiogroup', { name: 'Header Accept' });
     expect(within(accept).getByRole('radio', { name: 'Take spec' })).toBeChecked();
     const body = screen.getByRole('radiogroup', { name: 'Body $.a.b' });
@@ -84,7 +130,7 @@ describe('OpenApiSyncDetail', () => {
       selectedId: 'changed:POST /pets',
       choices: new Map([['POST /pets', { url: 'spec' as const }]]),
     });
-    render(<OpenApiSyncDetail {...p} />);
+    renderWithQuery(<OpenApiSyncDetail {...p} />);
     const url = screen.getByRole('radiogroup', { name: 'URL' });
     expect(within(url).getByRole('radio', { name: 'Take spec' })).toBeChecked();
     await userEvent.setup().click(within(url).getByRole('radio', { name: 'Keep yours' }));
@@ -93,7 +139,7 @@ describe('OpenApiSyncDetail', () => {
 
   it('links a rename from the new side and from the removed side', async () => {
     const p = props({ selectedId: 'new:GET /pets' });
-    const { rerender } = render(<OpenApiSyncDetail {...p} />);
+    const { rerender } = renderWithQuery(<OpenApiSyncDetail {...p} />);
     await userEvent.setup().click(screen.getByRole('button', { name: 'Link as rename' }));
     expect(p.onLink).toHaveBeenCalledWith('GET /animals', 'GET /pets');
     rerender(<OpenApiSyncDetail {...p} selectedId='removed:DELETE /pets' />);
@@ -105,12 +151,12 @@ describe('OpenApiSyncDetail', () => {
     const plan = makePlan({
       items: [{ ...makePlan().items[2], possiblyRenamedFrom: undefined } as never],
     });
-    render(<OpenApiSyncDetail {...props({ plan, selectedId: 'new:GET /pets' })} />);
+    renderWithQuery(<OpenApiSyncDetail {...props({ plan, selectedId: 'new:GET /pets' })} />);
     expect(screen.queryByRole('button', { name: 'Link as rename' })).toBeNull();
   });
 
   it('disables Link and Unlink while locked', () => {
-    const { rerender } = render(
+    const { rerender } = renderWithQuery(
       <OpenApiSyncDetail {...props({ selectedId: 'new:GET /pets', linksLocked: true })} />,
     );
     expect(screen.getByRole('button', { name: 'Link as rename' })).toBeDisabled();
@@ -131,7 +177,7 @@ describe('OpenApiSyncDetail', () => {
       selectedId: 'changed:POST /pets',
       links: [['GET /old', 'POST /pets']],
     });
-    render(<OpenApiSyncDetail {...p} />);
+    renderWithQuery(<OpenApiSyncDetail {...p} />);
     await userEvent.setup().click(screen.getByRole('button', { name: 'Unlink rename' }));
     expect(p.onUnlink).toHaveBeenCalledWith('GET /old');
   });
@@ -141,7 +187,7 @@ describe('OpenApiSyncDetail', () => {
       items: [],
       variableChanges: [{ name: 'baseUrl', kind: 'baseUrl', digest: 'v', spec: 'https://x' }],
     });
-    render(<OpenApiSyncDetail {...props({ plan, selectedId: 'variable:baseUrl:baseUrl' })} />);
+    renderWithQuery(<OpenApiSyncDetail {...props({ plan, selectedId: 'variable:baseUrl:baseUrl' })} />);
     expect(
       screen.getByText(/If you changed this value yourself, Rocket keeps yours.*no trusted baseline/),
     ).toBeInTheDocument();
@@ -159,7 +205,7 @@ describe('OpenApiSyncDetail', () => {
       },
     };
     const plan = makePlan({ items: [item] });
-    render(<OpenApiSyncDetail {...props({ plan, selectedId: 'new:GET /pets' })} />);
+    renderWithQuery(<OpenApiSyncDetail {...props({ plan, selectedId: 'new:GET /pets' })} />);
     expect(screen.getByText('POST')).toBeInTheDocument();
     expect(screen.getByText('{{baseUrl}}/pets')).toBeInTheDocument();
     expect(screen.getByText('Headers: Accept, X-Trace')).toBeInTheDocument();
@@ -181,7 +227,7 @@ describe('OpenApiSyncDetail', () => {
       },
     };
     const plan = makePlan({ items: [item] });
-    render(<OpenApiSyncDetail {...props({ plan, selectedId: 'new:GET /pets' })} />);
+    renderWithQuery(<OpenApiSyncDetail {...props({ plan, selectedId: 'new:GET /pets' })} />);
     expect(screen.getByText('No headers')).toBeInTheDocument();
     expect(screen.getByText('No query parameters')).toBeInTheDocument();
     expect(screen.getByText('No body')).toBeInTheDocument();

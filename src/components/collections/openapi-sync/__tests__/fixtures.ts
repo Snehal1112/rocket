@@ -54,6 +54,7 @@ export const changedItem: OpenApiSyncItem = {
 export const removedItem: OpenApiSyncItem = {
   kind: 'removed',
   key: 'DELETE /pets',
+  uid: 'u-removed',
   name: 'Delete pet',
   digest: 'd3',
   fingerprint: 'f3',

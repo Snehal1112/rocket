@@ -2013,6 +2013,7 @@ export type OpenApiSyncItem =
   | {
       kind: 'removed';
       key: string;
+      uid: string;
       name: string;
       digest: string;
       fingerprint: string;

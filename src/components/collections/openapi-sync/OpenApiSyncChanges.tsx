@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { StateBlock } from '@/components/ui/state-block';
 import {
+  useDeleteRequests,
   useDiscardOpenApiBackup,
   useOpenApiSyncChanges,
   useResetOpenApiSync,
@@ -11,6 +12,7 @@ import {
 } from '@/lib/queries/openapi-sync-queries';
 import { formatRelativeTime } from '@/lib/relative-time';
 import type { OpenApiBackupRow, OpenApiChangeRow } from '@/lib/tauri-api';
+import { type DeleteRequestRow, DeleteRequestsDialog } from './DeleteRequestsDialog';
 import { fieldLabel, resetAllConfirmText, resetConfirmText } from './openApiSyncView';
 import { openSyncRequest } from './openSyncRequest';
 import { ResetConfirmDialog } from './ResetConfirmDialog';
@@ -36,18 +38,25 @@ interface ResetControl {
   onReset: (row: OpenApiChangeRow) => void;
 }
 
+interface DeleteControl {
+  enabled: boolean;
+  onDelete: (row: OpenApiChangeRow) => void;
+}
+
 function ChangeRow({
   collection,
   row,
   kind,
   showFields,
   reset,
+  del,
 }: {
   collection: string;
   row: OpenApiChangeRow;
   kind: Kind;
   showFields: boolean;
   reset?: ResetControl;
+  del?: DeleteControl;
 }) {
   // Deleted rows have no method or URL, so the path or the name stands in.
   const target = row.url || row.requestPath || row.name;
@@ -80,6 +89,17 @@ function ChangeRow({
             onClick={() => void openRequest()}
           >
             Open request
+          </Button>
+        )}
+        {kind === 'added' && del && row.requestPath !== null && (
+          <Button
+            variant='outline'
+            size='sm'
+            className='h-7 shrink-0'
+            disabled={!del.enabled}
+            onClick={() => del.onDelete(row)}
+          >
+            Delete
           </Button>
         )}
         {kind === 'modified' && reset && row.key && (
@@ -140,6 +160,8 @@ function Group({
   showFields,
   reset,
   onResetAll,
+  del,
+  onDeleteAll,
 }: {
   collection: string;
   kind: Kind;
@@ -147,6 +169,8 @@ function Group({
   showFields: boolean;
   reset?: ResetControl;
   onResetAll?: () => void;
+  del?: DeleteControl;
+  onDeleteAll?: () => void;
 }) {
   if (rows.length === 0) return null;
   return (
@@ -156,6 +180,11 @@ function Group({
         {onResetAll && reset && (
           <Button variant='outline' size='sm' disabled={!reset.enabled} onClick={onResetAll}>
             {`Reset all to spec (${rows.length})`}
+          </Button>
+        )}
+        {onDeleteAll && del && (
+          <Button variant='outline' size='sm' disabled={!del.enabled} onClick={onDeleteAll}>
+            {`Delete all (${rows.length})`}
           </Button>
         )}
       </div>
@@ -168,6 +197,7 @@ function Group({
             kind={kind}
             showFields={showFields}
             reset={reset}
+            del={del}
           />
         ))}
       </ul>
@@ -251,6 +281,8 @@ export function OpenApiSyncChanges({ collection }: { collection: string }) {
   const reset = useResetOpenApiSync(collection);
   const restore = useRestoreOpenApiSync(collection);
   const discard = useDiscardOpenApiBackup(collection);
+  const del = useDeleteRequests(collection);
+  const [deleting, setDeleting] = useState<DeleteRequestRow[] | null>(null);
   const [pending, setPending] = useState<PendingReset | null>(null);
   const [discarding, setDiscarding] = useState<OpenApiBackupRow | null>(null);
   if (changes.isError) {
@@ -274,6 +306,27 @@ export function OpenApiSyncChanges({ collection }: { collection: string }) {
       reset.reset();
       setPending({ keys: [row.key], body: resetConfirmText(row) });
     },
+  };
+  const deleteRow = (row: OpenApiChangeRow): DeleteRequestRow[] =>
+    row.requestPath === null
+      ? []
+      : [
+          {
+            uid: row.uid,
+            requestPath: row.requestPath,
+            label: `${row.method} ${row.url}`.trim() || row.name,
+          },
+        ];
+  const deleteControl: DeleteControl = {
+    enabled: !del.isPending,
+    onDelete: (row) => {
+      del.reset();
+      setDeleting(deleteRow(row));
+    },
+  };
+  const deleteAll = () => {
+    del.reset();
+    setDeleting(c.added.flatMap(deleteRow));
   };
   const resetAll = () => {
     const keys = c.modified.flatMap((r) => (r.key ? [r.key] : []));
@@ -319,11 +372,33 @@ export function OpenApiSyncChanges({ collection }: { collection: string }) {
           setDiscarding(row);
         }}
       />
-      <Group collection={collection} kind='added' rows={c.added} showFields={false} />
+      {del.isError && <StateBlock tone='error'>{syncErrorMessage(del.error)}</StateBlock>}
+      <Group
+        collection={collection}
+        kind='added'
+        rows={c.added}
+        showFields={false}
+        del={deleteControl}
+        onDeleteAll={deleteAll}
+      />
       <Group collection={collection} kind='deleted' rows={c.deleted} showFields={false} />
       <p className='text-xs text-muted-foreground'>
         Scripts, tests and assertions are not tracked here.
       </p>
+      <DeleteRequestsDialog
+        requests={deleting ?? []}
+        open={deleting !== null}
+        busy={del.isPending}
+        onCancel={() => setDeleting(null)}
+        onConfirm={() => {
+          if (!deleting) return;
+          del.mutate(
+            deleting.map(({ uid, requestPath }) => ({ uid, requestPath })),
+            { onSuccess: () => toast.success('Deleted.') },
+          );
+          setDeleting(null);
+        }}
+      />
       <ResetConfirmDialog
         open={pending !== null}
         onOpenChange={(open) => {

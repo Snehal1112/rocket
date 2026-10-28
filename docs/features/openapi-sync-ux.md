@@ -77,6 +77,10 @@ The Spec updates empty state says when the spec was last checked and offers Chec
 
 Show changes on a modified row lists, for each changed field, the version last synced and yours (500 characters at most). Credentials are masked: the values of `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie` and `X-Api-Key` headers, URL user info, and query or form values whose name is exactly one of `api_key`, `apikey`, `api-key`, `key`, `token`, `access_token`, `refresh_token`, `client_secret`, `secret` or `password` (any letter case). A New item in Spec updates shows a preview: method, URL, the names of enabled headers and query parameters, whether it has a body, and the auth kind. Values of headers and query parameters are not sent. **Open request** opens the request tab (or focuses it); a missing file says so.
 
+## Delete requests
+
+In Your changes, each row of **Added by you** has **Delete**, and the group has **Delete all (N)**. In Spec updates, the detail of a removed request that you edited has **Delete this request**. Each asks first: `Delete "METHOD url"? This removes the file from the collection. The sync page cannot undo it, git can.` (for several: `Delete N requests?`). A request the spec still has, or that the spec removed and you did not edit, cannot be deleted here. The page names each request by its uid and path, and the backend refuses it when the file on disk is another one now. Deleting a spec-removed request also drops its operation, baseline entry and reset backup, so the removal is not reported again. It is one file transaction, it refuses while an apply runs, and it never uses the network.
+
 ## Skipped items
 
 The "N skipped, hidden from this list." line opens the Skipped list. Each row has **Un-skip**, and **Un-skip all** takes every skip back. Un-skip refreshes the waiting count and refuses while an apply runs. A skip whose item changed again is back in the review list and is not listed here.
@@ -145,3 +149,5 @@ A count badge shows on the collection row. A toast "N spec updates" with Review 
 24. Rename the file, Check now: the alert says the file was not found and offers Choose another file, which opens the Change link form.
 25. Copy the collection folder to another place: the sync tab shows Needs approval with the full path, and nothing is read until you approve.
 26. In Connect and Change link, switch to File, choose a spec, preview it, and check that there is no token field.
+27. Add a request of your own, open Your changes, press Delete, confirm: the file is gone from the sidebar. Press Delete all with two added requests.
+28. Edit a request, remove its operation from the spec, check, then open it in Spec updates and press Delete this request.

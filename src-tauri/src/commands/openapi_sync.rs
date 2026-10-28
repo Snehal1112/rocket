@@ -102,6 +102,7 @@ pub enum SyncItemDto {
     },
     Removed {
         key: String,
+        uid: String,
         name: String,
         digest: String,
         fingerprint: String,
@@ -291,13 +292,14 @@ fn item_dto(item: &SyncItem, digest: &str) -> SyncItemDto {
         },
         SyncItem::Removed {
             key,
+            uid,
             name,
             request_path,
             edited,
             possibly_renamed_to,
-            ..
         } => SyncItemDto::Removed {
             key: key.clone(),
+            uid: uid.clone(),
             name: name.clone(),
             digest,
             fingerprint: item.fingerprint().to_string(),
@@ -1838,6 +1840,7 @@ mod tests {
         };
         let json = serde_json::to_value(plan_dto(view(vec![item]))).expect("json");
         assert_eq!(json["items"][0]["kind"], "removed");
+        assert_eq!(json["items"][0]["uid"], "u2");
         assert!(json["items"][0]["edited"].is_null());
         assert_eq!(json["items"][0]["fingerprint"], "removed");
         assert!(json["items"][0]
@@ -2481,7 +2484,8 @@ mod tests {
 
     #[test]
     fn delete_errors_pass_only_fixed_sentences() {
-        let not_deletable = "This request is still part of the spec. Remove it from the spec first.";
+        let not_deletable =
+            "This request is still part of the spec. Remove it from the spec first.";
         assert_eq!(
             delete_error(DomainError::InvalidInput(not_deletable.to_string())),
             not_deletable
@@ -2492,10 +2496,14 @@ mod tests {
             changed
         );
         assert_eq!(
-            delete_error(DomainError::Conflict("another sync apply is running".to_string())),
+            delete_error(DomainError::Conflict(
+                "another sync apply is running".to_string()
+            )),
             "A sync is running. Try again when it is done."
         );
-        let other = delete_error(DomainError::Internal("cannot remove /home/me/secret".to_string()));
+        let other = delete_error(DomainError::Internal(
+            "cannot remove /home/me/secret".to_string(),
+        ));
         assert_eq!(other, "Deleting failed. Nothing was changed.");
         assert!(!other.contains("secret"));
     }

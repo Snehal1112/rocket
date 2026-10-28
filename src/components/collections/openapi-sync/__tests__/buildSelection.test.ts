@@ -30,6 +30,7 @@ const plan: OpenApiSyncPlan = {
     {
       kind: 'removed',
       key: 'GET /c',
+      uid: 'u-c',
       name: 'C',
       digest: 'dC',
       fingerprint: 'fC',

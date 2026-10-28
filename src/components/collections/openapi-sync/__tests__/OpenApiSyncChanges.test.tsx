@@ -18,6 +18,7 @@ vi.mock('@/lib/tauri-api', async () => {
     resetOpenApiSync: vi.fn(),
     restoreOpenApiSync: vi.fn(),
     discardOpenApiSyncBackup: vi.fn(),
+    deleteOpenApiRequests: vi.fn(),
   };
 });
 
@@ -128,12 +129,107 @@ describe('OpenApiSyncChanges', () => {
     expect(screen.getAllByRole('button', { name: 'Reset to spec' })).toHaveLength(2);
   });
 
-  it('added_rows_only_open_and_deleted_rows_have_no_buttons', async () => {
+  it('added_rows_open_and_delete_and_deleted_rows_have_no_buttons', async () => {
     show(changes({ added: [row({ uid: 'u2' })], deleted: [row({ uid: 'u3' })] }));
     await screen.findByText('Added by you (1)');
-    const buttons = screen.getAllByRole('button');
-    expect(buttons).toHaveLength(1);
-    expect(buttons[0]).toHaveAccessibleName('Open request');
+    const names = screen.getAllByRole('button').map((b) => b.textContent);
+    expect(names).toEqual(['Delete all (1)', 'Open request', 'Delete']);
+  });
+
+  describe('delete', () => {
+    const mine = () =>
+      row({
+        uid: 'u2',
+        key: null,
+        name: 'Mine',
+        method: 'POST',
+        url: '{{baseUrl}}/mine',
+        requestPath: 'mine',
+      });
+
+    it('delete_on_an_added_row_asks_before_deleting', async () => {
+      show(changes({ added: [mine()] }));
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole('button', { name: 'Delete' }));
+      const dialog = await screen.findByRole('alertdialog');
+      expect(dialog).toHaveTextContent('Delete "POST {{baseUrl}}/mine"?');
+      expect(dialog).toHaveTextContent(
+        'This removes the file from the collection. The sync page cannot undo it, git can.',
+      );
+      expect(tauriApi.deleteOpenApiRequests).not.toHaveBeenCalled();
+    });
+
+    it('confirm_calls_the_hook_with_uid_and_path', async () => {
+      vi.mocked(tauriApi.deleteOpenApiRequests).mockResolvedValue(1);
+      show(changes({ added: [mine()] }));
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole('button', { name: 'Delete' }));
+      await user.click(
+        within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete' }),
+      );
+      await waitFor(() =>
+        expect(tauriApi.deleteOpenApiRequests).toHaveBeenCalledWith('c', [
+          { uid: 'u2', requestPath: 'mine' },
+        ]),
+      );
+      await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Deleted.'));
+    });
+
+    it('cancel_deletes_nothing', async () => {
+      show(changes({ added: [mine()] }));
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole('button', { name: 'Delete' }));
+      await user.click(
+        within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Cancel' }),
+      );
+      expect(tauriApi.deleteOpenApiRequests).not.toHaveBeenCalled();
+    });
+
+    it('delete_all_sends_every_added_row', async () => {
+      vi.mocked(tauriApi.deleteOpenApiRequests).mockResolvedValue(2);
+      show(
+        changes({
+          added: [mine(), { ...mine(), uid: 'u3', name: 'Two', requestPath: 'two' }],
+        }),
+      );
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole('button', { name: 'Delete all (2)' }));
+      const dialog = await screen.findByRole('alertdialog');
+      expect(dialog).toHaveTextContent('Delete 2 requests?');
+      await user.click(within(dialog).getByRole('button', { name: 'Delete' }));
+      await waitFor(() =>
+        expect(tauriApi.deleteOpenApiRequests).toHaveBeenCalledWith('c', [
+          { uid: 'u2', requestPath: 'mine' },
+          { uid: 'u3', requestPath: 'two' },
+        ]),
+      );
+    });
+
+    it('a_failed_delete_shows_a_fixed_sentence', async () => {
+      vi.mocked(tauriApi.deleteOpenApiRequests).mockRejectedValue(
+        'cannot remove /home/me/secret/mine.yml',
+      );
+      show(changes({ added: [mine()] }));
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole('button', { name: 'Delete' }));
+      await user.click(
+        within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete' }),
+      );
+      const alert = await screen.findByText(/could not be completed|Nothing was changed|try again/i);
+      expect(alert.textContent ?? '').not.toContain('secret');
+    });
+
+    it('the_buttons_are_disabled_while_deleting', async () => {
+      vi.mocked(tauriApi.deleteOpenApiRequests).mockReturnValue(new Promise(() => undefined));
+      show(changes({ added: [mine()] }));
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole('button', { name: 'Delete' }));
+      await user.click(
+        within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Delete' }),
+      );
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled());
+      expect(screen.getByRole('button', { name: 'Delete all (1)' })).toBeDisabled();
+    });
   });
 
   it('open_request_button_calls_the_helper', async () => {
