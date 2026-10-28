@@ -79,6 +79,8 @@ impl OpenApiSyncService {
                 summary: op.summary,
                 parameters: op.parameters,
                 responses: op.responses,
+                request_body: op.request_body,
+                security: op.security,
             };
             match groups.iter_mut().find(|g| g.tag == op.tag) {
                 Some(group) => group.operations.push(row),
@@ -99,6 +101,7 @@ impl OpenApiSyncService {
             fetched_at: last_checked.or(source.last_checked_at),
             state,
             groups,
+            servers: spec.server_urls(),
         })
     }
 }
@@ -110,5 +113,6 @@ fn no_copy() -> SpecView {
         fetched_at: None,
         state: SpecViewState::NoCopy,
         groups: Vec::new(),
+        servers: Vec::new(),
     }
 }

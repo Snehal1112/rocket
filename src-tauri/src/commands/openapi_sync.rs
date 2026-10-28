@@ -419,11 +419,77 @@ pub struct SpecParamDto {
     pub required: bool,
 }
 
+/// One property of an object schema.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaPropertyDto {
+    pub name: String,
+    pub schema: SchemaViewDto,
+}
+
+/// A bounded schema for the spec viewer.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaViewDto {
+    pub kind: String,
+    pub format: Option<String>,
+    pub description: Option<String>,
+    pub required: bool,
+    pub nullable: bool,
+    pub enum_values: Vec<String>,
+    pub ref_name: Option<String>,
+    pub properties: Vec<SchemaPropertyDto>,
+    pub items: Option<Box<SchemaViewDto>>,
+    pub variants: Vec<SchemaViewDto>,
+    pub cut: bool,
+}
+
+/// One media type of a body with its schema.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BodyViewDto {
+    pub content_type: String,
+    pub required: bool,
+    pub schema: Option<SchemaViewDto>,
+}
+
+fn schema_view_dto(schema: rocket_import::SchemaView) -> SchemaViewDto {
+    SchemaViewDto {
+        kind: schema.kind,
+        format: schema.format,
+        description: schema.description,
+        required: schema.required,
+        nullable: schema.nullable,
+        enum_values: schema.enum_values,
+        ref_name: schema.ref_name,
+        properties: schema
+            .properties
+            .into_iter()
+            .map(|(name, schema)| SchemaPropertyDto {
+                name,
+                schema: schema_view_dto(schema),
+            })
+            .collect(),
+        items: schema.items.map(|items| Box::new(schema_view_dto(*items))),
+        variants: schema.variants.into_iter().map(schema_view_dto).collect(),
+        cut: schema.cut,
+    }
+}
+
+fn body_view_dto(body: rocket_import::BodyView) -> BodyViewDto {
+    BodyViewDto {
+        content_type: body.content_type,
+        required: body.required,
+        schema: body.schema.map(schema_view_dto),
+    }
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpecResponseDto {
     pub status: String,
     pub description: String,
+    pub bodies: Vec<BodyViewDto>,
 }
 
 #[derive(Debug, Serialize)]
@@ -435,6 +501,8 @@ pub struct SpecOperationDto {
     pub summary: Option<String>,
     pub parameters: Vec<SpecParamDto>,
     pub responses: Vec<SpecResponseDto>,
+    pub request_body: Vec<BodyViewDto>,
+    pub security: Vec<String>,
     pub is_new: bool,
 }
 
@@ -455,6 +523,7 @@ pub struct SpecViewDto {
     /// `in_sync`, `updates_waiting` or `no_copy`.
     pub state: &'static str,
     pub groups: Vec<SpecGroupDto>,
+    pub servers: Vec<String>,
 }
 
 fn spec_view_dto(view: SpecView) -> SpecViewDto {
@@ -495,13 +564,17 @@ fn spec_view_dto(view: SpecView) -> SpecViewDto {
                             .map(|r| SpecResponseDto {
                                 status: r.status,
                                 description: r.description,
+                                bodies: r.bodies.into_iter().map(body_view_dto).collect(),
                             })
                             .collect(),
+                        request_body: o.request_body.into_iter().map(body_view_dto).collect(),
+                        security: o.security,
                         is_new: o.is_new,
                     })
                     .collect(),
             })
             .collect(),
+        servers: view.servers,
     }
 }
 
@@ -2033,15 +2106,52 @@ mod tests {
                     summary: None,
                     parameters: Vec::new(),
                     responses: Vec::new(),
+                    request_body: Vec::new(),
+                    security: Vec::new(),
                     is_new: true,
                 }],
             }],
+            servers: Vec::new(),
         });
         let json = serde_json::to_value(dto).expect("json");
         assert_eq!(json["fetchedAt"], "2026-10-27T10:00:00+00:00");
         assert_eq!(json["state"], "updates_waiting");
         assert_eq!(json["groups"][0]["operations"][0]["isNew"], true);
         assert_eq!(json["groups"][0]["operations"][0]["method"], "GET");
+    }
+
+    #[test]
+    fn schema_dto_uses_camel_case_keys() {
+        use rocket_import::{BodyView, SchemaView};
+        let node = |kind: &str| SchemaView {
+            kind: kind.to_string(),
+            format: None,
+            description: None,
+            required: false,
+            nullable: false,
+            enum_values: vec!["a".to_string()],
+            ref_name: Some("Node".to_string()),
+            properties: Vec::new(),
+            items: None,
+            variants: Vec::new(),
+            cut: true,
+        };
+        let mut root = node("object");
+        root.properties.push(("name".to_string(), node("string")));
+        let dto = body_view_dto(BodyView {
+            content_type: "application/json".to_string(),
+            required: true,
+            schema: Some(root),
+        });
+        let json = serde_json::to_value(dto).expect("json");
+        assert_eq!(json["contentType"], "application/json");
+        assert_eq!(json["required"], true);
+        let schema = &json["schema"];
+        assert_eq!(schema["properties"][0]["name"], "name");
+        assert_eq!(schema["properties"][0]["schema"]["kind"], "string");
+        assert_eq!(schema["refName"], "Node");
+        assert_eq!(schema["enumValues"][0], "a");
+        assert_eq!(schema["cut"], true);
     }
 
     #[test]

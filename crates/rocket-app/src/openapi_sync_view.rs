@@ -135,6 +135,10 @@ pub struct SpecOpRow {
     pub summary: Option<String>,
     pub parameters: Vec<rocket_import::SpecParamView>,
     pub responses: Vec<rocket_import::SpecResponseView>,
+    /// One entry per media type of the request body.
+    pub request_body: Vec<rocket_import::BodyView>,
+    /// Names of the security schemes the operation uses. Empty means none.
+    pub security: Vec<String>,
     /// True when the operation is not in the last synced spec.
     pub is_new: bool,
 }
@@ -154,4 +158,6 @@ pub struct SpecView {
     pub fetched_at: Option<String>,
     pub state: SpecViewState,
     pub groups: Vec<SpecTagGroup>,
+    /// The server URLs of the spec, at most 10.
+    pub servers: Vec<String>,
 }
