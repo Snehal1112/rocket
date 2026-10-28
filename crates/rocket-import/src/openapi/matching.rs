@@ -222,6 +222,8 @@ mod tests {
             summary: summary.map(str::to_string),
             parameters: Vec::new(),
             responses: Vec::new(),
+            request_body: Vec::new(),
+            security: Vec::new(),
         }
     }
 

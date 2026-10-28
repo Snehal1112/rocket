@@ -32,6 +32,19 @@ pub struct Operation {
     pub deprecated: bool,
     /// Status code and description of each documented response, in document order.
     pub responses: Vec<(String, String)>,
+    /// Every media type of the request body with its schema, for the spec viewer.
+    pub request_media: Vec<MediaSpec>,
+    /// True when the request body is marked `required`.
+    pub request_body_required: bool,
+    /// The media types of each response, by status code, for the spec viewer.
+    pub response_media: Vec<(String, Vec<MediaSpec>)>,
+}
+
+/// One media type of a body and its schema, with local references already inlined.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MediaSpec {
+    pub content_type: String,
+    pub schema: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -8,6 +8,7 @@ pub(crate) mod merge;
 pub(crate) mod plan;
 pub(crate) mod rename;
 pub(crate) mod reset;
+pub(crate) mod schema_view;
 pub(crate) mod spec;
 
 pub use apply::{build_apply, plan_with_links};
@@ -23,4 +24,5 @@ pub use plan::{
     SyncPlan, VariableChange, VariableKind,
 };
 pub use reset::{reset_spec_owned_fields, RESET_FIELD_NAMES};
+pub use schema_view::{BodyView, SchemaView};
 pub use spec::{ParsedSpec, SpecOperationView, SpecParamView, SpecResponseView};

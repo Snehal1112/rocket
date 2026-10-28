@@ -3,6 +3,7 @@
 
 use crate::error::ImportResult;
 use crate::openapi::model::ParamLocation;
+use crate::openapi::sync::schema_view::{body_views, BodyView};
 use crate::openapi::{parse_openapi, OpenApiDoc};
 
 /// One parameter of an operation, as shown in the spec viewer.
@@ -19,6 +20,8 @@ pub struct SpecParamView {
 pub struct SpecResponseView {
     pub status: String,
     pub description: String,
+    /// The media types of the response with their schemas. Empty for a response without a body.
+    pub bodies: Vec<BodyView>,
 }
 
 /// A read-only summary of one operation. It holds names and short texts, never the raw spec.
@@ -32,6 +35,10 @@ pub struct SpecOperationView {
     pub summary: Option<String>,
     pub parameters: Vec<SpecParamView>,
     pub responses: Vec<SpecResponseView>,
+    /// One entry per media type of the request body. Empty when the operation has no body.
+    pub request_body: Vec<BodyView>,
+    /// Names of the security schemes the operation uses. Empty means none.
+    pub security: Vec<String>,
 }
 
 /// A spec that was read and checked. It is opaque on purpose.
@@ -80,6 +87,11 @@ impl ParsedSpec {
         &self.doc.servers
     }
 
+    /// The server URLs for display, at most 10.
+    pub fn server_urls(&self) -> Vec<String> {
+        self.doc.servers.iter().take(10).cloned().collect()
+    }
+
     /// The `info.title` text.
     pub fn title(&self) -> &str {
         &self.doc.title
@@ -121,8 +133,16 @@ impl ParsedSpec {
                     .map(|(status, description)| SpecResponseView {
                         status: status.clone(),
                         description: description.clone(),
+                        bodies: op
+                            .response_media
+                            .iter()
+                            .find(|(s, _)| s == status)
+                            .map(|(_, media)| body_views(media, false))
+                            .unwrap_or_default(),
                     })
                     .collect(),
+                request_body: body_views(&op.request_media, op.request_body_required),
+                security: op.security.clone(),
             })
             .collect()
     }

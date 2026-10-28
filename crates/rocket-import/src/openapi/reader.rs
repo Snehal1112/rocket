@@ -2,7 +2,7 @@
 
 use crate::error::{ImportError, ImportResult};
 use crate::openapi::model::{
-    OpenApiDoc, Operation, ParamLocation, Parameter, RequestBodySpec, SecurityScheme,
+    MediaSpec, OpenApiDoc, Operation, ParamLocation, Parameter, RequestBodySpec, SecurityScheme,
     SecuritySchemeKind,
 };
 use crate::openapi::yaml_budget::{node_limit_for, BudgetFail, YamlBudget, MAX_YAML_BYTES};
@@ -12,6 +12,8 @@ use serde_yaml::Value as Yaml;
 use std::collections::HashSet;
 
 /// Longest `$ref` chain the reader follows to one item.
+/// The key of the object a cut reference becomes. See `ref_marker`.
+pub(crate) const REF_MARKER_KEY: &str = "x-rocket-ref";
 const MAX_REF_DEPTH: usize = 32;
 /// Deepest `$ref` nesting inlined into one schema. Examples are built to depth 8, so deeper
 /// levels are never read.
@@ -260,6 +262,22 @@ fn deref<'a>(root: &'a Yaml, value: &'a Yaml, warnings: &mut Vec<String>) -> Opt
     None
 }
 
+/// What a reference that is not inlined becomes: an object with only the name it pointed at,
+/// so a viewer can say "same as Node". It has no `type` or `properties`, so a sample built
+/// from it is empty, as the empty object it replaces.
+fn ref_marker(target: &str) -> Json {
+    let name = target
+        .rsplit('/')
+        .next()
+        .unwrap_or_default()
+        .replace("~1", "/")
+        .replace("~0", "~");
+    let name: String = name.chars().take(80).collect();
+    let mut map = serde_json::Map::new();
+    map.insert(REF_MARKER_KEY.to_string(), Json::String(name));
+    Json::Object(map)
+}
+
 /// Convert a YAML value to JSON with local `$ref` objects replaced by their targets.
 /// A reference that loops back on itself, or nests deeper than `MAX_INLINE_DEPTH`, becomes
 /// `{}`. `budget` counts the nodes left to build, so a schema that refers to the next one
@@ -304,7 +322,7 @@ fn to_json(
                     return Json::Null;
                 }
                 if depth >= MAX_INLINE_DEPTH || visiting.iter().any(|v| v == target) {
-                    return Json::Object(serde_json::Map::new());
+                    return ref_marker(target);
                 }
                 let Some(resolved) = resolve_pointer(root, target) else {
                     return Json::Null;
@@ -428,6 +446,98 @@ fn parse_request_body(
     })
 }
 
+/// At most this many media types are kept for one body.
+const MAX_MEDIA_TYPES: usize = 5;
+
+/// Every media type of an OpenAPI 3 `content` map with its schema.
+fn media_list(root: &Yaml, content: Option<&Yaml>, warnings: &mut Vec<String>) -> Vec<MediaSpec> {
+    let Some(map) = content.and_then(Yaml::as_mapping) else {
+        return Vec::new();
+    };
+    map.iter()
+        .filter_map(|(k, media)| {
+            Some(MediaSpec {
+                content_type: k.as_str()?.to_string(),
+                schema: media.get("schema").map(|s| schema_json(root, s, warnings)),
+            })
+        })
+        .take(MAX_MEDIA_TYPES)
+        .collect()
+}
+
+/// The request body media of an operation, and whether the body is required.
+fn request_media_of(
+    root: &Yaml,
+    op: &Yaml,
+    raw_params: &[&Yaml],
+    is_v2: bool,
+    warnings: &mut Vec<String>,
+) -> (Vec<MediaSpec>, bool) {
+    if is_v2 {
+        let body = raw_params
+            .iter()
+            .filter_map(|p| deref(root, p, warnings))
+            .find(|p| str_of(p, "in").as_deref() == Some("body"));
+        let Some(body) = body else {
+            return (Vec::new(), false);
+        };
+        let content_type = first_string(op.get("consumes"))
+            .or_else(|| first_string(root.get("consumes")))
+            .unwrap_or_else(|| "application/json".to_string());
+        let media = MediaSpec {
+            content_type,
+            schema: body.get("schema").map(|s| schema_json(root, s, warnings)),
+        };
+        return (vec![media], bool_of(body, "required"));
+    }
+    let Some(body) = op.get("requestBody").and_then(|b| deref(root, b, warnings)) else {
+        return (Vec::new(), false);
+    };
+    (
+        media_list(root, body.get("content"), warnings),
+        bool_of(body, "required"),
+    )
+}
+
+/// The media types of each documented response, in document order.
+fn response_media_of(
+    root: &Yaml,
+    op: &Yaml,
+    is_v2: bool,
+    warnings: &mut Vec<String>,
+) -> Vec<(String, Vec<MediaSpec>)> {
+    let Some(map) = op.get("responses").and_then(Yaml::as_mapping) else {
+        return Vec::new();
+    };
+    map.iter()
+        .filter_map(|(code, value)| {
+            let status = match code {
+                Yaml::String(s) => s.clone(),
+                Yaml::Number(n) => n.to_string(),
+                _ => return None,
+            };
+            let response = deref(root, value, warnings)?;
+            let media = if is_v2 {
+                match response.get("schema") {
+                    Some(schema) => {
+                        let content_type = first_string(op.get("produces"))
+                            .or_else(|| first_string(root.get("produces")))
+                            .unwrap_or_else(|| "application/json".to_string());
+                        vec![MediaSpec {
+                            content_type,
+                            schema: Some(schema_json(root, schema, warnings)),
+                        }]
+                    }
+                    None => Vec::new(),
+                }
+            } else {
+                media_list(root, response.get("content"), warnings)
+            };
+            Some((status, media))
+        })
+        .collect()
+}
+
 fn first_string(v: Option<&Yaml>) -> Option<String> {
     v?.as_sequence()?.first()?.as_str().map(str::to_string)
 }
@@ -525,6 +635,8 @@ fn operations(root: &Yaml, is_v2: bool, warnings: &mut Vec<String>) -> Vec<Opera
                 key = format!("{base_key}-{n}");
             }
 
+            let (request_media, request_body_required) =
+                request_media_of(root, op, &all_raw, is_v2, warnings);
             out.push(Operation {
                 key,
                 method,
@@ -538,6 +650,9 @@ fn operations(root: &Yaml, is_v2: bool, warnings: &mut Vec<String>) -> Vec<Opera
                 security: security_names(root, op),
                 deprecated: bool_of(op, "deprecated"),
                 responses: responses_of(root, op, warnings),
+                request_media,
+                request_body_required,
+                response_media: response_media_of(root, op, is_v2, warnings),
             });
         }
     }
