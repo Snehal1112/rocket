@@ -44,7 +44,7 @@ The page header lists the spec's **Servers** (at most 10). An expanded operation
 
 - Reset puts the URL, query and path parameters, headers, body (form fields too) and auth back to the last synced spec, as Bruno does. The name, method, description, scripts, tests, assertions and docs are kept, so a rename is never undone. A row whose only changes are the name, method or description has no Reset button and is not counted in Reset all.
 - A confirm dialog says which groups are replaced. A backup of your version is kept until the next sync.
-- Restore writes the backup's URL, parameters, headers, body and auth back, and also its name, method and description, because a backup from an older build holds those too. It finds the request by uid. It finds the request by uid, never by path, so a new request at the old path is not touched.
+- Restore writes the backup's URL, parameters, headers, body and auth back. It also brings back the backup's name, method and description, but only while they still match the last synced spec (an older build's reset had put the spec's values back); a value you changed since is kept. It finds the request by uid, never by path, so a new request at the old path is not touched.
 - Reset is refused for sync data from an older version (no trusted baseline), while an apply runs, and for a request that changed on disk.
 
 ## Connect to an OpenAPI spec
@@ -113,14 +113,14 @@ A count badge shows on the collection row. A toast "N spec updates" with Review 
 - Counts can be stale after an edit in another pane, until the tab remounts or the next check.
 - The tab is not restored after a restart.
 - A damaged backups file fails the whole Your changes view until it is removed.
-- Reset all (n) counts rows, while rows without a key are not reset.
+- Reset all (n) counts only the rows it can reset: rows with a key and a changed reset field.
 - Open reset confirm dialogs are not closed when a refetch removes their row.
 - A tangled group can only be kept, with the spec operations added or skipped. Link them by hand afterwards.
 - Scripts, tests and assertions are not compared, so they are never reset.
 - The values in Your changes are not shown for a collection whose baseline is missing or from an older converter.
 - Values inside a request body are shown as they are, without masking.
 - JSON arrays and top-level array bodies are merged as one value, and numbers that are not canonical (such as `1.0` or `1e3`) are merged as text, so a rebuild never changes them.
-- An urlencoded body is merged field by field. A body with an empty piece (a doubled or trailing `&`) is merged as one value.
+- An urlencoded body is merged field by field, whether the baseline holds it as text or as entries. A body with an empty piece (a doubled or trailing `&`) or a repeated field name is merged as one value. The importer writes urlencoded fields as entries, as the collection file keeps them.
 - Reset restores the last synced version. A spec change that waits stays in the review list, and a later sync still offers it.
 - Regrouping existing folders is not supported: a request keeps its folder when the spec changes its tag or path.
 - A tag or path segment named `node_modules`, `.git`, `environments` or `mocks` is not used as a folder name. The request goes to the collection root, as in Bruno.

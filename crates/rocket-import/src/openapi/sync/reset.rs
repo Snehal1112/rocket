@@ -22,14 +22,28 @@ pub fn reset_spec_owned_fields(current: &Request, baseline: &Request) -> Request
     out
 }
 
-/// `current` with all ten spec-owned fields (the reset fields, and also the name, the method and
-/// the description) taken from a backup. An older reset replaced those three too, so a restore
-/// must bring them back, and a backup does not say which kind of reset made it.
-pub fn restore_spec_owned_fields(current: &Request, backup: &Request) -> Request {
+/// `current` with the reset fields taken from a backup. An older reset also replaced the name,
+/// the method and the description with the spec's, and a backup does not say which kind of
+/// reset made it. So each of those three comes back from the backup only while `current` still
+/// has the baseline's value, which is the case an older reset left behind. A value the user
+/// changed since is kept, and without a baseline all three are kept.
+pub fn restore_spec_owned_fields(
+    current: &Request,
+    backup: &Request,
+    baseline: Option<&Request>,
+) -> Request {
     let mut out = reset_spec_owned_fields(current, backup);
-    out.name = backup.name.clone();
-    out.method = backup.method.clone();
-    out.description = backup.description.clone();
+    if let Some(base) = baseline {
+        if current.name == base.name {
+            out.name = backup.name.clone();
+        }
+        if current.method == base.method {
+            out.method = backup.method.clone();
+        }
+        if current.description == base.description {
+            out.description = backup.description.clone();
+        }
+    }
     out
 }
 
@@ -113,12 +127,31 @@ mod tests {
         backup.url = "{{baseUrl}}/mine".to_string();
         let mut current = base.clone();
         current.tests = Some("test('x', () => {})".to_string());
-        let restored = restore_spec_owned_fields(&current, &backup);
+        let restored = restore_spec_owned_fields(&current, &backup, Some(&base));
         assert_eq!(restored.name, "My orders");
         assert_eq!(restored.method, HttpMethod::Post);
         assert_eq!(restored.description, backup.description);
         assert_eq!(restored.url, "{{baseUrl}}/mine");
         assert_eq!(restored.tests, current.tests);
+    }
+
+    #[test]
+    fn a_restore_keeps_a_rename_made_after_the_reset() {
+        let base = baseline();
+        let mut backup = base.clone();
+        backup.name = "Mine".to_string();
+        backup.url = "{{baseUrl}}/mine".to_string();
+        // After the reset the user renamed the request again.
+        let mut current = base.clone();
+        current.name = "Mine 2".to_string();
+        let restored = restore_spec_owned_fields(&current, &backup, Some(&base));
+        assert_eq!(restored.name, "Mine 2");
+        assert_eq!(restored.url, "{{baseUrl}}/mine");
+        // Without a baseline nothing says the name is still the spec's, so it is kept.
+        let mut spec_named = base.clone();
+        spec_named.name = base.name.clone();
+        let kept = restore_spec_owned_fields(&spec_named, &backup, None);
+        assert_eq!(kept.name, base.name);
     }
 
     #[test]

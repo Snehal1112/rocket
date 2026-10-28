@@ -534,3 +534,43 @@ async fn an_old_backup_still_restores() {
     assert_eq!(after.name, "Old mine");
     assert_eq!(after.url, "https://old.example.com/x");
 }
+
+#[tokio::test]
+async fn restore_keeps_a_rename_made_after_the_reset() {
+    let w = world().await;
+    rename(&w, "listPets", "Mine");
+    edit(&w, "listPets", "https://edited.example.com/x");
+    w.svc.reset(&w.name, &keys(&["listPets"])).expect("reset");
+    rename(&w, "listPets", "Mine 2");
+    w.svc.restore(&w.name, "listPets").expect("restore");
+    let after = load(&w, "listPets");
+    assert_eq!(after.name, "Mine 2");
+    assert_eq!(after.url, "https://edited.example.com/x");
+}
+
+#[tokio::test]
+async fn an_imported_urlencoded_body_keeps_its_fields_on_disk() {
+    let spec = serde_json::json!({
+        "openapi": "3.0.3", "info": {"title": "Forms", "version": "1"},
+        "servers": [{"url": "https://api.example.com"}],
+        "paths": {"/login": {"post": {
+            "operationId": "login", "tags": ["auth"],
+            "requestBody": {"content": {"application/x-www-form-urlencoded": {
+                "schema": {"type": "object", "properties": {
+                    "user": {"type": "string"}, "pass": {"type": "string"}}}}}},
+            "responses": {"200": {"description": "ok"}}}}}
+    })
+    .to_string();
+    let w = world_from(Arc::new(rocket_infra::FsFileTxFactory::new()), spec, |_| {}).await;
+    let body = load(&w, "login").body.expect("body");
+    assert_eq!(body.mode, rocket_shared::types::BodyMode::FormUrlEncoded);
+    let keys: Vec<String> = body
+        .form_data
+        .expect("entries")
+        .into_iter()
+        .map(|e| e.key)
+        .collect();
+    assert_eq!(keys, ["user", "pass"]);
+    // A fresh import is not reported as edited.
+    assert!(w.svc.changes(&w.name).expect("changes").modified.is_empty());
+}

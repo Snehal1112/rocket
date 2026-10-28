@@ -570,13 +570,24 @@ fn json_object(body: &Body) -> Option<serde_json::Map<String, Value>> {
     }
 }
 
-/// One `name=value` piece of an urlencoded body. `raw` is the piece as written, so rebuilding
-/// the body keeps every escape the user or the spec wrote.
-#[derive(Clone, PartialEq)]
+/// One field of an urlencoded body, read from the text a spec writes or from the entries a
+/// collection file keeps. The name and value are decoded, so the two shapes compare equal.
+#[derive(Clone)]
 struct UrlPair {
-    /// The name with its escapes decoded, for matching.
     name: String,
-    raw: String,
+    value: String,
+    enabled: bool,
+    /// The piece as written in a text body, kept while the value is untouched so rebuilding the
+    /// text keeps every escape.
+    raw: Option<String>,
+    /// The entry this came from, so a rebuild keeps its other attributes.
+    entry: Option<FormDataEntry>,
+}
+
+impl PartialEq for UrlPair {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.value == other.value && self.enabled == other.enabled
+    }
 }
 
 fn percent_decode(text: &str) -> String {
@@ -604,13 +615,64 @@ fn percent_decode(text: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-impl UrlPair {
-    fn parse(piece: &str) -> Self {
-        let raw_name = piece.split_once('=').map_or(piece, |(name, _)| name);
-        Self {
-            name: percent_decode(raw_name),
-            raw: piece.to_string(),
+/// Escapes everything except letters, digits and `-._~`.
+fn percent_encode(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            out.push(byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
         }
+    }
+    out
+}
+
+impl UrlPair {
+    fn from_text(piece: &str) -> Self {
+        let (name, value) = piece.split_once('=').unwrap_or((piece, ""));
+        Self {
+            name: percent_decode(name),
+            value: percent_decode(value),
+            enabled: true,
+            raw: Some(piece.to_string()),
+            entry: None,
+        }
+    }
+
+    fn from_entry(entry: &FormDataEntry) -> Self {
+        Self {
+            name: entry.key.clone(),
+            value: entry.value.clone(),
+            enabled: entry.enabled,
+            raw: None,
+            entry: Some(entry.clone()),
+        }
+    }
+
+    fn text(&self) -> String {
+        self.raw.clone().unwrap_or_else(|| {
+            format!(
+                "{}={}",
+                percent_encode(&self.name),
+                percent_encode(&self.value)
+            )
+        })
+    }
+
+    fn to_entry(&self) -> FormDataEntry {
+        let mut entry = self.entry.clone().unwrap_or(FormDataEntry {
+            key: String::new(),
+            value: String::new(),
+            entry_type: FormDataType::Text,
+            enabled: true,
+            content_type: None,
+            description: None,
+        });
+        entry.key = self.name.clone();
+        entry.value = self.value.clone();
+        entry.enabled = self.enabled;
+        entry
     }
 }
 
@@ -619,36 +681,45 @@ impl Entry for UrlPair {
         &self.name
     }
     fn value(&self) -> &str {
-        self.raw.split_once('=').map_or("", |(_, value)| value)
+        &self.value
     }
     fn set_value(&mut self, value: &str) {
-        let raw_name = self
-            .raw
-            .split_once('=')
-            .map_or(self.raw.as_str(), |(n, _)| n);
-        self.raw = format!("{raw_name}={value}");
+        self.value = value.to_string();
+        // The escapes of the old text no longer describe the value.
+        self.raw = None;
     }
     fn is_enabled(&self) -> bool {
-        true
+        self.enabled
     }
-    fn set_enabled(&mut self, _enabled: bool) {}
+    fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = enabled;
+    }
 }
 
-/// Splits an urlencoded body into its pieces. An empty piece (a doubled or trailing `&`) is not
-/// a field list a rebuild could reproduce, so it gives `None` and the body merges as one value.
+/// Reads the fields of an urlencoded body, from its text or from its entries. A text with an
+/// empty piece (a doubled or trailing `&`) is not a field list a rebuild could reproduce, and
+/// neither is a list that repeats a name, so both give `None` and the body merges as one value.
 fn url_pairs(body: &Body) -> Option<Vec<UrlPair>> {
     if body.mode != BodyMode::FormUrlEncoded {
         return None;
     }
-    let text = body.content.as_deref()?;
-    if text.is_empty() {
-        return Some(Vec::new());
-    }
-    let pieces: Vec<&str> = text.split('&').collect();
-    if pieces.iter().any(|p| p.is_empty()) {
+    let pairs: Vec<UrlPair> = match (&body.content, &body.form_data) {
+        (Some(text), _) if text.is_empty() => Vec::new(),
+        (Some(text), _) => {
+            let pieces: Vec<&str> = text.split('&').collect();
+            if pieces.iter().any(|p| p.is_empty()) {
+                return None;
+            }
+            pieces.into_iter().map(UrlPair::from_text).collect()
+        }
+        (None, Some(entries)) => entries.iter().map(UrlPair::from_entry).collect(),
+        (None, None) => Vec::new(),
+    };
+    let mut seen = std::collections::HashSet::new();
+    if pairs.iter().any(|p| !seen.insert(p.name.clone())) {
         return None;
     }
-    Some(pieces.into_iter().map(UrlPair::parse).collect())
+    Some(pairs)
 }
 
 // Rules 3 and 4: the body.
@@ -685,13 +756,18 @@ fn merge_body(
             let (pairs, mut ch) = merge_entries("form", false, &bp, &cp, &sp, choices);
             changes.append(&mut ch);
             let mut merged = cb.clone();
-            merged.content = Some(
-                pairs
-                    .iter()
-                    .map(|p| p.raw.as_str())
-                    .collect::<Vec<_>>()
-                    .join("&"),
-            );
+            // The result keeps the shape of the user's body: entries as on disk, or text.
+            if cb.content.is_some() {
+                merged.content = Some(
+                    pairs
+                        .iter()
+                        .map(UrlPair::text)
+                        .collect::<Vec<_>>()
+                        .join("&"),
+                );
+            } else {
+                merged.form_data = Some(pairs.iter().map(UrlPair::to_entry).collect());
+            }
             return Some(merged);
         }
         if let (BodyMode::FormData, BodyMode::FormData, BodyMode::FormData) =
@@ -1674,8 +1750,20 @@ mod tests {
         s.body = url_body(&format!("{text}&extra=1"));
         let out = run(&b, &c, &s);
         assert_eq!(url_text(out), format!("{text}&extra=1"));
-        // With nothing new in the spec the user's text comes back byte for byte.
-        let same = run(&b, &c, &b);
+        // A spec change to one field leaves the escapes of the others as they were.
+        let mut s2 = base();
+        s2.body = url_body("q=a%26b&token=new&flag&name=caf%C3%A9+au+lait");
+        let out = run(&b, &c, &s2);
+        assert_eq!(
+            url_text(out),
+            "q=a%26b&token=new&flag&name=caf%C3%A9+au+lait"
+        );
+        // A changed value is written escaped.
+        let mut s3 = base();
+        s3.body = url_body("q=a%26b&token=x=y&flag&name=caf%C3%A9+au+lait");
+        s3.body.as_mut().expect("body").content =
+            Some("q=a%26b&token=x=y&flag&name=caf%C3%A9+au+lait".to_string());
+        let same = run(&b, &c, &s3);
         assert_eq!(url_text(same), text);
     }
 
@@ -1738,5 +1826,68 @@ mod tests {
         let out = run(&b, &c, &s);
         assert!(has_change(&out, "form:my key"));
         assert_eq!(url_text(out), "my%20key=2");
+    }
+
+    fn url_entries(pairs: &[(&str, &str)]) -> Option<Body> {
+        Some(Body {
+            mode: BodyMode::FormUrlEncoded,
+            content: None,
+            form_data: Some(pairs.iter().map(|(k, v)| form(k, v)).collect()),
+            file_path: None,
+        })
+    }
+
+    #[test]
+    fn a_body_on_disk_as_entries_merges_with_a_text_baseline() {
+        // The baseline of an older import is text, the file on disk has entries.
+        let mut b = base();
+        b.body = url_body("a=1&b=2");
+        let mut c = base();
+        c.body = url_entries(&[("a", "mine"), ("b", "2")]);
+        let mut s = base();
+        s.body = url_entries(&[("a", "1"), ("b", "3"), ("c", "4")]);
+        let out = run(&b, &c, &s);
+        assert!(has_change(&out, "form:b") && has_change(&out, "form:c"));
+        assert!(!has_change(&out, "body"));
+        let body = out.merged.body.expect("body");
+        // The result keeps the shape of the user's file.
+        assert_eq!(body.content, None);
+        let got: Vec<(String, String)> = body
+            .form_data
+            .expect("entries")
+            .into_iter()
+            .map(|e| (e.key, e.value))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("a".to_string(), "mine".to_string()),
+                ("b".to_string(), "3".to_string()),
+                ("c".to_string(), "4".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_unchanged_body_in_the_two_shapes_is_no_change() {
+        let mut b = base();
+        b.body = url_body("a=1&my%20key=x%26y");
+        let mut c = base();
+        c.body = url_entries(&[("a", "1"), ("my key", "x&y")]);
+        let s = c.clone();
+        let out = run(&b, &c, &s);
+        assert!(out.changes.is_empty(), "{:?}", out.changes);
+    }
+
+    #[test]
+    fn repeated_names_merge_as_one_value() {
+        let mut b = base();
+        b.body = url_body("ids=1&ids=2");
+        let c = b.clone();
+        let mut s = base();
+        s.body = url_body("ids=1&ids=3");
+        let out = run(&b, &c, &s);
+        assert!(has_change(&out, "body"));
+        assert_eq!(url_text(out), "ids=1&ids=3");
     }
 }

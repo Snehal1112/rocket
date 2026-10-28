@@ -346,15 +346,28 @@ fn convert_body(content_type: &str, schema: Option<&Json>, sample: Option<Json>)
         return text_body(BodyMode::Json, content);
     }
     if lower.contains("x-www-form-urlencoded") {
-        let pairs: Vec<String> = properties
+        // The collection file keeps urlencoded fields as entries, so the converter builds them.
+        let entries = properties
             .map(|props| {
                 props
                     .iter()
-                    .map(|(name, prop)| format!("{name}={}", json_text(&sample_json(prop, 1))))
+                    .map(|(name, prop)| FormDataEntry {
+                        key: name.clone(),
+                        value: json_text(&sample_json(prop, 1)),
+                        entry_type: FormDataType::Text,
+                        enabled: true,
+                        content_type: None,
+                        description: None,
+                    })
                     .collect()
             })
             .unwrap_or_default();
-        return text_body(BodyMode::FormUrlEncoded, pairs.join("&"));
+        return Body {
+            mode: BodyMode::FormUrlEncoded,
+            content: None,
+            form_data: Some(entries),
+            file_path: None,
+        };
     }
     if lower.contains("multipart/form-data") {
         let entries = properties
@@ -545,6 +558,33 @@ mod tests {
             .filter(|h| h.key.eq_ignore_ascii_case("content-type"))
             .count();
         assert!(ct <= 1);
+    }
+
+    #[test]
+    fn an_urlencoded_body_is_entries_like_the_files_on_disk() {
+        let mut op = operation(HttpMethod::Post, "/form");
+        op.request_body = body(
+            "application/x-www-form-urlencoded",
+            Some(json!({"type": "object", "properties": {
+                "a": {"type": "string", "example": "x&y"},
+                "b": {"type": "integer"}
+            }})),
+            None,
+        );
+        let got = convert_operation(&op, &[], 1).request.body.expect("body");
+        assert_eq!(got.mode, BodyMode::FormUrlEncoded);
+        // The file format keeps urlencoded fields as entries and drops the text.
+        assert_eq!(got.content, None);
+        let entries = got.form_data.expect("entries");
+        assert_eq!(entries.len(), 2);
+        assert_eq!(
+            (entries[0].key.as_str(), entries[0].value.as_str()),
+            ("a", "x&y")
+        );
+        assert_eq!(entries[1].key, "b");
+        assert!(entries
+            .iter()
+            .all(|e| e.enabled && e.entry_type == FormDataType::Text));
     }
 
     #[test]

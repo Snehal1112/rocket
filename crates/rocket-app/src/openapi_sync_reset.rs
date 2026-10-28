@@ -161,6 +161,8 @@ impl OpenApiSyncService {
             .cloned()
             .ok_or_else(|| DomainError::NotFound(NO_BACKUP.to_string()))?;
         let current = flatten_requests(&repo.get(collection)?.root);
+        // The baseline says whether the name, method and description are still the spec's.
+        let baseline = deps.baselines.load(&root).ok().flatten();
         let renderer = (deps.renderer)(&root);
         let mut tx = deps.tx.begin(&root)?;
         let staged = (|| -> DomainResult<Option<(String, Request)>> {
@@ -168,7 +170,11 @@ impl OpenApiSyncService {
             if let Some(cur) = find_current(&current, &entry.uid) {
                 // Only the spec-owned fields come back, so scripts, examples and other edits
                 // made after the reset stay.
-                let request = restore_spec_owned_fields(&cur.request, &entry.request);
+                let base = baseline
+                    .as_ref()
+                    .and_then(|b| b.operations.iter().find(|o| o.key == key))
+                    .map(|o| &o.request);
+                let request = restore_spec_owned_fields(&cur.request, &entry.request, base);
                 let bytes = renderer.render(&cur.request_path, &request)?;
                 tx.stage_put(&request_filename_for(&cur.request_path), &bytes)?;
                 watch = Some((cur.request_path.clone(), cur.request.clone()));
