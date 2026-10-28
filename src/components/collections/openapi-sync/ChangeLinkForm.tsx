@@ -111,7 +111,7 @@ export function ChangeLinkForm({
   const checking = previewMutation.isPending;
 
   return (
-    <div className='flex flex-col gap-3 rounded-lg border border-border/70 p-3'>
+    <div className='flex flex-col gap-3 border-t border-border/70 pt-3'>
       <div className='space-y-1'>
         <Label htmlFor='change-link-input' className='text-xs font-medium'>
           New spec link
@@ -173,7 +173,8 @@ export function ChangeLinkForm({
         </div>
       )}
       {error && (
-        <p role='alert' className='text-xs text-destructive'>
+        <p role='alert' className='flex items-start gap-1.5 text-xs text-destructive'>
+          <TriangleAlert aria-hidden='true' className='mt-0.5 h-3.5 w-3.5 shrink-0' />
           {error}
         </p>
       )}

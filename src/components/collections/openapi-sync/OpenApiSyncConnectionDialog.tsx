@@ -1,4 +1,4 @@
-import { ShieldAlert, ShieldCheck } from 'lucide-react';
+import { FileText, Link2, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
@@ -34,7 +34,13 @@ import { ChangeLinkForm } from './ChangeLinkForm';
 import { CheckNowButtonView, useCheckRunner } from './CheckNowButton';
 import { DisconnectSyncDialog } from './DisconnectSyncDialog';
 import { OpenApiSyncConsentBanner } from './OpenApiSyncConsentBanner';
-import { intervalLabel, isFileLocation, isGithubLocation, splitLocation } from './openApiSyncView';
+import {
+  fileParts,
+  intervalLabel,
+  isFileLocation,
+  isGithubLocation,
+  splitLocation,
+} from './openApiSyncView';
 import { SyncBadge } from './SyncBadge';
 import { syncErrorMessage } from './syncErrors';
 
@@ -103,6 +109,8 @@ function ConnectionBody({
   if (status.interval !== 'off' && status.interval !== lastChosen) setLastChosen(status.interval);
   const { reset: resetSetToken } = setToken;
   const { short, full } = splitLocation(status.location);
+  const fileLocation = isFileLocation(status.location);
+  const file = fileParts(status.location);
 
   // The mutation keeps its variables, so it is reset when the field goes away.
   useEffect(() => resetSetToken, [resetSetToken]);
@@ -174,28 +182,60 @@ function ConnectionBody({
     <>
       <section
         aria-label='Status'
-        className='flex flex-wrap items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2'
+        className='flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/70 bg-card px-3 py-2.5'
       >
-        <p className={cn('text-sm', failed && 'text-destructive')}>
-          {checkedText} {statusSentence}
+        <p className={cn('flex items-center gap-2 text-sm', failed && 'text-destructive')}>
+          <span
+            aria-hidden='true'
+            className={cn(
+              'h-2 w-2 shrink-0 rounded-full',
+              failed ? 'bg-destructive' : ran && granted ? 'bg-emerald-500' : 'bg-foreground/30',
+            )}
+          />
+          <span>
+            {checkedText} {statusSentence}
+          </span>
         </p>
         <CheckNowButtonView runner={runner} />
       </section>
 
       <section
         aria-label='Spec link'
-        className='flex flex-col gap-2 rounded-lg border border-border/70 bg-muted/30 p-3'
+        className='flex flex-col gap-3 rounded-lg border border-border/70 bg-muted/30 p-3'
       >
-        <div className='flex items-start justify-between gap-3'>
-          <p className='min-w-0 break-all text-sm font-medium leading-snug'>
-            {isFileLocation(status.location) && (
-              <SyncBadge tone='info' className='mr-2 align-middle'>
-                Local file
-              </SyncBadge>
+        <div className='flex items-center gap-3'>
+          <span
+            aria-hidden='true'
+            className='flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-border/70 bg-card text-muted-foreground'
+          >
+            {fileLocation ? <FileText className='h-5 w-5' /> : <Link2 className='h-5 w-5' />}
+          </span>
+          <div className='flex min-w-0 flex-1 flex-col'>
+            <p className='min-w-0 break-words text-sm font-semibold leading-snug [overflow-wrap:anywhere]'>
+              {fileLocation ? file.name : full && showFull ? full : short}
+            </p>
+            {fileLocation && (
+              <p
+                title={file.folder}
+                className='truncate font-mono text-xs leading-snug text-muted-foreground'
+              >
+                {file.folder}
+              </p>
             )}
-            {full && showFull ? full : short}
-          </p>
-          <SyncBadge tone={granted ? 'success' : 'warning'} className='shrink-0 gap-1'>
+          </div>
+          {!changingLink && (
+            <Button
+              variant='outline'
+              size='sm'
+              className='shrink-0'
+              onClick={() => setChangingLink(true)}
+            >
+              Change link
+            </Button>
+          )}
+        </div>
+        <div className='flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-2.5'>
+          <SyncBadge tone={granted ? 'success' : 'warning'} className='gap-1'>
             {granted ? (
               <ShieldCheck aria-hidden='true' className='h-3 w-3' />
             ) : (
@@ -203,8 +243,6 @@ function ConnectionBody({
             )}
             {granted ? 'Approved on this machine' : 'Not approved yet'}
           </SyncBadge>
-        </div>
-        <div className='flex flex-wrap items-center gap-3'>
           {full && (
             <Button
               variant='link'
@@ -213,16 +251,6 @@ function ConnectionBody({
               onClick={() => setShowFull((v) => !v)}
             >
               {showFull ? 'Hide full link' : 'Show full link'}
-            </Button>
-          )}
-          {!changingLink && (
-            <Button
-              variant='link'
-              size='sm'
-              className='h-auto p-0 text-xs'
-              onClick={() => setChangingLink(true)}
-            >
-              Change link
             </Button>
           )}
         </div>
@@ -382,46 +410,54 @@ function ConnectionBody({
         )}
       </section>
 
-      <section
-        aria-label='Stop or remove'
-        className='flex flex-col gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3'
-      >
-        {granted && (
-          <div className='flex flex-col gap-1.5'>
-            <div className='flex items-center justify-between gap-4'>
-              <p className='min-w-0 text-xs text-muted-foreground'>
+      {granted && (
+        <section
+          aria-label='Trust'
+          className='flex flex-col gap-1.5 border-t border-border/70 pt-4'
+        >
+          <div className='flex items-center justify-between gap-4'>
+            <div className='flex min-w-0 flex-col gap-0.5'>
+              <p className='text-sm font-medium'>Trust on this machine</p>
+              <p className='text-xs text-muted-foreground'>
                 Stops background checks and token use until you approve the link again.
               </p>
-              <Button
-                size='sm'
-                variant='outline'
-                className='shrink-0'
-                onClick={() => revoke.mutate()}
-                disabled={revoke.isPending}
-              >
-                Stop trusting this link
-              </Button>
             </div>
-            {revokeError && (
-              <p role='alert' className='text-xs text-destructive'>
-                {revokeError}
-              </p>
-            )}
+            <Button
+              size='sm'
+              variant='outline'
+              className='shrink-0'
+              onClick={() => revoke.mutate()}
+              disabled={revoke.isPending}
+            >
+              Stop trusting this link
+            </Button>
           </div>
-        )}
-        <div className='flex items-center justify-between gap-4'>
-          <p className='min-w-0 text-xs text-muted-foreground'>
+          {revokeError && (
+            <p role='alert' className='text-xs text-destructive'>
+              {revokeError}
+            </p>
+          )}
+        </section>
+      )}
+
+      <section
+        aria-label='Disconnect'
+        className='flex items-center justify-between gap-4 rounded-lg border border-destructive/30 bg-destructive/5 p-3'
+      >
+        <div className='flex min-w-0 flex-col gap-0.5'>
+          <p className='text-sm font-medium'>Disconnect from the spec</p>
+          <p className='text-xs text-muted-foreground'>
             Removes the sync link from this collection. Your requests stay.
           </p>
-          <Button
-            size='sm'
-            variant='destructive'
-            className='shrink-0'
-            onClick={() => setDisconnectOpen(true)}
-          >
-            Disconnect
-          </Button>
         </div>
+        <Button
+          size='sm'
+          variant='destructive'
+          className='shrink-0'
+          onClick={() => setDisconnectOpen(true)}
+        >
+          Disconnect
+        </Button>
       </section>
       <DisconnectSyncDialog
         collection={collection}
@@ -450,6 +486,7 @@ export function OpenApiSyncConnectionDialog({
   return (
     <Dialog open={open} onOpenChange={requestClose}>
       <DialogContent
+        className='max-w-2xl'
         onOpenAutoFocus={(event) => {
           if (focus !== 'token') return;
           const input = document.getElementById('openapi-sync-token');

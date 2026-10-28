@@ -23,7 +23,7 @@ import {
 } from './openApiSyncView';
 import { openSyncRequest } from './openSyncRequest';
 import { ResetConfirmDialog } from './ResetConfirmDialog';
-import { MethodLabel, SyncBadge } from './SyncBadge';
+import { MethodPill, SyncBadge } from './SyncBadge';
 import { syncErrorMessage } from './syncErrors';
 import { ValueBox } from './ValueBox';
 
@@ -82,12 +82,12 @@ function ChangeRow({
   const actionClass =
     'h-6 shrink-0 px-2 text-xs opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100';
   return (
-    <li className='group border-b border-border px-3 py-1 text-sm last:border-b-0 hover:bg-muted/30'>
-      <div className='flex min-h-6 min-w-0 flex-wrap items-center gap-x-2 gap-y-1'>
-        {row.method && <MethodLabel method={row.method} className='w-14 shrink-0' />}
+    <li className='group border-b border-border px-3 py-2 text-sm last:border-b-0 hover:bg-muted/30'>
+      <div className='flex min-h-6 min-w-0 flex-wrap items-center gap-x-3 gap-y-1'>
+        {row.method && <MethodPill method={row.method} />}
         <span
           title={target}
-          className='min-w-0 max-w-[min(100%,36rem)] shrink truncate font-mono text-xs text-muted-foreground'
+          className='min-w-0 max-w-[min(100%,36rem)] shrink truncate font-mono text-xs font-medium'
         >
           {target}
         </span>
@@ -152,7 +152,7 @@ function ChangeRow({
         </p>
       )}
       {canExpand && open && (
-        <div className='flex flex-col gap-2 py-2 pl-16'>
+        <div className='flex flex-col gap-2 py-2 pl-[5.5rem]'>
           {row.changes.map((c) => (
             <div key={c.field} className='flex flex-col gap-1 rounded-sm border border-border p-2'>
               <span className='break-all text-xs font-medium'>{fieldLabel(c.field)}</span>
@@ -196,8 +196,8 @@ function Group({
   const resettable = rows.filter((r) => r.key && isResetEligible(r.fields)).length;
   return (
     <section className='flex flex-col'>
-      <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-border bg-background py-1.5'>
-        <h3 className='text-sm font-medium text-muted-foreground'>
+      <div className='sticky top-0 z-10 mb-1 flex min-h-11 items-center justify-between gap-3 rounded-lg border border-border/70 bg-card px-3 py-2 shadow-sm'>
+        <h3 className='min-w-0 truncate text-sm font-semibold'>
           {filtering
             ? `${GROUP_TITLE[kind]} (${rows.length} of ${total})`
             : `${GROUP_TITLE[kind]} (${rows.length})`}
@@ -248,50 +248,55 @@ function BackupGroup({
 }) {
   if (rows.length === 0) return null;
   return (
-    <section className='flex flex-col gap-1'>
-      <h3 className='text-sm font-medium'>{`Reset by you (${rows.length})`}</h3>
-      <ul className='rounded-sm border border-border'>
+    <section className='flex flex-col'>
+      <div className='mb-1 flex min-h-11 items-center rounded-lg border border-border/70 bg-card px-3 py-2 shadow-sm'>
+        <h3 className='min-w-0 truncate text-sm font-semibold'>{`Reset by you (${rows.length})`}</h3>
+      </div>
+      <ul className='flex flex-col'>
         {rows.map((r) => (
           <li
             key={r.key}
-            className='flex flex-col gap-1 border-b border-border/60 px-3 py-2 text-sm last:border-b-0'
+            className='flex flex-col gap-2 border-b border-border px-3 py-3 text-sm last:border-b-0 hover:bg-muted/30'
           >
-            <div className='flex min-w-0 items-center gap-2'>
-              <SyncBadge tone='neutral'>Reset</SyncBadge>
-              <MethodLabel method={r.method} className='shrink-0' />
-              <span className='min-w-0 flex-1 break-all font-mono text-xs'>{r.url}</span>
+            <div className='flex min-w-0 items-center gap-3'>
+              <MethodPill method={r.method} />
+              <span className='min-w-0 flex-1 break-all font-mono text-xs font-medium'>
+                {r.url}
+              </span>
             </div>
             {r.fields.length > 0 && (
-              <div className='flex flex-wrap gap-1'>
+              <div className='flex flex-wrap items-center gap-1 pl-[5.5rem]'>
                 {r.fields.map((f) => (
-                  <SyncBadge key={f} tone='info'>
+                  <SyncBadge key={f} tone='info' className='font-normal'>
                     {fieldLabel(f)}
                   </SyncBadge>
                 ))}
               </div>
             )}
-            <div className='flex flex-wrap items-center gap-2'>
+            <div className='flex flex-wrap items-center justify-between gap-x-3 gap-y-1 pl-[5.5rem]'>
               <span className='text-xs text-muted-foreground'>
                 {`Saved ${formatRelativeTime(r.savedAt)}`}
               </span>
-              <Button
-                variant='outline'
-                size='sm'
-                className='h-7'
-                disabled={busy}
-                onClick={() => onRestore(r)}
-              >
-                Restore my version
-              </Button>
-              <Button
-                variant='ghost'
-                size='sm'
-                className='h-7'
-                disabled={busy}
-                onClick={() => onDiscard(r)}
-              >
-                Discard backup
-              </Button>
+              <div className='flex items-center gap-1'>
+                <Button
+                  variant='ghost'
+                  size='sm'
+                  className='h-7 text-xs'
+                  disabled={busy}
+                  onClick={() => onDiscard(r)}
+                >
+                  Discard backup
+                </Button>
+                <Button
+                  variant='outline'
+                  size='sm'
+                  className='h-7 text-xs'
+                  disabled={busy}
+                  onClick={() => onRestore(r)}
+                >
+                  Restore my version
+                </Button>
+              </div>
             </div>
           </li>
         ))}

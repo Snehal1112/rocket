@@ -164,16 +164,22 @@ export function isFileLocation(location: string): boolean {
   return location.startsWith(FILE_PREFIX);
 }
 
+/** The file name and folder of a `file://` location. */
+export function fileParts(location: string): { name: string; folder: string } {
+  const path = location.slice(FILE_PREFIX.length);
+  const cut = path.lastIndexOf('/');
+  const name = path.slice(cut + 1);
+  let folder = cut <= 0 ? '/' : path.slice(0, cut);
+  // A Windows path has a slash before the drive letter.
+  if (/^\/[A-Za-z]:/.test(folder)) folder = folder.slice(1);
+  return { name, folder };
+}
+
 /** A link with a query or hash is split into a short form and the full text. A file shows its
  * name and its folder. */
 export function splitLocation(location: string): { short: string; full: string | null } {
   if (isFileLocation(location)) {
-    const path = location.slice(FILE_PREFIX.length);
-    const cut = path.lastIndexOf('/');
-    const name = path.slice(cut + 1);
-    let folder = cut <= 0 ? '/' : path.slice(0, cut);
-    // A Windows path has a slash before the drive letter.
-    if (/^\/[A-Za-z]:/.test(folder)) folder = folder.slice(1);
+    const { name, folder } = fileParts(location);
     return { short: `${name} in ${folder}`, full: null };
   }
   try {
