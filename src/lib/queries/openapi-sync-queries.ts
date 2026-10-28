@@ -16,6 +16,7 @@ import {
   getOpenApiSyncOverview,
   getOpenApiSyncPlan,
   getOpenApiSyncSkipped,
+  getOpenApiSyncSpecSource,
   getOpenApiSyncSpecView,
   getOpenApiSyncStatus,
   grantOpenApiSyncConsent,
@@ -55,6 +56,7 @@ export const openApiSyncKeys = {
   changes: (collection: string) => ['openapi-sync', 'changes', collection] as const,
   skipped: (collection: string) => ['openapi-sync', 'skipped', collection] as const,
   specView: (collection: string) => ['openapi-sync', 'spec-view', collection] as const,
+  specSource: (collection: string) => ['openapi-sync', 'spec-source', collection] as const,
   /** The waiting counts of every collection, so it is not scoped to one. */
   badges: ['openapi-sync', 'badges'] as const,
   status: (collection: string, includeToken = false) =>
@@ -161,6 +163,20 @@ export function useOpenApiSyncSpecView(collection: string | null | undefined) {
   });
 }
 
+/** The raw text of the latest stored spec, for the read-only editor. */
+export function useOpenApiSyncSpecSource(collection: string | null | undefined) {
+  return useQuery({
+    networkMode: 'always',
+    queryKey: openApiSyncKeys.specSource(collection ?? ''),
+    queryFn: () => getOpenApiSyncSpecSource(collection ?? ''),
+    enabled: !!collection,
+    staleTime: 0,
+    // The text can be large, so it is dropped when the page closes.
+    gcTime: 0,
+    retry: false,
+  });
+}
+
 /** How many updates wait in each collection that has a spec source. */
 export function useOpenApiSyncBadges() {
   return useQuery({
@@ -177,6 +193,7 @@ function invalidateSync(queryClient: QueryClient, collection: string): void {
   void queryClient.invalidateQueries({ queryKey: openApiSyncKeys.changes(collection) });
   void queryClient.invalidateQueries({ queryKey: openApiSyncKeys.skipped(collection) });
   void queryClient.invalidateQueries({ queryKey: openApiSyncKeys.specView(collection) });
+  void queryClient.invalidateQueries({ queryKey: openApiSyncKeys.specSource(collection) });
   void queryClient.invalidateQueries({ queryKey: openApiSyncKeys.badges });
   void queryClient.invalidateQueries({ queryKey: openApiSyncKeys.statusAll(collection) });
   void queryClient.invalidateQueries({ queryKey: openApiSyncKeys.planAll(collection) });

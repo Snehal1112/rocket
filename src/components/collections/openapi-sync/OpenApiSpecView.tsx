@@ -1,13 +1,26 @@
 import { ArrowLeft, ChevronDown, ChevronRight } from 'lucide-react';
-import { useMemo, useState } from 'react';
-import { Badge } from '@/components/ui/badge';
+import { lazy, Suspense, useCallback, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { StateBlock } from '@/components/ui/state-block';
-import { useOpenApiSyncOverview, useOpenApiSyncSpecView } from '@/lib/queries/openapi-sync-queries';
+import {
+  useOpenApiSyncOverview,
+  useOpenApiSyncSpecSource,
+  useOpenApiSyncSpecView,
+} from '@/lib/queries/openapi-sync-queries';
 import type { OpenApiBodyView, OpenApiSpecGroup, OpenApiSpecOperation } from '@/lib/tauri-api';
+import { cn } from '@/lib/utils';
 import { SchemaTree } from './SchemaTree';
+import type { RevealRequest } from './SpecSourcePane';
+import { MethodPill, methodBarClass, SyncBadge } from './SyncBadge';
+import { findOperationLine, splitLines } from './specSourceLines';
 import { syncErrorMessage } from './syncErrors';
+
+// Monaco loads only when the spec view opens.
+const SpecSourcePane = lazy(() =>
+  import('./SpecSourcePane').then((m) => ({ default: m.SpecSourcePane })),
+);
 
 /** Large specs list this many operations in total, then offer more. */
 const PAGE_SIZE = 500;
@@ -26,7 +39,7 @@ function BodyBlock({ body, collapsed }: { body: OpenApiBodyView; collapsed: bool
     <div className='flex flex-col gap-1'>
       <div className='flex items-center gap-2'>
         <span className='font-mono'>{body.contentType}</span>
-        {body.required && <Badge variant='secondary'>required</Badge>}
+        {body.required && <SyncBadge tone='warning'>required</SyncBadge>}
         {collapsed && body.schema && (
           <Button
             variant='link'
@@ -46,7 +59,7 @@ function BodyBlock({ body, collapsed }: { body: OpenApiBodyView; collapsed: bool
 
 function OperationDetail({ op }: { op: OpenApiSpecOperation }) {
   return (
-    <div className='flex flex-col gap-2 border-t border-border/60 bg-muted/30 px-3 py-2 text-xs'>
+    <div className='mt-1 flex flex-col gap-2 rounded-md border border-border/70 bg-card px-3 py-2 text-xs'>
       <div className='flex flex-col gap-1'>
         <h4 className='font-medium'>Parameters</h4>
         {op.parameters.length === 0 ? (
@@ -56,7 +69,7 @@ function OperationDetail({ op }: { op: OpenApiSpecOperation }) {
             {op.parameters.map((p) => (
               <li key={`${p.location}:${p.name}`} className='flex items-center gap-2 font-mono'>
                 <span>{`${p.name} (${p.location})`}</span>
-                {p.required && <Badge variant='secondary'>required</Badge>}
+                {p.required && <SyncBadge tone='warning'>required</SyncBadge>}
               </li>
             ))}
           </ul>
@@ -104,27 +117,40 @@ function OperationDetail({ op }: { op: OpenApiSpecOperation }) {
   );
 }
 
-function OperationRow({ op }: { op: OpenApiSpecOperation }) {
+function OperationRow({
+  op,
+  onOpen,
+}: {
+  op: OpenApiSpecOperation;
+  onOpen: (op: OpenApiSpecOperation) => void;
+}) {
   const [open, setOpen] = useState(false);
   const Chevron = open ? ChevronDown : ChevronRight;
   return (
-    <li className='border-b border-border/60 last:border-b-0'>
+    <li className='flex flex-col'>
       <Button
         variant='ghost'
-        className='h-auto w-full justify-start gap-2 rounded-none px-3 py-2 text-left font-normal'
+        className={cn(
+          'h-auto w-full justify-start gap-3 rounded-md border px-2 py-1.5 text-left font-normal',
+          methodBarClass(op.method),
+        )}
         aria-expanded={open}
-        aria-label={[op.method, op.path, op.summary].filter(Boolean).join(' ')}
-        onClick={() => setOpen((v) => !v)}
+        aria-label={`${[op.method, op.path, op.summary].filter(Boolean).join(' ')}${op.isNew ? ', new' : ''}`}
+        onClick={() => {
+          if (!open) onOpen(op);
+          setOpen((v) => !v);
+        }}
       >
-        <Chevron aria-hidden='true' className='h-3 w-3 shrink-0' />
-        <span className='w-14 shrink-0 font-mono text-xs font-semibold'>{op.method}</span>
-        <span className='min-w-0 break-all font-mono text-xs'>{op.path}</span>
+        <MethodPill method={op.method} />
+        <span className='min-w-0 break-all font-mono text-xs font-medium'>{op.path}</span>
         {op.summary && (
           <span className='min-w-0 flex-1 truncate text-xs text-muted-foreground'>
             {op.summary}
           </span>
         )}
-        {op.isNew && <Badge variant='warning'>New</Badge>}
+        {!op.summary && <span className='flex-1' />}
+        {op.isNew && <SyncBadge tone='warning'>New</SyncBadge>}
+        <Chevron aria-hidden='true' className='h-4 w-4 shrink-0 text-muted-foreground' />
       </Button>
       {open && <OperationDetail op={op} />}
     </li>
@@ -135,17 +161,19 @@ function TagGroup({
   group,
   total,
   shown,
+  onOpen,
 }: {
   group: OpenApiSpecGroup;
   total: number;
   shown: OpenApiSpecOperation[];
+  onOpen: (op: OpenApiSpecOperation) => void;
 }) {
   return (
     <section className='flex flex-col gap-1'>
-      <h3 className='text-sm font-medium'>{`${group.tag} (${total})`}</h3>
-      <ul className='rounded-md border border-border/70'>
+      <h3 className='border-b border-border/70 pb-1 text-sm font-medium'>{`${group.tag} (${total})`}</h3>
+      <ul className='flex flex-col gap-1.5'>
         {shown.map((op) => (
-          <OperationRow key={op.key} op={op} />
+          <OperationRow key={op.key} op={op} onOpen={onOpen} />
         ))}
       </ul>
     </section>
@@ -162,9 +190,27 @@ export function OpenApiSpecView({
 }) {
   const spec = useOpenApiSyncSpecView(collection);
   const overview = useOpenApiSyncOverview(collection);
+  const source = useOpenApiSyncSpecSource(collection);
   const [query, setQuery] = useState('');
   const [shown, setShown] = useState(PAGE_SIZE);
+  const [reveal, setReveal] = useState<RevealRequest | null>(null);
   const needle = query.trim().toLowerCase();
+  const sourceText = source.data?.text;
+  const sourceFormat = source.data?.format;
+  const hasEditor = typeof sourceText === 'string' && !source.data?.tooLarge;
+  // The text splits once, so opening a row only scans.
+  const sourceLines = useMemo(
+    () => (hasEditor && typeof sourceText === 'string' ? splitLines(sourceText) : null),
+    [hasEditor, sourceText],
+  );
+  const openOperation = useCallback(
+    (o: OpenApiSpecOperation) => {
+      if (!sourceLines || !sourceFormat) return;
+      const line = findOperationLine(sourceLines, sourceFormat, o.path, o.method);
+      if (line !== null) setReveal((prev) => ({ line, nonce: (prev?.nonce ?? 0) + 1 }));
+    },
+    [sourceLines, sourceFormat],
+  );
   const groups = useMemo(
     () =>
       (spec.data?.groups ?? [])
@@ -187,7 +233,7 @@ export function OpenApiSpecView({
   }, [groups, shown]);
 
   const back = (
-    <Button variant='ghost' size='sm' className='self-start' onClick={onBack}>
+    <Button variant='ghost' size='sm' onClick={onBack}>
       <ArrowLeft aria-hidden='true' className='h-4 w-4' />
       Back
     </Button>
@@ -219,34 +265,9 @@ export function OpenApiSpecView({
   }
   const waiting = overview.data?.updatesWaiting ?? 0;
   const waitingText =
-    waiting === 1 ? '1 update is waiting.' : waiting > 1 ? `${waiting} updates are waiting.` : null;
-  return (
-    <div className='flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4'>
-      {back}
-      <div className='flex flex-col gap-1'>
-        <div className='flex items-center gap-2'>
-          <h2 className='text-sm font-semibold'>{data.title}</h2>
-          {data.version && <Badge variant='outline'>{data.version}</Badge>}
-        </div>
-        <p className='text-xs text-muted-foreground'>Showing the latest spec Rocket fetched.</p>
-        {data.servers.length > 0 && (
-          <div className='flex flex-col gap-0.5 text-xs'>
-            <h3 className='font-medium'>Servers</h3>
-            <ul aria-label='Servers' className='flex flex-col font-mono text-muted-foreground'>
-              {data.servers.map((url) => (
-                <li key={url} className='break-all'>
-                  {url}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-        <p className='text-xs text-muted-foreground'>
-          {data.state === 'updates_waiting'
-            ? (waitingText ?? 'Updates are waiting.')
-            : 'Your collection is in sync with it.'}
-        </p>
-      </div>
+    waiting === 1 ? '1 update waiting' : waiting > 1 ? `${waiting} updates waiting` : null;
+  const operations = (
+    <div className='flex h-full min-h-0 flex-col gap-3 overflow-y-auto p-4'>
       <Input
         aria-label='Search operations'
         placeholder='Search by method, path or summary'
@@ -260,7 +281,13 @@ export function OpenApiSpecView({
         <StateBlock tone='empty'>No operations match.</StateBlock>
       ) : (
         visible.map((g) => (
-          <TagGroup key={g.group.tag} group={g.group} total={g.total} shown={g.shown} />
+          <TagGroup
+            key={g.group.tag}
+            group={g.group}
+            total={g.total}
+            shown={g.shown}
+            onOpen={openOperation}
+          />
         ))
       )}
       {remaining > 0 && (
@@ -270,6 +297,69 @@ export function OpenApiSpecView({
           </Button>
         </div>
       )}
+    </div>
+  );
+  const sourceMessage = source.isError ? (
+    <StateBlock tone='error'>{syncErrorMessage(source.error)}</StateBlock>
+  ) : source.isPending ? (
+    <StateBlock tone='loading'>Loading the spec source...</StateBlock>
+  ) : source.data?.tooLarge ? (
+    <StateBlock tone='empty'>
+      The spec is too large to show here. The operations on the right still work.
+    </StateBlock>
+  ) : null;
+  const showLeft = hasEditor || sourceMessage !== null;
+  const serverLine =
+    data.servers.length === 0
+      ? null
+      : data.servers.length === 1
+        ? `Server: ${data.servers[0]}`
+        : `Server: ${data.servers[0]} +${data.servers.length - 1} more`;
+  return (
+    <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>
+      <div className='flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/70 px-4 py-2'>
+        {back}
+        <h2 className='text-sm font-semibold'>{data.title}</h2>
+        {data.version && <SyncBadge tone='neutral'>{data.version}</SyncBadge>}
+        {data.state === 'updates_waiting' ? (
+          <SyncBadge tone='warning'>{waitingText ?? 'Updates waiting'}</SyncBadge>
+        ) : (
+          <SyncBadge tone='success'>In sync</SyncBadge>
+        )}
+        {serverLine && (
+          <span
+            className='min-w-0 truncate font-mono text-xs text-muted-foreground'
+            title={data.servers.length > 1 ? data.servers.join('\n') : undefined}
+          >
+            {serverLine}
+          </span>
+        )}
+      </div>
+      <ResizablePanelGroup orientation='horizontal' className='min-h-0 flex-1'>
+        {showLeft && (
+          <ResizablePanel id='spec-source' defaultSize={45} minSize='25%'>
+            <div className='h-full overflow-hidden'>
+              {hasEditor && source.data ? (
+                <Suspense
+                  fallback={
+                    <div className='p-3'>
+                      <StateBlock tone='loading'>Loading the editor...</StateBlock>
+                    </div>
+                  }
+                >
+                  <SpecSourcePane source={{ ...source.data, text: sourceText }} reveal={reveal} />
+                </Suspense>
+              ) : (
+                <div className='p-3'>{sourceMessage}</div>
+              )}
+            </div>
+          </ResizablePanel>
+        )}
+        {showLeft && <ResizableHandle withHandle />}
+        <ResizablePanel id='spec-operations' defaultSize={55} minSize='30%'>
+          {operations}
+        </ResizablePanel>
+      </ResizablePanelGroup>
     </div>
   );
 }

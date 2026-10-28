@@ -890,3 +890,24 @@ html .monaco-editor {
   max-width: 100%;
   overflow-x: auto;
 }
+
+/* The flash on a source line the spec view just revealed. */
+.spec-source-flash {
+  background-color: hsl(var(--primary) / 0.2);
+  animation: spec-source-flash-fade 1.5s ease-out forwards;
+}
+
+@keyframes spec-source-flash-fade {
+  from {
+    background-color: hsl(var(--primary) / 0.35);
+  }
+  to {
+    background-color: hsl(var(--primary) / 0.1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spec-source-flash {
+    animation: none;
+  }
+}

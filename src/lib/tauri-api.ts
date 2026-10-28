@@ -2226,6 +2226,17 @@ export interface OpenApiSpecView {
 export const getOpenApiSyncSpecView = (collection: string) =>
   invoke<OpenApiSpecView>('openapi_sync_spec_view', { collection });
 
+/** The raw text of the latest stored spec. `text` is null with no copy or a too large one. */
+export interface OpenApiSpecSource {
+  text: string | null;
+  format: 'yaml' | 'json';
+  sizeBytes: number;
+  tooLarge: boolean;
+}
+
+export const getOpenApiSyncSpecSource = (collection: string) =>
+  invoke<OpenApiSpecSource>('openapi_sync_spec_source', { collection });
+
 export const getOpenApiSyncOverview = (collection: string) =>
   invoke<OpenApiOverview>('openapi_sync_overview', { collection });
 

@@ -1,14 +1,56 @@
-import { screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as tauriApi from '@/lib/tauri-api';
-import type { OpenApiBodyView, OpenApiSchemaView, OpenApiSpecOperation, OpenApiSpecView as SpecViewData } from '@/lib/tauri-api';
+import type { OpenApiBodyView, OpenApiSpecSource, OpenApiSchemaView, OpenApiSpecOperation, OpenApiSpecView as SpecViewData } from '@/lib/tauri-api';
 import { renderWithQuery } from '@/test/trust-fixtures';
 import { OpenApiSpecView } from '../OpenApiSpecView';
 
 vi.mock('@/lib/tauri-api', async () => {
   const actual = await vi.importActual<typeof tauriApi>('@/lib/tauri-api');
-  return { ...actual, getOpenApiSyncSpecView: vi.fn(), getOpenApiSyncOverview: vi.fn() };
+  return {
+    ...actual,
+    getOpenApiSyncSpecView: vi.fn(),
+    getOpenApiSyncOverview: vi.fn(),
+    getOpenApiSyncSpecSource: vi.fn(),
+  };
+});
+
+// The real Monaco bundle is heavy to load, so its setup and theme hook are stubbed too.
+vi.mock('@/components/editor/monaco-setup', () => ({}));
+vi.mock('@/components/editor/useMonacoTheme', () => ({
+  useMonacoTheme: () => ({ themeName: 'rocket-light', defineThemes: vi.fn(), isDark: false }),
+}));
+
+// Monaco needs a real DOM layout, so the editor becomes a plain element here.
+const editorMock = vi.hoisted(() => ({
+  revealLineInCenter: vi.fn(),
+  setPosition: vi.fn(),
+  createDecorationsCollection: vi.fn(() => ({ clear: vi.fn() })),
+}));
+
+vi.mock('@monaco-editor/react', async () => {
+  const { useEffect } = await import('react');
+  return {
+    default: ({
+      value,
+      language,
+      onMount,
+    }: {
+      value?: string;
+      language?: string;
+      onMount?: (editor: typeof editorMock) => void;
+    }) => {
+      // The real editor calls onMount once after it is created.
+      // biome-ignore lint/correctness/useExhaustiveDependencies: Mount only.
+      useEffect(() => onMount?.(editorMock), []);
+      return (
+        <div data-testid='spec-editor' data-language={language}>
+          {value}
+        </div>
+      );
+    },
+  };
 });
 
 // The 500-row tests render many rows, so a busy machine needs more time.
@@ -68,7 +110,14 @@ function view(over: Partial<SpecViewData> = {}): SpecViewData {
   };
 }
 
-function show(data: SpecViewData, waiting = 0) {
+function show(data: SpecViewData, waiting = 0, source?: Partial<OpenApiSpecSource>) {
+  vi.mocked(tauriApi.getOpenApiSyncSpecSource).mockResolvedValue({
+    text: 'openapi: 3.0.0\n',
+    format: 'yaml',
+    sizeBytes: 2400000,
+    tooLarge: false,
+    ...source,
+  });
   vi.mocked(tauriApi.getOpenApiSyncSpecView).mockResolvedValue(data);
   vi.mocked(tauriApi.getOpenApiSyncOverview).mockResolvedValue({
     endpoints: 3,
@@ -95,15 +144,24 @@ describe('OpenApiSpecView', () => {
     expect(screen.getByText('Pets API')).toBeInTheDocument();
   });
 
-  it('says_whether_updates_wait', async () => {
+  it('shows_a_warning_badge_when_updates_wait', async () => {
     show(view({ state: 'updates_waiting' }), 2);
-    expect(await screen.findByText('Showing the latest spec Rocket fetched.')).toBeInTheDocument();
-    expect(await screen.findByText('2 updates are waiting.')).toBeInTheDocument();
+    expect(await screen.findByText('2 updates waiting')).toBeInTheDocument();
+    expect(screen.queryByText('In sync')).toBeNull();
   });
 
-  it('says_the_collection_is_in_sync', async () => {
+  it('shows_an_in_sync_badge', async () => {
     show(view());
-    expect(await screen.findByText('Your collection is in sync with it.')).toBeInTheDocument();
+    expect(await screen.findByText('In sync')).toBeInTheDocument();
+  });
+
+  it('the_redundant_header_sentences_are_gone', async () => {
+    show(view({ state: 'updates_waiting', servers: ['https://api.example.com'] }), 2);
+    await screen.findByText('2 updates waiting');
+    expect(screen.queryByText('Showing the latest spec Rocket fetched.')).toBeNull();
+    expect(screen.queryByText('Your collection is in sync with it.')).toBeNull();
+    expect(screen.queryByText('2 updates are waiting.')).toBeNull();
+    expect(screen.queryByText('Servers')).toBeNull();
   });
 
   it('marks_new_operations', async () => {
@@ -115,13 +173,16 @@ describe('OpenApiSpecView', () => {
       1,
     );
     expect(await screen.findByText('New')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'GET /pets List pets, new' })).toBeInTheDocument();
   });
 
   it('search_filters_the_rows', async () => {
     show(view());
-    const user = userEvent.setup();
     await screen.findByText('pets (2)');
-    await user.type(screen.getByRole('textbox', { name: 'Search operations' }), 'stock');
+    // The resizable group swallows pointer events in jsdom, so the value is set directly.
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search operations' }), {
+      target: { value: 'stock' },
+    });
     expect(screen.getByText('store (1)')).toBeInTheDocument();
     expect(screen.queryByText(/^pets \(/)).toBeNull();
     expect(screen.queryByText('/pets')).toBeNull();
@@ -267,11 +328,113 @@ describe('OpenApiSpecView', () => {
     expect(screen.getByText('bearer, key')).toBeInTheDocument();
   });
 
-  it('servers_are_listed_in_the_header', async () => {
+  it('one_server_is_a_single_muted_line', async () => {
+    show(view({ servers: ['https://api.example.com'] }));
+    expect(await screen.findByText('Server: https://api.example.com')).toBeInTheDocument();
+  });
+
+  it('several_servers_show_a_count_and_the_full_list_in_the_title', async () => {
     show(view({ servers: ['https://api.example.com', 'https://staging.example.com'] }));
-    expect(await screen.findByText('https://api.example.com')).toBeInTheDocument();
-    expect(screen.getByText('https://staging.example.com')).toBeInTheDocument();
-    expect(screen.getByText('Servers')).toBeInTheDocument();
+    const line = await screen.findByText('Server: https://api.example.com +1 more');
+    expect(line).toHaveAttribute(
+      'title',
+      'https://api.example.com\nhttps://staging.example.com',
+    );
+  });
+
+  it('shows_the_source_editor_with_the_format_and_size', async () => {
+    show(view(), 0, { format: 'json', text: '{}' });
+    const editor = await screen.findByTestId('spec-editor');
+    expect(editor).toHaveAttribute('data-language', 'json');
+    expect(screen.getByText('JSON, 2.3 MB')).toBeInTheDocument();
+  });
+
+  it('the_source_pane_shows_loading_while_operations_render', async () => {
+    show(view());
+    vi.mocked(tauriApi.getOpenApiSyncSpecSource).mockReturnValue(new Promise(() => {}));
+    cleanup();
+    renderWithQuery(<OpenApiSpecView collection='c2' onBack={vi.fn()} />);
+    expect(await screen.findByText('pets (2)')).toBeInTheDocument();
+    expect(screen.getByText('Loading the spec source...')).toBeInTheDocument();
+  });
+
+  it('a_too_large_source_shows_a_message_instead_of_the_editor', async () => {
+    show(view(), 0, { text: null, tooLarge: true });
+    expect(
+      await screen.findByText(
+        'The spec is too large to show here. The operations on the right still work.',
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId('spec-editor')).toBeNull();
+    expect(screen.getByText('pets (2)')).toBeInTheDocument();
+  });
+
+  it('a_source_error_shows_a_fixed_sentence', async () => {
+    show(view());
+    vi.mocked(tauriApi.getOpenApiSyncSpecSource).mockRejectedValue(new Error('cannot read /secret'));
+    cleanup();
+    renderWithQuery(<OpenApiSpecView collection='c3' onBack={vi.fn()} />);
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Something went wrong with the OpenAPI sync');
+    expect(screen.queryByText(/secret/)).toBeNull();
+    expect(await screen.findByText('pets (2)')).toBeInTheDocument();
+  });
+
+  it('no_source_text_shows_only_the_operations', async () => {
+    show(view(), 0, { text: null });
+    expect(await screen.findByText('pets (2)')).toBeInTheDocument();
+    expect(screen.queryByTestId('spec-editor')).toBeNull();
+    expect(screen.queryByRole('separator')).toBeNull();
+  });
+
+  it('opening_an_operation_reveals_its_line_in_the_source', async () => {
+    const text = 'openapi: 3.0.0\npaths:\n  /pets:\n    get:\n      x: 1\n  /inventory:\n    get:\n      x: 1\n';
+    show(view(), 0, { text });
+    await screen.findByTestId('spec-editor');
+    editorMock.revealLineInCenter.mockClear();
+    await expand(/^GET \/inventory Stock$/);
+    expect(editorMock.revealLineInCenter).toHaveBeenCalledWith(7);
+    expect(editorMock.setPosition).toHaveBeenCalledWith({ lineNumber: 7, column: 1 });
+    expect(editorMock.createDecorationsCollection).toHaveBeenCalled();
+  });
+
+  it('reopening_the_same_operation_reveals_the_line_again', async () => {
+    const text = 'paths:\n  /pets:\n    get:\n      x: 1\n';
+    show(view(), 0, { text });
+    await screen.findByTestId('spec-editor');
+    await expand(/^GET \/pets List pets$/);
+    await expand(/^GET \/pets List pets$/);
+    editorMock.revealLineInCenter.mockClear();
+    await expand(/^GET \/pets List pets$/);
+    expect(editorMock.revealLineInCenter).toHaveBeenCalledTimes(1);
+    expect(editorMock.revealLineInCenter).toHaveBeenCalledWith(3);
+  });
+
+  it('closing_an_operation_does_not_reveal_again', async () => {
+    const text = 'paths:\n  /pets:\n    get:\n      x: 1\n';
+    show(view(), 0, { text });
+    await screen.findByTestId('spec-editor');
+    await expand(/^GET \/pets List pets$/);
+    editorMock.revealLineInCenter.mockClear();
+    await expand(/^GET \/pets List pets$/);
+    expect(editorMock.revealLineInCenter).not.toHaveBeenCalled();
+  });
+
+  it('opening_an_operation_without_source_text_reveals_nothing', async () => {
+    show(view(), 0, { text: null });
+    await screen.findByText('pets (2)');
+    editorMock.revealLineInCenter.mockClear();
+    await expand(/^GET \/pets List pets$/);
+    expect(editorMock.revealLineInCenter).not.toHaveBeenCalled();
+    expect(screen.getByText('Parameters')).toBeInTheDocument();
+  });
+
+  it('an_operation_missing_from_the_source_reveals_nothing', async () => {
+    show(view(), 0, { text: 'paths:\n  /other:\n    get:\n' });
+    await screen.findByTestId('spec-editor');
+    editorMock.revealLineInCenter.mockClear();
+    await expand(/^GET \/pets List pets$/);
+    expect(editorMock.revealLineInCenter).not.toHaveBeenCalled();
   });
 
   it('an_operation_without_a_body_shows_no_body_section', async () => {
