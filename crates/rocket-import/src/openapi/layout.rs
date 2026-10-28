@@ -38,6 +38,24 @@ pub(crate) const UNTAGGED_FOLDER: &str = "untagged";
 /// safe for the file system; the importer turns each one into a unique, safe segment.
 /// An empty list means the collection root.
 pub(crate) fn folder_names(op: &Operation, group_by: GroupBy) -> Vec<String> {
+    let names = raw_folder_names(op, group_by);
+    // A name a collection folder uses for something else puts the request at the root, as in Bruno.
+    if names.iter().any(|n| is_reserved(n)) {
+        return Vec::new();
+    }
+    names
+}
+
+/// Folder names that mean something in a collection folder, compared without regard to case.
+const RESERVED_FOLDERS: [&str; 4] = ["node_modules", ".git", "environments", "mocks"];
+
+fn is_reserved(name: &str) -> bool {
+    RESERVED_FOLDERS
+        .iter()
+        .any(|r| name.trim().eq_ignore_ascii_case(r))
+}
+
+fn raw_folder_names(op: &Operation, group_by: GroupBy) -> Vec<String> {
     match group_by {
         GroupBy::Tags => vec![op
             .tags
@@ -78,6 +96,42 @@ mod tests {
             request_body_required: false,
             response_media: Vec::new(),
         }
+    }
+
+    #[test]
+    fn a_reserved_tag_name_falls_back_to_the_root() {
+        for name in [
+            "node_modules",
+            ".git",
+            "environments",
+            "mocks",
+            "Environments",
+            ".GIT",
+        ] {
+            assert!(
+                folder_names(&op("/a", &[name]), GroupBy::Tags).is_empty(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_reserved_path_segment_falls_back_to_the_root() {
+        assert!(folder_names(&op("/environments/list", &[]), GroupBy::Paths).is_empty());
+        assert!(folder_names(&op("/api/node_modules/x", &[]), GroupBy::Paths).is_empty());
+        assert!(folder_names(&op("/mocks", &[]), GroupBy::Paths).is_empty());
+    }
+
+    #[test]
+    fn a_normal_tag_is_unchanged() {
+        assert_eq!(
+            folder_names(&op("/a", &["Mocks and stubs"]), GroupBy::Tags),
+            vec!["Mocks and stubs"]
+        );
+        assert_eq!(
+            folder_names(&op("/api/orders/{id}", &[]), GroupBy::Paths),
+            vec!["api", "orders"]
+        );
     }
 
     #[test]

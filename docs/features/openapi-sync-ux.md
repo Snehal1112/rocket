@@ -119,6 +119,11 @@ A count badge shows on the collection row. A toast "N spec updates" with Review 
 - Scripts, tests and assertions are not compared, so they are never reset.
 - The values in Your changes are not shown for a collection whose baseline is missing or from an older converter.
 - Values inside a request body are shown as they are, without masking.
+- JSON arrays and top-level array bodies are merged as one value, and numbers that are not canonical (such as `1.0` or `1e3`) are merged as text, so a rebuild never changes them.
+- An urlencoded body is merged field by field. A body with an empty piece (a doubled or trailing `&`) is merged as one value.
+- Reset restores the last synced version. A spec change that waits stays in the review list, and a later sync still offers it.
+- Regrouping existing folders is not supported: a request keeps its folder when the spec changes its tag or path.
+- A tag or path segment named `node_modules`, `.git`, `environments` or `mocks` is not used as a folder name. The request goes to the collection root, as in Bruno.
 - A skip for an operation that left the spec stays in the local file until it is un-skipped.
 
 ## Manual checks
@@ -151,3 +156,5 @@ A count badge shows on the collection row. A toast "N spec updates" with Review 
 26. In Connect and Change link, switch to File, choose a spec, preview it, and check that there is no token field.
 27. Add a request of your own, open Your changes, press Delete, confirm: the file is gone from the sidebar. Press Delete all with two added requests.
 28. Edit a request, remove its operation from the spec, check, then open it in Spec updates and press Delete this request.
+29. Edit one field of an urlencoded request body, change another field in the spec, check and sync: both changes survive.
+30. Rename a synced request and change its URL, then Reset it: the URL goes back, the new name stays. A request with only a new name has no Reset button.
