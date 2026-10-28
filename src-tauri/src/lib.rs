@@ -1185,6 +1185,7 @@ pub fn run() {
             commands::openapi_sync::openapi_sync_changes,
             commands::openapi_sync::openapi_sync_skipped,
             commands::openapi_sync::openapi_sync_unskip,
+            commands::openapi_sync::openapi_sync_delete_requests,
             commands::openapi_sync::openapi_sync_badges,
             commands::openapi_sync::openapi_sync_check_now,
             commands::openapi_sync::openapi_sync_set_interval,

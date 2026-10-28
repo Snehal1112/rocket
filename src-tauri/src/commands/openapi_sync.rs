@@ -10,7 +10,7 @@ use rocket_app::{
     safe_message, BackupRow, BadgeView, ChangeLinkOutcome, ChangeLinkPreview, ChangeRow,
     ChangeValue, ChangesView, CheckOutcome, ConnectOperationRow, ConnectOutcome, ConnectPreview,
     ConnectRequestRow, ConnectRow, OpenApiSyncService, OverviewView, PlanView, ResetReport,
-    SkippedRow, SpecView, SpecViewState, SyncStatusView,
+    DeleteTarget, SkippedRow, SpecView, SpecViewState, SyncStatusView,
 };
 use rocket_collection::openapi_source::{SyncInterval, SyncStatus};
 use rocket_collection::ConsentState;
@@ -1173,6 +1173,54 @@ fn unskip_error(error: DomainError) -> String {
         DomainError::NotFound(_) => "The collection was not found.".to_string(),
         _ => "Taking the skip back failed. Nothing was changed.".to_string(),
     }
+}
+
+/// A request to delete, as the page knew it.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeleteTargetDto {
+    pub uid: String,
+    pub request_path: String,
+}
+
+fn delete_error(error: DomainError) -> String {
+    match error {
+        DomainError::InvalidInput(m)
+            if m.contains("still part of the spec") || m.contains("not in this collection") =>
+        {
+            m
+        }
+        DomainError::Conflict(m) if m.contains("changed on disk") || m.contains("not finished") => m,
+        DomainError::Conflict(_) => "A sync is running. Try again when it is done.".to_string(),
+        DomainError::NotFound(_) => "The collection was not found.".to_string(),
+        _ => "Deleting failed. Nothing was changed.".to_string(),
+    }
+}
+
+/// Deletes requests the user added, or that the spec removed and the user had edited. Never
+/// contacts the network.
+#[tauri::command]
+pub async fn openapi_sync_delete_requests(
+    collection: String,
+    targets: Vec<DeleteTargetDto>,
+    workspace_path: State<'_, Arc<Mutex<PathBuf>>>,
+    fetcher: State<'_, Arc<dyn SpecFetcher>>,
+) -> Result<usize, String> {
+    let workspace_path = Arc::clone(workspace_path.inner());
+    let fetcher = Arc::clone(fetcher.inner());
+    tokio::task::spawn_blocking(move || {
+        let targets: Vec<DeleteTarget> = targets
+            .into_iter()
+            .map(|t| DeleteTarget {
+                uid: t.uid,
+                request_path: t.request_path,
+            })
+            .collect();
+        make_sync_service(workspace_path, fetcher).delete_requests(&collection, &targets)
+    })
+    .await
+    .map_err(|_| TASK_FAILED.to_string())?
+    .map_err(delete_error)
 }
 
 /// The items the user skipped. Never contacts the network.
@@ -2420,6 +2468,36 @@ mod tests {
         assert_eq!(json["name"], "List pets");
         assert_eq!(json["method"], "GET");
         assert_eq!(json["path"], "{{baseUrl}}/pets");
+    }
+
+    #[test]
+    fn delete_dto_uses_camel_case_keys() {
+        let target: DeleteTargetDto =
+            serde_json::from_value(serde_json::json!({"uid": "u1", "requestPath": "pets/x"}))
+                .expect("target");
+        assert_eq!(target.uid, "u1");
+        assert_eq!(target.request_path, "pets/x");
+    }
+
+    #[test]
+    fn delete_errors_pass_only_fixed_sentences() {
+        let not_deletable = "This request is still part of the spec. Remove it from the spec first.";
+        assert_eq!(
+            delete_error(DomainError::InvalidInput(not_deletable.to_string())),
+            not_deletable
+        );
+        let changed = "The request changed on disk. Reload the page.";
+        assert_eq!(
+            delete_error(DomainError::Conflict(changed.to_string())),
+            changed
+        );
+        assert_eq!(
+            delete_error(DomainError::Conflict("another sync apply is running".to_string())),
+            "A sync is running. Try again when it is done."
+        );
+        let other = delete_error(DomainError::Internal("cannot remove /home/me/secret".to_string()));
+        assert_eq!(other, "Deleting failed. Nothing was changed.");
+        assert!(!other.contains("secret"));
     }
 
     #[test]

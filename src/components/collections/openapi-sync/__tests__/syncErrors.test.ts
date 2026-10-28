@@ -32,6 +32,17 @@ describe('syncErrorMessage', () => {
     }
   });
 
+  it('syncerrors_maps_the_delete_sentences', () => {
+    for (const sentence of [
+      'This request is still part of the spec. Remove it from the spec first.',
+      'The request changed on disk. Reload the page.',
+      'That request is not in this collection.',
+      'Deleting failed. Nothing was changed.',
+    ]) {
+      expect(syncErrorMessage(sentence)).toBe(sentence);
+    }
+  });
+
   it('maps_the_unshowable_spec_sentence', () => {
     expect(syncErrorMessage('Invalid input: The saved spec cannot be shown.')).toBe(
       'The saved spec cannot be shown.',

@@ -31,6 +31,7 @@ import {
   useRestoreOpenApiSync,
   useRevokeConsent,
   useSetInterval,
+  useDeleteRequests,
   useOpenApiSyncSkipped,
   useSetToken,
   useUnskip,
@@ -62,6 +63,7 @@ vi.mock('@/lib/tauri-api', async () => {
     previewOpenApiChangeLink: vi.fn(),
     getOpenApiSyncSkipped: vi.fn(),
     unskipOpenApiSync: vi.fn(),
+    deleteOpenApiRequests: vi.fn(),
     confirmOpenApiChangeLink: vi.fn(),
     previewOpenApiConnect: vi.fn(),
     confirmOpenApiConnect: vi.fn(),
@@ -743,6 +745,31 @@ describe('openapi sync queries', () => {
       await result.current.mutateAsync(['listPets']);
     });
     expect(tauriApi.unskipOpenApiSync).toHaveBeenCalledWith('A', ['listPets']);
+  });
+
+  it('delete_wrapper_calls_the_command', async () => {
+    vi.mocked(tauriApi.deleteOpenApiRequests).mockResolvedValue(1);
+    const { result } = renderHook(() => useDeleteRequests('A'), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync([{ uid: 'u1', requestPath: 'pets/x' }]);
+    });
+    expect(tauriApi.deleteOpenApiRequests).toHaveBeenCalledWith('A', [
+      { uid: 'u1', requestPath: 'pets/x' },
+    ]);
+  });
+
+  it('delete_refreshes_the_collection_and_sync_queries', async () => {
+    vi.mocked(tauriApi.deleteOpenApiRequests).mockResolvedValue(1);
+    const spy = vi.spyOn(client, 'invalidateQueries');
+    const { result } = renderHook(() => useDeleteRequests('A'), { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync([{ uid: 'u1', requestPath: 'pets/x' }]);
+    });
+    const keys = spy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(keys).toContainEqual(collectionKeys.all);
+    expect(keys).toContainEqual(openApiSyncKeys.changes('A'));
+    expect(keys).toContainEqual(openApiSyncKeys.planAll('A'));
+    expect(keys).toContainEqual(openApiSyncKeys.badges);
   });
 
   it('the_skipped_list_is_not_fetched_while_disabled', () => {

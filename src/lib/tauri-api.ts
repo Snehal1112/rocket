@@ -2246,6 +2246,16 @@ export const getOpenApiSyncSkipped = (collection: string) =>
 export const unskipOpenApiSync = (collection: string, keys: string[]) =>
   invoke<number>('openapi_sync_unskip', { collection, keys });
 
+/** A request to delete: its uid and the path the page knew it by. */
+export interface OpenApiDeleteTarget {
+  uid: string;
+  requestPath: string;
+}
+
+/** Deletes requests the user added, or the spec removed and the user had edited. */
+export const deleteOpenApiRequests = (collection: string, targets: OpenApiDeleteTarget[]) =>
+  invoke<number>('openapi_sync_delete_requests', { collection, targets });
+
 export const resetOpenApiSync = (collection: string, keys: string[]) =>
   invoke<OpenApiResetReport>('openapi_sync_reset', { collection, keys });
 

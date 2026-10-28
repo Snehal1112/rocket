@@ -16,6 +16,16 @@ const KNOWN: Array<[string, string]> = [
     'The spec file was not found on this computer.',
   ],
   ['The path is not a file.', 'The path is not a file.'],
+  [
+    'This request is still part of the spec. Remove it from the spec first.',
+    'This request is still part of the spec. Remove it from the spec first.',
+  ],
+  [
+    'The request changed on disk. Reload the page.',
+    'The request changed on disk. Reload the page.',
+  ],
+  ['That request is not in this collection.', 'That request is not in this collection.'],
+  ['Deleting failed. Nothing was changed.', 'Deleting failed. Nothing was changed.'],
   ['The spec file could not be read.', 'The spec file could not be read.'],
   [
     'The link must use https. Plain http works only for localhost.',

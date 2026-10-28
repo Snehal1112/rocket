@@ -1,5 +1,6 @@
 import { type QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
+import type { OpenApiDeleteTarget } from '@/lib/tauri-api';
 import {
   applyOpenApiSync,
   type ConnectConfirmArgs,
@@ -7,6 +8,7 @@ import {
   clearOpenApiSyncToken,
   confirmOpenApiChangeLink,
   confirmOpenApiConnect,
+  deleteOpenApiRequests,
   discardOpenApiSyncBackup,
   disconnectOpenApiSync,
   getOpenApiSyncBadges,
@@ -254,6 +256,16 @@ export function useResetOpenApiSync(collection: string) {
   return useMutation({
     networkMode: 'always',
     mutationFn: (keys: string[]) => resetOpenApiSync(collection, keys),
+    onSettled: () => refreshAfterReset(queryClient, collection),
+  });
+}
+
+/** Deletes requests from the sync page. The files change, so the tree reloads too. */
+export function useDeleteRequests(collection: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    networkMode: 'always',
+    mutationFn: (targets: OpenApiDeleteTarget[]) => deleteOpenApiRequests(collection, targets),
     onSettled: () => refreshAfterReset(queryClient, collection),
   });
 }
