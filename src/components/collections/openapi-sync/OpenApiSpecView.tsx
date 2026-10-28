@@ -1,9 +1,17 @@
 import { ArrowLeft, ChevronDown, ChevronRight } from 'lucide-react';
-import { lazy, Suspense, useCallback, useMemo, useState } from 'react';
+import { lazy, type ReactNode, Suspense, useCallback, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { StateBlock } from '@/components/ui/state-block';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import {
   useOpenApiSyncOverview,
   useOpenApiSyncSpecSource,
@@ -13,7 +21,7 @@ import type { OpenApiBodyView, OpenApiSpecGroup, OpenApiSpecOperation } from '@/
 import { cn } from '@/lib/utils';
 import { SchemaTree } from './SchemaTree';
 import type { RevealRequest } from './SpecSourcePane';
-import { MethodPill, methodBarClass, SyncBadge } from './SyncBadge';
+import { MethodPill, methodBarClass, SyncBadge, type SyncTone } from './SyncBadge';
 import { findOperationLine, splitLines } from './specSourceLines';
 import { syncErrorMessage } from './syncErrors';
 
@@ -38,7 +46,7 @@ function BodyBlock({ body, collapsed }: { body: OpenApiBodyView; collapsed: bool
   return (
     <div className='flex flex-col gap-1'>
       <div className='flex items-center gap-2'>
-        <span className='font-mono'>{body.contentType}</span>
+        <span className='font-mono font-medium'>{body.contentType}</span>
         {body.required && <SyncBadge tone='warning'>required</SyncBadge>}
         {collapsed && body.schema && (
           <Button
@@ -52,67 +60,130 @@ function BodyBlock({ body, collapsed }: { body: OpenApiBodyView; collapsed: bool
           </Button>
         )}
       </div>
-      {open && body.schema && <SchemaTree schema={body.schema} />}
+      {open && body.schema && (
+        <div className='rounded-md border border-border/70 bg-background/60 p-3'>
+          <SchemaTree schema={body.schema} />
+        </div>
+      )}
     </div>
   );
 }
 
+/** A titled block of the operation detail. */
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className='flex flex-col gap-2'>
+      <h4 className='border-b border-border/70 pb-1 text-sm font-semibold'>{title}</h4>
+      {children}
+    </section>
+  );
+}
+
+const LOCATION_TONE: Record<string, SyncTone> = {
+  path: 'info',
+  query: 'neutral',
+  header: 'neutral',
+  cookie: 'neutral',
+};
+
+function ParametersTable({ parameters }: { parameters: OpenApiSpecOperation['parameters'] }) {
+  return (
+    <Table aria-label='Parameters'>
+      <TableHeader>
+        <TableRow className='hover:bg-transparent'>
+          <TableHead className='h-8 text-xs'>Name</TableHead>
+          <TableHead className='h-8 text-xs'>In</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {parameters.map((p) => (
+          <TableRow key={`${p.location}:${p.name}`}>
+            <TableCell className='py-1.5 text-xs'>
+              <span className='font-mono font-semibold'>{p.name}</span>
+              {p.required && (
+                <span className='ml-1 text-destructive' title='required'>
+                  *
+                </span>
+              )}
+              {p.required && <span className='sr-only'>required</span>}
+            </TableCell>
+            <TableCell className='py-1.5 text-xs'>
+              <SyncBadge tone={LOCATION_TONE[p.location] ?? 'neutral'}>{p.location}</SyncBadge>
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+
+function ResponsesTable({ responses }: { responses: OpenApiSpecOperation['responses'] }) {
+  return (
+    <Table aria-label='Responses'>
+      <TableHeader>
+        <TableRow className='hover:bg-transparent'>
+          <TableHead className='h-8 w-16 text-xs'>Code</TableHead>
+          <TableHead className='h-8 text-xs'>Description</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {responses.map((r) => (
+          <TableRow key={r.status} className='align-top hover:bg-transparent'>
+            <TableCell className='py-1.5 align-top'>
+              <SyncBadge tone={statusTone(r.status)}>{r.status}</SyncBadge>
+            </TableCell>
+            <TableCell className='flex flex-col gap-1.5 py-1.5 text-xs'>
+              <span>{r.description}</span>
+              {r.bodies.map((b) => (
+                <BodyBlock key={b.contentType} body={b} collapsed />
+              ))}
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+
+function statusTone(status: string): SyncTone {
+  if (status.startsWith('2')) return 'success';
+  if (status.startsWith('3')) return 'info';
+  if (status.startsWith('4')) return 'warning';
+  if (status.startsWith('5')) return 'danger';
+  return 'neutral';
+}
+
 function OperationDetail({ op }: { op: OpenApiSpecOperation }) {
   return (
-    <div className='mt-1 flex flex-col gap-2 rounded-md border border-border/70 bg-card px-3 py-2 text-xs'>
-      <div className='flex flex-col gap-1'>
-        <h4 className='font-medium'>Parameters</h4>
+    <div className='mt-1 flex flex-col gap-4 rounded-md border border-border/70 bg-card px-4 py-3 text-xs'>
+      <Section title='Parameters'>
         {op.parameters.length === 0 ? (
           <p className='text-muted-foreground'>None.</p>
         ) : (
-          <ul aria-label='Parameters' className='flex flex-col gap-0.5'>
-            {op.parameters.map((p) => (
-              <li key={`${p.location}:${p.name}`} className='flex items-center gap-2 font-mono'>
-                <span>{`${p.name} (${p.location})`}</span>
-                {p.required && <SyncBadge tone='warning'>required</SyncBadge>}
-              </li>
-            ))}
-          </ul>
+          <ParametersTable parameters={op.parameters} />
         )}
-      </div>
+      </Section>
       {op.requestBody.length > 0 && (
-        <div className='flex flex-col gap-1'>
-          <h4 className='font-medium'>Request body</h4>
+        <Section title='Request body'>
           {op.requestBody.map((b) => (
             <BodyBlock key={b.contentType} body={b} collapsed={false} />
           ))}
-        </div>
+        </Section>
       )}
-      <div className='flex flex-col gap-1'>
-        <h4 className='font-medium'>Responses</h4>
+      <Section title='Responses'>
         {op.responses.length === 0 ? (
           <p className='text-muted-foreground'>None documented.</p>
         ) : (
-          <ul aria-label='Responses' className='flex flex-col gap-0.5'>
-            {op.responses.map((r) => (
-              <li key={r.status} className='flex flex-col gap-1'>
-                <div className='flex items-center gap-2'>
-                  <span className='font-mono font-semibold'>{r.status}</span>
-                  <span>{r.description}</span>
-                </div>
-                {r.bodies.map((b) => (
-                  <div key={b.contentType} className='ml-4'>
-                    <BodyBlock body={b} collapsed />
-                  </div>
-                ))}
-              </li>
-            ))}
-          </ul>
+          <ResponsesTable responses={op.responses} />
         )}
-      </div>
-      <div className='flex flex-col gap-1'>
-        <h4 className='font-medium'>Security</h4>
+      </Section>
+      <Section title='Security'>
         {op.security.length === 0 ? (
           <p className='text-muted-foreground'>None.</p>
         ) : (
           <p className='font-mono'>{op.security.join(', ')}</p>
         )}
-      </div>
+      </Section>
     </div>
   );
 }

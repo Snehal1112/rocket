@@ -222,11 +222,13 @@ describe('OpenApiSpecView', () => {
     await screen.findByText('pets (2)');
     expect(screen.queryByText('A list')).toBeNull();
     await user.click(screen.getByRole('button', { name: /GET \/pets List pets/ }));
-    expect(screen.getByText('limit (query)')).toBeInTheDocument();
-    const list = screen.getByRole('list', { name: 'Responses' });
-    expect(within(list).getByText('200')).toBeInTheDocument();
-    expect(within(list).getByText('A list')).toBeInTheDocument();
-    expect(within(list).getByText('Missing')).toBeInTheDocument();
+    const params = screen.getByRole('table', { name: 'Parameters' });
+    expect(within(params).getByText('limit')).toBeInTheDocument();
+    expect(within(params).getByText('query')).toBeInTheDocument();
+    const table = screen.getByRole('table', { name: 'Responses' });
+    expect(within(table).getByText('200')).toBeInTheDocument();
+    expect(within(table).getByText('A list')).toBeInTheDocument();
+    expect(within(table).getByText('Missing')).toBeInTheDocument();
   });
 
   it('summary_text_is_rendered_as_plain_text', async () => {
