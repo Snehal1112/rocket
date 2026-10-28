@@ -77,9 +77,11 @@ The header button (and the menu item and the Overview link) opens **Connection s
 
 ## Next steps on a failed check
 
-A failed check shows a button under the alert: **Add access token** (not found or unauthorized on a GitHub link, opens Connection settings at the token field) or **Check now** (network, status, rate limit, too many redirects). An unknown code, a non-GitHub link or a missing approval shows no button. Every Check now trigger of a collection shares one running check.
+A failed check shows a banner at the top of the Overview and of Spec updates ("Failed to check for spec updates", the stored sentence, never a raw message) with a button: **Add access token** (not found or unauthorized on a GitHub link, opens Connection settings at the token field) or **Check now** (network, status, rate limit, too many redirects). An unknown code, a non-GitHub link or a missing approval shows no button. Every Check now trigger of a collection shares one running check.
 
-The Spec updates empty state says when the spec was last checked and offers Check now. The Your changes empty state explains how changes appear.
+While the last check failed the Spec updates empty state says "Unable to check for updates. Fix the connection issue above and check again." Otherwise it says when the spec was last checked and offers Check now. The Your changes empty state explains how changes appear.
+
+Turning checks on in Connection settings (from Off to a frequency, with the link approved) runs one check right away and shows its outcome in the status row. Changing the frequency or turning checks off does not check.
 
 ## Values in Your changes
 
@@ -170,3 +172,7 @@ A count badge shows on the collection row. A toast "N spec updates" with Review 
 32. Turn Keep my values off and press Accept all: the overwrite warning appears, and the spec's value is taken.
 33. Press the N conflicts button: the list shows only requests with a conflict. Press it again to see all.
 34. Skip an item, press Confirm and sync: the dialog lists N skipped.
+35. Break the link (wrong path) and check: the Overview and Spec updates each show one failure banner with the right button, and the header has none.
+36. On a GitHub link without a token, a not-found failure offers Add access token, which opens Connection settings at the token field.
+37. Turn checks on from Off in Connection settings: a check runs and the status row shows the outcome.
+38. Change the frequency, then turn checks off: no check runs. A successful check clears the banner.

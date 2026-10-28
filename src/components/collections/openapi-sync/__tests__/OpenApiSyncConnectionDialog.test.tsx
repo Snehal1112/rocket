@@ -79,6 +79,57 @@ describe('OpenApiSyncConnectionDialog', () => {
     await waitFor(() => expect(tauriApi.getOpenApiSyncStatus).toHaveBeenCalledWith('d0', true));
   });
 
+  describe('check after turning checks on', () => {
+    beforeEach(() => {
+      vi.mocked(tauriApi.setOpenApiSyncInterval).mockResolvedValue(undefined);
+      vi.mocked(tauriApi.checkOpenApiSyncNow).mockResolvedValue({ state: 'unchanged' });
+    });
+
+    it('the_check_runs_when_checks_are_turned_on', async () => {
+      const user = renderDialog('r1', makeStatus({ interval: 'off' }));
+      await user.click(screen.getByRole('switch', { name: SWITCH }));
+      await waitFor(() => expect(tauriApi.checkOpenApiSyncNow).toHaveBeenCalledWith('r1'));
+      expect(tauriApi.checkOpenApiSyncNow).toHaveBeenCalledTimes(1);
+    });
+
+    it('the_outcome_shows_in_the_status_row', async () => {
+      const user = renderDialog('r2', makeStatus({ interval: 'off' }));
+      await user.click(screen.getByRole('switch', { name: SWITCH }));
+      const row = screen.getByRole('region', { name: 'Status' });
+      expect(await within(row).findByText('No changes in the spec.')).toBeInTheDocument();
+    });
+
+    it('no_check_when_the_interval_only_changes', async () => {
+      const user = renderDialog('r3', makeStatus({ interval: 'hourly' }));
+      await user.click(screen.getByRole('combobox', { name: 'Check frequency' }));
+      await user.click(screen.getByRole('option', { name: 'Every week' }));
+      await waitFor(() => expect(tauriApi.setOpenApiSyncInterval).toHaveBeenCalled());
+      expect(tauriApi.checkOpenApiSyncNow).not.toHaveBeenCalled();
+    });
+
+    it('no_check_when_turning_checks_off', async () => {
+      const user = renderDialog('r4', makeStatus({ interval: 'hourly' }));
+      await user.click(screen.getByRole('switch', { name: SWITCH }));
+      await waitFor(() => expect(tauriApi.setOpenApiSyncInterval).toHaveBeenCalledWith('r4', 'off'));
+      expect(tauriApi.checkOpenApiSyncNow).not.toHaveBeenCalled();
+    });
+
+    it('no_check_without_consent', async () => {
+      const user = renderDialog('r5', makeStatus({ interval: 'off', consent: 'missing' }));
+      await user.click(screen.getByRole('switch', { name: SWITCH }));
+      expect(tauriApi.setOpenApiSyncInterval).not.toHaveBeenCalled();
+      expect(tauriApi.checkOpenApiSyncNow).not.toHaveBeenCalled();
+    });
+
+    it('no_check_when_saving_the_interval_fails', async () => {
+      vi.mocked(tauriApi.setOpenApiSyncInterval).mockRejectedValue('x');
+      const user = renderDialog('r6', makeStatus({ interval: 'off' }));
+      await user.click(screen.getByRole('switch', { name: SWITCH }));
+      await waitFor(() => expect(tauriApi.setOpenApiSyncInterval).toHaveBeenCalled());
+      expect(tauriApi.checkOpenApiSyncNow).not.toHaveBeenCalled();
+    });
+  });
+
   describe('status row', () => {
     it('the_status_row_shows_the_last_check', () => {
       renderDialog('s1', makeStatus());

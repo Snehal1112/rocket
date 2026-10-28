@@ -32,7 +32,7 @@ import { formatRelativeTime } from '@/lib/relative-time';
 import type { OpenApiSyncInterval, OpenApiSyncStatus } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 import { ChangeLinkForm } from './ChangeLinkForm';
-import { CheckNowButton } from './CheckNowButton';
+import { CheckNowButtonView, useCheckRunner } from './CheckNowButton';
 import { DisconnectSyncDialog } from './DisconnectSyncDialog';
 import { OpenApiSyncConsentBanner } from './OpenApiSyncConsentBanner';
 import { intervalLabel, isFileLocation, isGithubLocation, splitLocation } from './openApiSyncView';
@@ -80,6 +80,8 @@ function ConnectionBody({
   const tokenStatus = useOpenApiSyncStatus(collection, true);
   const hasToken = tokenStatus.data?.hasToken === true;
   const interval = useSetInterval(collection);
+  // One runner serves the status row and the check that follows turning checks on.
+  const runner = useCheckRunner(collection, status.consent);
   const setToken = useSetToken(collection);
   const clearToken = useClearToken(collection);
   const revoke = useRevokeConsent(collection);
@@ -106,6 +108,11 @@ function ConnectionBody({
     if (!granted) {
       // Nothing changes until the link is approved on this machine.
       setNeedConsent(true);
+      return;
+    }
+    if (on && status.interval === 'off') {
+      // Turning checks on from off checks once now, so the user sees the link works.
+      interval.mutate(lastChosen, { onSuccess: () => runner.run() });
       return;
     }
     interval.mutate(on ? lastChosen : 'off');
@@ -161,7 +168,7 @@ function ConnectionBody({
         <p className={cn('text-sm', failed && 'text-destructive')}>
           {checkedText} {statusSentence}
         </p>
-        <CheckNowButton collection={collection} consent={status.consent} />
+        <CheckNowButtonView runner={runner} />
       </section>
 
       <section

@@ -14,10 +14,10 @@ Status words: **Done** (exists on the branch today), **Planned** (a plan covers 
 | http / localhost | Any http or https URL | https only | Differs: loopback http only (series 4 plan 01), because Rocket asks consent but Bruno does not and a private-address first hop is a bigger risk here |
 | Authenticated spec URLs | Not supported | Github token only | Done (Beyond) |
 | Swagger 2.0 | Refused: "Swagger 2.0 is not supported. Please convert your spec to OpenAPI 3.x." | Imported | Beyond |
-| Edit source later | `Edit connection settings` modal, `Spec Source` URL/File toggle; saving probes the new source, then re-checks; nothing is reset, the new source is diffed against the stored spec; no match-count warning | Not possible (Disconnect, then Connect) | Planned: Change link (series 3 plan 01) with a match-count warning; re-check after save (series 5 plan 05) |
-| Invalid new source | Toast "The URL does not point to a valid OpenAPI 3.x specification" | n/a | Planned: preview error sentence |
+| Edit source later | `Edit connection settings` modal, `Spec Source` URL/File toggle; saving probes the new source, then re-checks; nothing is reset, the new source is diffed against the stored spec; no match-count warning | Not possible (Disconnect, then Connect) | Done: Change link (series 3 plan 01) with a match-count warning; a check right after checks are turned on (series 5 plan 05) |
+| Invalid new source | Toast "The URL does not point to a valid OpenAPI 3.x specification" | n/a | Done: a fixed error sentence in the form |
 | Auto-check | Switch plus 5/15/30/60 min; default 5; renderer tick every 5 minutes; no retry or backoff | Switch plus 5/15/30 min, hourly, daily, weekly, monthly; default 5; backoff on failures | Done (Beyond) |
-| Rate-limit hint | none | none (only failure sentences after the fact) | Planned: series 3 plan 05 (Beyond) |
+| Rate-limit hint | none | none (only failure sentences after the fact) | Done: series 3 plan 05 (Beyond) |
 | Manual check | `Check for updates` button in the card header | `Check now` | Done |
 | Disconnect | Confirm "This will only disconnect the sync configuration. Your collection will remain intact." Deletes the stored spec copy | Disconnect dialog, requests stay | Done |
 | Offline spec copy | App userData `specs/<uuid>`, not in the collection | `.rocket/openapi-applied.spec` in the collection (git-ignored) | Done (Differs, collection-local) |
@@ -30,15 +30,15 @@ Status words: **Done** (exists on the branch today), **Planned** (a plan covers 
 |---|---|---|---|
 | Tabs | Overview, Collection Changes, Spec Updates | Overview, Spec updates (N), Your changes (N) | Done |
 | Overview cards | Total, In sync, Changed, Spec updated pending; last synced; title and version | Endpoints, In sync with spec, Changed by you, Spec updates waiting; link, version, last checked, last synced | Done |
-| Check failure banner | Overview: "Failed to check for spec updates" plus the error and `Update connection settings`; Spec Updates empty state: "Unable to check for updates / Fix the connection issue above and check again." | Header alert with text only | Planned: actions in the alert (series 3 plan 03) and on Overview and Spec updates (series 5 plan 05) |
+| Check failure banner | Overview: "Failed to check for spec updates" plus the error and `Update connection settings`; Spec Updates empty state: "Unable to check for updates / Fix the connection issue above and check again." | Header alert with text only | Done: a banner with the action on Overview and Spec updates (series 5 plan 05) |
 | Missing file | "Source file not found at <path>" with `Update connection settings` | n/a | Done: fixed sentence without a path and `Choose another file` (series 4 plan 03) |
 | No updates | "No updates from the spec" | "No spec updates waiting" | Done |
-| No local changes | "No changes in collection. The collection endpoints match the last synced spec." | "You have not changed anything." | Planned: clearer text (series 3 plan 03) |
+| No local changes | "No changes in collection. The collection endpoints match the last synced spec." | "You have not changed anything." | Done: clearer text (series 3 plan 03) |
 | View spec | Read-only viewer of the stored spec; falls back to the live source; "No spec file found. Sync your collection first." | Tag-grouped list with parameters and response codes only | Gap: series 5 plan 01 adds request body, response schemas, auth and servers |
 | First connect of an existing collection | Matching by `METHOD:normalizedPath` only; no differences means sync starts at once; otherwise an "Initial sync required" banner and a Review page | Initial sync review with matched, ambiguous groups and a digest-checked confirm | Done (Beyond) |
 | Collection Changes lists | Added, Deleted, Modified with counts | Modified, Added by you, Deleted by you, Reset by you | Done |
-| Values in Your changes | Diff shown on the review page | Field names only | Planned: series 3 plan 02 |
-| Open request | `Open` on a locally added endpoint | none | Planned: series 3 plan 02 |
+| Values in Your changes | Diff shown on the review page | Field names only | Done: series 3 plan 02 |
+| Open request | `Open` on a locally added endpoint | none | Done: series 3 plan 02 |
 | Tracked drift fields | URL, params, headers, body, auth mode (not scripts, tests, assertions, settings) | Name, method, URL, description, query, path, headers, form, body, auth | Done (Beyond) |
 
 ## 3. Review and apply
@@ -51,7 +51,7 @@ Status words: **Done** (exists on the branch today), **Planned** (a plan covers 
 | Conflicts | `N Conflicts`; button "Resolve N conflict(s) and sync" | Conflicts start as Keep yours; no count | Gap: series 5 plan 04 |
 | Diff preview | `View Spec Diff` button | Baseline / Yours / Spec per field, unchanged fields hidden | Done (Beyond) |
 | Confirm dialog | `Confirm Sync`, `Confirm & Sync Collection` | Confirm and sync | Done; series 5 plan 04 adds counts if missing |
-| Skipped items | In memory only. After sync a skipped new endpoint shows under `Deleted from Collection` with `Restore` and `Restore All` | Persisted in `openapi-local.json`; shown as a count only | Planned: skipped list with Un-skip (series 3 plan 04) |
+| Skipped items | In memory only. After sync a skipped new endpoint shows under `Deleted from Collection` with `Restore` and `Restore All` | Persisted in `openapi-local.json`; shown as a count only | Done: skipped list with Un-skip (series 3 plan 04) |
 | Removed from spec | Accepting a removed endpoint deletes the file only if method and path still match | Deleted only when unedited; edited ones are detached and kept | Done (Beyond); Gap: no way to delete an edited removed request (series 5 plan 02) |
 | Local-only requests | `Delete`/`Delete All Local Endpoints` with "cannot be undone" confirm; `Revert All Changes` | Listed as "Added by you", no delete action | Gap: series 5 plan 02 |
 | Reset | `Reset`/`Reset All` replaces URL, params, headers, body, auth; keeps scripts, tests, assertions; confirm "Your local changes will be lost." | Replaces 10 fields (also name, method, description), backup and Restore, refused with an untrusted baseline | Done (Beyond); Differs: scope, series 5 plan 03 aligns it |
