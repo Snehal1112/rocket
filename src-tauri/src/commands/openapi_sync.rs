@@ -97,6 +97,9 @@ pub enum SyncItemDto {
         digest: String,
         fingerprint: String,
         request_path: String,
+        /// The method and URL of the spec's version, so the review can show the endpoint.
+        method: String,
+        url: String,
         cautious: bool,
         changes: Vec<FieldChangeDto>,
     },
@@ -280,6 +283,7 @@ fn item_dto(item: &SyncItem, digest: &str) -> SyncItemDto {
             request_path,
             merge,
             fingerprint,
+            spec,
             ..
         } => SyncItemDto::Changed {
             key: key.clone(),
@@ -287,6 +291,8 @@ fn item_dto(item: &SyncItem, digest: &str) -> SyncItemDto {
             digest,
             fingerprint: fingerprint.clone(),
             request_path: request_path.clone(),
+            method: spec.method.to_string(),
+            url: spec.url.clone(),
             cautious: merge.cautious,
             changes: merge.changes.iter().map(field_change_dto).collect(),
         },
@@ -1824,6 +1830,8 @@ mod tests {
                 "digest": "d-listPets",
                 "fingerprint": "fp",
                 "requestPath": "pets/listPets",
+                "method": "GET",
+                "url": "{{baseUrl}}/pets",
                 "cautious": false,
                 "changes": [{"field": "query:limit", "outcome": "takeSpec", "spec": "1"}],
             })

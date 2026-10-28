@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   defaultChoice,
+  displayPath,
   fieldLabel,
   splitLocation,
   filterItems,
@@ -19,6 +20,13 @@ import {
 import { changedItem, makePlan, newItem, removedItem } from './fixtures';
 
 describe('openApiSyncView', () => {
+  it('display_path_drops_the_leading_variable', () => {
+    expect(displayPath('{{baseUrl}}/pets/:id')).toBe('/pets/:id');
+    expect(displayPath('https://x.test/pets')).toBe('https://x.test/pets');
+    expect(displayPath('{{baseUrl}}')).toBe('/');
+    expect(displayPath('')).toBe('');
+  });
+
   it('the_reset_confirm_names_the_replaced_fields', () => {
     const text = resetConfirmText({ method: 'GET', url: '/orders', fields: ['url', 'name'] });
     expect(text).toContain('Reset GET /orders to the spec?');

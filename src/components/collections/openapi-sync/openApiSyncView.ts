@@ -31,6 +31,12 @@ export function groupItems(items: OpenApiSyncItem[]): SyncGroup[] {
   }));
 }
 
+/** A request URL without its leading `{{baseUrl}}`-style variable, so the path reads first. */
+export function displayPath(url: string): string {
+  const path = url.replace(/^\{\{[^}]+\}\}/, '');
+  return path === '' && url !== '' ? '/' : path;
+}
+
 /** The id of a list entry. A key can repeat across kinds, so the kind is part of it. */
 export function itemId(item: OpenApiSyncItem): string {
   return `${item.kind}:${item.key}`;

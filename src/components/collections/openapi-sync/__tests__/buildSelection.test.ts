@@ -21,6 +21,8 @@ const plan: OpenApiSyncPlan = {
       digest: 'dB',
       fingerprint: 'fB',
       requestPath: 'b.yml',
+      method: 'GET',
+      url: '/b',
       cautious: false,
       changes: [
         { field: 'url', outcome: 'conflict' },

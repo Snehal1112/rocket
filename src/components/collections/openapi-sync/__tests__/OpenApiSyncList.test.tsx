@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { OpenApiSyncItem } from '@/lib/tauri-api';
@@ -11,14 +11,22 @@ function props(overrides: Partial<React.ComponentProps<typeof OpenApiSyncList>> 
   return {
     collection: 'c',
     plan: makePlan(),
-    selectedId: null,
-    onSelect: vi.fn(),
     query: '',
     approved: new Set<string>(),
     skips: new Set<string>(),
     variables: new Set<string>(),
     onToggle: vi.fn(),
     onToggleVariable: vi.fn(),
+    detail: {
+      collection: 'c',
+      plan: overrides.plan ?? makePlan(),
+      choices: new Map(),
+      links: [],
+      onChoose: vi.fn(),
+      onLink: vi.fn(),
+      onUnlink: vi.fn(),
+      linksLocked: false,
+    },
     ...overrides,
   };
 }
@@ -40,21 +48,46 @@ vi.mock('@/lib/tauri-api', async () => {
 });
 
 describe('OpenApiSyncList', () => {
-  it('shows the groups with counts and calls back on select', async () => {
-    const p = props();
-    render(<OpenApiSyncList {...p} />);
-    expect(screen.getByText('New (1)')).toBeInTheDocument();
-    expect(screen.getByText('Changed (1)')).toBeInTheDocument();
-    expect(screen.getByText('Removed (1)')).toBeInTheDocument();
-    await userEvent.setup().click(screen.getByText('Add pet'));
-    expect(p.onSelect).toHaveBeenCalledWith('changed:POST /pets');
+  it('shows the sections in order with their counts', () => {
+    render(<OpenApiSyncList {...props()} />);
+    const titles = screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent);
+    expect(titles).toEqual(['Updated in spec', 'New in spec', 'Removed from spec']);
+    expect(screen.getAllByText('1')).toHaveLength(3);
   });
 
-  it('collapses a group', async () => {
+  it('shows the method, the path and the name of a row', () => {
+    render(<OpenApiSyncList {...props()} />);
+    // The leading variable is dropped, so the path reads first.
+    expect(screen.getAllByText('/pets')).toHaveLength(2);
+    expect(screen.getByText('Add pet')).toBeInTheDocument();
+    expect(screen.getAllByText('POST').length).toBeGreaterThan(0);
+  });
+
+  it('marks a request that has a conflict', () => {
+    render(<OpenApiSyncList {...props()} />);
+    expect(screen.getByText('Conflict')).toBeInTheDocument();
+  });
+
+  it('opens a row in place and closes it again', async () => {
+    render(<OpenApiSyncList {...props()} />);
+    const user = userEvent.setup();
+    const toggle = screen.getByRole('button', { name: 'Show details of Add pet' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await user.click(toggle);
+    expect(screen.getByRole('button', { name: 'Hide details of Add pet' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+    expect(screen.getByText('Header Accept')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Hide details of Add pet' }));
+    expect(screen.queryByText('Header Accept')).toBeNull();
+  });
+
+  it('collapses a section', async () => {
     render(<OpenApiSyncList {...props()} />);
     const user = userEvent.setup();
     expect(screen.getByText('Add pet')).toBeInTheDocument();
-    await user.click(screen.getByText('Changed (1)'));
+    await user.click(screen.getByRole('button', { name: /Updated in spec/ }));
     expect(screen.queryByText('Add pet')).toBeNull();
   });
 
@@ -69,7 +102,7 @@ describe('OpenApiSyncList', () => {
     expect(screen.queryByText('Same one')).toBeNull();
     await userEvent.setup().click(screen.getByText('Stays as you have it (1)'));
     expect(screen.getByText('Same one')).toBeInTheDocument();
-    expect(screen.getByText('Variables (1)')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { level: 3, name: 'Variables' })).toBeInTheDocument();
     expect(screen.getByText('Base URL baseUrl')).toBeInTheDocument();
     expect(screen.getByText(/2 skipped/)).toBeInTheDocument();
     expect(screen.getByText(/Old request/)).toBeInTheDocument();
@@ -78,7 +111,7 @@ describe('OpenApiSyncList', () => {
   it('caps a very large plan at 500 rows per group and offers Show more', async () => {
     const plan = makePlan({ items: manyItems(600) });
     render(<OpenApiSyncList {...props({ plan })} />);
-    expect(screen.getByText('Changed (600)')).toBeInTheDocument();
+    expect(screen.getByText('500 of 600')).toBeInTheDocument();
     expect(screen.getByText('Request 499')).toBeInTheDocument();
     expect(screen.queryByText('Request 500')).toBeNull();
     expect(screen.getByText('100 more not shown')).toBeInTheDocument();
@@ -87,34 +120,59 @@ describe('OpenApiSyncList', () => {
     expect(screen.queryByText(/more not shown/)).toBeNull();
   });
 
-  it('toggles an approval with the row checkbox and with the Space key', async () => {
+  it('flips a row with its choice and leaves the row closed', async () => {
     const p = props();
     render(<OpenApiSyncList {...p} />);
     const user = userEvent.setup();
-    await user.click(screen.getByRole('checkbox', { name: 'Include Add pet in apply' }));
+    await user.click(
+      within(screen.getByRole('radiogroup', { name: 'Choice for Add pet' })).getByRole('radio', {
+        name: 'Update',
+      }),
+    );
     expect(p.onToggle).toHaveBeenCalledWith('POST /pets');
-    screen.getByRole('checkbox', { name: 'Include List pets in apply' }).focus();
-    await user.keyboard(' ');
-    expect(p.onToggle).toHaveBeenCalledWith('GET /pets');
-    // The checkbox does not select the row.
-    expect(p.onSelect).not.toHaveBeenCalled();
+    // The choice is not the row, so nothing opened.
+    expect(screen.queryByText('Header Accept')).toBeNull();
   });
 
-  it('shows checked and skipped state from the sets', () => {
+  it('names the choice by the kind of the row', () => {
+    render(<OpenApiSyncList {...props()} />);
+    const names = (label: string) =>
+      within(screen.getByRole('radiogroup', { name: label }))
+        .getAllByRole('radio')
+        .map((r) => r.textContent);
+    expect(names('Choice for Add pet')).toEqual(['Keep current', 'Update']);
+    expect(names('Choice for List pets')).toEqual(["Don't add", 'Add']);
+    expect(names('Choice for Delete pet')).toEqual(['Keep', 'Delete']);
+  });
+
+  it('shows the choice and the skipped state from the sets', () => {
     const p = props({ approved: new Set(['POST /pets']), skips: new Set(['GET /pets']) });
     render(<OpenApiSyncList {...p} />);
-    expect(screen.getByRole('checkbox', { name: 'Include Add pet in apply' })).toBeChecked();
-    expect(screen.getByRole('checkbox', { name: 'Include List pets in apply' })).not.toBeChecked();
+    expect(
+      within(screen.getByRole('radiogroup', { name: 'Choice for Add pet' })).getByRole('radio', {
+        name: 'Update',
+      }),
+    ).toBeChecked();
+    expect(
+      within(screen.getByRole('radiogroup', { name: 'Choice for List pets' })).getByRole('radio', {
+        name: "Don't add",
+      }),
+    ).toBeChecked();
     expect(screen.getByText('Skipped')).toBeInTheDocument();
   });
 
-  it('toggles a variable with its own callback', async () => {
+  it('flips a variable with its own callback', async () => {
     const plan = makePlan({
       variableChanges: [{ name: 'baseUrl', kind: 'baseUrl', digest: 'v' }],
     });
     const p = props({ plan });
     render(<OpenApiSyncList {...p} />);
-    await userEvent.setup().click(screen.getByRole('checkbox', { name: 'Include Base URL baseUrl in apply' }));
+    await userEvent.setup().click(
+      within(screen.getByRole('radiogroup', { name: 'Choice for Base URL baseUrl' })).getByRole(
+        'radio',
+        { name: 'Update' },
+      ),
+    );
     expect(p.onToggleVariable).toHaveBeenCalledWith('baseUrl');
     expect(p.onToggle).not.toHaveBeenCalled();
   });
@@ -123,16 +181,11 @@ describe('OpenApiSyncList', () => {
     const plan = makePlan({ items: [...manyItems(650), ...makePlan().items] });
     render(<OpenApiSyncList {...props({ plan, query: 'request' })} />);
     // All 650 match, which is past the cap of 500.
-    expect(screen.getByText('Changed (650)')).toBeInTheDocument();
+    expect(screen.getByText('650')).toBeInTheDocument();
     expect(screen.getByText('Request 649')).toBeInTheDocument();
     expect(screen.queryByText(/more not shown/)).toBeNull();
     expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
-    expect(screen.getByText('New (0)')).toBeInTheDocument();
-  });
-
-  it('says when nothing matches the query', () => {
-    render(<OpenApiSyncList {...props({ query: 'zzz' })} />);
-    expect(screen.getAllByText('Nothing here.').length).toBeGreaterThan(0);
+    expect(screen.queryByRole('heading', { level: 3, name: 'New in spec' })).toBeNull();
   });
 
   it('the_skipped_line_opens_the_list', async () => {

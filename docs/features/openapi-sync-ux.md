@@ -12,6 +12,17 @@ Four counts: Endpoints, In sync, Changed by you, Spec updates waiting. A banner 
 
 ## Spec updates
 
+The review is one full-width column, laid out like Bruno's Spec Updates tab and like Your changes:
+
+- A header with **Review changes**, **Accept all**, **Keep current**, a **More actions** menu (**Skip selected**, **Skip all**), the search, the **N conflicts** filter and **Keep my values**. **Select matches** shows only while the search has text.
+- Stacked sections with sticky card headers: **Updated in spec**, **New in spec**, **Removed from spec** and **Variables**. An empty section is not shown. Each header has a count and one line saying what the section means, and collapses.
+- One row per request: method pill, path (the leading `{{baseUrl}}` is dropped), name, a **Conflict** badge when you and the spec changed the same field, and a **Skipped** badge. A removed request has no method, so it shows a **Removed** badge.
+- Each row has a two-button choice instead of a checkbox. The right button takes the spec's change and is the old "ticked" state: **Update** (changed), **Add** (new), **Delete** (removed), **Update** (variable). The left button leaves it as it is: **Keep current**, **Don't add**, **Keep**. Leaving a row on the left does not skip it: it stays waiting. Only **Skip selected** and **Skip all** persist a skip.
+- A row opens in place (chevron) to show its detail: the field choices, **Link as rename**, the new request's preview or the **Delete this request** button. Several rows can be open at once.
+- A footer bar at the bottom says how many will be applied and has **Confirm and sync (N)**.
+
+Rules for the choices:
+
 - On open, every New item, every Changed item without a conflict and every variable change is selected.
 - A Changed item with a conflict starts unselected and keeps your version.
 - A Removed item is never preselected. A Removed item you edited can never be deleted by a bulk action.

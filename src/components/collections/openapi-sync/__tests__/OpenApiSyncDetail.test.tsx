@@ -232,10 +232,10 @@ describe('OpenApiSyncDetail', () => {
     renderWithQuery(<OpenApiSyncDetail {...props({ plan, selectedId: 'new:GET /pets' })} />);
     expect(screen.getByText('POST')).toBeInTheDocument();
     expect(screen.getByText('{{baseUrl}}/pets')).toBeInTheDocument();
-    expect(screen.getByText('Headers: Accept, X-Trace')).toBeInTheDocument();
-    expect(screen.getByText('Query: limit')).toBeInTheDocument();
-    expect(screen.getByText('Has a body')).toBeInTheDocument();
-    expect(screen.getByText('Auth: bearer')).toBeInTheDocument();
+    expect(screen.getByText('Accept, X-Trace')).toBeInTheDocument();
+    expect(screen.getByText('limit')).toBeInTheDocument();
+    expect(screen.getByText('Yes')).toBeInTheDocument();
+    expect(screen.getByText('bearer')).toBeInTheDocument();
   });
 
   it('a_new_item_without_extras_says_so', () => {
@@ -252,9 +252,8 @@ describe('OpenApiSyncDetail', () => {
     };
     const plan = makePlan({ items: [item] });
     renderWithQuery(<OpenApiSyncDetail {...props({ plan, selectedId: 'new:GET /pets' })} />);
-    expect(screen.getByText('No headers')).toBeInTheDocument();
-    expect(screen.getByText('No query parameters')).toBeInTheDocument();
-    expect(screen.getByText('No body')).toBeInTheDocument();
-    expect(screen.getByText('No auth of its own')).toBeInTheDocument();
+    // Headers, query and body each say None.
+    expect(screen.getAllByText('None')).toHaveLength(3);
+    expect(screen.getByText('None of its own')).toBeInTheDocument();
   });
 });

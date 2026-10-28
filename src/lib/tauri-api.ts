@@ -2007,6 +2007,9 @@ export type OpenApiSyncItem =
       digest: string;
       fingerprint: string;
       requestPath: string;
+      /** The method and URL of the spec's version. */
+      method: string;
+      url: string;
       cautious: boolean;
       changes: OpenApiFieldChange[];
     }

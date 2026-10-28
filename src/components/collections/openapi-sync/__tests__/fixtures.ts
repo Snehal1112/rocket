@@ -43,6 +43,8 @@ export const changedItem: OpenApiSyncItem = {
   digest: 'd2',
   fingerprint: 'f2',
   requestPath: 'pets/add-pet.yml',
+  method: 'POST',
+  url: '{{baseUrl}}/pets',
   cautious: false,
   changes: [
     { field: 'header:Accept', outcome: 'takeSpec', baseline: 'a/b', yours: 'a/b', spec: 'a/c' },

@@ -1,5 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { type ReactNode, useMemo, useState } from 'react';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { StateBlock } from '@/components/ui/state-block';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
@@ -21,20 +22,14 @@ import { countOverwrites } from './bulkSelection';
 import { CheckFailureBanner } from './CheckFailureBanner';
 import { NoUpdatesState } from './NoUpdatesState';
 import { OpenApiSpecView } from './OpenApiSpecView';
-import { OpenApiSyncActionsBar } from './OpenApiSyncActionsBar';
+import { OpenApiSyncActionsBar, OpenApiSyncFooter } from './OpenApiSyncActionsBar';
 import { OpenApiSyncChanges } from './OpenApiSyncChanges';
 import { OpenApiSyncConsentBanner } from './OpenApiSyncConsentBanner';
-import { OpenApiSyncDetail } from './OpenApiSyncDetail';
+import { PlanNotices } from './OpenApiSyncDetail';
 import { OpenApiSyncHeader } from './OpenApiSyncHeader';
 import { OpenApiSyncList } from './OpenApiSyncList';
 import { OpenApiSyncOverview } from './OpenApiSyncOverview';
-import {
-  filterItems,
-  filterVariables,
-  findEntry,
-  firstEntryId,
-  isPendingChangedError,
-} from './openApiSyncView';
+import { filterItems, filterVariables, isPendingChangedError } from './openApiSyncView';
 import { GENERIC_SYNC_ERROR, syncErrorMessage } from './syncErrors';
 import { useSyncSelection } from './useSyncSelection';
 
@@ -59,7 +54,6 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
   const planEnabled = !!status.data?.hasPending;
   const [links, setLinks] = useState<Links>([]);
   const plan = useOpenApiSyncPlan(collection, planEnabled, links);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [confirmOpen, setConfirmOpen] = useState(false);
   // The plan the confirm dialog was opened on, so a different plan closes it.
@@ -206,13 +200,6 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
     }
   };
 
-  const activeId =
-    shownPlan && findEntry(shownPlan, selectedId)
-      ? selectedId
-      : shownPlan
-        ? firstEntryId(shownPlan)
-        : null;
-
   // The viewer must not wait to reopen by itself when the collection is disconnected and
   // connected again in this tab.
   if (viewingSpec && (status.isError || !status.data)) setViewingSpec(false);
@@ -244,6 +231,18 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
     );
   }
 
+  const detailProps = planData
+    ? {
+        collection,
+        plan: planData,
+        choices: sel.choices,
+        links,
+        onChoose: sel.setChoice,
+        onLink: sel.linkRename,
+        onUnlink: sel.unlink,
+        linksLocked: plan.isPlaceholderData,
+      }
+    : null;
   const noUpdates = (
     <NoUpdatesState collection={collection} status={s} onOpenChanges={() => setTab('changes')} />
   );
@@ -279,35 +278,24 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
     body = (
       <div className='flex min-h-0 flex-1 flex-col'>
         {noUpdates}
-        <div className='flex min-h-0 flex-1'>
-          <div className='w-72 shrink-0 border-r border-border'>
+        <ScrollArea className='min-h-0 flex-1'>
+          <div className='px-4 pt-4 empty:hidden'>
+            <PlanNotices plan={planData} />
+          </div>
+          {detailProps && (
             <OpenApiSyncList
               collection={collection}
               plan={planData}
-              selectedId={null}
-              onSelect={setSelectedId}
               query=''
               approved={sel.approved}
               skips={sel.skips}
               variables={sel.variables}
               onToggle={toggle}
               onToggleVariable={toggleVariable}
+              detail={detailProps}
             />
-          </div>
-          <div className='min-w-0 flex-1'>
-            <OpenApiSyncDetail
-              collection={collection}
-              plan={planData}
-              selectedId={null}
-              choices={sel.choices}
-              links={links}
-              onChoose={sel.setChoice}
-              onLink={sel.linkRename}
-              onUnlink={sel.unlink}
-              linksLocked={plan.isPlaceholderData}
-            />
-          </div>
-        </div>
+          )}
+        </ScrollArea>
       </div>
     );
   } else {
@@ -323,7 +311,6 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
           query={query}
           onQueryChange={setQuery}
           updateCount={planData.items.length + planData.variableChanges.length}
-          selectedCount={sel.selectedCount}
           itemCount={planData.items.length}
           filteredCount={matchCount}
           itemSelectedCount={approvedItems.length}
@@ -331,10 +318,6 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
           busy={busy}
           onSelectMatches={selectMatches}
           onSkipSelected={skipSelected}
-          onConfirm={() => {
-            setConfirmPlan(planData);
-            setConfirmOpen(true);
-          }}
           onAcceptAll={requestAcceptAll}
           onSkipAll={() => setBulk({ kind: 'skip', plan: planData })}
           onKeepCurrent={sel.keepCurrent}
@@ -351,35 +334,33 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
             </StateBlock>
           </div>
         )}
-        <div className='flex min-h-0 flex-1'>
-          <div className='w-72 shrink-0 border-r border-border'>
+        <ScrollArea className='min-h-0 flex-1'>
+          <div className='px-4 pt-4 empty:hidden'>
+            <PlanNotices plan={planData} />
+          </div>
+          {detailProps && (
             <OpenApiSyncList
               collection={collection}
               plan={listPlan ?? planData}
-              selectedId={activeId}
-              onSelect={setSelectedId}
               query={query}
               approved={approved}
               skips={sel.skips}
               variables={variables}
               onToggle={toggle}
               onToggleVariable={toggleVariable}
+              detail={detailProps}
             />
-          </div>
-          <div className='min-w-0 flex-1'>
-            <OpenApiSyncDetail
-              collection={collection}
-              plan={planData}
-              selectedId={activeId}
-              choices={sel.choices}
-              links={links}
-              onChoose={sel.setChoice}
-              onLink={sel.linkRename}
-              onUnlink={sel.unlink}
-              linksLocked={plan.isPlaceholderData}
-            />
-          </div>
-        </div>
+          )}
+        </ScrollArea>
+        <OpenApiSyncFooter
+          updateCount={planData.items.length + planData.variableChanges.length}
+          selectedCount={sel.selectedCount}
+          busy={busy}
+          onConfirm={() => {
+            setConfirmPlan(planData);
+            setConfirmOpen(true);
+          }}
+        />
         {bulk && (
           <BulkConfirmDialog
             kind={bulk.kind}
