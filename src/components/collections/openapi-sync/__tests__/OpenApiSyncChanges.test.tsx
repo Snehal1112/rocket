@@ -1,4 +1,5 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { toast } from 'sonner';
@@ -604,5 +605,61 @@ describe('OpenApiSyncChanges', () => {
     );
     await screen.findByText('Modified (1)');
     expect(screen.queryByRole('button', { name: 'Show changes' })).not.toBeInTheDocument();
+  });
+
+  describe('filter', () => {
+    const many = Array.from({ length: 10 }, (_, i) =>
+      row({ key: `GET /p${i}`, uid: `u${i}`, url: `{{baseUrl}}/p${i}`, fields: ['url'] }),
+    );
+
+    it('has_no_filter_box_for_a_short_list', async () => {
+      show(changes({ modified: [row()] }));
+      await screen.findByText('Modified (1)');
+      expect(screen.queryByRole('searchbox', { name: 'Filter your changes' })).toBeNull();
+    });
+
+    it('narrows_the_rows_and_shows_how_many_match', async () => {
+      show(changes({ modified: many }));
+      await screen.findByText('Modified (10)');
+      await userEvent.setup().type(screen.getByRole('searchbox', { name: 'Filter your changes' }), 'p3');
+      expect(screen.getByText('Modified (1 of 10)')).toBeInTheDocument();
+      expect(screen.getByText('{{baseUrl}}/p3')).toBeInTheDocument();
+      expect(screen.queryByText('{{baseUrl}}/p4')).toBeNull();
+    });
+
+    it('hides_the_bulk_reset_while_filtering_because_it_covers_every_row', async () => {
+      show(changes({ modified: many }));
+      await screen.findByText('Reset all to spec (10)');
+      await userEvent.setup().type(screen.getByRole('searchbox', { name: 'Filter your changes' }), 'p3');
+      expect(screen.queryByRole('button', { name: /Reset all to spec/ })).toBeNull();
+    });
+
+    it('keeps_the_filter_box_when_the_list_shrinks_below_the_threshold', async () => {
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      vi.mocked(tauriApi.getOpenApiSyncChanges).mockResolvedValue(
+        changes({ modified: many.slice(0, 9) }),
+      );
+      render(
+        <QueryClientProvider client={client}>
+          <OpenApiSyncChanges collection='c' />
+        </QueryClientProvider>,
+      );
+      await screen.findByText('Modified (9)');
+      await userEvent.setup().type(screen.getByRole('searchbox', { name: 'Filter your changes' }), 'p3');
+      expect(screen.getByText('Modified (1 of 9)')).toBeInTheDocument();
+      vi.mocked(tauriApi.getOpenApiSyncChanges).mockResolvedValue(
+        changes({ modified: many.slice(0, 8) }),
+      );
+      await act(() => client.invalidateQueries());
+      await screen.findByText('Modified (1 of 8)');
+      expect(screen.getByRole('searchbox', { name: 'Filter your changes' })).toHaveValue('p3');
+    });
+
+    it('says_so_when_nothing_matches', async () => {
+      show(changes({ modified: many }));
+      await screen.findByText('Modified (10)');
+      await userEvent.setup().type(screen.getByRole('searchbox', { name: 'Filter your changes' }), 'zzz');
+      expect(screen.getByText('No changes match "zzz".')).toBeInTheDocument();
+    });
   });
 });

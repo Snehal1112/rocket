@@ -1,6 +1,5 @@
 import { ShieldAlert, ShieldCheck } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -36,6 +35,7 @@ import { CheckNowButtonView, useCheckRunner } from './CheckNowButton';
 import { DisconnectSyncDialog } from './DisconnectSyncDialog';
 import { OpenApiSyncConsentBanner } from './OpenApiSyncConsentBanner';
 import { intervalLabel, isFileLocation, isGithubLocation, splitLocation } from './openApiSyncView';
+import { SyncBadge } from './SyncBadge';
 import { syncErrorMessage } from './syncErrors';
 
 const FREQUENCIES: OpenApiSyncInterval[] = [
@@ -189,20 +189,20 @@ function ConnectionBody({
         <div className='flex items-start justify-between gap-3'>
           <p className='min-w-0 break-all text-sm font-medium leading-snug'>
             {isFileLocation(status.location) && (
-              <Badge variant='secondary' className='mr-2 align-middle'>
+              <SyncBadge tone='info' className='mr-2 align-middle'>
                 Local file
-              </Badge>
+              </SyncBadge>
             )}
             {full && showFull ? full : short}
           </p>
-          <Badge variant={granted ? 'outline' : 'warning'} className='shrink-0 gap-1'>
+          <SyncBadge tone={granted ? 'success' : 'warning'} className='shrink-0 gap-1'>
             {granted ? (
               <ShieldCheck aria-hidden='true' className='h-3 w-3' />
             ) : (
               <ShieldAlert aria-hidden='true' className='h-3 w-3' />
             )}
             {granted ? 'Approved on this machine' : 'Not approved yet'}
-          </Badge>
+          </SyncBadge>
         </div>
         <div className='flex flex-wrap items-center gap-3'>
           {full && (

@@ -45,6 +45,12 @@ interface OpenApiSyncTabProps {
 }
 
 /** What the pending spec would change, with the choices to apply it. It never runs a check. */
+// An underline tab strip for this page only. The shared Tabs stay as they are.
+const TABS_LIST =
+  'h-auto w-full justify-start gap-4 rounded-none border-b border-border bg-transparent px-4 pb-0 pt-1';
+const TAB_TRIGGER =
+  'rounded-none border-b-2 border-transparent bg-transparent px-1 pb-2 shadow-none data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none';
+
 const hasConflict = (i: OpenApiSyncItem) =>
   i.kind === 'changed' && i.changes.some((c) => c.outcome === 'conflict');
 
@@ -238,7 +244,9 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
     );
   }
 
-  const noUpdates = <NoUpdatesState collection={collection} status={s} />;
+  const noUpdates = (
+    <NoUpdatesState collection={collection} status={s} onOpenChanges={() => setTab('changes')} />
+  );
   let body: ReactNode;
   if (!planEnabled) {
     body = noUpdates;
@@ -440,16 +448,21 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
         </div>
       ) : (
         <Tabs value={active} onValueChange={setTab} className='flex min-h-0 flex-1 flex-col'>
-          <TabsList className='mx-4 mt-3 self-start'>
-            <TabsTrigger value='overview'>Overview</TabsTrigger>
-            <TabsTrigger value='updates'>
+          <TabsList className={TABS_LIST}>
+            <TabsTrigger value='overview' className={TAB_TRIGGER}>
+              Overview
+            </TabsTrigger>
+            <TabsTrigger value='updates' className={TAB_TRIGGER}>
               {waiting > 0 ? `Spec updates (${waiting})` : 'Spec updates'}
             </TabsTrigger>
-            <TabsTrigger value='changes'>
+            <TabsTrigger value='changes' className={TAB_TRIGGER}>
               {changeCount > 0 ? `Your changes (${changeCount})` : 'Your changes'}
             </TabsTrigger>
           </TabsList>
-          <TabsContent value='overview' className='flex flex-col gap-4 p-4'>
+          <TabsContent
+            value='overview'
+            className='flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4'
+          >
             <CheckFailureBanner collection={collection} status={s} />
             <OpenApiSyncOverview
               collection={collection}
@@ -463,7 +476,7 @@ export function OpenApiSyncTab({ collection }: OpenApiSyncTabProps) {
             </div>
             {body}
           </TabsContent>
-          <TabsContent value='changes' className='p-4'>
+          <TabsContent value='changes' className='min-h-0 flex-1 overflow-y-auto p-4 pt-0'>
             <OpenApiSyncChanges collection={collection} />
           </TabsContent>
         </Tabs>

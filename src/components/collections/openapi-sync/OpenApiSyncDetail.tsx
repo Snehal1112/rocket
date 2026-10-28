@@ -1,7 +1,6 @@
 import { Link2, Unlink } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { SegmentedControl } from '@/components/ui/segmented-control';
@@ -23,6 +22,7 @@ import {
   renameHint,
   variableLabel,
 } from './openApiSyncView';
+import { SyncBadge } from './SyncBadge';
 import { syncErrorMessage } from './syncErrors';
 import { ValueBox } from './ValueBox';
 
@@ -119,9 +119,9 @@ function NewPreview({ preview }: { preview: OpenApiNewPreview }) {
   );
 }
 
-function outcomeVariant(outcome: OpenApiFieldChange['outcome']) {
+function outcomeTone(outcome: OpenApiFieldChange['outcome']) {
   if (outcome === 'conflict') return 'warning' as const;
-  return outcome === 'takeSpec' ? ('default' as const) : ('secondary' as const);
+  return outcome === 'takeSpec' ? ('info' as const) : ('neutral' as const);
 }
 
 function FieldBlock({
@@ -137,7 +137,7 @@ function FieldBlock({
     <div className='flex flex-col gap-2 rounded-md border p-3'>
       <div className='flex items-center justify-between gap-2'>
         <span className='break-all text-sm font-medium'>{fieldLabel(change.field)}</span>
-        <Badge variant={outcomeVariant(change.outcome)}>{outcomeLabel(change.outcome)}</Badge>
+        <SyncBadge tone={outcomeTone(change.outcome)}>{outcomeLabel(change.outcome)}</SyncBadge>
       </div>
       <ValueBox title='Baseline' value={change.baseline} />
       <ValueBox title='Yours' value={change.yours} />

@@ -27,6 +27,7 @@ vi.mock('@/lib/tauri-api', async () => {
     getOpenApiSyncStatus: vi.fn(),
     getOpenApiSyncPlan: vi.fn(),
     getOpenApiSyncOverview: vi.fn(),
+    getOpenApiSyncSpecSource: vi.fn(),
     getOpenApiSyncChanges: vi.fn(),
     getOpenApiSyncSpecView: vi.fn(),
     onOpenApiSyncChecked: vi.fn(() => Promise.resolve(() => undefined)),
@@ -114,6 +115,12 @@ describe('OpenApiSyncTab', () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(
       makeStatus({ hasPending: false, lastStatus: { state: 'unchanged' } }),
     );
+    vi.mocked(tauriApi.getOpenApiSyncSpecSource).mockResolvedValue({
+      text: null,
+      format: 'yaml',
+      sizeBytes: 0,
+      tooLarge: false,
+    });
     vi.mocked(tauriApi.getOpenApiSyncSpecView).mockResolvedValue({
       title: 'Pets API',
       version: '1',
@@ -259,6 +266,38 @@ describe('OpenApiSyncTab', () => {
     it('the_empty_updates_state_says_when_it_was_last_checked', async () => {
       await openEmptyUpdates();
       expect(screen.getByText('Last checked 2h ago.')).toBeInTheDocument();
+    });
+
+    it('the_empty_updates_state_links_to_your_changes_when_there_are_some', async () => {
+      const changed = {
+        key: null,
+        uid: 'a',
+        name: 'a',
+        method: 'GET',
+        url: '/x',
+        requestPath: null,
+        fields: [],
+        changes: [],
+      };
+      vi.mocked(tauriApi.getOpenApiSyncChanges).mockResolvedValue({
+        baselineTrusted: true,
+        modified: [changed],
+        added: [],
+        deleted: [],
+        backups: [],
+        resetAvailable: true,
+      });
+      await openEmptyUpdates();
+      await userEvent.setup().click(screen.getByRole('button', { name: 'Review your changes (1)' }));
+      expect(screen.getByRole('tab', { name: 'Your changes (1)' })).toHaveAttribute(
+        'data-state',
+        'active',
+      );
+    });
+
+    it('the_empty_updates_state_hides_the_changes_link_when_there_are_none', async () => {
+      await openEmptyUpdates();
+      expect(screen.queryByRole('button', { name: /Review your changes/ })).toBeNull();
     });
 
     it('the_empty_updates_state_says_when_it_was_never_checked', async () => {
@@ -474,6 +513,12 @@ describe('OpenApiSyncTab', () => {
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockResolvedValue(
       makeStatus({ hasPending: false, lastStatus: { state: 'unchanged' } }),
     );
+    vi.mocked(tauriApi.getOpenApiSyncSpecSource).mockResolvedValue({
+      text: null,
+      format: 'yaml',
+      sizeBytes: 0,
+      tooLarge: false,
+    });
     vi.mocked(tauriApi.getOpenApiSyncSpecView).mockResolvedValue({
       title: 'Pets API',
       version: '1',

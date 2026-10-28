@@ -1,6 +1,5 @@
 import { MoreHorizontal, Settings2 } from 'lucide-react';
 import { useState } from 'react';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -15,6 +14,7 @@ import { type ChipState, chipState } from './chipState';
 import { DisconnectSyncDialog } from './DisconnectSyncDialog';
 import { OpenApiSyncConnectionDialog } from './OpenApiSyncConnectionDialog';
 import { intervalLabel, isFileLocation, splitLocation } from './openApiSyncView';
+import { SyncBadge, type SyncTone } from './SyncBadge';
 
 interface OpenApiSyncHeaderProps {
   collection: string;
@@ -25,14 +25,13 @@ interface OpenApiSyncHeaderProps {
   onViewSpec?: () => void;
 }
 
-const CHIP_VARIANT: Record<ChipState['kind'], 'warning' | 'destructive' | 'secondary' | 'outline'> =
-  {
-    'needs-approval': 'warning',
-    failed: 'destructive',
-    updates: 'warning',
-    off: 'secondary',
-    connected: 'outline',
-  };
+const CHIP_TONE: Record<ChipState['kind'], SyncTone> = {
+  'needs-approval': 'warning',
+  failed: 'danger',
+  updates: 'warning',
+  off: 'neutral',
+  connected: 'success',
+};
 
 /** The collection, its sync status chip, where the spec comes from and Check now. */
 export function OpenApiSyncHeader({
@@ -49,14 +48,14 @@ export function OpenApiSyncHeader({
   const openDialog = () => setDialogOpen(true);
   const { short, full } = splitLocation(status.location);
   return (
-    <div className='flex flex-col gap-2 border-b border-border/70 px-4 py-3'>
+    <div className='flex flex-col gap-2 border-b border-border px-4 py-2'>
       <div className='flex flex-wrap items-start justify-between gap-3'>
-        <div className='flex min-w-0 flex-col gap-1'>
-          <div className='flex items-center gap-1'>
+        <div className='flex min-w-0 flex-col gap-0.5'>
+          <div className='flex items-center gap-2'>
             <h2 className='truncate text-sm font-semibold'>{collection}</h2>
-            <Badge variant={CHIP_VARIANT[chip.kind]} title={chip.detail}>
+            <SyncBadge tone={CHIP_TONE[chip.kind]} dot title={chip.detail}>
               {chip.label}
-            </Badge>
+            </SyncBadge>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
@@ -78,11 +77,11 @@ export function OpenApiSyncHeader({
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
-          <p className='break-all text-sm font-medium'>
+          <p className='break-all font-mono text-xs text-muted-foreground'>
             {isFileLocation(status.location) && (
-              <Badge variant='secondary' className='mr-2 align-middle'>
+              <SyncBadge tone='info' className='mr-2 align-middle'>
                 Local file
-              </Badge>
+              </SyncBadge>
             )}
             {full && showFull ? full : short}
           </p>
@@ -98,16 +97,18 @@ export function OpenApiSyncHeader({
               </Button>
             </div>
           )}
-          <div className='flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground'>
+          <div className='flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground'>
             <span>
               {status.lastCheckedAt
                 ? `Last checked ${formatRelativeTime(status.lastCheckedAt)}`
                 : 'Not checked yet'}
             </span>
+            <span aria-hidden='true'>·</span>
             <span>Check interval: {intervalLabel(status.interval)}</span>
           </div>
         </div>
-        <div className='flex flex-wrap items-center gap-2'>
+        {/* Top aligned, so the check status under Check now does not push the other buttons. */}
+        <div className='flex flex-wrap items-start gap-2'>
           {/* The same dialog is in the menu, but a faint icon is easy to miss. */}
           <Button variant='outline' size='sm' onClick={() => openDialog()}>
             <Settings2 aria-hidden='true' className='mr-1.5 h-3.5 w-3.5' />

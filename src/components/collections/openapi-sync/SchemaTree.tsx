@@ -1,5 +1,5 @@
-import { Badge } from '@/components/ui/badge';
 import type { OpenApiSchemaView } from '@/lib/tauri-api';
+import { SyncBadge } from './SyncBadge';
 
 /** The type line of a node: `integer (int64)`. */
 function typeText(schema: OpenApiSchemaView): string {
@@ -24,8 +24,8 @@ export function SchemaTree({
       <div className='flex flex-wrap items-center gap-1.5 font-mono'>
         {name && <span className='font-semibold'>{name}</span>}
         <span className='text-muted-foreground'>{typeText(schema)}</span>
-        {schema.required && <Badge variant='secondary'>required</Badge>}
-        {schema.nullable && <Badge variant='outline'>nullable</Badge>}
+        {schema.required && <SyncBadge tone='warning'>required</SyncBadge>}
+        {schema.nullable && <SyncBadge tone='neutral'>nullable</SyncBadge>}
       </div>
       {schema.refName && <p className='text-muted-foreground'>{`Same as ${schema.refName}`}</p>}
       {schema.enumValues.length > 0 && (

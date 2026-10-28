@@ -1,7 +1,8 @@
+import { Search } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { StateBlock } from '@/components/ui/state-block';
 import {
   useDeleteRequests,
@@ -22,16 +23,14 @@ import {
 } from './openApiSyncView';
 import { openSyncRequest } from './openSyncRequest';
 import { ResetConfirmDialog } from './ResetConfirmDialog';
+import { MethodLabel, SyncBadge } from './SyncBadge';
 import { syncErrorMessage } from './syncErrors';
 import { ValueBox } from './ValueBox';
 
 type Kind = 'modified' | 'added' | 'deleted';
 
-const KIND_LABEL: Record<Kind, string> = {
-  modified: 'Modified',
-  added: 'Added',
-  deleted: 'Deleted',
-};
+/** The filter shows once there are more rows than this, so a short list stays plain. */
+const SEARCH_FROM = 8;
 
 const GROUP_TITLE: Record<Kind, string> = {
   modified: 'Modified',
@@ -79,80 +78,90 @@ function ChangeRow({
     setMissing(result === 'missing');
   };
   const canExpand = showFields && kind === 'modified' && row.changes.length > 0;
+  const showChips = showFields && kind === 'modified' && row.fields.length > 0;
+  const actionClass =
+    'h-6 shrink-0 px-2 text-xs opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100';
   return (
-    <li className='flex flex-col gap-1 border-b border-border/60 px-3 py-2 text-sm last:border-b-0'>
-      <div className='flex min-w-0 items-center gap-2'>
-        <Badge variant='outline'>{KIND_LABEL[kind]}</Badge>
-        {row.method && (
-          <span className='shrink-0 font-mono text-xs font-semibold'>{row.method}</span>
+    <li className='group border-b border-border px-3 py-1 text-sm last:border-b-0 hover:bg-muted/30'>
+      <div className='flex min-h-6 min-w-0 flex-wrap items-center gap-x-2 gap-y-1'>
+        {row.method && <MethodLabel method={row.method} className='w-14 shrink-0' />}
+        <span
+          title={target}
+          className='min-w-0 max-w-[min(100%,36rem)] shrink truncate font-mono text-xs text-muted-foreground'
+        >
+          {target}
+        </span>
+        {showChips && (
+          <div className='flex min-w-0 flex-wrap items-center gap-1'>
+            {row.fields.map((f) => (
+              <SyncBadge key={f} tone='info' className='font-normal'>
+                {fieldLabel(f)}
+              </SyncBadge>
+            ))}
+          </div>
         )}
-        <span className='min-w-0 flex-1 break-all font-mono text-xs'>{target}</span>
-        {canOpen && (
-          <Button
-            variant='ghost'
-            size='sm'
-            className='h-7 shrink-0'
-            onClick={() => void openRequest()}
-          >
-            Open request
-          </Button>
-        )}
-        {kind === 'added' && del && row.requestPath !== null && (
-          <Button
-            variant='outline'
-            size='sm'
-            className='h-7 shrink-0'
-            disabled={!del.enabled}
-            onClick={() => del.onDelete(row)}
-          >
-            Delete
-          </Button>
-        )}
-        {kind === 'modified' && reset && row.key && isResetEligible(row.fields) && (
-          <Button
-            variant='outline'
-            size='sm'
-            className='h-7 shrink-0'
-            disabled={!reset.enabled}
-            onClick={() => reset.onReset(row)}
-          >
-            Reset to spec
-          </Button>
-        )}
+        <div className='ml-auto flex shrink-0 items-center gap-1'>
+          {canExpand && (
+            <Button
+              variant='link'
+              size='sm'
+              className='h-6 p-0 text-xs'
+              aria-expanded={open}
+              onClick={() => setOpen((v) => !v)}
+            >
+              {open ? 'Hide changes' : 'Show changes'}
+            </Button>
+          )}
+          {canOpen && (
+            <Button
+              variant='ghost'
+              size='sm'
+              className={actionClass}
+              onClick={() => void openRequest()}
+            >
+              Open request
+            </Button>
+          )}
+          {kind === 'added' && del && row.requestPath !== null && (
+            <Button
+              variant='ghost'
+              size='sm'
+              className={actionClass}
+              disabled={!del.enabled}
+              onClick={() => del.onDelete(row)}
+            >
+              Delete
+            </Button>
+          )}
+          {kind === 'modified' && reset && row.key && isResetEligible(row.fields) && (
+            <Button
+              variant='ghost'
+              size='sm'
+              className={actionClass}
+              disabled={!reset.enabled}
+              onClick={() => reset.onReset(row)}
+            >
+              Reset to spec
+            </Button>
+          )}
+        </div>
       </div>
       {missing && (
         <p role='alert' className='text-xs text-destructive'>
           The request file was not found.
         </p>
       )}
-      {showFields && kind === 'modified' && row.fields.length > 0 && (
-        <div className='flex flex-wrap gap-1'>
-          {row.fields.map((f) => (
-            <Badge key={f} variant='secondary'>
-              {fieldLabel(f)}
-            </Badge>
-          ))}
-        </div>
-      )}
-      {canExpand && (
-        <div className='flex flex-col gap-2'>
-          <Button
-            variant='link'
-            size='sm'
-            className='h-auto self-start p-0 text-xs'
-            aria-expanded={open}
-            onClick={() => setOpen((v) => !v)}
-          >
-            {open ? 'Hide changes' : 'Show changes'}
-          </Button>
-          {open &&
-            row.changes.map((c) => (
-              <div key={c.field} className='flex flex-col gap-2 rounded-md border p-3'>
-                <span className='break-all text-sm font-medium'>{fieldLabel(c.field)}</span>
+      {canExpand && open && (
+        <div className='flex flex-col gap-2 py-2 pl-16'>
+          {row.changes.map((c) => (
+            <div key={c.field} className='flex flex-col gap-1 rounded-sm border border-border p-2'>
+              <span className='break-all text-xs font-medium'>{fieldLabel(c.field)}</span>
+              <div className='grid gap-2 md:grid-cols-2'>
                 <ValueBox title='Baseline' value={c.baseline} />
                 <ValueBox title='Yours' value={c.yours} />
               </div>
-            ))}
+            </div>
+          ))}
         </div>
       )}
     </li>
@@ -163,6 +172,7 @@ function Group({
   collection,
   kind,
   rows,
+  total,
   showFields,
   reset,
   onResetAll,
@@ -171,7 +181,9 @@ function Group({
 }: {
   collection: string;
   kind: Kind;
+  /** The rows to show. A filter can make this fewer than `total`. */
   rows: OpenApiChangeRow[];
+  total: number;
   showFields: boolean;
   reset?: ResetControl;
   onResetAll?: () => void;
@@ -179,23 +191,29 @@ function Group({
   onDeleteAll?: () => void;
 }) {
   if (rows.length === 0) return null;
+  // A bulk action always covers the whole group, so it hides while a filter narrows the rows.
+  const filtering = rows.length !== total;
   const resettable = rows.filter((r) => r.key && isResetEligible(r.fields)).length;
   return (
-    <section className='flex flex-col gap-1'>
-      <div className='flex items-center justify-between gap-2'>
-        <h3 className='text-sm font-medium'>{`${GROUP_TITLE[kind]} (${rows.length})`}</h3>
-        {onResetAll && reset && resettable > 0 && (
+    <section className='flex flex-col'>
+      <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-border bg-background py-1.5'>
+        <h3 className='text-sm font-medium text-muted-foreground'>
+          {filtering
+            ? `${GROUP_TITLE[kind]} (${rows.length} of ${total})`
+            : `${GROUP_TITLE[kind]} (${rows.length})`}
+        </h3>
+        {!filtering && onResetAll && reset && resettable > 0 && (
           <Button variant='outline' size='sm' disabled={!reset.enabled} onClick={onResetAll}>
             {`Reset all to spec (${resettable})`}
           </Button>
         )}
-        {onDeleteAll && del && (
+        {!filtering && onDeleteAll && del && (
           <Button variant='outline' size='sm' disabled={!del.enabled} onClick={onDeleteAll}>
             {`Delete all (${rows.length})`}
           </Button>
         )}
       </div>
-      <ul className='rounded-md border border-border/70'>
+      <ul>
         {rows.map((r) => (
           <ChangeRow
             key={`${r.uid}:${r.requestPath}`}
@@ -232,23 +250,23 @@ function BackupGroup({
   return (
     <section className='flex flex-col gap-1'>
       <h3 className='text-sm font-medium'>{`Reset by you (${rows.length})`}</h3>
-      <ul className='rounded-md border border-border/70'>
+      <ul className='rounded-sm border border-border'>
         {rows.map((r) => (
           <li
             key={r.key}
             className='flex flex-col gap-1 border-b border-border/60 px-3 py-2 text-sm last:border-b-0'
           >
             <div className='flex min-w-0 items-center gap-2'>
-              <Badge variant='outline'>Reset</Badge>
-              <span className='shrink-0 font-mono text-xs font-semibold'>{r.method}</span>
+              <SyncBadge tone='neutral'>Reset</SyncBadge>
+              <MethodLabel method={r.method} className='shrink-0' />
               <span className='min-w-0 flex-1 break-all font-mono text-xs'>{r.url}</span>
             </div>
             {r.fields.length > 0 && (
               <div className='flex flex-wrap gap-1'>
                 {r.fields.map((f) => (
-                  <Badge key={f} variant='secondary'>
+                  <SyncBadge key={f} tone='info'>
                     {fieldLabel(f)}
-                  </Badge>
+                  </SyncBadge>
                 ))}
               </div>
             )}
@@ -292,6 +310,7 @@ export function OpenApiSyncChanges({ collection }: { collection: string }) {
   const [deleting, setDeleting] = useState<DeleteRequestRow[] | null>(null);
   const [pending, setPending] = useState<PendingReset | null>(null);
   const [discarding, setDiscarding] = useState<OpenApiBackupRow | null>(null);
+  const [query, setQuery] = useState('');
   if (changes.isError) {
     return <StateBlock tone='error'>{syncErrorMessage(changes.error)}</StateBlock>;
   }
@@ -340,12 +359,44 @@ export function OpenApiSyncChanges({ collection }: { collection: string }) {
     reset.reset();
     setPending({ keys, body: resetAllConfirmText(keys.length) });
   };
+  const needle = query.trim().toLowerCase();
+  const narrow = (rows: OpenApiChangeRow[]) =>
+    needle
+      ? rows.filter((r) =>
+          `${r.method} ${r.url} ${r.requestPath ?? ''} ${r.name}`.toLowerCase().includes(needle),
+        )
+      : rows;
+  const modified = narrow(c.modified);
+  const added = narrow(c.added);
+  const deleted = narrow(c.deleted);
+  // The box stays while a filter is on, so a shrinking list never traps the user in a filter.
+  const searchable =
+    c.modified.length + c.added.length + c.deleted.length > SEARCH_FROM || needle !== '';
+  const noMatch = needle !== '' && modified.length + added.length + deleted.length === 0;
   return (
-    <div className='flex flex-col gap-4'>
+    <div className='flex flex-col gap-3'>
       <p className='text-xs text-muted-foreground'>
         Differences between your collection and the last synced spec. Sync never overwrites these
         without asking.
       </p>
+      {searchable && (
+        <div className='relative max-w-md'>
+          <Search
+            aria-hidden='true'
+            className='pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground'
+          />
+          {/* Same look as the other filter fields. The native search styling is switched off. */}
+          <Input
+            type='search'
+            aria-label='Filter your changes'
+            placeholder='Filter by method, path or name'
+            className='h-7 appearance-none pl-7 text-sm [&::-webkit-search-cancel-button]:appearance-none'
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+      )}
+      {noMatch && <StateBlock tone='empty'>{`No changes match "${query.trim()}".`}</StateBlock>}
       {!c.baselineTrusted && (
         <p className='text-xs text-muted-foreground'>
           These differences are approximate because the sync data is from an older version.
@@ -362,7 +413,8 @@ export function OpenApiSyncChanges({ collection }: { collection: string }) {
       <Group
         collection={collection}
         kind='modified'
-        rows={c.modified}
+        rows={modified}
+        total={c.modified.length}
         showFields={c.baselineTrusted}
         reset={control}
         onResetAll={resetAll}
@@ -385,12 +437,19 @@ export function OpenApiSyncChanges({ collection }: { collection: string }) {
       <Group
         collection={collection}
         kind='added'
-        rows={c.added}
+        rows={added}
+        total={c.added.length}
         showFields={false}
         del={deleteControl}
         onDeleteAll={deleteAll}
       />
-      <Group collection={collection} kind='deleted' rows={c.deleted} showFields={false} />
+      <Group
+        collection={collection}
+        kind='deleted'
+        rows={deleted}
+        total={c.deleted.length}
+        showFields={false}
+      />
       <p className='text-xs text-muted-foreground'>
         Scripts, tests and assertions are not tracked here.
       </p>

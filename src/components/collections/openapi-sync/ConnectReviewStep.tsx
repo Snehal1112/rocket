@@ -1,4 +1,3 @@
-import { Badge } from '@/components/ui/badge';
 import {
   Select,
   SelectContent,
@@ -12,6 +11,7 @@ import {
   type ConnectSection,
   summariseRows,
 } from './connectRows';
+import { SyncBadge } from './SyncBadge';
 
 const CHOICE_LABEL: Record<ConnectChoice, string> = {
   link: 'Link to spec',
@@ -60,7 +60,7 @@ function Line({ row }: { row: ConnectRowChoice }) {
       )}
       {operation && (
         <div className='flex items-center gap-2 text-xs'>
-          {request && <Badge variant='outline'>Spec</Badge>}
+          {request && <SyncBadge tone='info'>Spec</SyncBadge>}
           <Method value={operation.method} />
           <span className='truncate font-mono'>{operation.path}</span>
           {operation.summary && (
@@ -83,7 +83,7 @@ function Group({ row }: { row: ConnectRowChoice }) {
       ))}
       {(row.operations ?? []).map((o) => (
         <div key={o.key} className='flex items-center gap-2 text-xs'>
-          <Badge variant='outline'>Spec</Badge>
+          <SyncBadge tone='info'>Spec</SyncBadge>
           <Method value={o.method} />
           <span className='truncate font-mono'>{o.path}</span>
         </div>
