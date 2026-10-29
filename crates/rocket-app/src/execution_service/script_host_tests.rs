@@ -748,7 +748,7 @@ async fn send_request_to_the_host_of_a_templated_request_url_is_allowed_with_the
         .mount(&server)
         .await;
     let mut env = Environment::new("dev");
-    env.set_variable(Variable::new("base", &server.uri()));
+    env.set_variable(Variable::new("base", server.uri()));
     let svc = RequestExecutionService::new(
         Box::new(StaticEnvRepo(env)),
         Arc::new(rocket_infra::ReqwestExecutor::new()),

@@ -39,6 +39,7 @@ pub struct SyncInputs<'a> {
 
 /// One endpoint the plan reports.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 pub enum SyncItem {
     New {
         key: String,

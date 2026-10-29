@@ -176,8 +176,7 @@ pub(crate) mod test_support {
                 .fail_save
                 .lock()
                 .expect("lock fail_save")
-                .iter()
-                .any(|n| *n == flow.name)
+                .contains(&flow.name)
             {
                 return Err(boom());
             }

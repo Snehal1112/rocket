@@ -414,11 +414,10 @@ async fn a_kept_row_changes_nothing() {
     let w = world().await;
     hand_made(&w, &[("Mine", "GET", "{{baseUrl}}/mine")]);
     let before = snapshot(
-        &hand_root(&w)
+        hand_root(&w)
             .join("Mine.yml")
             .parent()
-            .expect("parent")
-            .to_path_buf(),
+            .expect("parent"),
     )
     .get("Mine.yml")
     .cloned();

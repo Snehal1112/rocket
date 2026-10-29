@@ -187,8 +187,10 @@ impl<'a> Applier<'a> {
             inputs.existing_paths,
             source.operations.iter().map(|o| o.request_path.as_str()),
         );
-        let mut local = OpenApiLocalState::default();
-        local.skips = inputs.plan_inputs.skips.clone();
+        let local = OpenApiLocalState {
+            skips: inputs.plan_inputs.skips.clone(),
+            ..Default::default()
+        };
         let mut report = ApplyReport::default();
         let mut stale_set = HashSet::new();
         for key in stale {
@@ -291,7 +293,7 @@ impl<'a> Applier<'a> {
             req.name = format!("{} ({n})", req.name);
         }
         let bytes = self.inputs.renderer.render(&path, &req)?;
-        let created: Vec<String> = self.alloc.new_folders.drain(..).collect();
+        let created: Vec<String> = std::mem::take(&mut self.alloc.new_folders);
         for folder_path in created {
             let rel = self.alloc.folder_file_for(&folder_path)?;
             let folder_bytes = self.inputs.renderer.render_folder(&folder_path)?;
