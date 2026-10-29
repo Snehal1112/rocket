@@ -1,17 +1,11 @@
-import { MoreHorizontal, Settings2 } from 'lucide-react';
+import { Clock, FileText, Link2, Settings2, Timer } from 'lucide-react';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { formatRelativeTime } from '@/lib/relative-time';
 import type { OpenApiSyncStatus } from '@/lib/tauri-api';
+import { cn } from '@/lib/utils';
 import { CheckNowButtonView, useCheckRunner } from './CheckNowButton';
 import { type ChipState, chipState } from './chipState';
-import { DisconnectSyncDialog } from './DisconnectSyncDialog';
 import { OpenApiSyncConnectionDialog } from './OpenApiSyncConnectionDialog';
 import { intervalLabel, isFileLocation, splitLocation } from './openApiSyncView';
 import { SyncBadge, type SyncTone } from './SyncBadge';
@@ -33,7 +27,7 @@ const CHIP_TONE: Record<ChipState['kind'], SyncTone> = {
   connected: 'success',
 };
 
-/** The collection, its sync status chip, where the spec comes from and Check now. */
+/** The collection, its sync status chip, where the spec comes from and the sync actions. */
 export function OpenApiSyncHeader({
   collection,
   status,
@@ -42,74 +36,24 @@ export function OpenApiSyncHeader({
 }: OpenApiSyncHeaderProps) {
   const [showFull, setShowFull] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [disconnectOpen, setDisconnectOpen] = useState(false);
   const runner = useCheckRunner(collection, status.consent);
   const chip = chipState(status, waiting);
   const openDialog = () => setDialogOpen(true);
   const { short, full } = splitLocation(status.location);
+  const fileSource = isFileLocation(status.location);
+  const expanded = Boolean(full && showFull);
   return (
-    <div className='flex flex-col gap-2 border-b border-border px-4 py-2'>
-      <div className='flex flex-wrap items-start justify-between gap-3'>
-        <div className='flex min-w-0 flex-col gap-0.5'>
-          <div className='flex items-center gap-2'>
-            <h2 className='truncate text-sm font-semibold'>{collection}</h2>
-            <SyncBadge tone={CHIP_TONE[chip.kind]} dot title={chip.detail}>
-              {chip.label}
-            </SyncBadge>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant='ghost'
-                  size='icon'
-                  className='h-6 w-6'
-                  aria-label='OpenAPI sync actions'
-                >
-                  <MoreHorizontal aria-hidden='true' className='h-4 w-4' />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align='start'>
-                <DropdownMenuItem onSelect={() => openDialog()}>
-                  Connection settings
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => setDisconnectOpen(true)}>
-                  Disconnect
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-          <p className='break-all font-mono text-xs text-muted-foreground'>
-            {isFileLocation(status.location) && (
-              <SyncBadge tone='info' className='mr-2 align-middle'>
-                Local file
-              </SyncBadge>
-            )}
-            {full && showFull ? full : short}
-          </p>
-          {full && (
-            <div>
-              <Button
-                variant='link'
-                size='sm'
-                className='h-auto p-0 text-xs'
-                onClick={() => setShowFull((v) => !v)}
-              >
-                {showFull ? 'Hide full link' : 'Show full link'}
-              </Button>
-            </div>
-          )}
-          <div className='flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground'>
-            <span>
-              {status.lastCheckedAt
-                ? `Last checked ${formatRelativeTime(status.lastCheckedAt)}`
-                : 'Not checked yet'}
-            </span>
-            <span aria-hidden='true'>·</span>
-            <span>Check interval: {intervalLabel(status.interval)}</span>
-          </div>
+    <div className='flex flex-col gap-1.5 border-b border-border px-4 py-3'>
+      <div className='flex flex-wrap items-start justify-between gap-x-4 gap-y-2'>
+        <div className='flex min-w-0 items-center gap-2 self-center'>
+          <h2 className='truncate text-base font-semibold'>{collection}</h2>
+          <SyncBadge tone={CHIP_TONE[chip.kind]} dot title={chip.detail}>
+            {chip.label}
+          </SyncBadge>
         </div>
         {/* Top aligned, so the check status under Check now does not push the other buttons. */}
         <div className='flex flex-wrap items-start gap-2'>
-          {/* The same dialog is in the menu, but a faint icon is easy to miss. */}
+          {/* Disconnect is in this dialog too, so the header needs no menu. */}
           <Button variant='outline' size='sm' onClick={() => openDialog()}>
             <Settings2 aria-hidden='true' className='mr-1.5 h-3.5 w-3.5' />
             Connection settings
@@ -122,11 +66,42 @@ export function OpenApiSyncHeader({
           <CheckNowButtonView runner={runner} />
         </div>
       </div>
-      <DisconnectSyncDialog
-        collection={collection}
-        open={disconnectOpen}
-        onOpenChange={setDisconnectOpen}
-      />
+      <div className='flex min-w-0 items-center gap-2 text-xs text-muted-foreground'>
+        {fileSource ? (
+          <FileText aria-hidden='true' className='h-3.5 w-3.5 shrink-0' />
+        ) : (
+          <Link2 aria-hidden='true' className='h-3.5 w-3.5 shrink-0' />
+        )}
+        {fileSource && <SyncBadge tone='info'>Local file</SyncBadge>}
+        {/* The tooltip is the short form, so a link with credentials never shows them. */}
+        <p className={cn('min-w-0 font-mono', expanded ? 'break-all' : 'truncate')} title={short}>
+          {expanded ? full : short}
+        </p>
+        {full && (
+          <Button
+            variant='link'
+            size='sm'
+            className='h-auto shrink-0 p-0 text-xs'
+            onClick={() => setShowFull((v) => !v)}
+          >
+            {showFull ? 'Hide full link' : 'Show full link'}
+          </Button>
+        )}
+      </div>
+      <div className='flex flex-wrap items-center gap-x-4 gap-y-0.5 text-xs text-muted-foreground'>
+        <span className='inline-flex items-center gap-1.5'>
+          <Clock aria-hidden='true' className='h-3.5 w-3.5' />
+          <span>
+            {status.lastCheckedAt
+              ? `Last checked ${formatRelativeTime(status.lastCheckedAt)}`
+              : 'Not checked yet'}
+          </span>
+        </span>
+        <span className='inline-flex items-center gap-1.5'>
+          <Timer aria-hidden='true' className='h-3.5 w-3.5' />
+          <span>Check interval: {intervalLabel(status.interval)}</span>
+        </span>
+      </div>
       <OpenApiSyncConnectionDialog
         collection={collection}
         status={status}

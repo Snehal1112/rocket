@@ -158,18 +158,19 @@ describe('OpenApiSyncHeader', () => {
     expect(screen.getByText('Updates waiting')).toBeInTheDocument();
   });
 
-  describe('connection menu', () => {
+  describe('actions', () => {
     beforeAll(() => {
       HTMLElement.prototype.hasPointerCapture = vi.fn(() => false);
       HTMLElement.prototype.scrollIntoView = vi.fn();
     });
 
-    it('the_menu_opens_connection_settings', async () => {
+    it('has_no_actions_menu_because_disconnect_is_in_the_connection_settings', async () => {
       const user = userEvent.setup();
       renderWithQuery(<OpenApiSyncHeader collection='c' status={makeStatus()} waiting={0} />);
-      await user.click(screen.getByRole('button', { name: 'OpenAPI sync actions' }));
-      await user.click(await screen.findByRole('menuitem', { name: 'Connection settings' }));
-      expect(await screen.findByRole('dialog')).toHaveTextContent('Connection settings');
+      expect(screen.queryByRole('button', { name: 'OpenAPI sync actions' })).toBeNull();
+      await user.click(screen.getByRole('button', { name: 'Connection settings' }));
+      const dialog = await screen.findByRole('dialog');
+      expect(within(dialog).getByRole('button', { name: 'Disconnect' })).toBeInTheDocument();
     });
 
     it('a_visible_button_beside_check_now_opens_the_connection_settings', async () => {
@@ -177,14 +178,6 @@ describe('OpenApiSyncHeader', () => {
       renderWithQuery(<OpenApiSyncHeader collection='c' status={makeStatus()} waiting={0} />);
       await user.click(screen.getByRole('button', { name: 'Connection settings' }));
       expect(await screen.findByRole('dialog')).toHaveTextContent('Connection settings');
-    });
-
-    it('the_menu_opens_the_disconnect_dialog', async () => {
-      const user = userEvent.setup();
-      renderWithQuery(<OpenApiSyncHeader collection='c' status={makeStatus()} waiting={0} />);
-      await user.click(screen.getByRole('button', { name: 'OpenAPI sync actions' }));
-      await user.click(await screen.findByRole('menuitem', { name: 'Disconnect' }));
-      expect(await screen.findByRole('alertdialog')).toHaveTextContent('Disconnect from the spec?');
     });
 
     it('runs a check from the button', async () => {

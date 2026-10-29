@@ -358,7 +358,7 @@ describe('OpenApiSyncTab', () => {
     expect(screen.getByText('One path was ignored.')).toBeInTheDocument();
   });
 
-  it('disconnects_from_the_menu_to_the_end', async () => {
+  it('disconnects_from_the_connection_settings_to_the_end', async () => {
     let connected = true;
     vi.mocked(tauriApi.getOpenApiSyncStatus).mockImplementation(async () =>
       connected ? makeStatus({ hasPending: false }) : null,
@@ -368,8 +368,8 @@ describe('OpenApiSyncTab', () => {
     });
     renderWithQuery(<TabWithListeners collection='dis2' />);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: 'OpenAPI sync actions' }));
-    await user.click(await screen.findByRole('menuitem', { name: 'Disconnect' }));
+    await user.click(await screen.findByRole('button', { name: 'Connection settings' }));
+    await user.click(await screen.findByRole('button', { name: 'Disconnect' }));
     await user.click(
       within(await screen.findByRole('alertdialog')).getByRole('button', { name: 'Disconnect' }),
     );
@@ -652,8 +652,7 @@ describe('OpenApiSyncTab', () => {
     renderWithQuery(<TabWithListeners collection='dis1' />);
     await screen.findByRole('heading', { name: 'New in spec' });
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: 'OpenAPI sync actions' }));
-    await user.click(await screen.findByRole('menuitem', { name: 'Connection settings' }));
+    await user.click(screen.getByRole('button', { name: 'Connection settings' }));
     await user.click(await screen.findByRole('button', { name: 'Disconnect' }));
     const confirm = await screen.findByRole('alertdialog');
     await user.click(within(confirm).getByRole('button', { name: 'Disconnect' }));
