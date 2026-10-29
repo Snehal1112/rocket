@@ -42,10 +42,15 @@ pub(crate) fn environment_client_certificates(
         return Vec::new();
     };
     // The merged lists include the parent chain's. A broken chain (a cycle) keeps the
-    // environment's own lists. The send already fails on the variable flatten, which also
-    // logs the flatten warnings, so they are not logged again here.
+    // environment's own lists. The warnings are logged here too, because nothing guarantees
+    // that another flatten of this environment ran first.
     let (certificates, bindings) = match rocket_environment::flatten_with_repo(&env, repo) {
-        Ok(flat) => (flat.certificates(), flat.bindings()),
+        Ok(flat) => {
+            for warning in &flat.warnings {
+                tracing::warn!("{warning}");
+            }
+            (flat.certificates(), flat.bindings())
+        }
         Err(error) => {
             tracing::warn!("{error}; using the client certificates of {name} only");
             (env.client_certificates, env.external_secrets)

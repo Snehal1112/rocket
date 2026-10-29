@@ -1,6 +1,6 @@
 // src/lib/certificate-validation.ts
 
-import type { ClientCertificate, ExternalSecretBinding } from '@/lib/tauri-api';
+import type { BindingView, ClientCertificate } from '@/lib/tauri-api';
 
 type FileCertificate = Exclude<ClientCertificate, { type: 'vault' }>;
 type VaultCertificate = Extract<ClientCertificate, { type: 'vault' }>;
@@ -58,7 +58,7 @@ function isKeyText(value: string): boolean {
 function vaultCertificateErrors(
   who: string,
   cert: VaultCertificate,
-  bindings: ExternalSecretBinding[],
+  bindings: BindingView[],
   inheritedAliases: string[],
 ): string[] {
   const named: [string, string][] = [
@@ -103,7 +103,7 @@ function hasParentSegment(path: string): boolean {
 }
 
 // Returns why a reference is unusable, or null when it matches a binding and one of its names.
-function referenceProblem(reference: string, bindings: ExternalSecretBinding[]): string | null {
+function referenceProblem(reference: string, bindings: BindingView[]): string | null {
   const dot = reference.indexOf('.');
   if (dot <= 0 || dot === reference.length - 1) return 'must look like alias.secretName';
   const alias = reference.slice(0, dot);
@@ -121,7 +121,7 @@ function referenceProblem(reference: string, bindings: ExternalSecretBinding[]):
 // parent environment defines.
 export function validateClientCertificates(
   certs: ClientCertificate[],
-  bindings: ExternalSecretBinding[],
+  bindings: BindingView[],
   inheritedAliases: string[] = [],
 ): CertificateIssues {
   const errors: string[] = [];

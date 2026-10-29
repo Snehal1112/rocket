@@ -712,7 +712,10 @@ impl McpToolService {
         // certificate build do, so the read still works.
         let bindings = match rocket_environment::flatten_with_repo(&env, repo.as_ref()) {
             Ok(merged) => merged.bindings(),
-            Err(_) => env.external_secrets.clone(),
+            Err(error) => {
+                tracing::warn!("{error}; reading the bindings of {environment} only");
+                env.external_secrets.clone()
+            }
         };
         let view = MaskedEnvironment::from_environment_with_bindings(&env, &bindings);
         self.publish_tool_invoked(

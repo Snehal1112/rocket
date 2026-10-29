@@ -1,6 +1,6 @@
 // src/lib/vault-secret-options.ts
 
-import type { ExternalSecretBinding } from '@/lib/tauri-api';
+import type { BindingView } from '@/lib/tauri-api';
 
 export interface VaultSecretOption {
   // The reference stored in the environment file: `${alias}.${secretName}`.
@@ -10,7 +10,7 @@ export interface VaultSecretOption {
 
 // Lists the secrets an environment can reference, from its External Secrets bindings.
 // Only fetched secret names appear, never values.
-export function vaultSecretOptions(bindings: ExternalSecretBinding[]): VaultSecretOption[] {
+export function vaultSecretOptions(bindings: BindingView[]): VaultSecretOption[] {
   const options: VaultSecretOption[] = [];
   for (const binding of bindings) {
     if (!binding.alias) continue;

@@ -18,11 +18,7 @@ import {
 } from '@/components/ui/select';
 import type { SaveButtonState } from '@/hooks/use-save-button';
 import { isLiteralPassphrase } from '@/lib/certificate-validation';
-import type {
-  ClientCertificate,
-  ExternalSecretBinding,
-  ResolvedCertificate,
-} from '@/lib/tauri-api';
+import type { BindingView, ClientCertificate, ResolvedCertificate } from '@/lib/tauri-api';
 import type { VariableScopeEntry } from '@/lib/url-variables';
 import { cn } from '@/lib/utils';
 import { type VaultSecretOption, vaultSecretOptions } from '@/lib/vault-secret-options';
@@ -40,7 +36,7 @@ const NO_INHERITED: ResolvedCertificate[] = [];
 
 export interface CertificatesTabProps {
   certificates: ClientCertificate[];
-  bindings: ExternalSecretBinding[];
+  bindings: BindingView[];
   // Read-only rows from the parent chain.
   inherited?: ResolvedCertificate[];
   onChange: (idx: number, patch: Partial<ClientCertificate>) => void;
@@ -251,7 +247,7 @@ interface CertificateRowProps {
   idx: number;
   total: number;
   cert: ClientCertificate;
-  bindings: ExternalSecretBinding[];
+  bindings: BindingView[];
   options: VaultSecretOption[];
   onChange: (idx: number, patch: Partial<ClientCertificate>) => void;
   onRemove: (idx: number) => void;

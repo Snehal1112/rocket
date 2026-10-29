@@ -40,6 +40,7 @@ import {
 import { useSecretManagerConnections } from '@/lib/queries/secret-manager-queries';
 import { canAddVaultCertificate } from '@/lib/secret-providers';
 import type {
+  BindingView,
   ClientCertificate,
   DotEnvStatus,
   Environment,
@@ -68,7 +69,7 @@ const EMPTY_ENVS: Environment[] = [];
 const EMPTY_ROWS: ResolvedVariable[] = [];
 const EMPTY_BINDINGS: ResolvedBinding[] = [];
 const EMPTY_CERTS: ResolvedCertificate[] = [];
-const EMPTY_EFFECTIVE: ExternalSecretBinding[] = [];
+const EMPTY_EFFECTIVE: BindingView[] = [];
 
 // Domains match case-insensitively and ignore surrounding spaces, as the backend merge does.
 const normalizeDomain = (domain: string) => domain.trim().replace(/[A-Z]/g, (c) => c.toLowerCase());
@@ -251,7 +252,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
       alias: b.alias,
       connectionId: b.connectionId,
       vaultName: b.vaultName,
-      secretNames: b.secretNames.map((name) => ({ name, secretId: '' })),
+      secretNames: b.secretNames.map((name) => ({ name })),
     }));
     return [...selectedEnv.externalSecrets, ...inherited];
   }, [selectedEnv, inheritedBindings]);

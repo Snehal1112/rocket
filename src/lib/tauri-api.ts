@@ -363,6 +363,11 @@ export interface ExternalSecretBinding {
   secretNames: ExternalSecretRef[];
 }
 
+/** A binding as a certificate picker or reference check reads it: no secret ids. */
+export type BindingView = Pick<ExternalSecretBinding, 'alias' | 'connectionId' | 'vaultName'> & {
+  secretNames: Pick<ExternalSecretRef, 'name'>[];
+};
+
 export type SecretProviderKind = 'rocketvault' | 'azure' | 'aws' | 'hashicorp' | 'gcp';
 
 // Azure AD service principal settings. The vault URL is baseUrl and the app

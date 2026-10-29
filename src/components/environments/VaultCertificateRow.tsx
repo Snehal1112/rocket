@@ -11,8 +11,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import {
+  type BindingView,
   type ClientCertificate,
-  type ExternalSecretBinding,
   listVaultCertificates,
   type VaultCertificateFormat,
   type VaultCertificateSummary,
@@ -29,7 +29,7 @@ type VaultCertificate = Extract<ClientCertificate, { type: 'vault' }>;
 export interface VaultCertificateRowProps {
   idx: number;
   cert: VaultCertificate;
-  bindings: ExternalSecretBinding[];
+  bindings: BindingView[];
   onChange: (idx: number, patch: Partial<ClientCertificate>) => void;
 }
 
