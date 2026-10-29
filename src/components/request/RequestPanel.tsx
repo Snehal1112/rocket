@@ -63,7 +63,7 @@ import {
   defaultExampleName,
   saveExampleDisabledReason,
 } from '@/lib/example-snapshot';
-import { resolveRequestFields } from '@/lib/execute-request';
+import { CLOSED_PROCESS_ENV, processEnvScopeOf, resolveRequestFields } from '@/lib/execute-request';
 import {
   graphqlSendMode,
   startSubscription,
@@ -139,6 +139,9 @@ export const BODY_MODES: { label: string; value: BodyState['mode'] }[] = [
   { label: 'Form URL Encoded', value: 'formurlencoded' },
   { label: 'Binary', value: 'binary' },
 ];
+
+// A stable reference, so the scoped context does not recompute every render.
+const NO_PROCESS_ENV_VARS: Record<string, string> = {};
 
 const BASE_AUTH_TYPES: { label: string; value: AuthState['authType'] }[] = [
   { label: 'None', value: 'none' },
@@ -569,7 +572,15 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   const { data: environments = [] } = useEnvironments(activeCollection);
   const { data: globalEnvName = null } = useGlobalEnvironmentName();
   const { data: globalEnv = null } = useGlobalEnvironment(globalEnvName);
-  const { data: processEnvVars = {} } = useProcessEnvVars(tab.source?.collection);
+  const processEnvScope = processEnvScopeOf(tab);
+  const { data: processEnvData } = useProcessEnvVars(
+    typeof processEnvScope === 'string' ? processEnvScope : null,
+    processEnvScope !== CLOSED_PROCESS_ENV,
+  );
+  const processEnvVars =
+    processEnvScope === CLOSED_PROCESS_ENV
+      ? NO_PROCESS_ENV_VARS
+      : (processEnvData ?? NO_PROCESS_ENV_VARS);
 
   // Build the scope-aware variable context for all editors in this panel.
   const scopedContext = useMemo(() => {

@@ -70,13 +70,19 @@ export function useGlobalEnvironments() {
   });
 }
 
-/** The host environment for `{{process.env.*}}`. Empty for a collection that is not allowed it. */
-export function useProcessEnvVars(collection: string | null | undefined = null) {
+const NO_VARS: Record<string, string> = {};
+
+/**
+ * The host environment for `{{process.env.*}}`. Empty for a collection that is not allowed it.
+ * When disabled it returns no variables, even if another tab cached the host environment.
+ */
+export function useProcessEnvVars(collection: string | null | undefined = null, enabled = true) {
   const scope = collection ?? null;
   return useQuery({
     queryKey: environmentKeys.process(scope),
     queryFn: () => getProcessEnvVars(scope),
-    select: (env) => env.vars,
+    enabled,
+    select: enabled ? (env) => env.vars : () => NO_VARS,
     staleTime: Number.POSITIVE_INFINITY,
   });
 }
