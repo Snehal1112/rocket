@@ -12,6 +12,12 @@ pub enum ExportFormat {
 
 pub struct ExportService;
 
+/// The Chart.js file the HTML report loads from the CDN.
+const CHART_JS_URL: &str = "https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js";
+/// The sha512 of that file as cdnjs publishes it. Change it together with the URL.
+const CHART_JS_SRI: &str =
+    "sha512-CQBWl4fJHWbryGE+Pc7UAxWMUMNMWzWxF4SQo9CgkJIN1kx6djDQZjh3Y8SZ1d+6I+1zze6Z7kHXO7q3UyZAWw==";
+
 /// Serialises `value` as JSON that is safe inside an inline script block.
 fn script_safe_json<T: serde::Serialize>(value: &T) -> String {
     serde_json::to_string(value)
@@ -87,7 +93,7 @@ impl ExportService {
 <head>
 <meta charset="UTF-8"/>
 <title>RocketAPI Load Test Report</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="{chart_url}" integrity="{chart_sri}" crossorigin="anonymous"></script>
 <style>
   body {{ font-family: system-ui, sans-serif; max-width: 1100px; margin: 40px auto; padding: 0 24px; color: #1a1a1a; }}
   h1 {{ font-size: 22px; font-weight: 500; margin-bottom: 4px; }}
@@ -176,6 +182,8 @@ log.forEach(e => {{
             log_count = result.request_log.len(),
             ts_json = ts_json,
             log_json = log_json,
+            chart_url = CHART_JS_URL,
+            chart_sri = CHART_JS_SRI,
         )
     }
 }
@@ -443,5 +451,30 @@ mod tests {
         let mut none = result_with_error("x");
         none.request_log[0].error = None;
         assert_eq!(csv_of(&none).lines().nth(1), Some("0,,0.00,0,,0"));
+    }
+
+    #[test]
+    fn html_pins_chart_js_with_integrity_and_crossorigin() {
+        let html = html_of(&minimal_result());
+        let tag = html
+            .lines()
+            .find(|l| l.contains("chart.umd.min.js"))
+            .expect("chart script tag");
+        assert!(tag.contains(&format!("src=\"{CHART_JS_URL}\"")));
+        assert!(tag.contains(&format!("integrity=\"{CHART_JS_SRI}\"")));
+        assert!(tag.contains("crossorigin=\"anonymous\""));
+    }
+
+    #[test]
+    fn chart_js_constants_name_the_same_version() {
+        assert!(CHART_JS_URL.contains("/Chart.js/4.4.1/"));
+        assert!(CHART_JS_SRI.starts_with("sha512-"));
+        assert_eq!(CHART_JS_SRI.len(), 95);
+    }
+
+    #[test]
+    fn html_loads_exactly_one_external_script() {
+        let html = html_of(&minimal_result());
+        assert_eq!(html.matches("<script src=").count(), 1);
     }
 }
