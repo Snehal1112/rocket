@@ -120,7 +120,7 @@ export function ExternalSecretsTab({
                       className='h-7 min-w-0 text-xs font-mono bg-muted/40'
                     />
                     <Badge variant='secondary' className='w-fit text-[11px]'>
-                      {row.secretCount} secrets
+                      {row.secretCount} {row.secretCount === 1 ? 'secret' : 'secrets'}
                     </Badge>
                     <Input
                       readOnly
