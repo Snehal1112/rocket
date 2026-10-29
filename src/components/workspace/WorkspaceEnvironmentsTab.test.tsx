@@ -66,6 +66,8 @@ describe('WorkspaceEnvironmentsTab inheritance', () => {
     vi.mocked(tauriApi.getResolvedEnvironment).mockResolvedValue({
       name: '',
       variables: [],
+      externalSecrets: [],
+      clientCertificates: [],
       warnings: [],
     });
   });
@@ -100,6 +102,8 @@ describe('WorkspaceEnvironmentsTab inheritance', () => {
     vi.mocked(tauriApi.getResolvedEnvironment).mockResolvedValue({
       name: 'base',
       variables: [{ key: 'HOST', value: 'x', enabled: true, secret: false, source: 'base' }],
+      externalSecrets: [],
+      clientCertificates: [],
       warnings: [],
     });
     renderTab();
