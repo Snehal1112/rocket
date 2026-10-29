@@ -1,6 +1,6 @@
 # App command ACL
 
-Rocket's app commands (the `#[tauri::command]` functions in `src-tauri/src/lib.rs`) can be called only by the local page in the `main` window.
+Rocket's app commands (the `#[tauri::command]` functions in `src-tauri/src/commands/*`, registered in `generate_handler!` in `src-tauri/src/lib.rs`) can be called only by the local page in the `main` window.
 
 ## Why
 

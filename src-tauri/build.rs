@@ -31,6 +31,10 @@ fn write_permission_set(commands: &[String]) {
     );
     fs::create_dir_all(Path::new(SET_FILE).parent().expect("set file has a parent"))
         .expect("permissions dir is created");
+    // Skip an identical write: tauri-build watches the folder, so a rewrite dirties every build.
+    if fs::read_to_string(SET_FILE).is_ok_and(|old| old == body) {
+        return;
+    }
     fs::write(SET_FILE, body).expect("permission set is written");
 }
 

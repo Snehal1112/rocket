@@ -30,13 +30,25 @@ fn parse_generate_handler(source: &str) -> BTreeSet<String> {
     let len = source[start..]
         .find(']')
         .expect("generate_handler block is closed");
+    // Drop line comments first so a trailing comment cannot swallow the next entry.
     source[start..start + len]
+        .lines()
+        .map(|line| line.split("//").next().unwrap_or_default())
+        .collect::<Vec<_>>()
+        .join("\n")
         .split(',')
         .map(str::trim)
-        .filter(|entry| !entry.is_empty() && !entry.starts_with("//"))
+        .filter(|entry| !entry.is_empty())
         .filter_map(|entry| entry.rsplit("::").next())
         .map(str::to_string)
         .collect()
+}
+
+#[test]
+fn parse_generate_handler_keeps_entry_after_trailing_comment() {
+    let source = "generate_handler![\n    foo, // note\n    bar,\n]";
+    let names = parse_generate_handler(source);
+    assert!(names.contains("foo") && names.contains("bar"), "got {names:?}");
 }
 
 #[test]
@@ -103,6 +115,12 @@ fn invoke(
     )
 }
 
+/// Asserts the call failed with Tauri's ACL rejection message.
+fn assert_acl_rejected(result: &Result<tauri::ipc::InvokeResponseBody, serde_json::Value>) {
+    let err = result.as_ref().expect_err("expected an ACL rejection");
+    assert!(err.to_string().contains("not allowed"), "got {err}");
+}
+
 #[test]
 fn main_window_local_page_can_invoke_app_commands() {
     let app = app();
@@ -113,11 +131,19 @@ fn main_window_local_page_can_invoke_app_commands() {
 }
 
 #[test]
+fn main_window_release_origin_can_invoke_app_commands() {
+    let app = app();
+    let main = local_window(&app, "main");
+    let result = invoke(&main, "tauri://localhost/index.html");
+    assert!(result.is_ok(), "expected Ok, got {result:?}");
+}
+
+#[test]
 fn remote_page_in_oauth_window_cannot_invoke_app_commands() {
     let app = app();
     let oauth = local_window(&app, "oauth2-auth");
     let result = invoke(&oauth, REMOTE_URL);
-    assert!(result.is_err(), "expected Err, got {result:?}");
+    assert_acl_rejected(&result);
 }
 
 #[test]
@@ -127,7 +153,7 @@ fn local_page_in_oauth_window_cannot_invoke_app_commands() {
     let local_url = main.url().expect("main window has a url").to_string();
     let oauth = local_window(&app, "oauth2-auth");
     let result = invoke(&oauth, &local_url);
-    assert!(result.is_err(), "expected Err, got {result:?}");
+    assert_acl_rejected(&result);
 }
 
 #[test]
@@ -135,5 +161,5 @@ fn remote_page_in_main_window_cannot_invoke_app_commands() {
     let app = app();
     let main = local_window(&app, "main");
     let result = invoke(&main, "https://idp.example.com/");
-    assert!(result.is_err(), "expected Err, got {result:?}");
+    assert_acl_rejected(&result);
 }
