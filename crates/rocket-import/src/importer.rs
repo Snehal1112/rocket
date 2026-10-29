@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use rocket_collection::CollectionRepository;
@@ -155,13 +156,15 @@ impl ImportService {
             .map_err(ImportError::DomainError)?;
         report.created_collections.push(resolved_name.clone());
 
-        // Walk request files.
+        // Walk request files. The set holds the output paths this run has taken.
+        let mut used = HashSet::new();
         self.walk_requests(
             path,
             path,
             &resolved_name,
             self.collection_repo.as_ref(),
             &mut report,
+            &mut used,
         )?;
 
         // Import environments.
@@ -327,6 +330,7 @@ impl ImportService {
         collection_name: &str,
         repo: &dyn CollectionRepository,
         report: &mut ImportReport,
+        used: &mut HashSet<String>,
     ) -> ImportResult<()> {
         for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
@@ -345,7 +349,7 @@ impl ImportService {
                 let folder_rel = p.strip_prefix(root).unwrap_or(&p);
                 let folder_path = folder_rel.to_string_lossy().to_string();
                 let _ = repo.create_folder(collection_name, &folder_path);
-                self.walk_requests(root, &p, collection_name, repo, report)?;
+                self.walk_requests(root, &p, collection_name, repo, report, used)?;
                 continue;
             }
 
@@ -399,7 +403,8 @@ impl ImportService {
                         });
                     }
 
-                    let out_path = rel_path.with_extension("yml").to_string_lossy().to_string();
+                    let out_path =
+                        unique_import_path(used, &rel_path.with_extension("yml").to_string_lossy());
                     match item_opt {
                         Some(req_converter::Converted::Http(req)) => {
                             let _ = repo.save_request(collection_name, &out_path, &req);
@@ -675,7 +680,8 @@ impl ImportService {
             repo.save(&env).map_err(ImportError::DomainError)?;
         }
 
-        self.write_postman_items(&collection.item, &col_name, "", &mut report)?;
+        let mut used = HashSet::new();
+        self.write_postman_items(&collection.item, &col_name, "", &mut report, &mut used)?;
 
         Ok(report)
     }
@@ -686,6 +692,7 @@ impl ImportService {
         col_name: &str,
         path_prefix: &str,
         report: &mut ImportReport,
+        used: &mut HashSet<String>,
     ) -> ImportResult<()> {
         use crate::converter::postman as pc;
         use crate::postman::ast::PostmanItem;
@@ -704,6 +711,7 @@ impl ImportService {
                         format!("{}/{}", path_prefix, slug)
                     };
 
+                    let request_path = unique_import_path(used, &request_path);
                     self.collection_repo
                         .save_request(col_name, &request_path, &req)
                         .map_err(ImportError::DomainError)?;
@@ -721,7 +729,7 @@ impl ImportService {
                         .create_folder(col_name, &folder_path)
                         .map_err(ImportError::DomainError)?;
 
-                    self.write_postman_items(&folder.item, col_name, &folder_path, report)?;
+                    self.write_postman_items(&folder.item, col_name, &folder_path, report, used)?;
                 }
             }
         }
@@ -1399,6 +1407,26 @@ fn is_windows_device_name(name: &str) -> bool {
     }
 }
 
+/// A request file path that no earlier file of this import took. Records it.
+///
+/// Paths compare by folded form (Unicode NFC, lowercase), so a case-only clash gets
+/// a number (`get 2.yml`). A free path is returned unchanged. A folder never clashes
+/// with a file, because the full path is the key.
+fn unique_import_path(used: &mut HashSet<String>, path: &str) -> String {
+    let normalized = rocket_collection::request_filename_for(path);
+    if used.insert(rocket_collection::fold_name(&normalized)) {
+        return normalized;
+    }
+    let stem = normalized
+        .strip_suffix(".yml")
+        .or_else(|| normalized.strip_suffix(".yaml"))
+        .unwrap_or(&normalized);
+    (2u32..)
+        .map(|n| rocket_collection::candidate_filename(stem, n))
+        .find(|c| used.insert(rocket_collection::fold_name(c)))
+        .unwrap_or(normalized)
+}
+
 /// A path segment for `name` that is free in `used` and not reserved. Records it.
 ///
 /// Matching is case-insensitive. A taken or reserved name gets `-2`, `-3`, ... and is
@@ -1972,6 +2000,86 @@ mod wsdl_tests {
             assert!(seg.chars().count() <= 100, "got: {seg}");
         }
         assert_eq!((a.1, b.1, c.1), (1, 2, 3));
+    }
+
+    #[test]
+    fn unique_import_path_keeps_a_free_name_unchanged() {
+        let mut used = std::collections::HashSet::new();
+        assert_eq!(unique_import_path(&mut used, "api/get.yml"), "api/get.yml");
+    }
+
+    #[test]
+    fn unique_import_path_numbers_a_clash_and_ignores_case() {
+        let mut used = std::collections::HashSet::new();
+        assert_eq!(unique_import_path(&mut used, "api/Get.yml"), "api/Get.yml");
+        assert_eq!(unique_import_path(&mut used, "api/get.yml"), "api/get 2.yml");
+        assert_eq!(unique_import_path(&mut used, "api/GET.yml"), "api/GET 3.yml");
+    }
+
+    #[test]
+    fn unique_import_path_ignores_folders() {
+        let mut used = std::collections::HashSet::new();
+        assert_eq!(unique_import_path(&mut used, "a.yml"), "a.yml");
+        assert_eq!(unique_import_path(&mut used, "a/b.yml"), "a/b.yml");
+    }
+
+    /// Imports a legacy Bruno collection holding one `.bru` file per name, each
+    /// with its own URL, and returns the request `.yml` files found in the result.
+    fn import_bru_names(names: &[&str]) -> Vec<(String, String)> {
+        let src_root = TempDir::new().expect("src dir");
+        let src = src_root.path().join("col");
+        std::fs::create_dir_all(&src).expect("create col dir");
+        std::fs::write(src.join("bruno.json"), r#"{"version":"1","name":"c"}"#)
+            .expect("write bruno.json");
+        for (i, name) in names.iter().enumerate() {
+            let body = format!(
+                "meta {{\n  name: {name}\n  type: http\n  seq: {}\n}}\n\nget {{\n  url: https://example.com/{i}\n  body: none\n  auth: none\n}}\n",
+                i + 1
+            );
+            std::fs::write(src.join(format!("{name}.bru")), body).expect("write bru");
+        }
+        let ws = TempDir::new().expect("ws dir");
+        let report = ImportService::new_with_workspace_path(ws.path())
+            .import_collection(&src, "default")
+            .expect("import should succeed");
+        let col = ws
+            .path()
+            .join("collections")
+            .join(&report.created_collections[0]);
+        let mut found: Vec<(String, String)> = std::fs::read_dir(&col)
+            .expect("read collection")
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| {
+                p.extension().is_some_and(|x| x == "yml")
+                    && p.file_name().is_some_and(|n| n != "opencollection.yml")
+            })
+            .map(|p| {
+                (
+                    p.file_name().expect("name").to_string_lossy().to_string(),
+                    std::fs::read_to_string(&p).expect("read request"),
+                )
+            })
+            .collect();
+        found.sort();
+        found
+    }
+
+    #[test]
+    fn bruno_import_keeps_both_files_when_case_variants_clash() {
+        let found = import_bru_names(&["Get", "get"]);
+        assert_eq!(found.len(), 2, "got: {:?}", found.iter().map(|f| &f.0).collect::<Vec<_>>());
+        assert!(found.iter().any(|f| f.0.ends_with(" 2.yml")));
+        for i in 0..2 {
+            let url = format!("https://example.com/{i}");
+            assert!(found.iter().any(|f| f.1.contains(&url)), "missing {url}");
+        }
+    }
+
+    #[test]
+    fn bruno_import_numbers_a_third_clash() {
+        let found = import_bru_names(&["Get", "get", "GET"]);
+        assert_eq!(found.len(), 3);
     }
 
     /// Delegates to the real repository but fails to save any request named `Get`.
