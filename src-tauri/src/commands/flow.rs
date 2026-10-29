@@ -609,6 +609,8 @@ impl RunFlowInputDto {
         FlowRunOptions {
             run_id: self.run_id.take(),
             partial: self.partial.take().map(PartialRun::from),
+            // The command sets the owner from the calling window.
+            owner: None,
         }
     }
 
@@ -642,14 +644,17 @@ impl RunFlowInputDto {
 /// summary when the run ends, mirroring `run_collection` in `runner.rs`. The
 /// frontend chooses the run id (`runId`) and matches every event by it, so
 /// Stop works before the run finishes and two tabs of one flow never share a
-/// run. Without `runId` the backend picks one.
+/// run. Without `runId` the backend picks one. The calling window owns the
+/// run: only it can read the run's callback URLs.
 #[tauri::command]
 pub async fn run_flow(
+    window: tauri::WebviewWindow,
     mut input: RunFlowInputDto,
     flow_exec: State<'_, FlowExecutionService>,
     exec: State<'_, RequestExecutionService>,
 ) -> Result<FlowRunSummary, DomainError> {
-    let options = input.take_options();
+    let mut options = input.take_options();
+    options.owner = Some(window.label().to_string());
     let (run_input, tokens) = input.into_parts();
     flow_exec
         .run_with_options(&exec, run_input, tokens, options)
@@ -692,14 +697,17 @@ impl From<FlowRunCallback> for FlowRunCallbackDto {
 /// Returns the callback URLs of a Flow run while it is active. The
 /// `flow-run-started` event names the Wait nodes without their URLs, and
 /// the UI calls this right after it. The URLs are known before that event
-/// is sent. An unknown or finished run id returns an empty list.
+/// is sent. Only the window that started the run gets the URLs. An unknown
+/// or finished run id, or a run another window started, returns an empty
+/// list.
 #[tauri::command]
 pub fn get_flow_run_callbacks(
+    window: tauri::WebviewWindow,
     run_id: String,
     flow_exec: State<'_, FlowExecutionService>,
 ) -> Result<Vec<FlowRunCallbackDto>, DomainError> {
     Ok(flow_exec
-        .callback_urls(&run_id)
+        .callback_urls(&run_id, Some(window.label()))
         .into_iter()
         .map(FlowRunCallbackDto::from)
         .collect())
