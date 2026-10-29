@@ -12,6 +12,17 @@ pub enum ExportFormat {
 
 pub struct ExportService;
 
+/// Serialises `value` as JSON that is safe inside an inline script block.
+fn script_safe_json<T: serde::Serialize>(value: &T) -> String {
+    serde_json::to_string(value)
+        .unwrap_or_default()
+        .replace('<', "\\u003c")
+        .replace('>', "\\u003e")
+        .replace('&', "\\u0026")
+        .replace('\u{2028}', "\\u2028")
+        .replace('\u{2029}', "\\u2029")
+}
+
 impl ExportService {
     /// Export a `LoadTestResult` to the requested format.
     /// Returns the file content as bytes and the suggested filename extension.
@@ -56,8 +67,8 @@ impl ExportService {
     }
 
     fn to_html(result: &LoadTestResult) -> String {
-        let ts_json = serde_json::to_string(&result.time_series).unwrap_or_default();
-        let log_json = serde_json::to_string(&result.request_log).unwrap_or_default();
+        let ts_json = script_safe_json(&result.time_series);
+        let log_json = script_safe_json(&result.request_log);
 
         format!(
             r#"<!DOCTYPE html>
@@ -126,15 +137,21 @@ mkChart('rpsChart', [{{ label: 'req/sec', data: ts.map(p => p.rps.toFixed(1)), b
 mkChart('errChart', [{{ label: '% error', data: ts.map(p => p.errorRatePct.toFixed(2)), borderColor: '#E24B4A', tension: 0.3, pointRadius: 0 }}], '%');
 mkChart('concChart', [{{ label: 'concurrent', data: ts.map(p => p.activeConcurrent), borderColor: '#1D9E75', fill: true, backgroundColor: 'rgba(29,158,117,0.1)', tension: 0.3, pointRadius: 0 }}], 'users');
 const tbody = document.getElementById('log-body');
+function cell(tr, text, cls) {{
+  const td = document.createElement('td');
+  td.textContent = String(text);
+  if (cls) td.className = cls;
+  tr.appendChild(td);
+}}
 log.forEach(e => {{
   const ok = e.status !== null && e.status < 400;
-  tbody.innerHTML += `<tr>
-    <td>${{e.seq}}</td>
-    <td class="${{ok ? 'ok' : 'err'}}">${{e.status ?? 'ERR'}}</td>
-    <td>${{e.latencyMs.toFixed(1)}}</td>
-    <td>${{e.responseBytes}}</td>
-    <td>${{e.error ?? ''}}</td>
-  </tr>`;
+  const tr = document.createElement('tr');
+  cell(tr, e.seq);
+  cell(tr, e.status ?? 'ERR', ok ? 'ok' : 'err');
+  cell(tr, e.latencyMs.toFixed(1));
+  cell(tr, e.responseBytes);
+  cell(tr, e.error ?? '');
+  tbody.appendChild(tr);
 }});
 </script>
 </body>
@@ -249,5 +266,113 @@ mod tests {
         // Field must be RFC 4180 quoted: outer quotes, inner quotes doubled.
         assert!(s.contains("\"connection failed: \"\"foo, bar\"\"\nretrying\""));
         assert!(s.starts_with("seq,status,latency_ms"));
+    }
+
+    const HOSTILE: &str = "x</script><img src=x onerror=alert(1)><!-- a&b";
+
+    fn result_with_error(error: &str) -> LoadTestResult {
+        let mut result = minimal_result();
+        result.request_log = vec![RequestLogEntry {
+            seq: 0,
+            status: None,
+            latency_ms: 0.0,
+            response_bytes: 0,
+            error: Some(error.into()),
+            phase_index: 0,
+        }];
+        result
+    }
+
+    fn html_of(result: &LoadTestResult) -> String {
+        let (bytes, _) = ExportService::export(result, ExportFormat::Html).expect("html export");
+        String::from_utf8(bytes).expect("utf8 html")
+    }
+
+    fn script_line<'a>(html: &'a str, prefix: &str) -> &'a str {
+        html.lines()
+            .find(|l| l.starts_with(prefix))
+            .expect("script line present")
+    }
+
+    #[test]
+    fn html_escapes_script_close_in_error_text() {
+        let html = html_of(&result_with_error(HOSTILE));
+        assert!(!html.contains("</script><img"));
+        assert!(!html.contains("onerror=alert(1)>"));
+        assert!(html.contains("\\u003c/script\\u003e"));
+    }
+
+    #[test]
+    fn html_keeps_the_template_script_tags_when_errors_contain_markup() {
+        let hostile = html_of(&result_with_error(HOSTILE));
+        let plain = html_of(&minimal_result());
+        assert_eq!(
+            hostile.matches("</script>").count(),
+            plain.matches("</script>").count()
+        );
+    }
+
+    #[test]
+    fn html_escapes_line_separators_and_ampersands() {
+        let html = html_of(&result_with_error("a\u{2028}b\u{2029}c&d"));
+        assert!(html.contains("\\u2028"));
+        assert!(html.contains("\\u2029"));
+        assert!(html.contains("c\\u0026d"));
+        assert!(!html.contains('\u{2028}'));
+        assert!(!html.contains('\u{2029}'));
+    }
+
+    #[test]
+    fn html_embedded_json_has_no_raw_markup_characters() {
+        let error = format!("{HOSTILE}\u{2028}\u{2029}");
+        let html = html_of(&result_with_error(&error));
+        for prefix in ["const ts = ", "const log = "] {
+            let line = script_line(&html, prefix);
+            for bad in ['<', '>', '&', '\u{2028}', '\u{2029}'] {
+                assert!(!line.contains(bad), "{prefix} line contains {bad:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn html_embedded_log_round_trips_the_error_text() {
+        let html = html_of(&result_with_error(HOSTILE));
+        let line = script_line(&html, "const log = ");
+        let json = line
+            .strip_prefix("const log = ")
+            .and_then(|l| l.strip_suffix(';'))
+            .expect("log line shape");
+        let value = serde_json::from_str::<serde_json::Value>(json).expect("valid json");
+        assert_eq!(value[0]["error"], HOSTILE);
+    }
+
+    #[test]
+    fn html_keeps_non_ascii_error_text_readable() {
+        let html = html_of(&result_with_error("接続エラー"));
+        assert!(html.contains("接続エラー"));
+    }
+
+    #[test]
+    fn html_with_an_empty_log_embeds_an_empty_array() {
+        let mut result = minimal_result();
+        result.request_log = vec![];
+        let html = html_of(&result);
+        assert_eq!(script_line(&html, "const log = "), "const log = [];");
+    }
+
+    #[test]
+    fn html_builds_log_rows_without_inner_html() {
+        let html = html_of(&minimal_result());
+        assert!(!html.contains("innerHTML"));
+        assert!(html.contains("textContent"));
+        assert!(html.contains("function cell(tr, text, cls)"));
+    }
+
+    #[test]
+    fn html_keeps_status_class_and_latency_format() {
+        let html = html_of(&minimal_result());
+        assert!(html.contains("'ERR'"));
+        assert!(html.contains("toFixed(1)"));
+        assert!(html.contains("'ok' : 'err'"));
     }
 }
