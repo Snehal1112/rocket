@@ -230,6 +230,45 @@ pub trait CollectionRepository: Send + Sync {
         ))
     }
 
+    /// Saves a new GraphQL request and fails with `AlreadyExists` when the
+    /// file is there already. Returns the collection-relative path.
+    fn create_graphql_request_exclusive(
+        &self,
+        _collection: &str,
+        _path: &str,
+        _request: &GraphQlRequest,
+    ) -> DomainResult<String> {
+        Err(DomainError::Internal(
+            "exclusive graphql creation is not available".into(),
+        ))
+    }
+
+    /// Saves a new gRPC request and fails with `AlreadyExists` when the
+    /// file is there already. Returns the collection-relative path.
+    fn create_grpc_request_exclusive(
+        &self,
+        _collection: &str,
+        _path: &str,
+        _request: &GrpcRequest,
+    ) -> DomainResult<String> {
+        Err(DomainError::Internal(
+            "exclusive grpc creation is not available".into(),
+        ))
+    }
+
+    /// Saves a new WebSocket request and fails with `AlreadyExists` when the
+    /// file is there already. Returns the collection-relative path.
+    fn create_websocket_request_exclusive(
+        &self,
+        _collection: &str,
+        _path: &str,
+        _request: &WebSocketRequest,
+    ) -> DomainResult<String> {
+        Err(DomainError::Internal(
+            "exclusive websocket creation is not available".into(),
+        ))
+    }
+
     /// Like `move_item`, but fails with `AlreadyExists` instead of replacing
     /// whatever sits at the destination.
     fn move_item_no_replace(
@@ -612,6 +651,29 @@ mod tests {
             .get_folder_chain_settings("c", "a/b/request.yml")
             .expect("default chain is Ok");
         assert_eq!(chain, Vec::<FolderSettings>::new());
+    }
+
+    #[test]
+    fn new_exclusive_creates_default_to_unavailable() {
+        let repo = MinimalRepo;
+        let gql = GraphQlRequest::new("g", "https://e.example/graphql");
+        assert!(matches!(
+            repo.create_graphql_request_exclusive("c", "g.yml", &gql)
+                .expect_err("default"),
+            DomainError::Internal(_)
+        ));
+        let grpc = GrpcRequest::new("r", "localhost:50051");
+        assert!(matches!(
+            repo.create_grpc_request_exclusive("c", "r.yml", &grpc)
+                .expect_err("default"),
+            DomainError::Internal(_)
+        ));
+        let ws = WebSocketRequest::new("w", "wss://e.example/ws");
+        assert!(matches!(
+            repo.create_websocket_request_exclusive("c", "w.yml", &ws)
+                .expect_err("default"),
+            DomainError::Internal(_)
+        ));
     }
 
     #[test]
