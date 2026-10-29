@@ -99,10 +99,6 @@ export const TAURI_MOCK_SCRIPT = `
       case 'get_process_env_vars':     return {};
       case 'get_global_environment':   return null;
 
-      // File watcher
-      case 'watch_collections':
-      case 'stop_watching':            return null;
-
       // UI state / misc
       case 'load_ui_state':            return null;
       case 'save_ui_state':            return null;

@@ -943,10 +943,8 @@ pub fn run() {
                     );
                 }
             }
+            // Keep the watcher managed so workspace commands can restart it.
             app.manage(watcher);
-
-            // Share the event bus so commands like watch_collections can reuse it.
-            app.manage(watcher_bus);
 
             if let Some(win) = app.get_webview_window("main") {
                 let _ = win.set_size(tauri::Size::Physical(tauri::PhysicalSize {
@@ -1089,8 +1087,6 @@ pub fn run() {
             commands::proxy::get_proxy_settings,
             commands::proxy::save_proxy_settings,
             commands::app::get_app_data_dir,
-            commands::app::watch_collections,
-            commands::app::stop_watching,
             commands::audit::list_audit_events,
             commands::audit::list_audit_events_range,
             commands::audit::get_compliance_profile,
