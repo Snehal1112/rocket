@@ -1,7 +1,7 @@
 // src/components/workspace/WorkspaceEnvironmentsTab.tsx
 
 import { AlertTriangle } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { EnvironmentSidebar } from '@/components/environments/EnvironmentSidebar';
 import { extendsCandidates } from '@/components/environments/extends-candidates';
@@ -75,8 +75,16 @@ export function WorkspaceEnvironmentsTab() {
     });
   }, [environments]);
 
-  // Sync editing vars when the selected env or its data changes.
+  // A refetch must not overwrite unsaved edits, so keep a mirror of the dirty flag.
+  const isDirtyRef = useRef(false);
+  isDirtyRef.current = isDirty;
+  const loadedNameRef = useRef<string | null>(null);
+
+  // Load the draft on a selection change, and on a data refresh only when it is clean.
   useEffect(() => {
+    const switched = loadedNameRef.current !== selectedName;
+    if (!switched && isDirtyRef.current) return;
+    loadedNameRef.current = selectedName;
     const env = environments.find((e) => e.name === selectedName);
     setEditingVars(env ? env.variables.slice() : []);
     setEditingExtends(env?.extends || undefined);

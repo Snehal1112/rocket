@@ -1,10 +1,11 @@
 // src/components/workspace/WorkspaceEnvironmentsTab.test.tsx
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { WorkspaceEnvironmentsTab } from '@/components/workspace/WorkspaceEnvironmentsTab';
+import { environmentKeys } from '@/lib/queries/environment-queries';
 import type { Environment } from '@/lib/tauri-api';
 import * as tauriApi from '@/lib/tauri-api';
 
@@ -54,11 +55,12 @@ const env = (name: string, extra: Partial<Environment> = {}): Environment => ({
 
 function renderTab() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const result = render(
     <QueryClientProvider client={queryClient}>
       <WorkspaceEnvironmentsTab />
     </QueryClientProvider>,
   );
+  return { ...result, queryClient };
 }
 
 describe('WorkspaceEnvironmentsTab inheritance', () => {
@@ -109,5 +111,54 @@ describe('WorkspaceEnvironmentsTab inheritance', () => {
     renderTab();
     expect(await screen.findByLabelText('Inherited key 1')).toHaveValue('HOST');
     expect(screen.getByTitle('From base')).toBeInTheDocument();
+  });
+});
+
+describe('WorkspaceEnvironmentsTab refresh', () => {
+  const variable = (key: string) => ({ key, value: '', enabled: true, secret: false });
+
+  beforeEach(() => {
+    vi.mocked(tauriApi.getResolvedEnvironment).mockResolvedValue({
+      name: '',
+      variables: [],
+      externalSecrets: [],
+      clientCertificates: [],
+      warnings: [],
+    });
+  });
+
+  it('a_refetch_keeps_unsaved_edits_in_the_open_global_environment', async () => {
+    vi.mocked(tauriApi.listGlobalEnvironments).mockResolvedValue([
+      env('a', { variables: [variable('HOST')] }),
+      env('b'),
+    ]);
+    const { queryClient } = renderTab();
+    const user = userEvent.setup();
+    const keyInput = await screen.findByLabelText('Variable key 1');
+    await user.type(keyInput, '_EDITED');
+    // The refetch changes the open environment too, so a reload would show it.
+    vi.mocked(tauriApi.listGlobalEnvironments).mockResolvedValue([
+      env('a', { variables: [variable('FROM_DISK')] }),
+      env('b', { variables: [variable('NEW')] }),
+    ]);
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: environmentKeys.globalAll });
+      // React Query notifies observers on a later tick, so let that render run.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(screen.getByLabelText('Variable key 1')).toHaveValue('HOST_EDITED');
+  });
+
+  it('a_refetch_updates_a_clean_global_environment', async () => {
+    vi.mocked(tauriApi.listGlobalEnvironments).mockResolvedValue([
+      env('a', { variables: [variable('HOST')] }),
+    ]);
+    const { queryClient } = renderTab();
+    expect(await screen.findByLabelText('Variable key 1')).toHaveValue('HOST');
+    vi.mocked(tauriApi.listGlobalEnvironments).mockResolvedValue([
+      env('a', { variables: [variable('CHANGED')] }),
+    ]);
+    await queryClient.invalidateQueries({ queryKey: environmentKeys.globalAll });
+    await waitFor(() => expect(screen.getByLabelText('Variable key 1')).toHaveValue('CHANGED'));
   });
 });
