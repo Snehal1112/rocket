@@ -24,7 +24,7 @@ A collection file only requests elevated access. `~/.rocket-api/trust.yml` holds
 
 - Backend (WebSocket, GraphQL subscriptions, gRPC): `build_variable_context_with_process_env` fills `process.env.*` only when `RequestExecutionService::process_env_allowed(collection)`.
 - HTTP: `get_process_env_vars(collection?)` returns an empty map when the collection is not allowed. `useProcessEnvVars(collection)` and `execute-request.ts` pass the collection.
-- A request with no collection (scratch) keeps full access.
+- A request with no collection (scratch) keeps full access. A History tab is not scratch: it follows its entry's collection, or gets no host environment when the entry has none (see Known limits).
 - `.env` files named by an environment's `dotEnvFilePath` (and its parents') are read only when this gate allows host environment access. The default `<collection>/.env` (and the workspace base `.env`) is read under the same gate, with no environment selected, as the lowest layers. A denied gate means no file is read at all. The real OS environment wins over a `.env` value with the same name, and every `.env` value is masked in the Console (reveal toggle shows it).
 - Before a send, `warnIfProcessEnvWithheld` (`src/lib/process-env-gate.ts`) adds a console line and a toast when the text uses a placeholder and access is withheld. The send is never blocked.
 - Who has it: collections that existed at the upgrade (grandfathered), collections created in Rocket. Clones and imports have none until allowed.
@@ -48,7 +48,8 @@ First start after the upgrade grandfathers every existing collection once. `Trus
 ## Known limits
 
 - Backend-executed HTTP (flows, `rok.runRequest`, the assistant's `run_request`) never resolves `{{process.env}}`. Only the frontend send and the three backend protocols above do.
-- Resending a request from History carries no collection, so it is treated as scratch and keeps host environment access. Accepted residual.
+- A request resent from History keeps the gate of the collection it was sent from: the History tab carries the entry's collection in `historyCollection` (never in `source`), and the send, the Copy as cURL, the load test and the variable preview use it as the process env scope (`processEnvScopeOf` in `execute-request.ts`). A History entry with no collection (old entries, scratch sends) gets no host environment (`CLOSED_PROCESS_ENV`), and the same warning is shown. Known gap: a History tab switched to a WebSocket, gRPC or GraphQL subscription request keeps full access.
+- History stores the resolved URL, so a host value that a send was allowed to resolve (a path placeholder, or any non-`.env` OS value) is stored in clear text. Redacting it is a follow-up.
 - External folders linked into a workspace are not watched, so a pull there shows in the banner only after the next trust refresh (reopen the tab or grant/revoke).
 - The migration notice has no host environment count, and Review opens the first listed collection by its directory name.
 - The HTTP send asks the backend for the process env map on every send (one IPC), and the process env queries are invalidated on trust, collection and git changes.
