@@ -63,7 +63,7 @@ Wraps `Box<dyn GitService>`. Every mutating operation publishes a `DomainEvent`.
 - `diff_staged` — diff for already-staged files.
 - `checkout_remote_branch` — creates a local tracking branch. Rejects an existing local branch of the same name unless `force` is set, which instead resets that branch (and its upstream) to the remote's tip, discarding local commits absent from that remote. A forced reset of the *checked-out* branch still refuses to run over uncommitted tracked changes.
 - `fetch` — no event published (read-only remote op).
-- `conflicts` — publishes `GitConflictDetected` only when the list is non-empty.
+- `conflicts` — read-only query, publishes nothing. `GitConflictDetected` has no publisher now.
 - `abort_merge` — reverts in-progress merge; publishes `GitStatusChanged`.
 
 ## Key Patterns
@@ -152,7 +152,7 @@ reference them, but a script can read one by exact name (`rok.getSecretVar`).
 
 ## Flow run ids (`flow_run_id.rs`)
 
-`FlowExecutionService::run_with_options(exec, input, tokens, FlowRunOptions { run_id, partial })`
+`FlowExecutionService::run_with_options(exec, input, tokens, FlowRunOptions { run_id, partial, owner })`
 is the one run entry; `run_with_auth` and `run_partial` call it. The frontend
 chooses the run id (a UUID from `newFlowRunId()` in `src/lib/flow-run-id.ts`)
 and sends it as `runId` in `RunFlowInputDto`; without one the service makes a
@@ -199,10 +199,16 @@ token and events are broadcast to every webview, so no event carries it:
 `FlowRunStarted.callbacks` names the nodes only (omitted when empty, an old
 `url` key is ignored). The UI fetches the URLs with the
 `get_flow_run_callbacks` command, which reads
-`FlowExecutionService::callback_urls(run_id)`. The registry entry is written
-right after the endpoints open, before `FlowRunStarted`, and removed by
-`RunRegistration`'s drop on every end path (finish, error, cancel). An
-unknown or finished run id returns an empty list. `FlowRunCallback` hides
+`FlowExecutionService::callback_urls(run_id, caller)`. The registry entry is
+written right after the endpoints open, before `FlowRunStarted`, and removed by
+`RunRegistration`'s drop on every end path (finish, error, cancel). The entry
+holds the run's owner (`FlowRunOptions.owner`, an opaque tag; the `run_flow`
+command sets the calling window's label). A run with an owner hands the URLs
+only to a caller with the same tag, so another webview (such as the
+`oauth2-auth` window) and a caller of `None` get an empty list. A run without
+an owner (MCP, runner, tests) hands them to any caller. An unknown or
+finished run id, or a foreign run, returns an empty list, never an error, so
+existence does not leak. `FlowRunCallback` hides
 the URL in `Debug`. Never put the URL in a `FlowRunSummary`, a step, an
 exchange, a log, an event or history.
 Each endpoint's full URL and bare token also join the run's

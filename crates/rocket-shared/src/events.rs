@@ -294,7 +294,9 @@ pub struct FlowRewriteFailure {
 ///
 /// Renaming any of these is a breaking change for the frontend listeners
 /// and needs its own decision. The bus adds `seq` and `tsMs` at emit time.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// Only the back-compat unit tests below read events back, so Deserialize is test-only.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(test, derive(Deserialize))]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum DomainEvent {
     // Collection events

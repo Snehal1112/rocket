@@ -2282,14 +2282,16 @@ impl RequestExecutionService {
                         state.http_request.method = m;
                     } else {
                         tracing::warn!(
-                            method = %method_str,
                             "req.setMethod() called with an unrecognized HTTP method, ignored"
                         );
-                        state.script_error.get_or_insert_with(|| {
-                            format!(
-                            "req.setMethod('{method_str}') is not a valid HTTP method — ignored."
-                        )
-                        });
+                        // The method text is script-chosen and may hold a secret.
+                        let message = crate::redaction::redact_secrets(
+                            &format!(
+                                "req.setMethod('{method_str}') is not a valid HTTP method — ignored."
+                            ),
+                            &state.var_ctx.secret_values,
+                        );
+                        state.script_error.get_or_insert(message);
                     }
                 }
                 // Apply header mutations in the order the script issued them —
@@ -9185,6 +9187,42 @@ mod tests {
             err.contains("PACTH ME"),
             "error should name the invalid method: {err}"
         );
+    }
+
+    #[tokio::test]
+    async fn before_request_script_invalid_method_masks_secret_in_script_error() {
+        use rocket_scripting::{RequestMutations, ScriptResult};
+
+        // A secret with a space is not a valid method token, so setMethod() is rejected.
+        let result = ScriptResult {
+            request_mutations: Some(RequestMutations {
+                method: Some("sk live abcdef123".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let mut env = Environment::new("dev");
+        env.set_variable(Variable::secret("API_KEY", "sk live abcdef123"));
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::with_env(env)),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        )
+        .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
+
+        let mut input = sample_input("https://example.com", Some("dev"));
+        input.pre_request_script = Some("// pre".into());
+        let output = svc.execute(input).await.expect("execute failed");
+
+        let err = output.script_error.expect("script_error");
+        assert!(!err.contains("sk live abcdef123"), "output: {err}");
+        assert!(err.contains("••••••"), "output: {err}");
     }
 
     #[tokio::test]

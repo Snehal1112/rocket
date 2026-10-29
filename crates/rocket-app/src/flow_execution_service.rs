@@ -707,6 +707,17 @@ pub struct FlowRunOptions {
     pub run_id: Option<String>,
     /// Set for "Run this node" or "Run from here".
     pub partial: Option<PartialRun>,
+    /// Opaque tag of the caller that started the run, such as a window label.
+    /// The run's callback URLs are handed only to a caller with the same tag.
+    /// `None` (MCP, runner, tests) leaves them open to any caller.
+    pub owner: Option<String>,
+}
+
+/// The callback URLs of one in-flight run and who may read them.
+#[derive(Debug, Clone)]
+struct RunCallbackEntry {
+    owner: Option<String>,
+    callbacks: Vec<FlowRunCallback>,
 }
 
 /// One node's outcome within a run, as reported in `FlowRunSummary::steps`
@@ -900,9 +911,9 @@ pub struct FlowExecutionService {
     /// One cancel handle per in-flight run. `cancel` triggers it, so a node
     /// that is waiting stops at once.
     cancel_handles: Arc<Mutex<HashMap<String, CancelHandle>>>,
-    /// Callback URLs of each in-flight run, by run id. Filled once the run's
+    /// Callback URLs and owner of each in-flight run, by run id. Filled once the run's
     /// endpoints open and emptied by `RunRegistration` when the run ends.
-    callback_urls: Arc<Mutex<HashMap<String, Vec<FlowRunCallback>>>>,
+    callback_urls: Arc<Mutex<HashMap<String, RunCallbackEntry>>>,
     /// Opens run-scoped callback endpoints for Wait for callback nodes.
     callback_listener: Box<dyn crate::callback_listener::CallbackListener>,
     /// Fetches non-interactive OAuth2 tokens for Auth nodes at run start.
@@ -1000,14 +1011,24 @@ impl FlowExecutionService {
 
     /// The callback URLs of an in-flight run, in node order. They are known
     /// from the moment the run's endpoints open, before `FlowRunStarted` is
-    /// published. An unknown or finished run id returns an empty list, so a
-    /// caller cannot tell an unknown run from one without Wait nodes. The
-    /// URLs hold bearer tokens: callers must not log them.
-    pub fn callback_urls(&self, run_id: &str) -> Vec<FlowRunCallback> {
+    /// published. A run started with an owner hands its URLs only to a caller
+    /// with that same tag, so another window gets an empty list (also for a
+    /// caller of `None`). A run without an owner hands them to any caller. An
+    /// unknown or finished run id returns an empty list too, so a caller
+    /// cannot tell an unknown run, a foreign run or one without Wait nodes
+    /// apart. The URLs hold bearer tokens: callers must not log them.
+    pub fn callback_urls(&self, run_id: &str, caller: Option<&str>) -> Vec<FlowRunCallback> {
         self.callback_urls
             .lock()
             .ok()
-            .and_then(|urls| urls.get(run_id).cloned())
+            .and_then(|urls| {
+                let entry = urls.get(run_id)?;
+                let allowed = match entry.owner.as_deref() {
+                    None => true,
+                    Some(owner) => caller == Some(owner),
+                };
+                allowed.then(|| entry.callbacks.clone())
+            })
             .unwrap_or_default()
     }
 
@@ -1073,6 +1094,7 @@ impl FlowExecutionService {
         let options = FlowRunOptions {
             run_id: None,
             partial: Some(partial),
+            owner: None,
         };
         self.run_with_options(exec, input, auth_tokens, options)
             .await
@@ -1100,7 +1122,11 @@ impl FlowExecutionService {
         auth_tokens: FlowAuthTokens,
         options: FlowRunOptions,
     ) -> DomainResult<FlowRunSummary> {
-        let FlowRunOptions { run_id, partial } = options;
+        let FlowRunOptions {
+            run_id,
+            partial,
+            owner,
+        } = options;
         let run_id = crate::flow_run_id::choose_run_id(run_id)?;
         // Reserved before anything else, so a duplicate id is refused at once,
         // and a Stop sent while secrets and tokens are fetched is kept and
@@ -1185,7 +1211,13 @@ impl FlowExecutionService {
         }
         if !callbacks.urls().is_empty() {
             if let Ok(mut urls) = self.callback_urls.lock() {
-                urls.insert(run_id.clone(), callbacks.urls().to_vec());
+                urls.insert(
+                    run_id.clone(),
+                    RunCallbackEntry {
+                        owner,
+                        callbacks: callbacks.urls().to_vec(),
+                    },
+                );
             }
         }
         // Masked values as the run starts, kept for this run's cache entry.
@@ -8690,7 +8722,7 @@ mod tests {
     /// Publisher that reads the service's callback URL registry the moment
     /// `FlowRunStarted` is published, the way the UI reacts to the event.
     struct ProbeUrlsOnStart {
-        urls: Arc<Mutex<HashMap<String, Vec<FlowRunCallback>>>>,
+        urls: Arc<Mutex<HashMap<String, RunCallbackEntry>>>,
         seen: Arc<Mutex<Option<Vec<FlowRunCallback>>>>,
         events: Arc<RecordingPublisher>,
     }
@@ -8702,7 +8734,7 @@ mod tests {
                     .lock()
                     .expect("lock urls")
                     .get(run_id)
-                    .cloned()
+                    .map(|entry| entry.callbacks.clone())
                     .unwrap_or_default();
                 *self.seen.lock().expect("lock seen") = Some(found);
             }
@@ -8750,7 +8782,7 @@ mod tests {
             }]),
             "the URL is readable before the first node runs"
         );
-        assert!(service.callback_urls(&summary.run_id).is_empty());
+        assert!(service.callback_urls(&summary.run_id, None).is_empty());
     }
 
     #[tokio::test]
@@ -8769,7 +8801,7 @@ mod tests {
             fake.wait_opened(1).await;
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             let run_id = run_id_of(&publisher).expect("the run started");
-            let during = service.callback_urls(&run_id);
+            let during = service.callback_urls(&run_id, None);
             service.cancel(&run_id);
             during
         });
@@ -8779,14 +8811,75 @@ mod tests {
         assert_eq!(during.len(), 1);
         assert_eq!(during[0].node_id, "w");
         assert_eq!(during[0].url, "http://fake:1/cb/0");
-        assert!(service.callback_urls(&summary.run_id).is_empty());
+        assert!(service.callback_urls(&summary.run_id, None).is_empty());
         assert!(service.callback_urls.lock().expect("lock").is_empty());
+    }
+
+    /// Runs a waiting flow started by `owner` and returns what each caller
+    /// reads while it waits.
+    async fn callback_urls_read_by_callers(
+        owner: Option<&str>,
+        callers: &[Option<&str>],
+    ) -> Vec<Vec<FlowRunCallback>> {
+        let fake = crate::test_doubles::FakeCallbackListener::new();
+        let publisher = RecordingPublisher::new();
+        let service = service_with_publisher(
+            register_then_wait(wait_node_with("w", 60_000, None)),
+            &publisher,
+        )
+        .with_callback_listener(Box::new(Arc::clone(&fake)));
+        let executor = RecordingExecutor::new();
+        let exec = recording_exec(&executor, fixed_wire("x"));
+        let options = FlowRunOptions {
+            owner: owner.map(str::to_string),
+            ..FlowRunOptions::default()
+        };
+
+        let (summary, read) = tokio::join!(
+            service.run_with_options(&exec, run_input("cb"), FlowAuthTokens::new(), options),
+            async {
+                fake.wait_opened(1).await;
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                let run_id = run_id_of(&publisher).expect("the run started");
+                let read: Vec<_> = callers
+                    .iter()
+                    .map(|caller| service.callback_urls(&run_id, *caller))
+                    .collect();
+                service.cancel(&run_id);
+                read
+            }
+        );
+        summary.expect("run");
+        read
+    }
+
+    #[tokio::test]
+    async fn callback_urls_go_only_to_the_window_that_started_the_run() {
+        let read =
+            callback_urls_read_by_callers(Some("main"), &[Some("main"), Some("oauth2-auth"), None])
+                .await;
+
+        assert_eq!(read[0].len(), 1, "the owner reads the URLs");
+        assert_eq!(read[0][0].url, "http://fake:1/cb/0");
+        assert!(read[1].is_empty(), "another window gets nothing");
+        assert!(read[2].is_empty(), "a caller without a tag gets nothing");
+    }
+
+    #[tokio::test]
+    async fn callback_urls_of_a_run_without_an_owner_go_to_any_caller() {
+        let read =
+            callback_urls_read_by_callers(None, &[Some("main"), Some("oauth2-auth"), None]).await;
+
+        for urls in &read {
+            assert_eq!(urls.len(), 1);
+            assert_eq!(urls[0].node_id, "w");
+        }
     }
 
     #[tokio::test]
     async fn callback_urls_of_an_unknown_run_are_empty() {
         let service = service_with_flow(register_then_wait(wait_node_with("w", 1000, None)));
-        assert!(service.callback_urls("no-such-run").is_empty());
+        assert!(service.callback_urls("no-such-run", None).is_empty());
     }
 
     #[tokio::test]
@@ -8834,7 +8927,7 @@ mod tests {
         let summary = service.run(&exec, run_input("cb")).await.expect("run");
 
         assert_eq!(summary.stopped_reason, "completed");
-        assert!(service.callback_urls(&summary.run_id).is_empty());
+        assert!(service.callback_urls(&summary.run_id, None).is_empty());
         assert!(service.callback_urls.lock().expect("lock").is_empty());
     }
 

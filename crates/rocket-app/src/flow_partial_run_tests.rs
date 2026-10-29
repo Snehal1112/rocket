@@ -660,6 +660,7 @@ fn with_id(id: &str) -> FlowRunOptions {
     FlowRunOptions {
         run_id: Some(id.to_string()),
         partial: None,
+        owner: None,
     }
 }
 
@@ -804,6 +805,7 @@ async fn client_run_id_of_a_kept_run_is_refused_and_the_kept_run_is_untouched() 
             FlowRunOptions {
                 run_id: Some("partial-1".to_string()),
                 partial: Some(partial("kept-1", "b", FlowPartialMode::Node)),
+                owner: None,
             },
         )
         .await

@@ -1346,10 +1346,6 @@ export const clearCookies = () => invoke<void>('clear_cookies');
 
 export const getAppDataDir = () => invoke<string>('get_app_data_dir');
 
-export const watchCollections = () => invoke<void>('watch_collections');
-
-export const stopWatching = () => invoke<void>('stop_watching');
-
 // ============================================================
 // Git
 // ============================================================
