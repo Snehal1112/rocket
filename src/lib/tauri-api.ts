@@ -947,6 +947,18 @@ export const getGrpcRequest = (collection: string, path: string) =>
 export const saveGrpcRequest = (collection: string, path: string, request: GrpcRequest) =>
   invoke<GrpcRequest>('save_grpc_request', { collection, path, request });
 
+export const createGraphQlRequest = (collection: string, path: string, request: GraphQlRequest) =>
+  invoke<GraphQlRequest>('create_graphql_request', { collection, path, request });
+
+export const createGrpcRequest = (collection: string, path: string, request: GrpcRequest) =>
+  invoke<GrpcRequest>('create_grpc_request', { collection, path, request });
+
+export const createWebSocketRequest = (
+  collection: string,
+  path: string,
+  request: WebSocketRequest,
+) => invoke<WebSocketRequest>('create_websocket_request', { collection, path, request });
+
 export const getWebSocketRequest = (collection: string, path: string) =>
   invoke<WebSocketRequest>('get_websocket_request', { collection, path });
 
