@@ -5,9 +5,9 @@ import {
   FileText,
   FolderCog,
   GitBranch,
+  GitCompareArrows,
   Globe,
   LayoutDashboard,
-  RefreshCw,
   ShieldCheck,
   X,
 } from 'lucide-react';
@@ -115,7 +115,7 @@ export function TabItem({
       ) : isContractTab(tab) ? (
         <FileLock aria-hidden='true' className='h-4 w-4 shrink-0' />
       ) : isOpenApiSyncTab(tab) ? (
-        <RefreshCw aria-hidden='true' className='h-4 w-4 shrink-0' />
+        <GitCompareArrows aria-hidden='true' className='h-4 w-4 shrink-0' />
       ) : isScriptTab(tab) ? (
         <FileCode aria-hidden='true' className='h-4 w-4 shrink-0' />
       ) : isExampleTab(tab) ? (

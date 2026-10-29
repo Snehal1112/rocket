@@ -5,13 +5,13 @@ import {
   Download,
   FileCode,
   FolderPlus,
+  GitCompareArrows,
   LayoutGrid,
   Link2,
   Lock,
   MoreHorizontal,
   Pencil,
   Plus,
-  RefreshCw,
   Trash2,
   TriangleAlert,
 } from 'lucide-react';
@@ -555,7 +555,7 @@ export function CollectionNode({
               </DropdownMenuItem>
               {(openApiSync.data || openApiSync.isError) && (
                 <DropdownMenuItem onClick={openOpenApiSync}>
-                  <RefreshCw aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> OpenAPI sync
+                  <GitCompareArrows aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> OpenAPI sync
                 </DropdownMenuItem>
               )}
               {canConnect && (
@@ -628,7 +628,7 @@ export function CollectionNode({
         </ContextMenuItem>
         {(openApiSync.data || openApiSync.isError) && (
           <ContextMenuItem onClick={openOpenApiSync}>
-            <RefreshCw aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> OpenAPI sync
+            <GitCompareArrows aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> OpenAPI sync
           </ContextMenuItem>
         )}
         {canConnect && (

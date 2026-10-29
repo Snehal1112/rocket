@@ -6,12 +6,12 @@ import {
   FileText,
   FolderOpen,
   GitBranch,
+  GitCompareArrows,
   Globe,
   KeyRound,
   LayoutDashboard,
   List,
   Loader2,
-  RefreshCw,
   Variable,
 } from 'lucide-react';
 import type React from 'react';
@@ -459,7 +459,7 @@ function deriveSegments(
           onSelect: (item) => nav.switchCollection(item.id),
         },
       },
-      { label: 'OpenAPI sync', icon: <RefreshCw className='h-3 w-3' /> },
+      { label: 'OpenAPI sync', icon: <GitCompareArrows className='h-3 w-3' /> },
     ];
   }
 
