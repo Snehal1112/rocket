@@ -17,7 +17,7 @@ use std::collections::HashSet;
 use rocket_collection::{
     CollectionItem, CollectionSettings, CollectionVariable, Folder, FolderSettings, Request,
 };
-use rocket_environment::{Environment, Variable};
+use rocket_environment::{Environment, ExternalSecretBinding, Variable};
 use rocket_history::HistoryEntry;
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::types::{Auth, Body, BodyMode, FormDataEntry, Header, QueryParam};
@@ -315,11 +315,19 @@ pub struct MaskedEnvironment {
 
 impl MaskedEnvironment {
     pub fn from_environment(env: &Environment) -> Self {
+        Self::from_environment_with_bindings(env, &env.external_secrets)
+    }
+
+    /// Like `from_environment`, but lists the given bindings, such as the
+    /// ones merged along the `extends` chain, as the vault references.
+    pub fn from_environment_with_bindings(
+        env: &Environment,
+        bindings: &[ExternalSecretBinding],
+    ) -> Self {
         Self {
             name: env.name.clone(),
             variables: env.variables.iter().map(mask_env_variable).collect(),
-            vault_references: env
-                .external_secrets
+            vault_references: bindings
                 .iter()
                 .flat_map(|binding| {
                     binding
@@ -1002,7 +1010,7 @@ pub(crate) fn render_outline(collections: &[OutlineCollection]) -> String {
 mod tests {
     use super::*;
     use rocket_collection::{Collection, RequestKind, RequestSummary};
-    use rocket_environment::{ExternalSecretBinding, ExternalSecretRef};
+    use rocket_environment::ExternalSecretRef;
     use rocket_shared::types::{FormDataType, HttpMethod};
 
     #[test]
@@ -1273,6 +1281,38 @@ mod tests {
         assert_eq!(host.value.as_deref(), Some("api.example.com"));
         let json = serde_json::to_string(&view).expect("serialize");
         assert!(!json.contains("sk-live-abc"));
+    }
+
+    fn payments_binding() -> ExternalSecretBinding {
+        ExternalSecretBinding {
+            alias: "payments".into(),
+            connection_id: "conn-1".into(),
+            vault_name: "main".into(),
+            secret_names: vec![ExternalSecretRef {
+                name: "apiKey".into(),
+                secret_id: "id-1".into(),
+            }],
+        }
+    }
+
+    #[test]
+    fn vault_references_include_parent_secrets() {
+        let mut child = Environment::new("child");
+        child.extends = Some("parent".into());
+        let view = MaskedEnvironment::from_environment_with_bindings(&child, &[payments_binding()]);
+        assert_eq!(view.vault_references, vec!["payments.apiKey".to_string()]);
+    }
+
+    #[test]
+    fn vault_references_unchanged_without_a_parent() {
+        let mut env = Environment::new("dev");
+        env.external_secrets.push(payments_binding());
+        let view = MaskedEnvironment::from_environment(&env);
+        assert_eq!(view.vault_references, vec!["payments.apiKey".to_string()]);
+        assert_eq!(
+            view,
+            MaskedEnvironment::from_environment_with_bindings(&env, &env.external_secrets)
+        );
     }
 
     fn summary(method: &str, file: &str) -> RequestSummary {

@@ -706,11 +706,15 @@ impl McpToolService {
     ) -> DomainResult<MaskedEnvironment> {
         self.check_in_workspace(session_id, collection)?;
         Self::validate_environment_name(environment)?;
-        let env = self
-            .environment_repo_factory
-            .for_collection(collection)
-            .get(environment)?;
-        let view = MaskedEnvironment::from_environment(&env);
+        let repo = self.environment_repo_factory.for_collection(collection);
+        let env = repo.get(environment)?;
+        let merged = rocket_environment::flatten_with_repo(&env, repo.as_ref())?;
+        let bindings: Vec<_> = merged
+            .external_secrets
+            .into_iter()
+            .map(|flat| flat.binding)
+            .collect();
+        let view = MaskedEnvironment::from_environment_with_bindings(&env, &bindings);
         self.publish_tool_invoked(
             session_id,
             "get_environment",

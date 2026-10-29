@@ -1316,7 +1316,10 @@ mod tests {
             environment_name: Some("dev"),
             global_env_name: None,
         };
-        assert_eq!(svc.lint_with_environment("demo", &flow, env), svc.lint("demo", &flow));
+        assert_eq!(
+            svc.lint_with_environment("demo", &flow, env),
+            svc.lint("demo", &flow)
+        );
     }
 
     fn lint_sources_with_nothing_saved() -> crate::flow_lint_context::LintSources {
@@ -1465,7 +1468,9 @@ mod tests {
         };
         let lints = svc.lint_with_environment("demo", &flow, dev);
         assert!(
-            lints.iter().all(|l| l.code != rocket_flow::lint::UNKNOWN_VARIABLE),
+            lints
+                .iter()
+                .all(|l| l.code != rocket_flow::lint::UNKNOWN_VARIABLE),
             "a saved request may set variables at run time"
         );
     }
