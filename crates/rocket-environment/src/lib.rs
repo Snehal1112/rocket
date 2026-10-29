@@ -26,7 +26,8 @@ pub use dot_env::{
 pub use environment::{Environment, Extensions};
 pub use external_secret::{ExternalSecretBinding, ExternalSecretRef};
 pub use flatten::{
-    find_extends_cycle, flatten_environment, flatten_with_repo, FlatVariable, Flattened,
+    find_extends_cycle, flatten_environment, flatten_with_repo, FlatBinding, FlatCertificate,
+    FlatVariable, Flattened,
 };
 pub use repository::{EnvironmentRepository, EnvironmentRepositoryFactory};
 pub use resolver::{resolve, resolve_with_env, ResolveResult};

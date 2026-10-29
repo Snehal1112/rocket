@@ -1,7 +1,7 @@
 use rocket_audit::actor::AuditActor;
 use rocket_audit::publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher};
-use rocket_environment::{Environment, EnvironmentRepository};
-use rocket_shared::error::{DomainError, DomainResult};
+use rocket_environment::{Environment, EnvironmentRepository, ExternalSecretBinding};
+use rocket_shared::error::DomainResult;
 use rocket_shared::events::{DomainEvent, EventPublisher};
 use std::sync::Arc;
 
@@ -49,14 +49,9 @@ impl EnvironmentService {
         self.repo.get(name)
     }
 
-    pub fn save(&self, env: &Environment) -> DomainResult<()> {
-        rocket_environment::external_secret::validate_external_secret_bindings(
-            &env.external_secrets,
-        )?;
-        rocket_environment::validate_client_certificates(
-            &env.client_certificates,
-            &env.external_secrets,
-        )?;
+    /// Bindings of `env` merged with its parent chain. A cycle is an error and
+    /// a missing parent only warns.
+    fn merged_bindings(&self, env: &Environment) -> DomainResult<Vec<ExternalSecretBinding>> {
         let repo = self.repo.as_ref();
         let own = |name: &str| {
             if name == env.name {
@@ -65,17 +60,19 @@ impl EnvironmentService {
                 repo.get(name).ok()
             }
         };
-        if let Some(cycle) = rocket_environment::find_extends_cycle(env, &own) {
-            let first = cycle.first().cloned().unwrap_or_default();
-            let path = cycle
-                .into_iter()
-                .chain(std::iter::once(first))
-                .collect::<Vec<_>>()
-                .join(" -> ");
-            return Err(DomainError::InvalidInput(format!(
-                "Environment extends cycle: {path}"
-            )));
+        let flat = rocket_environment::flatten_environment(env, &own)?;
+        for warning in &flat.warnings {
+            tracing::warn!("{warning}");
         }
+        Ok(flat.bindings())
+    }
+
+    pub fn save(&self, env: &Environment) -> DomainResult<()> {
+        let bindings = self.merged_bindings(env)?;
+        rocket_environment::external_secret::validate_external_secret_bindings(
+            &env.external_secrets,
+        )?;
+        rocket_environment::validate_client_certificates(&env.client_certificates, &bindings)?;
         // Snapshot previous state so we can detect which secret values actually changed.
         let previous = self.repo.get(&env.name).ok();
         self.repo.save(env)?;
@@ -104,9 +101,10 @@ impl EnvironmentService {
         env: &Environment,
         lookup: &dyn rocket_environment::ProviderCapabilityLookup,
     ) -> DomainResult<()> {
+        let bindings = self.merged_bindings(env)?;
         rocket_environment::validate_vault_certificate_providers(
             &env.client_certificates,
-            &env.external_secrets,
+            &bindings,
             lookup,
         )?;
         self.save(env)
@@ -475,6 +473,79 @@ mod tests {
         let svc = make_service();
         svc.save(&child("a", "nope"))
             .expect("missing parent only warns");
+    }
+
+    fn parent_with_prod_binding() -> Environment {
+        let mut base = Environment::new("base");
+        base.external_secrets.push(ExternalSecretBinding {
+            alias: "prod".into(),
+            connection_id: "conn-1".into(),
+            vault_name: "v".into(),
+            secret_names: vec![],
+        });
+        base
+    }
+
+    fn child_with_vault_certificate() -> Environment {
+        let mut c = child("child", "base");
+        c.client_certificates.push(ClientCertificate::Vault {
+            domain: "api.example.com".into(),
+            binding: "prod".into(),
+            certificate: "c1".into(),
+            format: VaultCertificateFormat::Pkcs12,
+        });
+        c
+    }
+
+    #[test]
+    fn save_accepts_a_vault_certificate_naming_a_parent_alias() {
+        let svc = make_service();
+        svc.save(&parent_with_prod_binding()).expect("base");
+        svc.save(&child_with_vault_certificate())
+            .expect("parent alias is valid");
+    }
+
+    #[test]
+    fn save_rejects_a_vault_certificate_naming_an_unknown_alias() {
+        let svc = make_service();
+        svc.save(&Environment::new("base")).expect("base");
+        let err = svc
+            .save(&child_with_vault_certificate())
+            .expect_err("no binding anywhere");
+        assert!(err.to_string().contains("prod"), "{err}");
+    }
+
+    #[test]
+    fn save_does_not_persist_inherited_bindings_or_certificates() {
+        let svc = make_service();
+        svc.save(&parent_with_prod_binding()).expect("base");
+        svc.save(&child_with_vault_certificate()).expect("child");
+        let stored = svc.get("child").expect("get");
+        assert!(stored.external_secrets.is_empty());
+        assert_eq!(stored.client_certificates.len(), 1);
+    }
+
+    #[test]
+    fn save_with_missing_parent_uses_only_own_bindings() {
+        let svc = make_service();
+        let mut c = child_with_vault_certificate();
+        c.extends = Some("gone".into());
+        svc.save(&c).expect_err("no own binding for prod");
+    }
+
+    #[test]
+    fn save_with_capabilities_accepts_a_parent_alias() {
+        let svc = make_service();
+        svc.save(&parent_with_prod_binding()).expect("base");
+        let lookup = FixedLookup(Some(ConnectionProvider {
+            kind: SecretProviderKind::RocketVault,
+            capabilities: ProviderCapabilities {
+                certificates: true,
+                ..ProviderCapabilities::default()
+            },
+        }));
+        svc.save_with_capabilities(&child_with_vault_certificate(), &lookup)
+            .expect("parent alias is valid");
     }
 
     #[test]

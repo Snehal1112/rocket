@@ -41,8 +41,21 @@ pub(crate) fn environment_client_certificates(
     let Ok(env) = repo.get(name) else {
         return Vec::new();
     };
-    let bindings = env.external_secrets;
-    env.client_certificates
+    // The merged lists include the parent chain's. A broken chain (a cycle) keeps the
+    // environment's own lists, so a request still goes out with what it defines itself.
+    let (certificates, bindings) = match rocket_environment::flatten_with_repo(&env, repo) {
+        Ok(flat) => {
+            for warning in &flat.warnings {
+                tracing::warn!("{warning}");
+            }
+            (flat.certificates(), flat.bindings())
+        }
+        Err(error) => {
+            tracing::warn!("{error}; using the client certificates of {name} only");
+            (env.client_certificates, env.external_secrets)
+        }
+    };
+    certificates
         .into_iter()
         .map(|c| resolve_client_certificate(c, vars))
         .map(|c| absolutize_certificate_paths(c, collection_dir))
@@ -362,7 +375,7 @@ pub(crate) fn describe_all(certs: &[ResolvedClientCertificate]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_doubles::StaticEnvRepo;
+    use crate::test_doubles::{MapEnvRepo, StaticEnvRepo};
     use rocket_environment::Environment;
     use rocket_shared::certificate::VaultCertificateFormat;
 
@@ -431,6 +444,79 @@ mod tests {
         let lines = resolve_env(env, &[("apiHost", "api.example.com")]);
         assert!(
             lines[0].starts_with("deferred api.example.com "),
+            "{lines:?}"
+        );
+    }
+
+    fn resolve_chain(envs: Vec<Environment>, name: &str, vars: &[(&str, &str)]) -> Vec<String> {
+        let vars: HashMap<String, String> = vars
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        let repo = MapEnvRepo(envs.into_iter().map(|e| (e.name.clone(), e)).collect());
+        describe_all(&environment_client_certificates(
+            &repo,
+            Some(name),
+            None,
+            &vars,
+            &HashMap::new(),
+        ))
+    }
+
+    fn child_of(parent: &str) -> Environment {
+        let mut child = Environment::new("child");
+        child.extends = Some(parent.into());
+        child
+    }
+
+    #[test]
+    fn inherited_certificate_is_presented_for_its_domain() {
+        let mut base = Environment::new("base");
+        base.client_certificates = vec![vault_entry("api.example.com", "prod")];
+        base.external_secrets = vec![binding("prod")];
+        let lines = resolve_chain(vec![base, child_of("base")], "child", &[]);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(lines[0].contains("api.example.com"), "{lines:?}");
+    }
+
+    #[test]
+    fn inherited_vault_certificate_resolves_against_parent_alias() {
+        let mut base = Environment::new("base");
+        base.external_secrets = vec![binding("prod")];
+        base.client_certificates = vec![vault_entry("api.example.com", "prod")];
+        let lines = resolve_chain(vec![base, child_of("base")], "child", &[]);
+        assert!(
+            lines[0].starts_with("deferred api.example.com "),
+            "{lines:?}"
+        );
+    }
+
+    #[test]
+    fn inherited_certificate_placeholders_use_child_variables() {
+        let mut base = Environment::new("base");
+        base.external_secrets = vec![binding("prod")];
+        base.client_certificates = vec![vault_entry("{{apiHost}}", "prod")];
+        let lines = resolve_chain(
+            vec![base, child_of("base")],
+            "child",
+            &[("apiHost", "x.com")],
+        );
+        assert!(lines[0].starts_with("deferred x.com "), "{lines:?}");
+    }
+
+    #[test]
+    fn cycle_falls_back_to_own_certificates() {
+        let mut a = Environment::new("a");
+        a.extends = Some("b".into());
+        a.external_secrets = vec![binding("prod")];
+        a.client_certificates = vec![vault_entry("own.example.com", "prod")];
+        let mut b = Environment::new("b");
+        b.extends = Some("a".into());
+        b.client_certificates = vec![vault_entry("other.example.com", "prod")];
+        let lines = resolve_chain(vec![a, b], "a", &[]);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        assert!(
+            lines[0].starts_with("deferred own.example.com "),
             "{lines:?}"
         );
     }

@@ -1,8 +1,10 @@
 //! Flattening of an environment with its `extends` parent chain.
 
 use crate::invalid::invalid;
-use crate::{Environment, EnvironmentRepository, Variable};
+use crate::{Environment, EnvironmentRepository, ExternalSecretBinding, Variable};
+use rocket_shared::certificate::ClientCertificate;
 use rocket_shared::error::DomainResult;
+use std::collections::HashSet;
 
 /// A variable together with the name of the environment that defines it.
 #[derive(Debug, Clone, PartialEq)]
@@ -11,14 +13,52 @@ pub struct FlatVariable {
     pub source: String,
 }
 
-/// The result of flattening: merged variables plus non-fatal warnings.
+/// An external secret binding together with the environment that defines it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FlatBinding {
+    pub binding: ExternalSecretBinding,
+    pub source: String,
+}
+
+/// A client certificate together with the environment that defines it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FlatCertificate {
+    pub certificate: ClientCertificate,
+    pub source: String,
+}
+
+/// The result of flattening: merged variables, bindings and certificates plus
+/// non-fatal warnings.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Flattened {
     pub variables: Vec<FlatVariable>,
+    pub external_secrets: Vec<FlatBinding>,
+    pub client_certificates: Vec<FlatCertificate>,
     pub warnings: Vec<String>,
 }
 
+/// Domain key for the certificate merge: trimmed and ASCII lowercased.
+fn domain_key(cert: &ClientCertificate) -> String {
+    cert.domain().trim().to_ascii_lowercase()
+}
+
 impl Flattened {
+    /// The merged bindings without their source.
+    pub fn bindings(&self) -> Vec<ExternalSecretBinding> {
+        self.external_secrets
+            .iter()
+            .map(|f| f.binding.clone())
+            .collect()
+    }
+
+    /// The merged certificates without their source.
+    pub fn certificates(&self) -> Vec<ClientCertificate> {
+        self.client_certificates
+            .iter()
+            .map(|f| f.certificate.clone())
+            .collect()
+    }
+
     /// Enabled key and value pairs, in variable order.
     pub fn enabled_pairs(&self) -> Vec<(&str, &str)> {
         self.variables
@@ -120,6 +160,29 @@ pub fn flatten_environment(
                 None => out.variables.push(flat),
             }
         }
+        for binding in &layer.external_secrets {
+            // A nearer layer's binding replaces the inherited one of the same alias.
+            out.external_secrets
+                .retain(|f| f.binding.alias != binding.alias);
+            out.external_secrets.push(FlatBinding {
+                binding: binding.clone(),
+                source: layer.name.clone(),
+            });
+        }
+    }
+    // Certificates list the child's own entries first, then inherited ones.
+    let mut taken = HashSet::new();
+    for layer in &chain.layers {
+        // Only a nearer layer hides an entry. Twins inside one environment all stay.
+        for cert in &layer.client_certificates {
+            if !taken.contains(&domain_key(cert)) {
+                out.client_certificates.push(FlatCertificate {
+                    certificate: cert.clone(),
+                    source: layer.name.clone(),
+                });
+            }
+        }
+        taken.extend(layer.client_certificates.iter().map(domain_key));
     }
     Ok(out)
 }
@@ -152,6 +215,172 @@ mod tests {
 
     fn flat(child: &Environment, s: &HashMap<String, Environment>) -> DomainResult<Flattened> {
         flatten_environment(child, &|n| s.get(n).cloned())
+    }
+
+    fn binding(alias: &str, vault: &str) -> ExternalSecretBinding {
+        ExternalSecretBinding {
+            alias: alias.to_string(),
+            connection_id: "conn".to_string(),
+            vault_name: vault.to_string(),
+            secret_names: Vec::new(),
+        }
+    }
+
+    fn pkcs12(domain: &str) -> ClientCertificate {
+        pkcs12_at(domain, "/c.p12")
+    }
+
+    fn pkcs12_at(domain: &str, path: &str) -> ClientCertificate {
+        ClientCertificate::Pkcs12 {
+            domain: domain.to_string(),
+            pkcs12_file_path: path.to_string(),
+            pkcs12_secret: None,
+            passphrase: None,
+        }
+    }
+
+    fn aliases(out: &Flattened) -> Vec<&str> {
+        out.external_secrets
+            .iter()
+            .map(|f| f.binding.alias.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn child_binding_replaces_parent_binding_with_same_alias() {
+        let mut p = env("p", None, &[]);
+        p.external_secrets = vec![binding("prod", "parent-vault"), binding("stage", "s")];
+        let mut c = env("c", Some("p"), &[]);
+        c.external_secrets = vec![binding("prod", "child-vault")];
+        let out = flat(&c, &store(vec![p, c.clone()])).expect("flatten");
+        let got: Vec<(&str, &str, &str)> = out
+            .external_secrets
+            .iter()
+            .map(|f| {
+                (
+                    f.binding.alias.as_str(),
+                    f.binding.vault_name.as_str(),
+                    f.source.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(got, vec![("stage", "s", "p"), ("prod", "child-vault", "c")]);
+    }
+
+    #[test]
+    fn parent_only_bindings_are_inherited() {
+        let mut p = env("p", None, &[]);
+        p.external_secrets = vec![binding("a", "v")];
+        let c = env("c", Some("p"), &[]);
+        let out = flat(&c, &store(vec![p])).expect("flatten");
+        assert_eq!(out.external_secrets.len(), 1);
+        assert_eq!(out.external_secrets[0].binding.alias, "a");
+        assert_eq!(out.external_secrets[0].source, "p");
+    }
+
+    #[test]
+    fn three_level_chain_merges_bindings_furthest_first() {
+        let mut g = env("g", None, &[]);
+        g.external_secrets = vec![binding("g1", "v")];
+        let mut p = env("p", Some("g"), &[]);
+        p.external_secrets = vec![binding("p1", "v")];
+        let mut c = env("c", Some("p"), &[]);
+        c.external_secrets = vec![binding("c1", "v")];
+        let out = flat(&c, &store(vec![g, p])).expect("flatten");
+        assert_eq!(aliases(&out), vec!["g1", "p1", "c1"]);
+    }
+
+    #[test]
+    fn aliases_differing_in_case_are_distinct() {
+        let mut p = env("p", None, &[]);
+        p.external_secrets = vec![binding("Prod", "v")];
+        let mut c = env("c", Some("p"), &[]);
+        c.external_secrets = vec![binding("prod", "v")];
+        let out = flat(&c, &store(vec![p])).expect("flatten");
+        assert_eq!(out.external_secrets.len(), 2);
+    }
+
+    #[test]
+    fn child_certificate_replaces_parent_certificate_with_same_domain() {
+        let mut p = env("p", None, &[]);
+        p.client_certificates = vec![pkcs12("a.com")];
+        let mut c = env("c", Some("p"), &[]);
+        c.client_certificates = vec![pkcs12_at("a.com", "/child.p12")];
+        let out = flat(&c, &store(vec![p])).expect("flatten");
+        assert_eq!(out.client_certificates.len(), 1);
+        assert_eq!(out.client_certificates[0].source, "c");
+        assert_eq!(
+            out.client_certificates[0].certificate,
+            pkcs12_at("a.com", "/child.p12")
+        );
+    }
+
+    #[test]
+    fn domain_match_ignores_case_and_spaces() {
+        let mut p = env("p", None, &[]);
+        p.client_certificates = vec![pkcs12("a.com")];
+        let mut c = env("c", Some("p"), &[]);
+        c.client_certificates = vec![pkcs12(" A.COM ")];
+        let out = flat(&c, &store(vec![p])).expect("flatten");
+        assert_eq!(out.client_certificates.len(), 1);
+        assert_eq!(out.client_certificates[0].source, "c");
+    }
+
+    #[test]
+    fn certificates_list_child_first_then_inherited() {
+        let mut p = env("p", None, &[]);
+        p.client_certificates = vec![pkcs12("p.com")];
+        let mut c = env("c", Some("p"), &[]);
+        c.client_certificates = vec![pkcs12("c.com")];
+        let out = flat(&c, &store(vec![p])).expect("flatten");
+        let domains: Vec<&str> = out
+            .client_certificates
+            .iter()
+            .map(|f| f.certificate.domain())
+            .collect();
+        assert_eq!(domains, vec!["c.com", "p.com"]);
+    }
+
+    #[test]
+    fn same_domain_twins_in_one_environment_both_stay() {
+        let mut c = env("c", None, &[]);
+        c.client_certificates = vec![
+            pkcs12_at("a.com", "/one.p12"),
+            pkcs12_at("a.com", "/two.p12"),
+        ];
+        let out = flat(&c, &store(vec![])).expect("flatten");
+        assert_eq!(out.certificates(), c.client_certificates);
+    }
+
+    #[test]
+    fn no_extends_returns_own_lists_unchanged() {
+        let mut c = env("c", None, &[]);
+        c.external_secrets = vec![binding("a", "v")];
+        c.client_certificates = vec![pkcs12("a.com")];
+        let out = flat(&c, &store(vec![])).expect("flatten");
+        assert_eq!(out.bindings(), c.external_secrets);
+        assert_eq!(out.certificates(), c.client_certificates);
+        assert_eq!(out.external_secrets[0].source, "c");
+        assert_eq!(out.client_certificates[0].source, "c");
+    }
+
+    #[test]
+    fn missing_parent_warns_and_keeps_own_lists() {
+        let mut c = env("c", Some("gone"), &[]);
+        c.external_secrets = vec![binding("a", "v")];
+        let out = flat(&c, &store(vec![])).expect("flatten");
+        assert_eq!(aliases(&out), vec!["a"]);
+        assert_eq!(out.warnings.len(), 1);
+    }
+
+    #[test]
+    fn cycle_still_errors_with_bindings_present() {
+        let mut a = env("a", Some("b"), &[]);
+        a.external_secrets = vec![binding("x", "v")];
+        let mut b = env("b", Some("a"), &[]);
+        b.external_secrets = vec![binding("y", "v")];
+        let err = flat(&a, &store(vec![b])).expect_err("cycle").to_string();
+        assert!(err.contains("a -> b -> a"), "{err}");
     }
 
     #[test]
