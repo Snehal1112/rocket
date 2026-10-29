@@ -271,14 +271,7 @@ impl GitAppService {
 
     // Conflicts
     pub fn conflicts(&self, path: &str) -> DomainResult<Vec<ConflictFile>> {
-        let files = self.git.conflicts(path)?;
-        if !files.is_empty() {
-            self.events.publish(DomainEvent::GitConflictDetected {
-                collection: path.to_string(),
-                files: files.iter().map(|f| f.path.clone()).collect(),
-            });
-        }
-        Ok(files)
+        self.git.conflicts(path)
     }
 
     pub fn resolve_conflict(
@@ -692,19 +685,12 @@ mod tests {
         Ok(())
     }
 
-    // Current behaviour: this read-only query publishes when conflicts exist.
     #[test]
-    fn conflicts_publishes_git_conflict_detected_with_file_paths() -> DomainResult<()> {
+    fn conflicts_is_a_side_effect_free_query() -> DomainResult<()> {
         let (svc, events, _) = build(false, vec!["a.yml".into(), "b.yml".into()]);
         let files = svc.conflicts("/repo")?;
         assert_eq!(files.len(), 2);
-        match events.events().as_slice() {
-            [DomainEvent::GitConflictDetected { collection, files }] => {
-                assert_eq!(collection, "/repo");
-                assert_eq!(files, &["a.yml".to_string(), "b.yml".to_string()]);
-            }
-            other => panic!("unexpected events: {other:?}"),
-        }
+        assert!(events.events().is_empty());
         Ok(())
     }
 
