@@ -1,7 +1,10 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { findTabInTree } from '@/lib/pane-utils';
 import * as tauriApi from '@/lib/tauri-api';
+import { usePaneStore } from '@/stores/pane-store';
+import type { RequestTab } from '@/types/pane-types';
 import { HistoryPanel } from '../HistoryPanel';
 
 vi.mock('@/lib/tauri-api', async () => {
@@ -24,7 +27,11 @@ describe('HistoryPanel mount', () => {
   });
 });
 
-function entry(id: string, runSource?: tauriApi.RunSource): tauriApi.HistoryEntry {
+function entry(
+  id: string,
+  runSource?: tauriApi.RunSource,
+  collection?: string,
+): tauriApi.HistoryEntry {
   return {
     id,
     method: 'GET',
@@ -34,6 +41,7 @@ function entry(id: string, runSource?: tauriApi.RunSource): tauriApi.HistoryEntr
     responseSize: 0,
     timestamp: '2026-10-11T10:00:00Z',
     runSource,
+    collection,
   };
 }
 
@@ -83,6 +91,34 @@ describe('HistoryPanel run source', () => {
     render(<HistoryPanel />);
     await waitFor(() => expect(tauriApi.listHistory).toHaveBeenCalledWith(200));
     expect(tauriApi.searchHistory).not.toHaveBeenCalled();
+  });
+});
+
+describe('HistoryPanel open entry', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    usePaneStore.getState().reset();
+    vi.mocked(tauriApi.searchHistory).mockResolvedValue([]);
+  });
+
+  async function openAndGetTab(id: string, collection?: string) {
+    vi.mocked(tauriApi.listHistory).mockResolvedValue([entry(id, undefined, collection)]);
+    render(<HistoryPanel />);
+    await userEvent.click(
+      await screen.findByRole('button', { name: `Open GET https://api.example.com/${id}` }),
+    );
+    return findTabInTree(usePaneStore.getState().root, `history-${id}`)?.tab as RequestTab;
+  }
+
+  it('sets historyCollection and no source when the entry has a collection', async () => {
+    const tab = await openAndGetTab('h1', 'clone');
+    expect(tab.historyCollection).toBe('clone');
+    expect(tab.source).toBeUndefined();
+  });
+
+  it('sets historyCollection to null when the entry has none', async () => {
+    const tab = await openAndGetTab('h2');
+    expect(tab.historyCollection).toBeNull();
   });
 });
 

@@ -31,6 +31,8 @@ export interface RequestTab extends BaseTab {
   tabType: 'request' | 'history';
   request: RequestState;
   response: ResponseState | null;
+  /** The collection of the History entry. Set only for `history` tabs, and never a `source`. */
+  historyCollection?: string | null;
 }
 
 export type CollectionSection = 'overview' | 'auth' | 'variables' | 'documentation';

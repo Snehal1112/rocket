@@ -158,6 +158,8 @@ export function HistoryPanel() {
       },
       response: null,
       isDirty: false,
+      // Not `source`: that would turn on autosave, collection switching and collection variables.
+      historyCollection: entry.collection ?? null,
     };
     usePaneStore.getState().openTab(tab);
   }

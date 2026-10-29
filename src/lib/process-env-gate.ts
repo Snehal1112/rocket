@@ -7,6 +7,12 @@ import { usePaneStore } from '@/stores/pane-store';
 
 const PLACEHOLDER = '{{process.env.';
 
+/** Marks a request that has no host environment at all, such as a History entry without a collection. */
+export const CLOSED_PROCESS_ENV: unique symbol = Symbol('closed-process-env');
+
+/** A collection name, `CLOSED_PROCESS_ENV`, or `undefined` for a scratch request with full access. */
+export type ProcessEnvScope = string | typeof CLOSED_PROCESS_ENV | undefined;
+
 /**
  * Warns before a send when the request text uses `{{process.env.NAME}}` and the collection
  * is not allowed host environment access on this computer. The send still goes out with
@@ -17,11 +23,11 @@ const PLACEHOLDER = '{{process.env.';
  * params, body, auth fields). Objects are searched through their JSON form.
  */
 export async function warnIfProcessEnvWithheld(
-  collection: string | null | undefined,
+  scope: ProcessEnvScope | null,
   parts: unknown[],
   requestName = 'Request',
 ): Promise<void> {
-  if (!collection) return;
+  if (!scope) return;
   const used = parts.some((part) => {
     if (part == null) return false;
     try {
@@ -32,6 +38,14 @@ export async function warnIfProcessEnvWithheld(
     }
   });
   if (!used) return;
+  if (scope === CLOSED_PROCESS_ENV) {
+    const message =
+      'Host environment variables are not available for a request reopened from History without a collection, so {{process.env.NAME}} was sent unresolved.';
+    useConsoleStore.getState().addScriptEntry({ level: 'warn', message, requestName });
+    toast.warning(message);
+    return;
+  }
+  const collection = scope;
   try {
     const trust = await getQueryClient().fetchQuery({
       queryKey: collectionTrustKeys.one(collection),
