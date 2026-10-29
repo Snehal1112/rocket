@@ -169,7 +169,7 @@ fn populate(repo: &FsCollectionRepo, name: &str, requests: usize, folders: usize
 }
 
 fn http_request(i: usize) -> Request {
-    let method = if i % 2 == 0 {
+    let method = if i.is_multiple_of(2) {
         HttpMethod::Get
     } else {
         HttpMethod::Post

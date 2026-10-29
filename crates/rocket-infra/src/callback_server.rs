@@ -381,10 +381,12 @@ mod tests {
     /// A deliberate memory budget. If you raise a limit, raise this knowingly.
     #[test]
     fn queued_callback_bytes_stay_within_the_memory_budget() {
-        assert!(
-            CHANNEL_CAPACITY * MAX_BODY_BYTES <= 8 * 1024 * 1024,
-            "queued callbacks may hold at most 8 MiB per endpoint"
-        );
+        const {
+            assert!(
+                CHANNEL_CAPACITY * MAX_BODY_BYTES <= 8 * 1024 * 1024,
+                "queued callbacks may hold at most 8 MiB per endpoint"
+            )
+        };
     }
 
     #[tokio::test]

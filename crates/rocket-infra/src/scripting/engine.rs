@@ -4671,7 +4671,7 @@ mod cookie_tests {
         "#;
         let out = run(ctx_with(code, vec![]), None).await;
         let mut expected = vec!["0 true"];
-        expected.extend(std::iter::repeat("rok.cookies is not available here").take(9));
+        expected.extend(std::iter::repeat_n("rok.cookies is not available here", 9));
         assert_eq!(out, expected);
     }
 
