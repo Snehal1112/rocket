@@ -44,6 +44,15 @@ impl ExportService {
         }
     }
 
+    /// Prefix a single quote to text a spreadsheet would read as a formula.
+    fn neutralise_formula(s: &str) -> String {
+        if s.starts_with(['=', '+', '-', '@', '\t', '\r']) {
+            format!("'{s}")
+        } else {
+            s.to_string()
+        }
+    }
+
     /// Quote a CSV field per RFC 4180 if it contains a delimiter, quote, or line break.
     fn csv_quote(s: &str) -> String {
         if s.contains([',', '"', '\n', '\r']) {
@@ -57,7 +66,9 @@ impl ExportService {
         let mut out = String::from("seq,status,latency_ms,response_bytes,error,phase_index\n");
         for entry in &result.request_log {
             let status = entry.status.map(|s| s.to_string()).unwrap_or_default();
-            let error = Self::csv_quote(entry.error.as_deref().unwrap_or(""));
+            let error = Self::csv_quote(&Self::neutralise_formula(
+                entry.error.as_deref().unwrap_or(""),
+            ));
             out.push_str(&format!(
                 "{},{},{:.2},{},{},{}\n",
                 entry.seq, status, entry.latency_ms, entry.response_bytes, error, entry.phase_index,
@@ -374,5 +385,63 @@ mod tests {
         assert!(html.contains("'ERR'"));
         assert!(html.contains("toFixed(1)"));
         assert!(html.contains("'ok' : 'err'"));
+    }
+
+    fn csv_of(result: &LoadTestResult) -> String {
+        let (bytes, ext) = ExportService::export(result, ExportFormat::Csv).expect("csv export");
+        assert_eq!(ext, "csv");
+        String::from_utf8(bytes).expect("utf8 csv")
+    }
+
+    #[test]
+    fn csv_prefixes_a_quote_to_error_text_that_starts_with_a_formula_character() {
+        for (input, cell) in [
+            ("=1+1", "'=1+1"),
+            ("+cmd", "'+cmd"),
+            ("-2+3", "'-2+3"),
+            ("@SUM(A1)", "'@SUM(A1)"),
+        ] {
+            let csv = csv_of(&result_with_error(input));
+            assert_eq!(
+                csv.lines().nth(1),
+                Some(format!("0,,0.00,0,{cell},0").as_str()),
+                "{input}"
+            );
+        }
+    }
+
+    #[test]
+    fn csv_prefixes_a_quote_to_error_text_that_starts_with_tab_or_carriage_return() {
+        let tab = csv_of(&result_with_error("\tx"));
+        assert!(tab.contains("0,,0.00,0,'\tx,0"));
+        let cr = csv_of(&result_with_error("\rx"));
+        assert!(cr.contains("0,,0.00,0,\"'\rx\",0"));
+    }
+
+    #[test]
+    fn csv_leaves_ordinary_error_text_unchanged() {
+        for input in ["x=1", "connection refused", "a-b"] {
+            let csv = csv_of(&result_with_error(input));
+            assert_eq!(
+                csv.lines().nth(1),
+                Some(format!("0,,0.00,0,{input},0").as_str()),
+                "{input}"
+            );
+        }
+    }
+
+    #[test]
+    fn csv_prefixes_before_quoting() {
+        let csv = csv_of(&result_with_error("=a,b"));
+        assert_eq!(csv.lines().nth(1), Some("0,,0.00,0,\"'=a,b\",0"));
+    }
+
+    #[test]
+    fn csv_keeps_an_empty_error_cell_empty() {
+        let csv = csv_of(&result_with_error(""));
+        assert_eq!(csv.lines().nth(1), Some("0,,0.00,0,,0"));
+        let mut none = result_with_error("x");
+        none.request_log[0].error = None;
+        assert_eq!(csv_of(&none).lines().nth(1), Some("0,,0.00,0,,0"));
     }
 }
