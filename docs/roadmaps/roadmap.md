@@ -147,6 +147,12 @@ Shipped on local main (not pushed). Details in `docs/features/collection-trust.m
 | R-59 | Tidy-ups from the tool reviews: `cargo fmt` once over the workspace, `/kb-refresh rocketapi`, mark follow-up rows in `assistant-followups.md` | open | | Small, separate commits. |
 | R-60 | Software factory v3 series (plans 01 to 08): Rust driver with `git2`, headless agents, checks before review, risk gate, budget, series, dashboard tokens, harness and verification | built on branch `factory-v3/plan-08-verification`; dry run pending (user) | spec `docs/superpowers/specs/2026-10-13-software-factory-v3-rust-driver-design.md`, plans `docs/superpowers/plans/2026-10-13-software-factory-v3/`, design doc `~/data/rocket/Archive/rocket-tools-factory/software-factory.md` | Run the dry run recipe in `~/data/rocket/Archive/rocket-tools-factory/software-factory.md`, compare `factory tokens` with the job 001 baseline, then merge. Open follow-ups are in its open items list. |
 
+## 8e. App security (2026-10-30)
+
+| ID | Item | Status | Where | What remains |
+|---|---|---|---|---|
+| R-71 | App command ACL: app commands callable only from the local page in the `main` window (the OAuth 2 window gets none) | done (`ac3caae5`) | `src-tauri/app-commands.txt`, `build.rs`, `capabilities/default.json`, `src-tauri/src/ipc_acl_tests.rs`; `docs/features/ipc-command-acl.md` | Manual checks in the doc are not yet run (need `yarn tauri dev` and `yarn tauri build`). |
+
 ## 9. Probably dropped
 
 Confirm with the user before marking `dropped`.

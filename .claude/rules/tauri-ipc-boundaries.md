@@ -12,6 +12,7 @@
 - No domain business logic in command modules.
 - Route via rocket-app traits/services.
 - Keep concrete I/O in rocket-infra.
+- A new command is also added to src-tauri/app-commands.txt, or it is denied at runtime (see docs/features/ipc-command-acl.md).
 
 ## DTO and Serde Rules
 

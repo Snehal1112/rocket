@@ -23,6 +23,7 @@
     "notification:default",
     "opener:default",
     "dialog:default",
-    "clipboard-manager:allow-write-text"
+    "clipboard-manager:allow-write-text",
+    "main-window-commands"
   ]
 }
