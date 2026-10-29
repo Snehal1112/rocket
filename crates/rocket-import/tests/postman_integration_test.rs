@@ -82,6 +82,78 @@ fn auto_renames_on_conflict() {
     );
 }
 
+fn postman_request(name: &str, url: &str) -> serde_json::Value {
+    serde_json::json!({
+        "name": name,
+        "request": { "method": "GET", "url": url }
+    })
+}
+
+/// Imports a collection named `Dup` with the given items and returns its folder.
+fn import_items(ws: &Path, items: serde_json::Value) -> PathBuf {
+    let dir = TempDir::new().expect("tempdir");
+    let path = dir.path().join("dup.json");
+    let doc = serde_json::json!({
+        "info": {
+            "name": "Dup",
+            "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+        },
+        "item": items
+    });
+    std::fs::write(&path, doc.to_string()).expect("write json");
+    make_service(ws)
+        .import_postman_collection(&path, "default")
+        .expect("should import");
+    ws.join("collections").join("Dup")
+}
+
+fn request_files(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .expect("read dir")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_file())
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .filter(|n| n.ends_with(".yml") && n != "opencollection.yml" && n != "folder.yml")
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn postman_import_keeps_both_items_with_one_sanitized_name() {
+    let ws = TempDir::new().expect("tempdir");
+    let col = import_items(
+        ws.path(),
+        serde_json::json!([
+            postman_request("List users", "https://example.com/a"),
+            postman_request("List-users", "https://example.com/b"),
+        ]),
+    );
+    let files = request_files(&col);
+    assert_eq!(files.len(), 2, "got {files:?}");
+    assert!(files.iter().any(|f| f.ends_with(" 2.yml")), "got {files:?}");
+    let all: String = files
+        .iter()
+        .map(|f| std::fs::read_to_string(col.join(f)).expect("read"))
+        .collect();
+    assert!(all.contains("example.com/a") && all.contains("example.com/b"));
+}
+
+#[test]
+fn postman_import_allows_the_same_name_in_two_folders() {
+    let ws = TempDir::new().expect("tempdir");
+    let col = import_items(
+        ws.path(),
+        serde_json::json!([
+            { "name": "One", "item": [postman_request("Get", "https://example.com/1")] },
+            { "name": "Two", "item": [postman_request("Get", "https://example.com/2")] },
+        ]),
+    );
+    for folder in ["One", "Two"] {
+        assert_eq!(request_files(&col.join(folder)), vec!["Get.yml"]);
+    }
+}
+
 #[test]
 fn rejects_non_postman_json() {
     let ws = TempDir::new().unwrap();
