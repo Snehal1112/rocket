@@ -1566,6 +1566,27 @@ impl EnvironmentRepository for StaticEnvRepo {
     }
 }
 
+/// Environment repo over several environments, found by name. Enough for a test of `extends`.
+pub struct MapEnvRepo(pub std::collections::HashMap<String, Environment>);
+
+impl EnvironmentRepository for MapEnvRepo {
+    fn list(&self) -> DomainResult<Vec<Environment>> {
+        Ok(self.0.values().cloned().collect())
+    }
+    fn get(&self, name: &str) -> DomainResult<Environment> {
+        self.0
+            .get(name)
+            .cloned()
+            .ok_or_else(|| DomainError::NotFound(name.into()))
+    }
+    fn save(&self, _: &Environment) -> DomainResult<()> {
+        Ok(())
+    }
+    fn delete(&self, _: &str) -> DomainResult<()> {
+        Ok(())
+    }
+}
+
 /// Returns the same pre-loaded `Environment` for any collection name asked —
 /// used to prove a caller routes an environment lookup through
 /// `regular_env_repo(collection)` rather than the global `env_repo`. Pair

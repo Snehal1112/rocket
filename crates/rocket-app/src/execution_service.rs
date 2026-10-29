@@ -662,7 +662,7 @@ impl RequestExecutionService {
     ) -> DomainResult<std::collections::HashMap<String, String>> {
         let (result, failures) = self
             .resolve_external_secrets_partial(collection, environment_name)
-            .await;
+            .await?;
         match failures.into_iter().next() {
             Some(failure) => Err(failure.error),
             None => Ok(result),
@@ -675,25 +675,30 @@ impl RequestExecutionService {
     /// connection is the likely cause of every later failure. Bindings after
     /// it are still resolved. The caller decides whether the failure matters
     /// for the request in hand.
+    ///
+    /// The bindings are the environment's merged bindings, its parent chain's included. A missing
+    /// environment adds nothing, but an `extends` cycle is an error.
     async fn resolve_external_secrets_partial(
         &self,
         collection: Option<&str>,
         environment_name: Option<&str>,
-    ) -> (
+    ) -> DomainResult<(
         std::collections::HashMap<String, String>,
         Vec<UnresolvedBinding>,
-    ) {
+    )> {
         let mut result = std::collections::HashMap::new();
         let mut failures = Vec::new();
 
         let Some(name) = environment_name else {
-            return (result, failures);
+            return Ok((result, failures));
         };
 
-        let Ok(env) = self.regular_env_repo(collection).get(name) else {
-            return (result, failures);
+        let repo = self.regular_env_repo(collection);
+        let Ok(env) = repo.get(name) else {
+            return Ok((result, failures));
         };
-        'bindings: for binding in &env.external_secrets {
+        let flat = flatten_scope(&env, repo.as_ref())?;
+        'bindings: for binding in &flat.bindings() {
             for secret_ref in &binding.secret_names {
                 let value = match crate::vault_secret_resolution::resolve_vault_secret_value(
                     self.secret_manager_repo.as_ref(),
@@ -728,7 +733,7 @@ impl RequestExecutionService {
             }
         }
 
-        (result, failures)
+        Ok((result, failures))
     }
 
     /// Whether anything this send can read refers to a secret of `alias`:
@@ -2861,7 +2866,7 @@ impl RequestExecutionService {
                 input.collection.as_deref(),
                 input.environment_name.as_deref(),
             )
-            .await;
+            .await?;
         let mut unresolved = Vec::new();
         for failure in failures {
             if self.references_alias(&input, &failure.alias, &external_secrets) {
@@ -3982,6 +3987,105 @@ mod tests {
             Arc::new(FakeSecretStore),
             fetcher,
         )
+    }
+
+    fn svc_with_vault_envs(
+        envs: Vec<Environment>,
+        fetcher: Arc<FakeVaultFetcher>,
+    ) -> RequestExecutionService {
+        let map = envs.into_iter().map(|e| (e.name.clone(), e)).collect();
+        RequestExecutionService::new(
+            Box::new(crate::test_doubles::MapEnvRepo(map)),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(FakeSecretManagerRepo::with_connection(test_connection(
+                "conn-1",
+            ))),
+            Arc::new(FakeSecretStore),
+            fetcher,
+        )
+    }
+
+    #[tokio::test]
+    async fn resolve_external_secrets_includes_a_parent_binding() {
+        let mut base = Environment::new("base");
+        base.external_secrets
+            .push(binding_with_refs("payments", vec![("apiKey", "sec-1")]));
+        let mut child = Environment::new("child");
+        child.extends = Some("base".into());
+        let fetcher = Arc::new(FakeVaultFetcher::new(vec![(
+            "sec-1",
+            FakeSecretOutcome::Value("sk-live-key".to_string()),
+        )]));
+        let svc = svc_with_vault_envs(vec![base, child], Arc::clone(&fetcher));
+        let result = svc
+            .resolve_external_secrets(None, Some("child"))
+            .await
+            .expect("resolve_external_secrets");
+        assert_eq!(
+            result.get("payments.apiKey"),
+            Some(&"sk-live-key".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_external_secrets_child_binding_wins_over_parent_alias() {
+        let mut base = Environment::new("base");
+        base.external_secrets.push(binding_with_refs(
+            "payments",
+            vec![("apiKey", "sec-parent")],
+        ));
+        let mut child = Environment::new("child");
+        child.extends = Some("base".into());
+        child
+            .external_secrets
+            .push(binding_with_refs("payments", vec![("apiKey", "sec-child")]));
+        let fetcher = Arc::new(FakeVaultFetcher::new(vec![(
+            "sec-child",
+            FakeSecretOutcome::Value("child-value".to_string()),
+        )]));
+        let svc = svc_with_vault_envs(vec![base, child], Arc::clone(&fetcher));
+        let result = svc
+            .resolve_external_secrets(None, Some("child"))
+            .await
+            .expect("resolve_external_secrets");
+        assert_eq!(
+            result.get("payments.apiKey"),
+            Some(&"child-value".to_string())
+        );
+        assert_eq!(
+            *fetcher.calls.lock().expect("lock calls"),
+            vec!["sec-child".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_external_secrets_cycle_returns_the_cycle_error() {
+        let mut a = Environment::new("a");
+        a.extends = Some("b".into());
+        let mut b = Environment::new("b");
+        b.extends = Some("a".into());
+        let fetcher = Arc::new(FakeVaultFetcher::new(vec![]));
+        let svc = svc_with_vault_envs(vec![a, b], fetcher);
+        let err = svc
+            .resolve_external_secrets(None, Some("a"))
+            .await
+            .expect_err("a cycle must fail the fetch");
+        assert!(err.to_string().contains("a -> b -> a"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn resolve_external_secrets_missing_environment_is_ok_and_empty() {
+        let fetcher = Arc::new(FakeVaultFetcher::new(vec![]));
+        let svc = svc_with_vault_envs(vec![Environment::new("prod")], fetcher);
+        let result = svc
+            .resolve_external_secrets(None, Some("nope"))
+            .await
+            .expect("a missing environment is not an error");
+        assert!(result.is_empty());
     }
 
     #[tokio::test]
