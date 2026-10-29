@@ -118,8 +118,8 @@ Expected: 9 curl-parser tests pass (the full example plus the 8 in the table), t
 - Test: `src/lib/__tests__/curl-parser.test.ts`
 
 **Interfaces:**
-- Consumes: Task 1's `ParsedCurl['body']`; `generateCurlCommand(resolved: ResolvedRequestFields, method: string): string` from `@/lib/curl-generator`; `Body` from `@/lib/tauri-api`.
-- Produces: `export function bodyFromParsedCurl(body: ParsedCurl['body']): Body | undefined`. For `undefined` it returns `undefined`. For a form body it returns `{ mode: 'formdata', formData: <entries> }`. For other modes it returns `{ mode, content, formData: [] }`, which is what `handleCurlImport` builds today.
+- Consumes: Task 1's `ParsedCurl['body']`; `generateCurlCommand(resolved: ResolvedRequestFields, method: string): string` from `@/lib/curl-generator`; `BodyState` from `@/types/pane-types`.
+- Produces: `export function bodyFromParsedCurl(body: ParsedCurl['body']): BodyState | undefined`, where `BodyState` is the editor's body state in `src/types/pane-types.ts` (`content: string` is required and form rows are `KeyValueEntry` with a required `id`). For `undefined` it returns `undefined`. For a form body it returns `{ mode: 'formdata', content: '', formData: <entries, each with id: crypto.randomUUID()> }`. For other modes it returns `{ mode, content, formData: [] }`, which is what `handleCurlImport` builds today.
 
 - [ ] **Step 1: Read the code**
 
@@ -147,7 +147,8 @@ it('round-trips a Copy as cURL form-data body', () => {
 |---|---|---|
 | `skips disabled entries when copying, so they do not come back` | a disabled third entry in the same body | the parsed list equals the first two entries only |
 | `bodyFromParsedCurl returns undefined without a body` | `bodyFromParsedCurl(undefined)` | `undefined` |
-| `bodyFromParsedCurl keeps form entries` | `bodyFromParsedCurl(parseCurl("curl -F 'a=1' https://x.test")?.body)` | `{ mode: 'formdata', formData: [{ key: 'a', value: '1', entryType: 'text', enabled: true }] }` |
+| `bodyFromParsedCurl keeps form entries` | `bodyFromParsedCurl(parseCurl("curl -F 'a=1' https://x.test")?.body)` | `{ mode: 'formdata', content: '', formData: [{ id: expect.any(String), key: 'a', value: '1', entryType: 'text', enabled: true }] }` |
+| `bodyFromParsedCurl gives each form row its own id` | two `-F` fields | the two row ids are different strings |
 | `bodyFromParsedCurl keeps the text body shape` | `bodyFromParsedCurl({ mode: 'json', content: '{"a":1}' })` | `{ mode: 'json', content: '{"a":1}', formData: [] }` |
 
 - [ ] **Step 3: Run the tests and see them fail**
@@ -162,7 +163,7 @@ Add the exported function to `src/lib/curl-parser.ts` per the Interfaces block. 
 - [ ] **Step 5: Run the checks**
 
 Run: `bun run test curl-parser`, `bun run test RequestPanel`, `bunx tsc --noEmit`, `bun run check`
-Expected: all pass (14 curl-parser tests), `RequestPanel` tests unchanged and green. Run `git diff --stat` and confirm only the three listed files changed.
+Expected: all pass (15 curl-parser tests), `RequestPanel` tests unchanged and green. Run `git diff --stat` and confirm only the three listed files changed.
 
 - [ ] **Step 6: Commit**
 

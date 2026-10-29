@@ -57,7 +57,7 @@ import {
   formatCurlPathWarning,
   generateCurlCommand,
 } from '@/lib/curl-generator';
-import type { ParsedCurl } from '@/lib/curl-parser';
+import { bodyFromParsedCurl, type ParsedCurl } from '@/lib/curl-parser';
 import {
   buildExampleSnapshot,
   defaultExampleName,
@@ -447,11 +447,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       };
 
       if (parsed.body) {
-        patch.body = {
-          mode: parsed.body.mode,
-          content: parsed.body.content,
-          formData: [],
-        };
+        patch.body = bodyFromParsedCurl(parsed.body);
       }
 
       if (parsed.auth?.type === 'basic') {

@@ -1,8 +1,15 @@
+import type { FormDataEntry } from '@/lib/tauri-api';
+import type { BodyState } from '@/types/pane-types';
+
 export interface ParsedCurl {
   method: string;
   url: string;
   headers: { key: string; value: string }[];
-  body?: { mode: 'json' | 'xml' | 'text'; content: string };
+  body?: {
+    mode: 'json' | 'xml' | 'text' | 'formdata';
+    content: string;
+    formData?: FormDataEntry[];
+  };
   auth?: { type: 'basic'; username: string; password: string };
 }
 
@@ -40,6 +47,23 @@ function tokenize(input: string): string[] {
   }
   if (current) tokens.push(current);
   return tokens;
+}
+
+// Parses one `--form` or `--form-string` argument (`name=value`) into an entry.
+// `literal` is true for `--form-string`, whose value is never a file or a list of options.
+function parseFormEntry(arg: string, literal: boolean): FormDataEntry | null {
+  const eq = arg.indexOf('=');
+  if (eq <= 0) return null;
+  const key = arg.slice(0, eq);
+  const raw = arg.slice(eq + 1);
+  if (literal || !raw.startsWith('@')) {
+    return { key, value: raw, entryType: 'text', enabled: true };
+  }
+  const [path, ...options] = raw.slice(1).split(';');
+  const entry: FormDataEntry = { key, value: path, entryType: 'file', enabled: true };
+  const type = options.find((o) => o.startsWith('type='));
+  if (type) entry.contentType = type.slice('type='.length);
+  return entry;
 }
 
 // Detects body content type from Content-Type header or content shape.
@@ -81,6 +105,7 @@ export function parseCurl(input: string): ParsedCurl | null {
   let url = '';
   const headers: { key: string; value: string }[] = [];
   let bodyContent: string | undefined;
+  const formData: FormDataEntry[] = [];
   let auth: ParsedCurl['auth'];
 
   let i = 0;
@@ -105,6 +130,9 @@ export function parseCurl(input: string): ParsedCurl | null {
       token === '--data-binary'
     ) {
       bodyContent = tokens[++i] ?? '';
+    } else if (token === '-F' || token === '--form' || token === '--form-string') {
+      const entry = parseFormEntry(tokens[++i] ?? '', token === '--form-string');
+      if (entry) formData.push(entry);
     } else if (token === '-u' || token === '--user') {
       const creds = tokens[++i] ?? '';
       const colonIdx = creds.indexOf(':');
@@ -170,15 +198,30 @@ export function parseCurl(input: string): ParsedCurl | null {
 
   // Infer method from body presence.
   if (!method) {
-    method = bodyContent ? 'POST' : 'GET';
+    method = bodyContent || formData.length > 0 ? 'POST' : 'GET';
   }
 
-  // Build body with mode detection.
+  // Build body with mode detection. A form body wins over -d, as curl refuses to mix them.
   let body: ParsedCurl['body'];
-  if (bodyContent) {
+  if (formData.length > 0) {
+    body = { mode: 'formdata', content: '', formData };
+  } else if (bodyContent) {
     const contentType = headers.find((h) => h.key.toLowerCase() === 'content-type')?.value;
     body = { mode: detectBodyMode(bodyContent, contentType), content: bodyContent };
   }
 
   return { method, url, headers, body, auth };
+}
+
+// Turns a parsed cURL body into the body state of the editor. Form rows get their own ids.
+export function bodyFromParsedCurl(body: ParsedCurl['body']): BodyState | undefined {
+  if (!body) return undefined;
+  if (body.mode === 'formdata') {
+    return {
+      mode: 'formdata',
+      content: '',
+      formData: (body.formData ?? []).map((entry) => ({ id: crypto.randomUUID(), ...entry })),
+    };
+  }
+  return { mode: body.mode, content: body.content, formData: [] };
 }
