@@ -1569,7 +1569,7 @@ pub async fn openapi_sync_check_now(
             let root = service.root_of(&collection)?;
             // The whole check runs on a blocking thread. It holds no std guard across an
             // await, and its fetches still run on the runtime.
-            let result = tauri::async_runtime::block_on(service.check(&root));
+            let result = tauri::async_runtime::block_on(service.check_now(&root));
             // The same refresh signal the background check sends.
             let status = match &result {
                 Ok(CheckOutcome::Unchanged) => "unchanged",

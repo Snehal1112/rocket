@@ -276,22 +276,15 @@ pub fn fetch_target(location: &SpecLocation, with_token: bool) -> FetchTarget {
             git_ref,
             path,
         } => {
-            let (owner, repo) = (encode_segment(owner), encode_segment(repo));
-            let encoded_path = encode_path(path);
             if with_token {
-                FetchTarget {
-                    url: format!(
-                        "https://api.github.com/repos/{owner}/{repo}/contents/{encoded_path}?ref={}",
-                        encode_segment(git_ref)
-                    ),
-                    accept: Some("application/vnd.github.raw+json".to_string()),
-                    origin: "https://api.github.com".to_string(),
-                }
+                github_contents_target(owner, repo, git_ref, path)
             } else {
+                let (owner, repo) = (encode_segment(owner), encode_segment(repo));
                 FetchTarget {
                     url: format!(
-                        "https://raw.githubusercontent.com/{owner}/{repo}/{}/{encoded_path}",
-                        encode_path(git_ref)
+                        "https://raw.githubusercontent.com/{owner}/{repo}/{}/{}",
+                        encode_path(git_ref),
+                        encode_path(path)
                     ),
                     accept: None,
                     origin: "https://raw.githubusercontent.com".to_string(),
@@ -310,6 +303,36 @@ pub fn fetch_target(location: &SpecLocation, with_token: bool) -> FetchTarget {
             accept: None,
             origin: String::new(),
         },
+    }
+}
+
+/// The contents API address of a GitHub file. Its answers are kept for at most 60 seconds.
+fn github_contents_target(owner: &str, repo: &str, git_ref: &str, path: &str) -> FetchTarget {
+    let (owner, repo) = (encode_segment(owner), encode_segment(repo));
+    FetchTarget {
+        url: format!(
+            "https://api.github.com/repos/{owner}/{repo}/contents/{}?ref={}",
+            encode_path(path),
+            encode_segment(git_ref)
+        ),
+        accept: Some("application/vnd.github.raw+json".to_string()),
+        origin: "https://api.github.com".to_string(),
+    }
+}
+
+/// Like `fetch_target`, but a GitHub file is always read through the contents API, even without
+/// a token. The raw host keeps an answer for up to 5 minutes whatever the request says, the
+/// contents API for 60 seconds, so a check the user asked for misses a fresh push for less time. The token, if any, is sent only to the
+/// returned `origin`.
+pub fn fetch_target_fresh(location: &SpecLocation) -> FetchTarget {
+    match location {
+        SpecLocation::Github {
+            owner,
+            repo,
+            git_ref,
+            path,
+        } => github_contents_target(owner, repo, git_ref, path),
+        other => fetch_target(other, false),
     }
 }
 
@@ -525,6 +548,30 @@ mod tests {
         assert_eq!(other.url, "https://example.com:8443/a/openapi.json");
         assert_eq!(other.accept, None);
         assert_eq!(other.origin, "https://example.com:8443");
+    }
+
+    #[test]
+    fn fresh_target_reads_github_through_the_contents_api_without_a_token() {
+        let fresh = fetch_target_fresh(&github("feature/x", "docs/open api.yaml"));
+        assert_eq!(
+            fresh.url,
+            "https://api.github.com/repos/acme/orders/contents/docs/open%20api.yaml?ref=feature%2Fx"
+        );
+        assert_eq!(
+            fresh.accept.as_deref(),
+            Some("application/vnd.github.raw+json")
+        );
+        assert_eq!(fresh.origin, "https://api.github.com");
+
+        // Any other location is the same as the plain target.
+        let other = SpecLocation::Https {
+            url: "https://example.com/a.json".to_string(),
+        };
+        let plain = fetch_target(&other, false);
+        let fresh = fetch_target_fresh(&other);
+        assert_eq!(fresh.url, plain.url);
+        assert_eq!(fresh.accept, plain.accept);
+        assert_eq!(fresh.origin, plain.origin);
     }
 
     #[test]

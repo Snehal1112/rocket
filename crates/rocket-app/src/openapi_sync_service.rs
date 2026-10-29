@@ -23,9 +23,9 @@ use rocket_http::spec_fetch::{
     SpecFetcher, DEFAULT_MAX_SPEC_BYTES,
 };
 use rocket_import::{
-    bundle_spec, check_spec_text, fetch_failure_message, fetch_target, lost_refs_message,
-    parse_spec_target, ref_failure_message, refs_unchanged_labeled, whole_bundle_failed_message,
-    Bundle, SpecSources,
+    bundle_spec, check_spec_text, fetch_failure_message, fetch_target, fetch_target_fresh,
+    lost_refs_message, parse_spec_target, ref_failure_message, refs_unchanged_labeled,
+    whole_bundle_failed_message, Bundle, SpecSources,
 };
 use rocket_shared::error::{DomainError, DomainResult};
 use sha2::{Digest, Sha256};
@@ -512,7 +512,20 @@ impl OpenApiSyncService {
         Ok(())
     }
 
+    /// The background check, as the scheduler runs it.
     pub async fn check(&self, collection_root: &Path) -> DomainResult<CheckOutcome> {
+        self.check_with(collection_root, false).await
+    }
+
+    /// A check the user asked for. A GitHub file without a token is read through the contents
+    /// API and not the raw host, because the raw host keeps an answer for up to 5 minutes and
+    /// would hide a push made just now. The API gets no validators (the stored ones belong to
+    /// the raw host), and its etag is not stored, so the background check keeps its 304s.
+    pub async fn check_now(&self, collection_root: &Path) -> DomainResult<CheckOutcome> {
+        self.check_with(collection_root, true).await
+    }
+
+    async fn check_with(&self, collection_root: &Path, fresh: bool) -> DomainResult<CheckOutcome> {
         // The consent gate comes first: no recovery, no keychain read and no request
         // without an approval of the current location on this machine.
         if let Err(refusal) = self.gated_source(collection_root)? {
@@ -560,7 +573,17 @@ impl OpenApiSyncService {
             source.etag = None;
             source.last_modified = None;
         }
-        let target = fetch_target(&source.location, token_sent);
+        // A token already sends a GitHub file to the contents API, so only a tokenless manual
+        // check changes host.
+        let other_host =
+            fresh && matches!(source.location, SpecLocation::Github { .. }) && !token_sent;
+        let target = if other_host {
+            source.etag = None;
+            source.last_modified = None;
+            fetch_target_fresh(&source.location)
+        } else {
+            fetch_target(&source.location, token_sent)
+        };
         let request = SpecFetchRequest {
             url: target.url,
             accept: target.accept,
@@ -782,8 +805,12 @@ impl OpenApiSyncService {
 
         let text = bundle.text.into_bytes();
         let hash = sha256_hex(&text);
-        source.etag = etag;
-        source.last_modified = last_modified;
+        // The validators of another host are not kept, so the next background check can use
+        // the ones it stored.
+        if !other_host {
+            source.etag = etag;
+            source.last_modified = last_modified;
+        }
         source.remote_refs = bundle.refs;
         source.remote_refs_incomplete = bundle.fetch_failed;
 
@@ -1829,6 +1856,58 @@ mod tests {
         let l = f.local();
         assert_eq!(l.last_checked_at, Some(fixed_now().to_rfc3339()));
         assert_eq!(l.last_status, Some(SyncStatus::Unchanged));
+    }
+
+    #[tokio::test]
+    async fn a_manual_check_reads_github_through_the_contents_api_without_validators() {
+        let f = Fixture::new(source(github()));
+        f.fetcher.push(fetched(fixture(), "\"api\""));
+        let out = f.svc.check_now(f.root()).await.expect("check");
+        assert_eq!(out, CheckOutcome::Unchanged);
+        let req = f.fetcher.last_request();
+        assert_eq!(
+            req.url,
+            "https://api.github.com/repos/o/r/contents/api.json?ref=main"
+        );
+        assert_eq!(
+            req.accept.as_deref(),
+            Some("application/vnd.github.raw+json")
+        );
+        // The stored validators belong to the raw host, so none is sent to the API.
+        assert_eq!(req.if_none_match, None);
+        assert_eq!(req.if_modified_since, None);
+        // The API's etag is not stored, so the next background check can still get a 304.
+        let stored = f.svc.load(f.root()).expect("source");
+        assert_eq!(stored.etag.as_deref(), Some("\"v1\""));
+        assert_eq!(
+            stored.last_modified.as_deref(),
+            Some("Mon, 01 Jan 2026 00:00:00 GMT")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_scheduled_check_still_reads_github_from_the_raw_host() {
+        let f = Fixture::new(source(github()));
+        f.fetcher.push(Ok(SpecFetchOutcome::NotModified));
+        f.svc.check(f.root()).await.expect("check");
+        let req = f.fetcher.last_request();
+        assert_eq!(
+            req.url,
+            "https://raw.githubusercontent.com/o/r/main/api.json"
+        );
+        assert_eq!(req.if_none_match.as_deref(), Some("\"v1\""));
+    }
+
+    #[tokio::test]
+    async fn a_manual_check_of_another_host_sends_the_validators_as_usual() {
+        let f = Fixture::new(source(SpecLocation::Https {
+            url: "https://example.com/a.json".into(),
+        }));
+        f.fetcher.push(Ok(SpecFetchOutcome::NotModified));
+        f.svc.check_now(f.root()).await.expect("check");
+        let req = f.fetcher.last_request();
+        assert_eq!(req.url, "https://example.com/a.json");
+        assert_eq!(req.if_none_match.as_deref(), Some("\"v1\""));
     }
 
     #[tokio::test]
