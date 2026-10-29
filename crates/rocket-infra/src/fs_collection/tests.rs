@@ -3285,6 +3285,73 @@ fn create_request_exclusive_never_replaces_a_file() {
 }
 
 #[test]
+fn create_request_exclusive_falls_back_when_hard_link_is_unsupported() {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create");
+    let request = Request::new("One", HttpMethod::Get, "https://one.example.com");
+    let path =
+        requests::create_request_exclusive_with(&repo, "col", "one.yml", &request, |_, _| {
+            Err(std::io::ErrorKind::Unsupported.into())
+        })
+        .expect("fallback create");
+    assert_eq!(path, "one.yml");
+    let file = dir.path().join("col/one.yml");
+    assert!(fs::read_to_string(&file)
+        .expect("file")
+        .contains("https://one.example.com"));
+    assert!(leftover_temp_files(&dir.path().join("col")).is_empty());
+}
+
+#[test]
+fn create_request_exclusive_fallback_never_replaces_a_file() {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create");
+    let first = Request::new("One", HttpMethod::Get, "https://one.example.com");
+    repo.create_request_exclusive("col", "one.yml", &first)
+        .expect("first create");
+    let file = dir.path().join("col/one.yml");
+    let before = fs::read_to_string(&file).expect("file");
+    let other = Request::new("Two", HttpMethod::Post, "https://two.example.com");
+    let err = requests::create_request_exclusive_with(&repo, "col", "one.yml", &other, |_, _| {
+        Err(std::io::ErrorKind::Unsupported.into())
+    })
+    .expect_err("exists");
+    assert!(matches!(err, DomainError::AlreadyExists(ref l) if l == "col/one.yml"));
+    assert_eq!(fs::read_to_string(&file).expect("file"), before);
+    assert!(leftover_temp_files(&dir.path().join("col")).is_empty());
+}
+
+#[test]
+fn create_request_exclusive_maps_a_link_clash_to_already_exists() {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create");
+    let request = Request::new("One", HttpMethod::Get, "https://one.example.com");
+    let err = requests::create_request_exclusive_with(&repo, "col", "one.yml", &request, |_, _| {
+        Err(std::io::ErrorKind::AlreadyExists.into())
+    })
+    .expect_err("clash");
+    assert!(matches!(err, DomainError::AlreadyExists(_)));
+    assert!(!dir.path().join("col/one.yml").exists());
+    assert!(leftover_temp_files(&dir.path().join("col")).is_empty());
+}
+
+#[test]
+fn create_request_exclusive_never_creates_a_missing_folder() {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create");
+    let request = Request::new("One", HttpMethod::Get, "https://one.example.com");
+    assert!(requests::create_request_exclusive_with(
+        &repo,
+        "col",
+        "missing/one.yml",
+        &request,
+        |_, _| Err(std::io::ErrorKind::Unsupported.into()),
+    )
+    .is_err());
+    assert!(!dir.path().join("col/missing").exists());
+}
+
+#[test]
 fn create_graphql_request_exclusive_never_replaces_a_file() {
     let (dir, repo) = setup();
     repo.create("col").expect("create collection");

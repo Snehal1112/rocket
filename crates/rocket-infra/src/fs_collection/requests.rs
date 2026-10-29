@@ -131,16 +131,29 @@ pub(super) fn save_request(
 }
 
 /// Saves a brand-new request. The file is linked into place without
-/// replacing, so it fails with `AlreadyExists` instead of replacing a file
-/// that appeared after the caller's check. The parent folder must exist.
+/// replacing, or created with `create_new` on a filesystem without hard links,
+/// so it fails with `AlreadyExists` instead of replacing a file that appeared
+/// after the caller's check. The parent folder must exist.
 pub(super) fn create_request_exclusive(
     repo: &FsCollectionRepo,
     collection: &str,
     path: &str,
     request: &Request,
 ) -> DomainResult<String> {
-    use std::io::Write;
+    create_request_exclusive_with(repo, collection, path, request, |from, to| {
+        fs::hard_link(from, to)
+    })
+}
 
+/// `create_request_exclusive` with the link operation passed in, so a test can
+/// stand in for a filesystem without hard links.
+pub(super) fn create_request_exclusive_with(
+    repo: &FsCollectionRepo,
+    collection: &str,
+    path: &str,
+    request: &Request,
+    link: impl Fn(&Path, &Path) -> std::io::Result<()>,
+) -> DomainResult<String> {
     Collection::validate_name(collection)?;
     let mutex = repo.collection_mutex(collection);
     let _guard = mutex.lock().unwrap_or_else(|e| e.into_inner());
@@ -154,37 +167,12 @@ pub(super) fn create_request_exclusive(
     let file_path = repo.validate_path(&collection_dir, Path::new(&normalized))?;
     let yaml = serde_yaml::to_string(&request_to_oc_http_request(request))
         .map_err(|e| DomainError::Internal(format!("Failed to serialize request YAML: {e}")))?;
-
-    // The content goes to a hidden temp file first. A hard link then gives it
-    // its final name, and fails if that name exists, so a reader never sees a
-    // partial file and a crash leaves no truncated request behind.
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .subsec_nanos();
-    let tmp_name = format!(".new-request.tmp.{}_{nanos:08x}", std::process::id());
-    let tmp_path = file_path.with_file_name(tmp_name);
-    let written = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&tmp_path)
-        .and_then(|mut file| {
-            file.write_all(yaml.as_bytes())?;
-            file.sync_all()
-        });
-    if let Err(e) = written {
-        let _ = fs::remove_file(&tmp_path);
-        return Err(DomainError::Io(e.to_string()));
-    }
-    let linked = fs::hard_link(&tmp_path, &file_path);
-    let _ = fs::remove_file(&tmp_path);
-    match linked {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            return Err(DomainError::AlreadyExists(format!("{collection}/{path}")));
-        }
-        Err(e) => return Err(DomainError::Io(e.to_string())),
-    }
+    write_new_file_exclusive(
+        &file_path,
+        yaml.as_bytes(),
+        &format!("{collection}/{path}"),
+        link,
+    )?;
     Ok(file_path
         .strip_prefix(&collection_dir)
         .unwrap_or(&file_path)
