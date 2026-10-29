@@ -341,11 +341,13 @@ impl CollectionService {
     ) -> DomainResult<Request> {
         self.locked(collection, || {
             let actual_path = self.repo.save_request(collection, path, request)?;
+            // Publish only after the follow-up read succeeds.
+            let saved = self.repo.get_request(collection, &actual_path)?;
             self.events.publish(DomainEvent::RequestSaved {
                 collection: collection.to_string(),
-                path: actual_path.clone(),
+                path: actual_path,
             });
-            self.repo.get_request(collection, &actual_path)
+            Ok(saved)
         })
     }
 
@@ -1273,6 +1275,29 @@ mod tests {
             )),
             "expected RequestSaved, got {:?}", *published
         );
+    }
+
+    #[test]
+    fn save_request_publishes_nothing_when_the_follow_up_read_fails() {
+        let publisher = Arc::new(RecordingEventPublisher {
+            events: Mutex::new(vec![]),
+        });
+        let repo = NullCollectionRepo::strict()
+            .on_save_request(|_, path, _| Ok(path.to_string()))
+            .on_get_request(|collection, path| {
+                Err(DomainError::NotFound(format!("{collection}/{path}")))
+            });
+        let svc = CollectionService::new(
+            Box::new(repo),
+            Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+        );
+        let request = Request::new(
+            "Get Users",
+            HttpMethod::Get,
+            "https://api.example.com/users",
+        );
+        assert!(svc.save_request("my-api", "users.yml", &request).is_err());
+        assert!(publisher.events.lock().expect("lock").is_empty());
     }
 
     #[test]
