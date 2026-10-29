@@ -4,8 +4,8 @@ use rocket_audit::{
     publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher},
 };
 use rocket_environment::Environment;
-use rocket_shared::certificate::ClientCertificate;
 use rocket_infra::FsEnvironmentRepo;
+use rocket_shared::certificate::ClientCertificate;
 use rocket_shared::{
     error::DomainError,
     events::{EventPublisher, NullEventPublisher},
