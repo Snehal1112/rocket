@@ -32,8 +32,8 @@ fn script_safe_json<T: serde::Serialize>(value: &T) -> String {
 impl ExportService {
     /// Export a `LoadTestResult` to the requested format.
     /// Returns the file content as bytes and the suggested filename extension.
-    /// Note: For `Pdf`, the bytes returned are the HTML report — the Tauri
-    /// command layer renders it via the webview's print-to-PDF API.
+    /// Note: For `Pdf`, the bytes are the same HTML report with the extension
+    /// `pdf`. Nothing renders them to a PDF.
     pub fn export(
         result: &LoadTestResult,
         format: ExportFormat,
@@ -259,8 +259,7 @@ mod tests {
         assert!(s.contains("Load Test Report"));
     }
 
-    /// PDF is a passthrough: the service returns HTML bytes, and the Tauri
-    /// command layer hands them to the webview for print-to-PDF rendering.
+    /// PDF is a passthrough: the service returns the HTML bytes.
     #[test]
     fn pdf_returns_html_bytes() {
         let (bytes, ext) = ExportService::export(&minimal_result(), ExportFormat::Pdf).unwrap();
