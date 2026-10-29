@@ -1710,10 +1710,28 @@ export interface ResolvedVariable {
   source: string;
 }
 
+/** An external secret binding of a flattened environment. Names are counted, never listed. */
+export interface ResolvedBinding {
+  alias: string;
+  vaultName: string;
+  connectionId: string;
+  secretCount: number;
+  source: string;
+}
+
+/** A client certificate of a flattened environment, metadata only. */
+export interface ResolvedCertificate {
+  type: 'pem' | 'pkcs12' | 'vault';
+  domain: string;
+  source: string;
+}
+
 /** An environment flattened with its `extends` chain. */
 export interface ResolvedEnvironment {
   name: string;
   variables: ResolvedVariable[];
+  externalSecrets: ResolvedBinding[];
+  clientCertificates: ResolvedCertificate[];
   warnings: string[];
 }
 

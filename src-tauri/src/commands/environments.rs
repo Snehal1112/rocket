@@ -5,6 +5,7 @@ use rocket_audit::{
 };
 use rocket_environment::Environment;
 use rocket_infra::FsEnvironmentRepo;
+use rocket_shared::certificate::ClientCertificate;
 use rocket_shared::{
     error::DomainError,
     events::{EventPublisher, NullEventPublisher},
@@ -244,12 +245,37 @@ pub struct ResolvedVariableDto {
     pub source: String,
 }
 
+/// One external secret binding of a flattened environment. It carries secret names only
+/// as a count, never a name list or a value.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedBindingDto {
+    pub alias: String,
+    pub vault_name: String,
+    pub connection_id: String,
+    pub secret_count: usize,
+    pub source: String,
+}
+
+/// One client certificate of a flattened environment, as metadata only. `kind` is `pem`,
+/// `pkcs12` or `vault`. No path, passphrase or secret reference is sent.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedCertificateDto {
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub domain: String,
+    pub source: String,
+}
+
 /// An environment flattened with its `extends` chain.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolvedEnvironmentDto {
     pub name: String,
     pub variables: Vec<ResolvedVariableDto>,
+    pub external_secrets: Vec<ResolvedBindingDto>,
+    pub client_certificates: Vec<ResolvedCertificateDto>,
     pub warnings: Vec<String>,
 }
 
@@ -272,6 +298,31 @@ fn to_resolved_dto(name: &str, flat: &rocket_environment::Flattened) -> Resolved
                 value: f.variable.value.clone(),
                 enabled: f.variable.enabled,
                 secret: f.variable.secret,
+                source: f.source.clone(),
+            })
+            .collect(),
+        external_secrets: flat
+            .external_secrets
+            .iter()
+            .map(|f| ResolvedBindingDto {
+                alias: f.binding.alias.clone(),
+                vault_name: f.binding.vault_name.clone(),
+                connection_id: f.binding.connection_id.clone(),
+                secret_count: f.binding.secret_names.len(),
+                source: f.source.clone(),
+            })
+            .collect(),
+        client_certificates: flat
+            .client_certificates
+            .iter()
+            .map(|f| ResolvedCertificateDto {
+                kind: match &f.certificate {
+                    ClientCertificate::Pem { .. } => "pem",
+                    ClientCertificate::Pkcs12 { .. } => "pkcs12",
+                    ClientCertificate::Vault { .. } => "vault",
+                }
+                .to_string(),
+                domain: f.certificate.domain().to_string(),
                 source: f.source.clone(),
             })
             .collect(),
@@ -357,7 +408,9 @@ pub fn get_process_env_vars(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rocket_environment::{FlatVariable, Flattened, Variable};
+    use rocket_environment::{
+        ExternalSecretBinding, FlatBinding, FlatCertificate, FlatVariable, Flattened, Variable,
+    };
 
     type TestResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -370,7 +423,74 @@ mod tests {
                 source: "base".into(),
             }],
             warnings: vec!["w".into()],
+            ..Default::default()
         }
+    }
+
+    fn flat_inherited() -> Flattened {
+        let secret = |name: &str| rocket_environment::ExternalSecretRef {
+            name: name.into(),
+            secret_id: "id".into(),
+        };
+        Flattened {
+            external_secrets: vec![FlatBinding {
+                binding: ExternalSecretBinding {
+                    alias: "prod".into(),
+                    connection_id: "conn-1".into(),
+                    vault_name: "Prod".into(),
+                    secret_names: vec![secret("a"), secret("b")],
+                },
+                source: "p".into(),
+            }],
+            client_certificates: vec![
+                FlatCertificate {
+                    certificate: ClientCertificate::Pkcs12 {
+                        domain: "a.com".into(),
+                        pkcs12_file_path: "/keys/bundle.p12".into(),
+                        pkcs12_secret: None,
+                        passphrase: None,
+                    },
+                    source: "p".into(),
+                },
+                FlatCertificate {
+                    certificate: ClientCertificate::Pem {
+                        domain: "b.com".into(),
+                        certificate_file_path: String::new(),
+                        private_key_file_path: "/keys/client.key".into(),
+                        certificate_secret: Some("payments.cert".into()),
+                        private_key_secret: None,
+                        passphrase: Some("hunter2".into()),
+                    },
+                    source: "c".into(),
+                },
+            ],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn resolved_dto_lists_inherited_bindings_and_certificates_with_source() -> TestResult {
+        let json = serde_json::to_value(to_resolved_dto("c", &flat_inherited()))?;
+        assert_eq!(json["externalSecrets"][0]["alias"], "prod");
+        assert_eq!(json["externalSecrets"][0]["vaultName"], "Prod");
+        assert_eq!(json["externalSecrets"][0]["connectionId"], "conn-1");
+        assert_eq!(json["externalSecrets"][0]["secretCount"], 2);
+        assert_eq!(json["externalSecrets"][0]["source"], "p");
+        assert_eq!(json["clientCertificates"][0]["type"], "pkcs12");
+        assert_eq!(json["clientCertificates"][0]["domain"], "a.com");
+        assert_eq!(json["clientCertificates"][0]["source"], "p");
+        assert_eq!(json["clientCertificates"][1]["type"], "pem");
+        Ok(())
+    }
+
+    #[test]
+    fn resolved_dto_certificate_rows_carry_no_secret_fields() -> TestResult {
+        let text = serde_json::to_string(&to_resolved_dto("c", &flat_inherited()))?;
+        assert!(!text.contains("hunter2"));
+        assert!(!text.contains("/keys/client.key"));
+        assert!(!text.contains("/keys/bundle.p12"));
+        assert!(!text.contains("payments.cert"));
+        Ok(())
     }
 
     #[test]

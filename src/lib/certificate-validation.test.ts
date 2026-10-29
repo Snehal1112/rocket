@@ -186,6 +186,12 @@ describe('validateClientCertificates for RocketVault certificates', () => {
     expect(validateClientCertificates([cert], bindings).errors).toEqual([]);
   });
 
+  it('accepts an alias from inheritedAliases', () => {
+    const cert = vaultCert({ binding: 'prod' });
+    expect(validateClientCertificates([cert], bindings, ['prod']).errors).toEqual([]);
+    expect(validateClientCertificates([cert], bindings).errors).toHaveLength(1);
+  });
+
   it('rejects a binding that is not in the environment', () => {
     const { errors } = validateClientCertificates([vaultCert({ binding: 'payments' })], bindings);
     expect(errors).toEqual([

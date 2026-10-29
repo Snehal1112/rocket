@@ -706,11 +706,15 @@ impl McpToolService {
     ) -> DomainResult<MaskedEnvironment> {
         self.check_in_workspace(session_id, collection)?;
         Self::validate_environment_name(environment)?;
-        let env = self
-            .environment_repo_factory
-            .for_collection(collection)
-            .get(environment)?;
-        let view = MaskedEnvironment::from_environment(&env);
+        let repo = self.environment_repo_factory.for_collection(collection);
+        let env = repo.get(environment)?;
+        let merged = rocket_environment::flatten_with_repo(&env, repo.as_ref())?;
+        let bindings: Vec<_> = merged
+            .external_secrets
+            .into_iter()
+            .map(|flat| flat.binding)
+            .collect();
+        let view = MaskedEnvironment::from_environment_with_bindings(&env, &bindings);
         self.publish_tool_invoked(
             session_id,
             "get_environment",
@@ -1862,6 +1866,50 @@ mod tests {
         assert!(publisher.events().iter().any(
             |e| matches!(e, DomainEvent::AcpToolInvoked { tool, .. } if tool == "get_environment")
         ));
+    }
+
+    #[test]
+    fn get_environment_lists_the_parents_vault_references() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_autonomy("my-api", true);
+        let env_factory = FakeEnvRepoFactory::new();
+        let mut base = Environment::new("base");
+        base.external_secrets
+            .push(rocket_environment::ExternalSecretBinding {
+                alias: "payments".into(),
+                connection_id: "c".into(),
+                vault_name: "v".into(),
+                secret_names: vec![rocket_environment::ExternalSecretRef {
+                    name: "apiKey".into(),
+                    secret_id: "id".into(),
+                }],
+            });
+        env_factory.with_env(base);
+        let mut child = Environment::new("child");
+        child.extends = Some("base".into());
+        env_factory.with_env(child);
+        let svc = service_with(repo, env_factory, RecordingPublisher::new());
+
+        let view = svc
+            .get_environment("s1", "my-api", "child")
+            .expect("get_environment");
+        assert_eq!(view.vault_references, vec!["payments.apiKey".to_string()]);
+    }
+
+    #[test]
+    fn get_environment_fails_on_an_extends_cycle() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_autonomy("my-api", true);
+        let env_factory = FakeEnvRepoFactory::new();
+        for (name, parent) in [("a", "b"), ("b", "a")] {
+            let mut e = Environment::new(name);
+            e.extends = Some(parent.into());
+            env_factory.with_env(e);
+        }
+        let svc = service_with(repo, env_factory, RecordingPublisher::new());
+
+        svc.get_environment("s1", "my-api", "a")
+            .expect_err("a cycle must fail the read");
     }
 
     #[test]

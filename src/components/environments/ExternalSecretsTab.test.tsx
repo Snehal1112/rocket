@@ -189,6 +189,33 @@ describe('ExternalSecretsTab', () => {
     expect(screen.queryByText('stripe-key')).not.toBeInTheDocument();
   });
 
+  it('lists inherited bindings read-only with their source', async () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <ExternalSecretsTab
+          bindings={[]}
+          inherited={[
+            { alias: 'prod', vaultName: 'v', connectionId: 'conn-1', secretCount: 2, source: 'base' },
+            { alias: 'one', vaultName: 'v', connectionId: 'conn-1', secretCount: 1, source: 'base' },
+          ]}
+          onChange={vi.fn()}
+          onAdd={vi.fn()}
+          onRemove={vi.fn()}
+          onSave={vi.fn()}
+          isDirty={false}
+          saveState='idle'
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findAllByText('base')).toHaveLength(2);
+    expect(screen.getByText('2 secrets')).toBeInTheDocument();
+    expect(screen.getByText('1 secret')).toBeInTheDocument();
+    expect(screen.getByLabelText('Inherited alias 1')).toHaveValue('prod');
+    expect(screen.queryByLabelText('Alias for binding 1')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /delete binding/i })).not.toBeInTheDocument();
+  });
+
   it('warns when the bound connection no longer exists', async () => {
     renderTab([{ ...binding, connectionId: 'deleted-conn' }]);
 

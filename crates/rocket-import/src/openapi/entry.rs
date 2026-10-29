@@ -396,6 +396,7 @@ impl ImportService {
     /// collection's source file. A failed fetch creates nothing. A source file that cannot be
     /// written is a warning, not an error. A token is sent to GitHub links only and is never
     /// stored here; the caller keeps it in the keychain.
+    #[allow(clippy::too_many_arguments)]
     pub async fn import_openapi_url(
         &self,
         fetcher: &dyn SpecFetcher,
@@ -1014,8 +1015,7 @@ parameters:
                 GroupBy::Tags,
                 "ws",
             )
-            .err()
-            .expect("refused");
+            .expect_err("refused");
         assert!(err.to_string().contains("full path"), "{err}");
     }
 

@@ -21,6 +21,7 @@ import { bindingScopeColumnLabel, getProviderDescriptor } from '@/lib/secret-pro
 import type {
   ExternalSecretBinding,
   ExternalSecretRef,
+  ResolvedBinding,
   SecretManagerConnection,
 } from '@/lib/tauri-api';
 import { fetchExternalSecretNames } from '@/lib/tauri-api';
@@ -28,8 +29,12 @@ import { cn } from '@/lib/utils';
 
 const GRID_COLS = 'grid-cols-[1fr_1fr_1fr_auto_28px]';
 
+const NO_INHERITED: ResolvedBinding[] = [];
+
 interface ExternalSecretsTabProps {
   bindings: ExternalSecretBinding[];
+  // Read-only rows from the parent chain.
+  inherited?: ResolvedBinding[];
   onChange: (idx: number, patch: Partial<ExternalSecretBinding>) => void;
   onAdd: () => void;
   onRemove: (idx: number) => void;
@@ -40,6 +45,7 @@ interface ExternalSecretsTabProps {
 
 export function ExternalSecretsTab({
   bindings,
+  inherited = NO_INHERITED,
   onChange,
   onAdd,
   onRemove,
@@ -70,7 +76,7 @@ export function ExternalSecretsTab({
         <div />
       </div>
 
-      {bindings.length === 0 ? (
+      {bindings.length === 0 && inherited.length === 0 ? (
         <div className='flex-1 flex flex-col items-center justify-center gap-3 text-center px-6'>
           <p className='text-sm font-medium text-foreground'>No external secrets bound</p>
           <p className='text-xs text-muted-foreground leading-relaxed max-w-[260px]'>
@@ -97,12 +103,48 @@ export function ExternalSecretsTab({
                 onRemove={onRemove}
               />
             ))}
+            {inherited.length > 0 && (
+              <div className='pt-2 space-y-1'>
+                <p className='text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70'>
+                  Inherited
+                </p>
+                {inherited.map((row, idx) => (
+                  <div
+                    key={`${row.source}:${row.alias}`}
+                    className={cn('grid min-w-0 items-center gap-1.5', GRID_COLS)}
+                  >
+                    <Input
+                      readOnly
+                      value={row.alias}
+                      aria-label={`Inherited alias ${idx + 1}`}
+                      className='h-7 min-w-0 text-xs font-mono bg-muted/40'
+                    />
+                    <Badge variant='secondary' className='w-fit text-[11px]'>
+                      {row.secretCount} {row.secretCount === 1 ? 'secret' : 'secrets'}
+                    </Badge>
+                    <Input
+                      readOnly
+                      value={row.vaultName}
+                      aria-label={`Inherited vault name ${idx + 1}`}
+                      className='h-7 min-w-0 text-xs font-mono bg-muted/40'
+                    />
+                    <span
+                      className='truncate text-[10px] text-muted-foreground'
+                      title={`From ${row.source}`}
+                    >
+                      {row.source}
+                    </span>
+                    <div />
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </ScrollArea>
       )}
 
       <div className='px-3 py-2 border-t border-border/40 flex items-center justify-between shrink-0'>
-        {bindings.length > 0 ? (
+        {bindings.length > 0 || inherited.length > 0 ? (
           <Button
             variant='ghost'
             size='sm'

@@ -782,7 +782,7 @@ impl OpenApiSyncService {
                 .iter()
                 .filter(|p| {
                     bundle.whole_failed
-                        || bundle.unloaded.iter().any(|u| *u == p.url)
+                        || bundle.unloaded.contains(&p.url)
                         || (bundle.scan_truncated && !bundle.refs.iter().any(|r| r.url == p.url))
                 })
                 .map(|p| p.url.as_str())
@@ -2446,9 +2446,11 @@ mod tests {
         );
         assert_eq!(s.last_status, Some(SyncStatus::Changed));
         // Once the local state has a check, it wins.
-        let mut l = OpenApiLocalState::default();
-        l.last_checked_at = Some(fixed_now().to_rfc3339());
-        l.last_status = Some(SyncStatus::Unchanged);
+        let l = OpenApiLocalState {
+            last_checked_at: Some(fixed_now().to_rfc3339()),
+            last_status: Some(SyncStatus::Unchanged),
+            ..Default::default()
+        };
         FsOpenApiLocalRepo.save(f.root(), &l).expect("save");
         let s = f.svc.status(f.root(), true).expect("status");
         assert_eq!(s.last_status, Some(SyncStatus::Unchanged));

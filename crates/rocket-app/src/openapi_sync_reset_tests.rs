@@ -224,7 +224,8 @@ impl CollectionFileTxFactory for EditOnStage {
 
 #[tokio::test]
 async fn reset_writes_nothing_when_the_file_changed_on_disk() {
-    let slot: Arc<Mutex<Option<Arc<dyn Fn() + Send + Sync>>>> = Arc::new(Mutex::new(None));
+    type Hook = Arc<dyn Fn() + Send + Sync>;
+    let slot: Arc<Mutex<Option<Hook>>> = Arc::new(Mutex::new(None));
     let late: Arc<dyn Fn() + Send + Sync> = {
         let slot = Arc::clone(&slot);
         Arc::new(move || {

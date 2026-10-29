@@ -9,7 +9,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
 use rocket_collection::CollectionRepository;
-use rocket_environment::{Environment, EnvironmentRepository, EnvironmentRepositoryFactory};
+use rocket_environment::{flatten_with_repo, EnvironmentRepository, EnvironmentRepositoryFactory};
 use rocket_flow::lint::LintContext;
 use rocket_flow::{Flow, FlowNodeKind, RequestSource};
 use rocket_shared::error::DomainError;
@@ -69,14 +69,14 @@ impl<'a> CollectionLintContext<'a> {
         match env.environment_name {
             Some(name) => {
                 let repo = sources.env_factory.for_collection(collection);
-                complete &= add_environment(&mut names, repo.get(name));
+                complete &= add_environment(&mut names, repo.as_ref(), name);
             }
             None => complete = false,
         }
 
         // No global environment selected is a real answer: nothing comes from there.
         if let Some(name) = env.global_env_name {
-            complete &= add_environment(&mut names, sources.global_env_repo.get(name));
+            complete &= add_environment(&mut names, sources.global_env_repo.as_ref(), name);
         }
 
         Self {
@@ -91,8 +91,12 @@ impl<'a> CollectionLintContext<'a> {
 
 /// Adds the keys of one environment. Returns false when the scope may hold
 /// names that were not added: it could not be read, or it inherits.
-fn add_environment(names: &mut HashSet<String>, read: Result<Environment, DomainError>) -> bool {
-    let Ok(environment) = read else {
+fn add_environment(
+    names: &mut HashSet<String>,
+    repo: &dyn EnvironmentRepository,
+    name: &str,
+) -> bool {
+    let Ok(environment) = repo.get(name) else {
         return false;
     };
     names.extend(
@@ -102,7 +106,13 @@ fn add_environment(names: &mut HashSet<String>, read: Result<Environment, Domain
             .filter(|v| v.enabled)
             .map(|v| v.key.clone()),
     );
-    for binding in &environment.external_secrets {
+    // The bindings of the parent chain count too. A broken chain adds none.
+    let merged = flatten_with_repo(&environment, repo).ok();
+    let bindings: Vec<_> = match &merged {
+        Some(flat) => flat.external_secrets.iter().map(|f| &f.binding).collect(),
+        None => environment.external_secrets.iter().collect(),
+    };
+    for binding in bindings {
         for secret in &binding.secret_names {
             names.insert(format!("{}.{}", binding.alias, secret.name));
         }
@@ -454,6 +464,74 @@ mod tests {
         let flow = flow_of(vec![inline_node("a")]);
         let ctx = CollectionLintContext::new(&src, "demo", ENV, &flow);
         assert_eq!(ctx.variable_is_known("missing"), None);
+    }
+
+    /// Serves a map of environments, so a child can find its parent.
+    struct MapFactory(std::collections::HashMap<String, Environment>);
+
+    impl EnvironmentRepositoryFactory for MapFactory {
+        fn for_collection(&self, _collection: &str) -> Box<dyn EnvironmentRepository> {
+            Box::new(crate::test_doubles::MapEnvRepo(self.0.clone()))
+        }
+    }
+
+    #[test]
+    fn lint_names_include_parent_secrets() {
+        let repo = ConfigurableCollectionRepo::new();
+        let mut parent = Environment::new("base");
+        parent.external_secrets.push(ExternalSecretBinding {
+            alias: "payments".into(),
+            connection_id: "c".into(),
+            vault_name: "v".into(),
+            secret_names: vec![ExternalSecretRef {
+                name: "apiKey".into(),
+                secret_id: "id".into(),
+            }],
+        });
+        let mut child = Environment::new("dev");
+        child.extends = Some("base".into());
+        let envs = [parent, child]
+            .into_iter()
+            .map(|e| (e.name.clone(), e))
+            .collect();
+        let mut src = sources(&repo, None, Some(environment(&[])));
+        src.env_factory = Box::new(MapFactory(envs));
+        let flow = flow_of(vec![inline_node("a")]);
+        let ctx = CollectionLintContext::new(&src, "demo", ENV, &flow);
+        assert_eq!(ctx.variable_is_known("payments.apiKey"), Some(true));
+        assert!(!ctx.names_complete);
+        assert_eq!(ctx.variable_is_known("missing"), None);
+    }
+
+    #[test]
+    fn lint_falls_back_to_own_secrets_on_an_extends_cycle() {
+        let repo = ConfigurableCollectionRepo::new();
+        let binding = |alias: &str, name: &str| ExternalSecretBinding {
+            alias: alias.into(),
+            connection_id: "c".into(),
+            vault_name: "v".into(),
+            secret_names: vec![ExternalSecretRef {
+                name: name.into(),
+                secret_id: "id".into(),
+            }],
+        };
+        let mut parent = Environment::new("base");
+        parent.extends = Some("dev".into());
+        parent.external_secrets.push(binding("parent", "key"));
+        let mut child = Environment::new("dev");
+        child.extends = Some("base".into());
+        child.external_secrets.push(binding("own", "key"));
+        let envs = [parent, child]
+            .into_iter()
+            .map(|e| (e.name.clone(), e))
+            .collect();
+        let mut src = sources(&repo, None, Some(environment(&[])));
+        src.env_factory = Box::new(MapFactory(envs));
+        let flow = flow_of(vec![inline_node("a")]);
+        let ctx = CollectionLintContext::new(&src, "demo", ENV, &flow);
+        assert_eq!(ctx.variable_is_known("own.key"), Some(true));
+        assert_eq!(ctx.variable_is_known("parent.key"), None);
+        assert!(!ctx.names_complete);
     }
 
     #[test]

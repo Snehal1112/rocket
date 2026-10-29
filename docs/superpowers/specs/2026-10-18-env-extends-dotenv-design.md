@@ -74,7 +74,7 @@ Make the stored `extends` and `dotEnvFilePath` fields on an environment do what 
 - What does a global environment's relative `.env` path resolve against when no workspace folder is reachable? Chosen: that path is not resolved and warns. Collection environments are unaffected. No gitignore handling. Decided by: call
 - Is the `.env` file read when the host environment gate denies access? Chosen: no, the file is not read at all, so an untrusted collection cannot make Rocket read a file it names. The `..` rule only refuses a literal `..` segment, the same as the client certificate paths. Decided by: call
 - Do the collection runner and flows get `.env` values? Chosen: no, they follow the backend-executed rule in the Non-goals, and they still get the `extends` flatten. Decided by: call
-- What is inherited? Chosen: variables only, with their secret flag kept, so inherited secrets are masked like any secret. The parent's external secret bindings and client certificates are not inherited here. Decided by: call
+- What is inherited? Chosen: variables only, with their secret flag kept, so inherited secrets are masked like any secret. The parent's external secret bindings and client certificates are not inherited here. Superseded: they are inherited now, see `2026-10-29-inherit-secrets-certs-design.md`. Decided by: call
 
 ## Acceptance criteria
 

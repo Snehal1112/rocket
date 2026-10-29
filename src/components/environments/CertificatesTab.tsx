@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { SingleLineEditor } from '@/components/editor';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Select,
@@ -17,7 +18,11 @@ import {
 } from '@/components/ui/select';
 import type { SaveButtonState } from '@/hooks/use-save-button';
 import { isLiteralPassphrase } from '@/lib/certificate-validation';
-import type { ClientCertificate, ExternalSecretBinding } from '@/lib/tauri-api';
+import type {
+  ClientCertificate,
+  ExternalSecretBinding,
+  ResolvedCertificate,
+} from '@/lib/tauri-api';
 import type { VariableScopeEntry } from '@/lib/url-variables';
 import { cn } from '@/lib/utils';
 import { type VaultSecretOption, vaultSecretOptions } from '@/lib/vault-secret-options';
@@ -31,9 +36,13 @@ const TYPE_LABELS: Record<ClientCertificate['type'], string> = {
   vault: 'Vault',
 };
 
+const NO_INHERITED: ResolvedCertificate[] = [];
+
 export interface CertificatesTabProps {
   certificates: ClientCertificate[];
   bindings: ExternalSecretBinding[];
+  // Read-only rows from the parent chain.
+  inherited?: ResolvedCertificate[];
   onChange: (idx: number, patch: Partial<ClientCertificate>) => void;
   onAdd: (type: ClientCertificate['type']) => void;
   onRemove: (idx: number) => void;
@@ -99,6 +108,7 @@ function pieceSpecs(cert: FileCertificate): PieceSpec[] {
 export function CertificatesTab({
   certificates,
   bindings,
+  inherited = NO_INHERITED,
   onChange,
   onAdd,
   onRemove,
@@ -126,7 +136,7 @@ export function CertificatesTab({
         </p>
       </div>
 
-      {certificates.length === 0 ? (
+      {certificates.length === 0 && inherited.length === 0 ? (
         <div className='flex-1 flex flex-col items-center justify-center gap-1 text-center px-6'>
           <p className='text-sm font-medium text-foreground'>No client certificates</p>
           <p className='text-xs text-muted-foreground leading-relaxed max-w-[280px]'>
@@ -151,6 +161,35 @@ export function CertificatesTab({
                 variableContext={variableContext}
               />
             ))}
+            {inherited.length > 0 && (
+              <div className='space-y-1'>
+                <p className='text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70'>
+                  Inherited
+                </p>
+                {inherited.map((row, idx) => (
+                  <div
+                    key={`${row.source}:${row.domain}`}
+                    className='flex items-center gap-1.5 min-w-0'
+                  >
+                    <Badge variant='secondary' className='text-[11px] shrink-0'>
+                      {TYPE_LABELS[row.type]}
+                    </Badge>
+                    <Input
+                      readOnly
+                      value={row.domain}
+                      aria-label={`Inherited domain ${idx + 1}`}
+                      className='h-7 min-w-0 flex-1 text-xs font-mono bg-muted/40'
+                    />
+                    <span
+                      className='truncate text-[10px] text-muted-foreground'
+                      title={`From ${row.source}`}
+                    >
+                      {row.source}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </ScrollArea>
       )}
