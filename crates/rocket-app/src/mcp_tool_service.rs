@@ -1869,6 +1869,50 @@ mod tests {
     }
 
     #[test]
+    fn get_environment_lists_the_parents_vault_references() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_autonomy("my-api", true);
+        let env_factory = FakeEnvRepoFactory::new();
+        let mut base = Environment::new("base");
+        base.external_secrets
+            .push(rocket_environment::ExternalSecretBinding {
+                alias: "payments".into(),
+                connection_id: "c".into(),
+                vault_name: "v".into(),
+                secret_names: vec![rocket_environment::ExternalSecretRef {
+                    name: "apiKey".into(),
+                    secret_id: "id".into(),
+                }],
+            });
+        env_factory.with_env(base);
+        let mut child = Environment::new("child");
+        child.extends = Some("base".into());
+        env_factory.with_env(child);
+        let svc = service_with(repo, env_factory, RecordingPublisher::new());
+
+        let view = svc
+            .get_environment("s1", "my-api", "child")
+            .expect("get_environment");
+        assert_eq!(view.vault_references, vec!["payments.apiKey".to_string()]);
+    }
+
+    #[test]
+    fn get_environment_fails_on_an_extends_cycle() {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_autonomy("my-api", true);
+        let env_factory = FakeEnvRepoFactory::new();
+        for (name, parent) in [("a", "b"), ("b", "a")] {
+            let mut e = Environment::new(name);
+            e.extends = Some(parent.into());
+            env_factory.with_env(e);
+        }
+        let svc = service_with(repo, env_factory, RecordingPublisher::new());
+
+        svc.get_environment("s1", "my-api", "a")
+            .expect_err("a cycle must fail the read");
+    }
+
+    #[test]
     fn get_test_results_errors_with_not_found_when_nothing_is_cached() {
         let repo = ConfigurableCollectionRepo::new();
         repo.set_autonomy("my-api", true);

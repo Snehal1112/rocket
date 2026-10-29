@@ -504,6 +504,37 @@ mod tests {
     }
 
     #[test]
+    fn lint_falls_back_to_own_secrets_on_an_extends_cycle() {
+        let repo = ConfigurableCollectionRepo::new();
+        let binding = |alias: &str, name: &str| ExternalSecretBinding {
+            alias: alias.into(),
+            connection_id: "c".into(),
+            vault_name: "v".into(),
+            secret_names: vec![ExternalSecretRef {
+                name: name.into(),
+                secret_id: "id".into(),
+            }],
+        };
+        let mut parent = Environment::new("base");
+        parent.extends = Some("dev".into());
+        parent.external_secrets.push(binding("parent", "key"));
+        let mut child = Environment::new("dev");
+        child.extends = Some("base".into());
+        child.external_secrets.push(binding("own", "key"));
+        let envs = [parent, child]
+            .into_iter()
+            .map(|e| (e.name.clone(), e))
+            .collect();
+        let mut src = sources(&repo, None, Some(environment(&[])));
+        src.env_factory = Box::new(MapFactory(envs));
+        let flow = flow_of(vec![inline_node("a")]);
+        let ctx = CollectionLintContext::new(&src, "demo", ENV, &flow);
+        assert_eq!(ctx.variable_is_known("own.key"), Some(true));
+        assert_eq!(ctx.variable_is_known("parent.key"), None);
+        assert!(!ctx.names_complete);
+    }
+
+    #[test]
     fn a_flow_with_a_saved_request_never_answers_no() {
         let repo = ConfigurableCollectionRepo::new();
         let src = sources(&repo, Some(environment(&["token"])), Some(environment(&[])));
