@@ -197,6 +197,36 @@ pub fn create_request(
 }
 
 #[tauri::command(async)]
+pub fn create_graphql_request(
+    collection: String,
+    path: String,
+    request: GraphQlRequest,
+    svc: State<'_, CollectionService>,
+) -> Result<GraphQlRequest, DomainError> {
+    svc.create_graphql_request(&collection, &path, &request)
+}
+
+#[tauri::command(async)]
+pub fn create_grpc_request(
+    collection: String,
+    path: String,
+    request: GrpcRequest,
+    svc: State<'_, CollectionService>,
+) -> Result<GrpcRequest, DomainError> {
+    svc.create_grpc_request(&collection, &path, &request)
+}
+
+#[tauri::command(async)]
+pub fn create_websocket_request(
+    collection: String,
+    path: String,
+    request: WebSocketRequest,
+    svc: State<'_, CollectionService>,
+) -> Result<WebSocketRequest, DomainError> {
+    svc.create_websocket_request(&collection, &path, &request)
+}
+
+#[tauri::command(async)]
 pub fn duplicate_request(
     collection: String,
     path: String,

@@ -542,6 +542,71 @@ impl CollectionService {
         })
     }
 
+    /// Creates a new GraphQL request and refuses to replace an existing file.
+    /// Names are compared like `create_request`.
+    pub fn create_graphql_request(
+        &self,
+        collection: &str,
+        path: &str,
+        request: &GraphQlRequest,
+    ) -> DomainResult<GraphQlRequest> {
+        let file_path = rocket_collection::request_filename_for(path);
+        self.locked(collection, || {
+            self.ensure_path_free(collection, &file_path)?;
+            let actual_path = self
+                .repo
+                .create_graphql_request_exclusive(collection, &file_path, request)?;
+            self.publish_request_saved(collection, &actual_path);
+            self.repo.get_graphql_request(collection, &actual_path)
+        })
+    }
+
+    /// Creates a new gRPC request and refuses to replace an existing file.
+    pub fn create_grpc_request(
+        &self,
+        collection: &str,
+        path: &str,
+        request: &GrpcRequest,
+    ) -> DomainResult<GrpcRequest> {
+        let file_path = rocket_collection::request_filename_for(path);
+        self.locked(collection, || {
+            self.ensure_path_free(collection, &file_path)?;
+            let actual_path = self
+                .repo
+                .create_grpc_request_exclusive(collection, &file_path, request)?;
+            self.publish_request_saved(collection, &actual_path);
+            self.repo.get_grpc_request(collection, &actual_path)
+        })
+    }
+
+    /// Creates a new WebSocket request and refuses to replace an existing file.
+    pub fn create_websocket_request(
+        &self,
+        collection: &str,
+        path: &str,
+        request: &WebSocketRequest,
+    ) -> DomainResult<WebSocketRequest> {
+        let file_path = rocket_collection::request_filename_for(path);
+        self.locked(collection, || {
+            self.ensure_path_free(collection, &file_path)?;
+            let actual_path = self
+                .repo
+                .create_websocket_request_exclusive(collection, &file_path, request)?;
+            self.publish_request_saved(collection, &actual_path);
+            self.repo.get_websocket_request(collection, &actual_path)
+        })
+    }
+
+    /// Fails with `AlreadyExists` when the path is taken, in any letter case.
+    fn ensure_path_free(&self, collection: &str, file_path: &str) -> DomainResult<()> {
+        if self.repo.path_exists(collection, file_path)? {
+            return Err(DomainError::AlreadyExists(format!(
+                "{collection}/{file_path}"
+            )));
+        }
+        Ok(())
+    }
+
     /// Duplicates an HTTP request found by its full path. The copy gets a new
     /// uid and a unique name in the source's folder, and no file is replaced.
     pub fn duplicate_request(&self, collection: &str, path: &str) -> DomainResult<Request> {
@@ -1442,6 +1507,86 @@ mod tests {
         assert_eq!(rec.len(), 1);
         assert_eq!(rec[0].0, "auth/Fresh.yml");
     }
+
+    /// Builds the create tests of one non-HTTP request type. The fixture counts
+    /// exclusive writes and records the published events.
+    macro_rules! non_http_create_tests {
+        ($module:ident, $ty:ident, $create:ident, $on_create:ident, $on_get:ident) => {
+            mod $module {
+                use super::*;
+
+                fn fixture(
+                    exists: bool,
+                ) -> (CollectionService, Arc<RecordingEventPublisher>, Arc<Mutex<u32>>) {
+                    let writes = Arc::new(Mutex::new(0u32));
+                    let counter = Arc::clone(&writes);
+                    let repo = NullCollectionRepo::strict()
+                        .on_path_exists(move |_, _| Ok(exists))
+                        .$on_create(move |_, p, _| {
+                            *counter.lock().expect("writes") += 1;
+                            Ok(p.to_string())
+                        })
+                        .$on_get(|_, _| Ok($ty::new("Fresh", "https://e.example")));
+                    let publisher = Arc::new(RecordingEventPublisher {
+                        events: Mutex::new(vec![]),
+                    });
+                    let svc = CollectionService::new(
+                        Box::new(repo),
+                        Box::new(SharedEventPublisher(Arc::clone(&publisher))),
+                    );
+                    (svc, publisher, writes)
+                }
+
+                #[test]
+                fn refuses_a_name_that_exists_even_in_another_case() {
+                    let (svc, publisher, writes) = fixture(true);
+                    let request = $ty::new("Orders", "https://e.example");
+                    let err = svc
+                        .$create("col", "Orders", &request)
+                        .expect_err("name is taken");
+                    assert!(matches!(err, DomainError::AlreadyExists(_)), "{err}");
+                    assert_eq!(*writes.lock().expect("writes"), 0);
+                    assert!(publisher.events.lock().expect("lock").is_empty());
+                }
+
+                #[test]
+                fn writes_a_new_name_and_publishes() {
+                    let (svc, publisher, writes) = fixture(false);
+                    let request = $ty::new("Fresh", "https://e.example");
+                    svc.$create("col", "Fresh", &request).expect("created");
+                    assert_eq!(*writes.lock().expect("writes"), 1);
+                    let events = publisher.events.lock().expect("lock");
+                    assert!(matches!(
+                        events.as_slice(),
+                        [DomainEvent::RequestSaved { collection, path }]
+                            if collection == "col" && path == "Fresh.yml"
+                    ));
+                }
+            }
+        };
+    }
+
+    non_http_create_tests!(
+        create_graphql_request,
+        GraphQlRequest,
+        create_graphql_request,
+        on_create_graphql_request_exclusive,
+        on_get_graphql_request
+    );
+    non_http_create_tests!(
+        create_grpc_request,
+        GrpcRequest,
+        create_grpc_request,
+        on_create_grpc_request_exclusive,
+        on_get_grpc_request
+    );
+    non_http_create_tests!(
+        create_websocket_request,
+        WebSocketRequest,
+        create_websocket_request,
+        on_create_websocket_request_exclusive,
+        on_get_websocket_request
+    );
 
     #[test]
     fn duplicate_request_creates_a_copy_with_a_new_uid_and_name() {

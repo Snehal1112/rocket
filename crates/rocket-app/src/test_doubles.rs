@@ -12,7 +12,8 @@ use crate::callback_listener::{CallbackEndpoint, CallbackListener, ReceivedCall}
 use async_trait::async_trait;
 use rocket_collection::{
     Collection, CollectionRepository, CollectionSettings, CollectionSummary, CollectionVariable,
-    FolderSettings, Request as CollectionRequest, RequestKind, RequestScriptPhase,
+    FolderSettings, GraphQlRequest, GrpcRequest, Request as CollectionRequest, RequestKind,
+    RequestScriptPhase, WebSocketRequest,
 };
 use rocket_environment::{
     Environment, EnvironmentRepository, EnvironmentRepositoryFactory, ExternalSecretRef,
@@ -758,6 +759,8 @@ type Hook2<R> = Option<Box<dyn Fn(&str, &str) -> DomainResult<R> + Send + Sync>>
 type SaveRequestHook =
     Option<Box<dyn Fn(&str, &str, &CollectionRequest) -> DomainResult<String> + Send + Sync>>;
 
+type CreateHook<T> = Option<Box<dyn Fn(&str, &str, &T) -> DomainResult<String> + Send + Sync>>;
+
 type MoveItemHook = Box<dyn Fn(&str, &str, &str, &str) -> DomainResult<()> + Send + Sync>;
 
 /// A `CollectionRepository` that does nothing, with optional per-method hooks.
@@ -786,6 +789,12 @@ pub struct NullCollectionRepo {
     request_kind: Hook2<RequestKind>,
     path_exists: Hook2<bool>,
     create_request_exclusive: SaveRequestHook,
+    create_graphql_exclusive: CreateHook<GraphQlRequest>,
+    create_grpc_exclusive: CreateHook<GrpcRequest>,
+    create_websocket_exclusive: CreateHook<WebSocketRequest>,
+    get_graphql_request: Hook2<GraphQlRequest>,
+    get_grpc_request: Hook2<GrpcRequest>,
+    get_websocket_request: Hook2<WebSocketRequest>,
 }
 
 impl Default for NullCollectionRepo {
@@ -820,6 +829,12 @@ impl NullCollectionRepo {
             request_kind: None,
             path_exists: None,
             create_request_exclusive: None,
+            create_graphql_exclusive: None,
+            create_grpc_exclusive: None,
+            create_websocket_exclusive: None,
+            get_graphql_request: None,
+            get_grpc_request: None,
+            get_websocket_request: None,
         }
     }
 
@@ -963,6 +978,48 @@ impl NullCollectionRepo {
         self.create_request_exclusive = Some(Box::new(f));
         self
     }
+    pub fn on_create_graphql_request_exclusive(
+        mut self,
+        f: impl Fn(&str, &str, &GraphQlRequest) -> DomainResult<String> + Send + Sync + 'static,
+    ) -> Self {
+        self.create_graphql_exclusive = Some(Box::new(f));
+        self
+    }
+    pub fn on_create_grpc_request_exclusive(
+        mut self,
+        f: impl Fn(&str, &str, &GrpcRequest) -> DomainResult<String> + Send + Sync + 'static,
+    ) -> Self {
+        self.create_grpc_exclusive = Some(Box::new(f));
+        self
+    }
+    pub fn on_create_websocket_request_exclusive(
+        mut self,
+        f: impl Fn(&str, &str, &WebSocketRequest) -> DomainResult<String> + Send + Sync + 'static,
+    ) -> Self {
+        self.create_websocket_exclusive = Some(Box::new(f));
+        self
+    }
+    pub fn on_get_graphql_request(
+        mut self,
+        f: impl Fn(&str, &str) -> DomainResult<GraphQlRequest> + Send + Sync + 'static,
+    ) -> Self {
+        self.get_graphql_request = Some(Box::new(f));
+        self
+    }
+    pub fn on_get_grpc_request(
+        mut self,
+        f: impl Fn(&str, &str) -> DomainResult<GrpcRequest> + Send + Sync + 'static,
+    ) -> Self {
+        self.get_grpc_request = Some(Box::new(f));
+        self
+    }
+    pub fn on_get_websocket_request(
+        mut self,
+        f: impl Fn(&str, &str) -> DomainResult<WebSocketRequest> + Send + Sync + 'static,
+    ) -> Self {
+        self.get_websocket_request = Some(Box::new(f));
+        self
+    }
     pub fn on_get_request_variables(
         mut self,
         f: impl Fn(&str, &str) -> DomainResult<Vec<CollectionVariable>> + Send + Sync + 'static,
@@ -1046,6 +1103,69 @@ impl CollectionRepository for NullCollectionRepo {
             Some(f) => f(collection, path, request),
             None => Err(DomainError::Internal(
                 "exclusive request creation is not available".into(),
+            )),
+        }
+    }
+    fn create_graphql_request_exclusive(
+        &self,
+        collection: &str,
+        path: &str,
+        request: &GraphQlRequest,
+    ) -> DomainResult<String> {
+        match &self.create_graphql_exclusive {
+            Some(f) => f(collection, path, request),
+            None => Err(DomainError::Internal(
+                "exclusive graphql creation is not available".into(),
+            )),
+        }
+    }
+    fn create_grpc_request_exclusive(
+        &self,
+        collection: &str,
+        path: &str,
+        request: &GrpcRequest,
+    ) -> DomainResult<String> {
+        match &self.create_grpc_exclusive {
+            Some(f) => f(collection, path, request),
+            None => Err(DomainError::Internal(
+                "exclusive grpc creation is not available".into(),
+            )),
+        }
+    }
+    fn create_websocket_request_exclusive(
+        &self,
+        collection: &str,
+        path: &str,
+        request: &WebSocketRequest,
+    ) -> DomainResult<String> {
+        match &self.create_websocket_exclusive {
+            Some(f) => f(collection, path, request),
+            None => Err(DomainError::Internal(
+                "exclusive websocket creation is not available".into(),
+            )),
+        }
+    }
+    fn get_graphql_request(&self, collection: &str, path: &str) -> DomainResult<GraphQlRequest> {
+        match &self.get_graphql_request {
+            Some(f) => f(collection, path),
+            None => Err(DomainError::Internal("graphql read is not available".into())),
+        }
+    }
+    fn get_grpc_request(&self, collection: &str, path: &str) -> DomainResult<GrpcRequest> {
+        match &self.get_grpc_request {
+            Some(f) => f(collection, path),
+            None => Err(DomainError::Internal("grpc read is not available".into())),
+        }
+    }
+    fn get_websocket_request(
+        &self,
+        collection: &str,
+        path: &str,
+    ) -> DomainResult<WebSocketRequest> {
+        match &self.get_websocket_request {
+            Some(f) => f(collection, path),
+            None => Err(DomainError::Internal(
+                "websocket read is not available".into(),
             )),
         }
     }
