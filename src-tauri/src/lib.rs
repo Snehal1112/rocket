@@ -1,5 +1,7 @@
 mod audit_bridge;
 mod callback_adapter;
+#[cfg(test)]
+mod ipc_acl_tests;
 // `pub` so integration tests in `src-tauri/tests/` can drive command
 // orchestration directly (e.g. `commands::acp_sessions::
 // start_workspace_assistant_inner`) — mirrors why `mcp` below is already `pub`.
