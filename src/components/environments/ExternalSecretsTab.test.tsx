@@ -195,8 +195,8 @@ describe('ExternalSecretsTab', () => {
         <ExternalSecretsTab
           bindings={[]}
           inherited={[
-            { alias: 'prod', vaultName: 'v', connectionId: 'conn-1', secretCount: 2, source: 'base' },
-            { alias: 'one', vaultName: 'v', connectionId: 'conn-1', secretCount: 1, source: 'base' },
+            { alias: 'prod', vaultName: 'v', connectionId: 'conn-1', secretCount: 2, secretNames: ['s0', 's1'], source: 'base' },
+            { alias: 'one', vaultName: 'v', connectionId: 'conn-1', secretCount: 1, secretNames: ['s0'], source: 'base' },
           ]}
           onChange={vi.fn()}
           onAdd={vi.fn()}

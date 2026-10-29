@@ -698,7 +698,7 @@ impl RequestExecutionService {
             return Ok((result, failures));
         };
         let flat = flatten_scope(&env, repo.as_ref())?;
-        'bindings: for binding in &flat.bindings() {
+        'bindings: for binding in flat.external_secrets.iter().map(|f| &f.binding) {
             for secret_ref in &binding.secret_names {
                 let value = match crate::vault_secret_resolution::resolve_vault_secret_value(
                     self.secret_manager_repo.as_ref(),

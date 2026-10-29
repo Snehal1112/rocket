@@ -708,12 +708,12 @@ impl McpToolService {
         Self::validate_environment_name(environment)?;
         let repo = self.environment_repo_factory.for_collection(collection);
         let env = repo.get(environment)?;
-        let merged = rocket_environment::flatten_with_repo(&env, repo.as_ref())?;
-        let bindings: Vec<_> = merged
-            .external_secrets
-            .into_iter()
-            .map(|flat| flat.binding)
-            .collect();
+        // A broken chain (a cycle) keeps the environment's own bindings, like lint and the
+        // certificate build do, so the read still works.
+        let bindings = match rocket_environment::flatten_with_repo(&env, repo.as_ref()) {
+            Ok(merged) => merged.bindings(),
+            Err(_) => env.external_secrets.clone(),
+        };
         let view = MaskedEnvironment::from_environment_with_bindings(&env, &bindings);
         self.publish_tool_invoked(
             session_id,
@@ -1897,19 +1897,28 @@ mod tests {
     }
 
     #[test]
-    fn get_environment_fails_on_an_extends_cycle() {
+    fn get_environment_keeps_its_own_vault_references_on_an_extends_cycle() {
         let repo = ConfigurableCollectionRepo::new();
         repo.set_autonomy("my-api", true);
         let env_factory = FakeEnvRepoFactory::new();
         for (name, parent) in [("a", "b"), ("b", "a")] {
             let mut e = Environment::new(name);
             e.extends = Some(parent.into());
+            if name == "a" {
+                e.external_secrets.push(vault_binding("own", "id-own"));
+            }
             env_factory.with_env(e);
         }
         let svc = service_with(repo, env_factory, RecordingPublisher::new());
 
-        svc.get_environment("s1", "my-api", "a")
-            .expect_err("a cycle must fail the read");
+        let view = svc
+            .get_environment("s1", "my-api", "a")
+            .expect("a cycle keeps the own bindings");
+        assert!(
+            view.vault_references.iter().any(|r| r.starts_with("own.")),
+            "{:?}",
+            view.vault_references
+        );
     }
 
     #[test]

@@ -1710,12 +1710,13 @@ export interface ResolvedVariable {
   source: string;
 }
 
-/** An external secret binding of a flattened environment. Names are counted, never listed. */
+/** An external secret binding of a flattened environment. It lists secret names, never ids or values. */
 export interface ResolvedBinding {
   alias: string;
   vaultName: string;
   connectionId: string;
   secretCount: number;
+  secretNames: string[];
   source: string;
 }
 

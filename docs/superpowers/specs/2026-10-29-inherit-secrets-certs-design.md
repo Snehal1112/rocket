@@ -48,7 +48,7 @@ pub external_secrets: Vec<FlatBinding>,
 pub client_certificates: Vec<FlatCertificate>,
 ```
 
-- Bindings merge by `alias`. A later layer (closer to the child) replaces an earlier binding with the same alias in place. Other bindings are kept, ancestors first.
+- Bindings merge by `alias`. A later layer (closer to the child) replaces an earlier binding with the same alias, and the replacement takes the later layer's position. Other bindings are kept, ancestors first.
 - Certificates merge by `domain`, compared after trimming and ASCII lowercasing, on the raw text before `{{var}}` resolution. This key is coarser than the URL matcher in `crates/rocket-http/src/client_cert.rs:16-26`, which also understands a scheme, port and path. `https://a.com` and `a.com` are two entries in the merge, and the child-first order keeps the child preferred when both match. A child certificate replaces a parent certificate of the same domain. The result lists the child's own certificates first in their own order, then the inherited ones, so the first-match rule in `rocket_http::client_cert::find_certificate` prefers the child.
 - These lists have no disabled state, so there is no shadowing rule.
 - A cycle is an error and a missing parent only warns, exactly as for variables.
@@ -61,6 +61,7 @@ Example: `base` binds `prod` and `stage`; `child` binds `prod` with another vaul
 - `resolve_external_secrets_partial` flattens the selected environment and loops over the merged bindings. `resolve_external_secrets_partial` returns `DomainResult<(map, failures)>` instead of a bare tuple, so a cycle is an `Err` that `resolve_external_secrets` and every caller of the partial form propagate. A normal send already fails earlier on the variable flatten (`execution_service.rs:227`), so this error matters for direct callers. Global environments inherit within the global store the same way. `rok.getSecretVar`, `{{alias.secret}}`, the collection runner, flows, WebSocket and OAuth2 all go through this call, so they inherit it.
 - `environment_client_certificates` takes the merged certificates and merged bindings. The `{{var}}` placeholders in an inherited certificate resolve against the child's variables. On a cycle it falls back to the environment's own lists and logs a warning, because the variable flatten already failed the send.
 - `flow_lint_context` adds the merged `alias.secret` names. Its completeness rule for environments with `extends` stays as it is (`flow_lint_context.rs:94-111`), so unknown names are still not flagged and the existing test `an_environment_with_inheritance_leaves_unknown_names_unanswered` keeps passing.
+- `get_environment` keeps the environment's own bindings when the chain is broken by a cycle, like lint and the certificate build.
 - `MaskedEnvironment` keeps `from_environment` and gains a second constructor that takes the merged bindings, used by `get_environment` in `mcp_tool_service.rs`. Inherited variables in that view stay a follow-up of #22.
 - The wrapper at `execution_service.rs:1458` keeps its signature and passes the repo through, as does `oauth2_service.rs:195-210`.
 
@@ -71,7 +72,7 @@ Example: `base` binds `prod` and `stage`; `child` binds `prod` with another vaul
 ### 4. UI
 
 - `ResolvedEnvironmentDto` gains `externalSecrets` and `clientCertificates`, each row with `source`.
-  - Binding row: `alias`, `vaultName` (the binding's `vault_name`), `connectionId`, `secretCount` (`secret_names.len()`), `source`. The DTO lists every merged row, and the UI filters out rows whose `source` is the selected environment, as for variables.
+  - Binding row: `alias`, `vaultName` (the binding's `vault_name`), `connectionId`, `secretCount` (`secret_names.len()`), `secretNames` (names only, no ids), `source`. The DTO lists every merged row, and the UI filters out rows whose `source` is the selected environment, as for variables.
   - Certificate row: `type`, `domain`, `source`. No path, passphrase or secret reference is sent.
 - The External Secrets tab and the Client Certificates tab list inherited rows read-only after the child's own rows, labelled with the source environment, like inherited variables. Rows the child overrides are not listed as inherited.
 - The dialog's client certificate validation (`src/lib/certificate-validation.ts`) takes an optional `inheritedAliases` list from the saved flatten and accepts those aliases. It does not see unsaved parent edits, so a parent change must be saved first, and the backend check at save is the authority. Saving never writes inherited rows into the child.
@@ -163,3 +164,5 @@ None. The ticket is fully built by this spec.
 - Does flow lint start flagging unknown names for inheriting environments? Chosen: no, its completeness rule stays, because changing it alters existing lint behaviour. Decided by: call
 - How does a cycle fail the secret fetch? Chosen: the partial function returns a `DomainResult`, so the cycle is an `Err`. Decided by: call
 - Does the dialog see unsaved parent edits? Chosen: no, it uses the saved flatten and the backend validates at save. Decided by: call
+- Should the inherited binding rows list secret names? Chosen: yes, names only and never ids or values, because the dialog must check and offer a certificate's secret reference against inherited bindings. This replaces the first plan's count-only rows. Decided by: call
+- Should an MCP read of a cyclic environment fail? Chosen: no, it keeps the own bindings, so all three readers behave the same on a cycle. Decided by: call

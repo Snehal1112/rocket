@@ -530,7 +530,17 @@ mod tests {
         let svc = make_service();
         let mut c = child_with_vault_certificate();
         c.extends = Some("gone".into());
-        svc.save(&c).expect_err("no own binding for prod");
+        let err = svc.save(&c).expect_err("no own binding for prod");
+        assert!(err.to_string().contains("prod"), "{err}");
+    }
+
+    #[test]
+    fn save_with_missing_parent_and_own_binding_succeeds() {
+        let svc = make_service();
+        let mut c = child_with_vault_certificate();
+        c.extends = Some("gone".into());
+        c.external_secrets = parent_with_prod_binding().external_secrets;
+        svc.save(&c).expect("own binding is enough");
     }
 
     #[test]

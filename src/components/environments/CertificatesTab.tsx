@@ -168,7 +168,8 @@ export function CertificatesTab({
                 </p>
                 {inherited.map((row, idx) => (
                   <div
-                    key={`${row.source}:${row.domain}`}
+                    // biome-ignore lint/suspicious/noArrayIndexKey: read-only rows, and same-domain twins in one environment share source and domain
+                    key={`${row.source}:${row.domain}:${idx}`}
                     className='flex items-center gap-1.5 min-w-0'
                   >
                     <Badge variant='secondary' className='text-[11px] shrink-0'>

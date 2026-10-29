@@ -245,8 +245,8 @@ pub struct ResolvedVariableDto {
     pub source: String,
 }
 
-/// One external secret binding of a flattened environment. It carries secret names only
-/// as a count, never a name list or a value.
+/// One external secret binding of a flattened environment. It carries secret names and a
+/// count, never an id or a value. The dialog needs the names to check a certificate reference.
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolvedBindingDto {
@@ -254,6 +254,7 @@ pub struct ResolvedBindingDto {
     pub vault_name: String,
     pub connection_id: String,
     pub secret_count: usize,
+    pub secret_names: Vec<String>,
     pub source: String,
 }
 
@@ -309,6 +310,12 @@ fn to_resolved_dto(name: &str, flat: &rocket_environment::Flattened) -> Resolved
                 vault_name: f.binding.vault_name.clone(),
                 connection_id: f.binding.connection_id.clone(),
                 secret_count: f.binding.secret_names.len(),
+                secret_names: f
+                    .binding
+                    .secret_names
+                    .iter()
+                    .map(|s| s.name.clone())
+                    .collect(),
                 source: f.source.clone(),
             })
             .collect(),
@@ -475,6 +482,10 @@ mod tests {
         assert_eq!(json["externalSecrets"][0]["vaultName"], "Prod");
         assert_eq!(json["externalSecrets"][0]["connectionId"], "conn-1");
         assert_eq!(json["externalSecrets"][0]["secretCount"], 2);
+        assert_eq!(
+            json["externalSecrets"][0]["secretNames"],
+            serde_json::json!(["a", "b"])
+        );
         assert_eq!(json["externalSecrets"][0]["source"], "p");
         assert_eq!(json["clientCertificates"][0]["type"], "pkcs12");
         assert_eq!(json["clientCertificates"][0]["domain"], "a.com");

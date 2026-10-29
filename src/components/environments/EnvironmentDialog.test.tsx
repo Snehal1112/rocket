@@ -323,8 +323,8 @@ describe('EnvironmentDialog inherited rows', () => {
       name: 'child',
       variables: [],
       externalSecrets: [
-        { alias: 'prod', vaultName: 'v', connectionId: 'c', secretCount: 1, source: 'child' },
-        { alias: 'shared', vaultName: 'v', connectionId: 'c', secretCount: 1, source: 'base' },
+        { alias: 'prod', vaultName: 'v', connectionId: 'c', secretCount: 1, secretNames: ['s0'], source: 'child' },
+        { alias: 'shared', vaultName: 'v', connectionId: 'c', secretCount: 1, secretNames: ['s0'], source: 'base' },
       ],
       clientCertificates: [
         { type: 'pem', domain: 'own.example.com', source: 'child' },
@@ -343,6 +343,40 @@ describe('EnvironmentDialog inherited rows', () => {
     await user.click(screen.getByRole('tab', { name: /certificates/i }));
     expect(await screen.findByLabelText('Inherited domain 1')).toHaveValue('base.example.com');
     expect(screen.queryByLabelText('Inherited domain 2')).not.toBeInTheDocument();
+  });
+
+  it('a_pem_certificate_can_name_a_parent_secret_and_save', async () => {
+    vi.mocked(tauriApi.listEnvironments).mockResolvedValue([
+      {
+        ...child,
+        clientCertificates: [
+          {
+            type: 'pem',
+            domain: 'a.example.com',
+            certificateSecret: 'shared.s0',
+            privateKeyFilePath: '/keys/client.key',
+          },
+        ],
+      },
+      base,
+    ]);
+    vi.mocked(tauriApi.getResolvedEnvironment).mockResolvedValue({
+      name: 'child',
+      variables: [],
+      externalSecrets: [
+        { alias: 'shared', vaultName: 'v', connectionId: 'c', secretCount: 1, secretNames: ['s0'], source: 'base' },
+      ],
+      clientCertificates: [],
+      warnings: [],
+    });
+    renderDialog();
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText('Variable key 1'), '2');
+    await screen.findByRole('tab', { name: /external secrets/i });
+    await vi.waitFor(() => expect(tauriApi.getResolvedEnvironment).toHaveBeenCalled());
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+
+    await vi.waitFor(() => expect(tauriApi.saveEnvironment).toHaveBeenCalled());
   });
 
   it('saving_does_not_include_inherited_rows', async () => {

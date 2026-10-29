@@ -68,9 +68,10 @@ const EMPTY_ENVS: Environment[] = [];
 const EMPTY_ROWS: ResolvedVariable[] = [];
 const EMPTY_BINDINGS: ResolvedBinding[] = [];
 const EMPTY_CERTS: ResolvedCertificate[] = [];
+const EMPTY_EFFECTIVE: ExternalSecretBinding[] = [];
 
 // Domains match case-insensitively and ignore surrounding spaces, as the backend merge does.
-const normalizeDomain = (domain: string) => domain.trim().toLowerCase();
+const normalizeDomain = (domain: string) => domain.trim().replace(/[A-Z]/g, (c) => c.toLowerCase());
 // Radix Select forbids an empty item value, so "None" uses a sentinel.
 const NO_PARENT = '__none__';
 
@@ -242,6 +243,18 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
     () => inheritedBindings.map((b) => b.alias),
     [inheritedBindings],
   );
+  // The child's own bindings plus the inherited ones, so a certificate can name either.
+  // Inherited rows carry names only, which is all the pickers and the reference check need.
+  const effectiveBindings = useMemo(() => {
+    if (!selectedEnv) return EMPTY_EFFECTIVE;
+    const inherited = inheritedBindings.map((b) => ({
+      alias: b.alias,
+      connectionId: b.connectionId,
+      vaultName: b.vaultName,
+      secretNames: b.secretNames.map((name) => ({ name, secretId: '' })),
+    }));
+    return [...selectedEnv.externalSecrets, ...inherited];
+  }, [selectedEnv, inheritedBindings]);
 
   // All tabs share one save, so an unfinished binding or certificate blocks a Variables save too.
   // Point the user at the tab that holds the problem instead of failing with a generic toast.
@@ -256,7 +269,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
     // Certificate references are checked against the bindings above, which are now known valid.
     const issues = validateClientCertificates(
       selectedEnv.clientCertificates,
-      selectedEnv.externalSecrets,
+      effectiveBindings,
       inheritedAliases,
     );
     if (issues.errors.length > 0) {
@@ -267,7 +280,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
     // Warnings (a literal passphrase) never block the save.
     if (issues.warnings.length > 0) toast.warning(issues.warnings[0]);
     void triggerSave();
-  }, [selectedEnv, inheritedAliases, triggerSave]);
+  }, [selectedEnv, effectiveBindings, inheritedAliases, triggerSave]);
 
   // Reset dirty flag when switching environments.
   // biome-ignore lint/correctness/useExhaustiveDependencies: selectedName is the intentional trigger
@@ -709,7 +722,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                 >
                   <CertificatesTab
                     certificates={selectedEnv.clientCertificates}
-                    bindings={selectedEnv.externalSecrets}
+                    bindings={effectiveBindings}
                     inherited={inheritedCertificates}
                     onChange={updateClientCertificate}
                     onAdd={addClientCertificate}

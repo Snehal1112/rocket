@@ -42,14 +42,10 @@ pub(crate) fn environment_client_certificates(
         return Vec::new();
     };
     // The merged lists include the parent chain's. A broken chain (a cycle) keeps the
-    // environment's own lists, so a request still goes out with what it defines itself.
+    // environment's own lists. The send already fails on the variable flatten, which also
+    // logs the flatten warnings, so they are not logged again here.
     let (certificates, bindings) = match rocket_environment::flatten_with_repo(&env, repo) {
-        Ok(flat) => {
-            for warning in &flat.warnings {
-                tracing::warn!("{warning}");
-            }
-            (flat.certificates(), flat.bindings())
-        }
+        Ok(flat) => (flat.certificates(), flat.bindings()),
         Err(error) => {
             tracing::warn!("{error}; using the client certificates of {name} only");
             (env.client_certificates, env.external_secrets)
@@ -485,6 +481,19 @@ mod tests {
         base.external_secrets = vec![binding("prod")];
         base.client_certificates = vec![vault_entry("api.example.com", "prod")];
         let lines = resolve_chain(vec![base, child_of("base")], "child", &[]);
+        assert!(
+            lines[0].starts_with("deferred api.example.com "),
+            "{lines:?}"
+        );
+    }
+
+    #[test]
+    fn child_vault_certificate_resolves_against_a_parent_only_alias() {
+        let mut base = Environment::new("base");
+        base.external_secrets = vec![binding("prod")];
+        let mut child = child_of("base");
+        child.client_certificates = vec![vault_entry("api.example.com", "prod")];
+        let lines = resolve_chain(vec![base, child], "child", &[]);
         assert!(
             lines[0].starts_with("deferred api.example.com "),
             "{lines:?}"
