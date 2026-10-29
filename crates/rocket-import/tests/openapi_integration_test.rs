@@ -268,16 +268,12 @@ fn reserved_and_hostile_names_are_safe() {
     let names = dir_names(&ws.path().join("collections").join(&out.collection));
     let folders: BTreeSet<String> = names
         .into_iter()
-        .filter(|n| !n.ends_with(".yml") && n != "environments" || n == "environments-2")
+        .filter(|n| !n.ends_with(".yml") && n != "environments")
         .collect();
+    // The `environments` tag is reserved, so that request sits at the collection root.
     assert_eq!(
         folders,
-        BTreeSet::from([
-            "--".to_string(),
-            "CON-2".to_string(),
-            "a-b".to_string(),
-            "environments-2".to_string(),
-        ])
+        BTreeSet::from(["--".to_string(), "CON-2".to_string(), "a-b".to_string()])
     );
     assert_eq!(out.report.imported, 4);
 }
