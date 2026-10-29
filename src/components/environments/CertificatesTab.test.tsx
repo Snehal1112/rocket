@@ -125,6 +125,28 @@ describe('CertificatesTab', () => {
     expect(screen.getByRole('button', { name: 'Add PEM' })).toBeInTheDocument();
   });
 
+  it('lists inherited certificates read-only with their source', () => {
+    render(
+      <CertificatesTab
+        certificates={[]}
+        bindings={bindings}
+        inherited={[{ type: 'pem', domain: 'api.base.com', source: 'base' }]}
+        onChange={vi.fn()}
+        onAdd={vi.fn()}
+        onRemove={vi.fn()}
+        onMove={vi.fn()}
+        onSave={vi.fn()}
+        isDirty={false}
+        saveState='idle'
+      />,
+    );
+
+    expect(screen.getByText('base')).toBeInTheDocument();
+    expect(screen.getByLabelText('Inherited domain 1')).toHaveValue('api.base.com');
+    expect(screen.queryByLabelText('Domain for certificate 1')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /delete certificate/i })).not.toBeInTheDocument();
+  });
+
   it('shows an empty state and the add buttons when there are no certificates', () => {
     renderTab([]);
     expect(screen.getByText('No client certificates')).toBeInTheDocument();

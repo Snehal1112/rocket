@@ -296,6 +296,8 @@ describe('EnvironmentDialog inherited rows', () => {
     vi.mocked(tauriApi.getResolvedEnvironment).mockResolvedValue({
       name: 'child',
       variables,
+      externalSecrets: [],
+      clientCertificates: [],
       warnings,
     });
   }
@@ -314,6 +316,33 @@ describe('EnvironmentDialog inherited rows', () => {
     await screen.findByLabelText('Variable key 1');
     expect(await screen.findByLabelText('Inherited key 1')).toHaveValue('TOKEN');
     expect(screen.queryByLabelText('Inherited key 2')).not.toBeInTheDocument();
+  });
+
+  it('overridden_rows_are_not_listed_as_inherited', async () => {
+    vi.mocked(tauriApi.getResolvedEnvironment).mockResolvedValue({
+      name: 'child',
+      variables: [],
+      externalSecrets: [
+        { alias: 'prod', vaultName: 'v', connectionId: 'c', secretCount: 1, source: 'child' },
+        { alias: 'shared', vaultName: 'v', connectionId: 'c', secretCount: 1, source: 'base' },
+      ],
+      clientCertificates: [
+        { type: 'pem', domain: 'own.example.com', source: 'child' },
+        { type: 'pem', domain: 'base.example.com', source: 'base' },
+      ],
+      warnings: [],
+    });
+    renderDialog();
+    const user = userEvent.setup();
+    await screen.findByLabelText('Variable key 1');
+
+    await user.click(screen.getByRole('tab', { name: /external secrets/i }));
+    expect(await screen.findByLabelText('Inherited alias 1')).toHaveValue('shared');
+    expect(screen.queryByLabelText('Inherited alias 2')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('tab', { name: /certificates/i }));
+    expect(await screen.findByLabelText('Inherited domain 1')).toHaveValue('base.example.com');
+    expect(screen.queryByLabelText('Inherited domain 2')).not.toBeInTheDocument();
   });
 
   it('saving_does_not_include_inherited_rows', async () => {

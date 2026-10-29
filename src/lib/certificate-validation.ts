@@ -59,6 +59,7 @@ function vaultCertificateErrors(
   who: string,
   cert: VaultCertificate,
   bindings: ExternalSecretBinding[],
+  inheritedAliases: string[],
 ): string[] {
   const named: [string, string][] = [
     ['domain', cert.domain],
@@ -73,7 +74,10 @@ function vaultCertificateErrors(
   const errors: string[] = [];
   if (cert.binding.trim() === '') {
     errors.push(`${who}: choose an External Secrets binding.`);
-  } else if (!bindings.some((b) => b.alias === cert.binding)) {
+  } else if (
+    !bindings.some((b) => b.alias === cert.binding) &&
+    !inheritedAliases.includes(cert.binding)
+  ) {
     errors.push(
       `${who}: binding "${cert.binding}" has no External Secrets binding in this environment.`,
     );
@@ -113,10 +117,12 @@ function referenceProblem(reference: string, bindings: ExternalSecretBinding[]):
 }
 
 // Mirrors `validate_client_certificates` in rocket-environment. Errors block the save.
-// A literal passphrase is only a warning.
+// A literal passphrase is only a warning. A vault entry may also name an alias that only a
+// parent environment defines.
 export function validateClientCertificates(
   certs: ClientCertificate[],
   bindings: ExternalSecretBinding[],
+  inheritedAliases: string[] = [],
 ): CertificateIssues {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -131,7 +137,7 @@ export function validateClientCertificates(
     if (!domain) errors.push(`${who}: domain is required.`);
 
     if (cert.type === 'vault') {
-      errors.push(...vaultCertificateErrors(who, cert, bindings));
+      errors.push(...vaultCertificateErrors(who, cert, bindings, inheritedAliases));
       continue;
     }
 

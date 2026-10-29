@@ -44,6 +44,8 @@ import type {
   DotEnvStatus,
   Environment,
   ExternalSecretBinding,
+  ResolvedBinding,
+  ResolvedCertificate,
   ResolvedVariable,
   Variable,
 } from '@/lib/tauri-api';
@@ -64,6 +66,11 @@ interface EnvironmentDialogProps {
 const EMPTY_ENVS: Environment[] = [];
 
 const EMPTY_ROWS: ResolvedVariable[] = [];
+const EMPTY_BINDINGS: ResolvedBinding[] = [];
+const EMPTY_CERTS: ResolvedCertificate[] = [];
+
+// Domains match case-insensitively and ignore surrounding spaces, as the backend merge does.
+const normalizeDomain = (domain: string) => domain.trim().toLowerCase();
 // Radix Select forbids an empty item value, so "None" uses a sentinel.
 const NO_PARENT = '__none__';
 
@@ -207,6 +214,35 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
     'Failed to save changes',
   );
 
+  // Inherited rows come from the saved, flattened environment. Rows the child
+  // defines (saved or in-flight) are its own, so they are not listed here.
+  const { data: resolvedEnv } = useResolvedEnvironment(activeCollection, selectedName);
+  const inheritedRows = useMemo(() => {
+    if (!selectedEnv) return EMPTY_ROWS;
+    const own = new Set(selectedEnv.variables.map((v) => v.key));
+    return (resolvedEnv?.variables ?? EMPTY_ROWS).filter(
+      (v) => v.source !== selectedEnv.name && !own.has(v.key),
+    );
+  }, [resolvedEnv, selectedEnv]);
+  const inheritedBindings = useMemo(() => {
+    if (!selectedEnv) return EMPTY_BINDINGS;
+    const own = new Set(selectedEnv.externalSecrets.map((b) => b.alias));
+    return (resolvedEnv?.externalSecrets ?? EMPTY_BINDINGS).filter(
+      (b) => b.source !== selectedEnv.name && !own.has(b.alias),
+    );
+  }, [resolvedEnv, selectedEnv]);
+  const inheritedCertificates = useMemo(() => {
+    if (!selectedEnv) return EMPTY_CERTS;
+    const own = new Set(selectedEnv.clientCertificates.map((c) => normalizeDomain(c.domain)));
+    return (resolvedEnv?.clientCertificates ?? EMPTY_CERTS).filter(
+      (c) => c.source !== selectedEnv.name && !own.has(normalizeDomain(c.domain)),
+    );
+  }, [resolvedEnv, selectedEnv]);
+  const inheritedAliases = useMemo(
+    () => inheritedBindings.map((b) => b.alias),
+    [inheritedBindings],
+  );
+
   // All tabs share one save, so an unfinished binding or certificate blocks a Variables save too.
   // Point the user at the tab that holds the problem instead of failing with a generic toast.
   const handleSave = useCallback(() => {
@@ -221,6 +257,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
     const issues = validateClientCertificates(
       selectedEnv.clientCertificates,
       selectedEnv.externalSecrets,
+      inheritedAliases,
     );
     if (issues.errors.length > 0) {
       toast.error(issues.errors[0]);
@@ -230,7 +267,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
     // Warnings (a literal passphrase) never block the save.
     if (issues.warnings.length > 0) toast.warning(issues.warnings[0]);
     void triggerSave();
-  }, [selectedEnv, triggerSave]);
+  }, [selectedEnv, inheritedAliases, triggerSave]);
 
   // Reset dirty flag when switching environments.
   // biome-ignore lint/correctness/useExhaustiveDependencies: selectedName is the intentional trigger
@@ -322,16 +359,6 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
       ? dotEnvStatusLine(dotEnvStatus)
       : null;
 
-  // Inherited rows come from the saved, flattened environment. Rows the child
-  // defines (saved or in-flight) are its own, so they are not listed here.
-  const { data: resolvedEnv } = useResolvedEnvironment(activeCollection, selectedName);
-  const inheritedRows = useMemo(() => {
-    if (!selectedEnv) return EMPTY_ROWS;
-    const own = new Set(selectedEnv.variables.map((v) => v.key));
-    return (resolvedEnv?.variables ?? EMPTY_ROWS).filter(
-      (v) => v.source !== selectedEnv.name && !own.has(v.key),
-    );
-  }, [resolvedEnv, selectedEnv]);
   const warnings = useMemo(
     () =>
       (resolvedEnv?.warnings ?? []).filter(
@@ -667,6 +694,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                 >
                   <ExternalSecretsTab
                     bindings={selectedEnv.externalSecrets}
+                    inherited={inheritedBindings}
                     onChange={updateExternalSecret}
                     onAdd={addExternalSecret}
                     onRemove={removeExternalSecret}
@@ -682,6 +710,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
                   <CertificatesTab
                     certificates={selectedEnv.clientCertificates}
                     bindings={selectedEnv.externalSecrets}
+                    inherited={inheritedCertificates}
                     onChange={updateClientCertificate}
                     onAdd={addClientCertificate}
                     onRemove={removeClientCertificate}
