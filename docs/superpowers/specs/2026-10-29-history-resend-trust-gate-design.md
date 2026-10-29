@@ -36,6 +36,7 @@ Setting `source` on a History tab is wrong. It would turn on autosave to a reque
 - Redacting host environment values that History stores in clear text when the gate allows access. This is a separate ticket (see Follow-ups).
 - Any backend change, any `src-tauri` change, any edit to `docs/features/collection-trust.md`.
 - Changing what a History tab can edit or save.
+- A History tab switched to a GraphQL subscription, WebSocket or gRPC request. Those paths use `source` or the request's own collection and keep full access for a tab with none. A History entry is always an HTTP request, so this is a known gap, not part of this job.
 
 ## Design
 
@@ -52,7 +53,7 @@ Flow: `openEntry(entry) -> tab.historyCollection -> process env scope -> getProc
 
 ### 2. Process env scope
 
-In `src/lib/execute-request.ts`:
+`CLOSED_PROCESS_ENV` and `ProcessEnvScope` are defined in `src/lib/process-env-gate.ts` and re-exported from `src/lib/execute-request.ts`, because `execute-request.ts` imports the gate. The rest is in `execute-request.ts`:
 
 ```ts
 export const CLOSED_PROCESS_ENV = Symbol('closed-process-env');
