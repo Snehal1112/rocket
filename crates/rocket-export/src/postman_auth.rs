@@ -212,7 +212,7 @@ mod tests {
     use rocket_shared::oauth2::{
         OAuth2ClientCredentials, OAuth2PKCE, OAuth2ResourceOwner, OAuth2TokenConfig,
     };
-    use rocket_shared::types::{Header, OAuth1Auth};
+    use rocket_shared::types::Header;
 
     fn value(a: &Auth) -> Value {
         match postman_auth(a) {
@@ -388,7 +388,7 @@ mod tests {
         assert_eq!(postman_auth(&Auth::Inherit), PostmanAuth::Omit);
         assert_eq!(postman_auth(&Auth::None), PostmanAuth::Value(json!({"type": "noauth"})));
         assert_eq!(
-            postman_auth(&Auth::OAuth1(Box::new(OAuth1Auth::default()))),
+            postman_auth(&Auth::OAuth1(Box::default())),
             PostmanAuth::Skipped("oauth1")
         );
         assert_eq!(
