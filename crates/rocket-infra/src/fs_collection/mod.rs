@@ -303,6 +303,33 @@ impl CollectionRepository for FsCollectionRepo {
         requests::create_request_exclusive(self, collection, path, request)
     }
 
+    fn create_graphql_request_exclusive(
+        &self,
+        collection: &str,
+        path: &str,
+        request: &GraphQlRequest,
+    ) -> DomainResult<String> {
+        requests::create_graphql_request_exclusive(self, collection, path, request)
+    }
+
+    fn create_grpc_request_exclusive(
+        &self,
+        collection: &str,
+        path: &str,
+        request: &GrpcRequest,
+    ) -> DomainResult<String> {
+        requests::create_grpc_request_exclusive(self, collection, path, request)
+    }
+
+    fn create_websocket_request_exclusive(
+        &self,
+        collection: &str,
+        path: &str,
+        request: &WebSocketRequest,
+    ) -> DomainResult<String> {
+        requests::create_websocket_request_exclusive(self, collection, path, request)
+    }
+
     fn move_item_no_replace(
         &self,
         src_collection: &str,

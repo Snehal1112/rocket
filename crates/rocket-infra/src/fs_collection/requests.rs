@@ -192,6 +192,87 @@ pub(super) fn create_request_exclusive(
         .to_string())
 }
 
+/// Writes `bytes` to a hidden temp file next to `file_path`, then gives it the
+/// final name with `link`, which must fail if that name exists. A reader never
+/// sees a partial file. A link error other than `AlreadyExists` (a filesystem
+/// without hard links) falls back to `fallback_create_new_with`.
+pub(super) fn write_new_file_exclusive(
+    file_path: &Path,
+    bytes: &[u8],
+    label: &str,
+    link: impl Fn(&Path, &Path) -> std::io::Result<()>,
+) -> DomainResult<()> {
+    use std::io::Write;
+
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos();
+    let tmp_name = format!(".new-request.tmp.{}_{nanos:08x}", std::process::id());
+    let tmp_path = file_path.with_file_name(tmp_name);
+    let written = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&tmp_path)
+        .and_then(|mut file| {
+            file.write_all(bytes)?;
+            file.sync_all()
+        });
+    if let Err(e) = written {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(DomainError::Io(e.to_string()));
+    }
+    let linked = link(&tmp_path, file_path);
+    let _ = fs::remove_file(&tmp_path);
+    match linked {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            Err(DomainError::AlreadyExists(label.to_string()))
+        }
+        Err(_) => fallback_create_new(file_path, bytes, label),
+    }
+}
+
+/// Creates `file_path` with `create_new` and runs `write` on it. A clash is
+/// `AlreadyExists` and deletes nothing. A failed write removes the file this
+/// call created.
+pub(super) fn fallback_create_new_with(
+    file_path: &Path,
+    label: &str,
+    write: impl FnOnce(&mut fs::File) -> std::io::Result<()>,
+) -> DomainResult<()> {
+    let mut file = match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(file_path)
+    {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            return Err(DomainError::AlreadyExists(label.to_string()));
+        }
+        Err(e) => return Err(DomainError::Io(e.to_string())),
+    };
+    if let Err(e) = write(&mut file) {
+        drop(file);
+        let _ = fs::remove_file(file_path);
+        return Err(DomainError::Io(e.to_string()));
+    }
+    Ok(())
+}
+
+pub(super) fn fallback_create_new(
+    file_path: &Path,
+    bytes: &[u8],
+    label: &str,
+) -> DomainResult<()> {
+    use std::io::Write;
+
+    fallback_create_new_with(file_path, label, |file| {
+        file.write_all(bytes)?;
+        file.sync_all()
+    })
+}
+
 pub(super) fn rename_request(
     repo: &FsCollectionRepo,
     collection: &str,
@@ -255,7 +336,79 @@ pub(super) fn get_graphql_request(
     Ok(request)
 }
 
-#[tracing::instrument(name = "collection_save_graphql_request", skip(repo, request), fields(collection_name = %collection, request_path = %path))]
+/// Shared body of the GraphQL, gRPC and WebSocket exclusive creates. `to_yaml`
+/// serializes the request. The file is new, so no variables are preserved.
+fn create_typed_request_exclusive(
+    repo: &FsCollectionRepo,
+    collection: &str,
+    path: &str,
+    uid: &str,
+    kind: &str,
+    to_yaml: impl FnOnce() -> Result<String, serde_yaml::Error>,
+) -> DomainResult<String> {
+    Collection::validate_name(collection)?;
+    let mutex = repo.collection_mutex(collection);
+    let _guard = mutex.lock().unwrap_or_else(|e| e.into_inner());
+    if uid.is_empty() {
+        return Err(DomainError::Internal(format!(
+            "create_{kind}_request_exclusive: empty uid on request for '{path}' in collection '{collection}'"
+        )));
+    }
+    let collection_dir = repo.collection_path(collection);
+    let normalized = request_filename_for(path);
+    let file_path = repo.validate_path(&collection_dir, Path::new(&normalized))?;
+    let yaml = to_yaml()
+        .map_err(|e| DomainError::Internal(format!("Failed to serialize {kind} request YAML: {e}")))?;
+    write_new_file_exclusive(
+        &file_path,
+        yaml.as_bytes(),
+        &format!("{collection}/{path}"),
+        |from, to| std::fs::hard_link(from, to),
+    )?;
+    Ok(file_path
+        .strip_prefix(&collection_dir)
+        .unwrap_or(&file_path)
+        .to_string_lossy()
+        .to_string())
+}
+
+/// Saves a brand-new GraphQL request without ever replacing a file.
+pub(super) fn create_graphql_request_exclusive(
+    repo: &FsCollectionRepo,
+    collection: &str,
+    path: &str,
+    request: &GraphQlRequest,
+) -> DomainResult<String> {
+    create_typed_request_exclusive(repo, collection, path, &request.uid, "graphql", || {
+        serde_yaml::to_string(&graphql_to_oc(request))
+    })
+}
+
+/// Saves a brand-new gRPC request without ever replacing a file.
+pub(super) fn create_grpc_request_exclusive(
+    repo: &FsCollectionRepo,
+    collection: &str,
+    path: &str,
+    request: &GrpcRequest,
+) -> DomainResult<String> {
+    create_typed_request_exclusive(repo, collection, path, &request.uid, "grpc", || {
+        serde_yaml::to_string(&grpc_to_oc(request))
+    })
+}
+
+/// Saves a brand-new WebSocket request without ever replacing a file.
+pub(super) fn create_websocket_request_exclusive(
+    repo: &FsCollectionRepo,
+    collection: &str,
+    path: &str,
+    request: &WebSocketRequest,
+) -> DomainResult<String> {
+    create_typed_request_exclusive(repo, collection, path, &request.uid, "websocket", || {
+        serde_yaml::to_string(&websocket_to_oc_websocket(request))
+    })
+}
+
+#[tracing::instrument(name = "collection_save_graphql_request",skip(repo, request), fields(collection_name = %collection, request_path = %path))]
 pub(super) fn save_graphql_request(
     repo: &FsCollectionRepo,
     collection: &str,

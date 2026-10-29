@@ -3285,6 +3285,176 @@ fn create_request_exclusive_never_replaces_a_file() {
 }
 
 #[test]
+fn create_graphql_request_exclusive_never_replaces_a_file() {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create collection");
+    let first = GraphQlRequest::new("Orders", "https://e.example/graphql");
+    repo.create_graphql_request_exclusive("col", "orders.yml", &first)
+        .expect("first create");
+    let file = dir.path().join("col/orders.yml");
+    let before = fs::read_to_string(&file).expect("read");
+    let second = GraphQlRequest::new("Other", "https://e.example/other");
+    let err = repo
+        .create_graphql_request_exclusive("col", "orders.yml", &second)
+        .expect_err("second create");
+    assert!(matches!(err, DomainError::AlreadyExists(_)), "{err}");
+    assert_eq!(before, fs::read_to_string(&file).expect("read"));
+}
+
+#[test]
+fn create_grpc_request_exclusive_never_replaces_a_file() {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create collection");
+    let first = GrpcRequest::new("Say Hello", "localhost:50051");
+    repo.create_grpc_request_exclusive("col", "hello.yml", &first)
+        .expect("first create");
+    let file = dir.path().join("col/hello.yml");
+    let before = fs::read_to_string(&file).expect("read");
+    let second = GrpcRequest::new("Other", "localhost:1");
+    let err = repo
+        .create_grpc_request_exclusive("col", "hello.yml", &second)
+        .expect_err("second create");
+    assert!(matches!(err, DomainError::AlreadyExists(_)), "{err}");
+    assert_eq!(before, fs::read_to_string(&file).expect("read"));
+}
+
+#[test]
+fn create_websocket_request_exclusive_never_replaces_a_file() {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create collection");
+    let first = WebSocketRequest::new("Chat", "ws://x");
+    repo.create_websocket_request_exclusive("col", "chat.yml", &first)
+        .expect("first create");
+    let file = dir.path().join("col/chat.yml");
+    let before = fs::read_to_string(&file).expect("read");
+    let second = WebSocketRequest::new("Other", "ws://y");
+    let err = repo
+        .create_websocket_request_exclusive("col", "chat.yml", &second)
+        .expect_err("second create");
+    assert!(matches!(err, DomainError::AlreadyExists(_)), "{err}");
+    assert_eq!(before, fs::read_to_string(&file).expect("read"));
+}
+
+#[test]
+fn create_typed_requests_exclusive_reject_an_empty_uid() {
+    let (dir, repo) = setup();
+    repo.create("col").expect("create collection");
+    let mut gql = GraphQlRequest::new("A", "https://e.example/graphql");
+    gql.uid = String::new();
+    let mut grpc = GrpcRequest::new("B", "localhost:1");
+    grpc.uid = String::new();
+    let mut ws = WebSocketRequest::new("C", "ws://x");
+    ws.uid = String::new();
+    let errs = [
+        repo.create_graphql_request_exclusive("col", "a.yml", &gql),
+        repo.create_grpc_request_exclusive("col", "b.yml", &grpc),
+        repo.create_websocket_request_exclusive("col", "c.yml", &ws),
+    ];
+    for err in errs {
+        assert!(
+            matches!(err.expect_err("empty uid"), DomainError::Internal(_)),
+            "empty uid must be Internal"
+        );
+    }
+    for name in ["a.yml", "b.yml", "c.yml"] {
+        assert!(!dir.path().join("col").join(name).exists());
+    }
+}
+
+#[test]
+fn create_typed_requests_exclusive_write_readable_files() {
+    let (_dir, repo) = setup();
+    repo.create("col").expect("create collection");
+    let gql = GraphQlRequest::new("Orders", "https://e.example/graphql");
+    let grpc = GrpcRequest::new("Say Hello", "localhost:50051");
+    let ws = WebSocketRequest::new("Chat", "ws://x");
+    assert_eq!(
+        repo.create_graphql_request_exclusive("col", "a.yml", &gql)
+            .expect("gql"),
+        "a.yml"
+    );
+    repo.create_grpc_request_exclusive("col", "b.yml", &grpc)
+        .expect("grpc");
+    repo.create_websocket_request_exclusive("col", "c.yml", &ws)
+        .expect("ws");
+    let got = repo.get_graphql_request("col", "a.yml").expect("get gql");
+    assert_eq!((got.name.as_str(), got.url.as_str()), ("Orders", "https://e.example/graphql"));
+    let got = repo.get_grpc_request("col", "b.yml").expect("get grpc");
+    assert_eq!((got.name.as_str(), got.url.as_str()), ("Say Hello", "localhost:50051"));
+    let got = repo.get_websocket_request("col", "c.yml").expect("get ws");
+    assert_eq!((got.name.as_str(), got.url.as_str()), ("Chat", "ws://x"));
+}
+
+fn leftover_temp_files(dir: &std::path::Path) -> Vec<String> {
+    fs::read_dir(dir)
+        .expect("read dir")
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .filter(|n| n.starts_with(".new-request.tmp."))
+        .collect()
+}
+
+#[test]
+fn write_new_file_exclusive_links_a_new_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let file = dir.path().join("a.yml");
+    requests::write_new_file_exclusive(&file, b"new", "col/a.yml", |from, to| {
+        fs::hard_link(from, to)
+    })
+    .expect("create");
+    assert_eq!(fs::read_to_string(&file).expect("file"), "new");
+    assert!(leftover_temp_files(dir.path()).is_empty());
+}
+
+#[test]
+fn write_new_file_exclusive_never_replaces_a_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let file = dir.path().join("a.yml");
+    fs::write(&file, "old").expect("seed");
+    let err = requests::write_new_file_exclusive(&file, b"new", "col/a.yml", |from, to| {
+        fs::hard_link(from, to)
+    })
+    .expect_err("exists");
+    assert!(matches!(err, DomainError::AlreadyExists(ref l) if l == "col/a.yml"));
+    assert_eq!(fs::read_to_string(&file).expect("file"), "old");
+    assert!(leftover_temp_files(dir.path()).is_empty());
+}
+
+#[test]
+fn exclusive_create_falls_back_when_hard_link_is_unsupported() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let file = dir.path().join("a.yml");
+    requests::write_new_file_exclusive(&file, b"new", "col/a.yml", |_, _| {
+        Err(std::io::ErrorKind::Unsupported.into())
+    })
+    .expect("fallback create");
+    assert_eq!(fs::read_to_string(&file).expect("file"), "new");
+    assert!(leftover_temp_files(dir.path()).is_empty());
+}
+
+#[test]
+fn fallback_create_new_maps_a_clash_to_already_exists_and_keeps_the_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let file = dir.path().join("a.yml");
+    fs::write(&file, "old").expect("seed");
+    let err = requests::fallback_create_new(&file, b"new", "col/a.yml").expect_err("exists");
+    assert!(matches!(err, DomainError::AlreadyExists(_)));
+    assert_eq!(fs::read_to_string(&file).expect("file"), "old");
+}
+
+#[test]
+fn fallback_create_new_removes_the_file_when_the_write_fails() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let file = dir.path().join("a.yml");
+    let err = requests::fallback_create_new_with(&file, "col/a.yml", |_| {
+        Err(std::io::ErrorKind::Other.into())
+    })
+    .expect_err("write fails");
+    assert!(matches!(err, DomainError::Io(_)));
+    assert!(!file.exists());
+}
+
+#[test]
 fn move_item_no_replace_keeps_the_destination() {
     let (dir, repo) = setup();
     repo.create("col").expect("create");

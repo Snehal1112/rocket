@@ -209,6 +209,36 @@ impl CollectionRepository for SharedPathCollectionRepo {
             .create_request_exclusive(collection, path, request)
     }
 
+    fn create_graphql_request_exclusive(
+        &self,
+        collection: &str,
+        path: &str,
+        request: &GraphQlRequest,
+    ) -> DomainResult<String> {
+        self.repo()
+            .create_graphql_request_exclusive(collection, path, request)
+    }
+
+    fn create_grpc_request_exclusive(
+        &self,
+        collection: &str,
+        path: &str,
+        request: &GrpcRequest,
+    ) -> DomainResult<String> {
+        self.repo()
+            .create_grpc_request_exclusive(collection, path, request)
+    }
+
+    fn create_websocket_request_exclusive(
+        &self,
+        collection: &str,
+        path: &str,
+        request: &WebSocketRequest,
+    ) -> DomainResult<String> {
+        self.repo()
+            .create_websocket_request_exclusive(collection, path, request)
+    }
+
     fn move_item_no_replace(
         &self,
         src_collection: &str,
@@ -422,6 +452,21 @@ mod tests {
             expected.exists(),
             "collection directory should be at {expected:?}"
         );
+    }
+
+    #[test]
+    fn shared_path_repo_forwards_the_exclusive_creates() {
+        let (_dir, repo) = setup();
+        repo.create("col").expect("create collection");
+        let gql = GraphQlRequest::new("Orders", "https://e.example/graphql");
+        repo.create_graphql_request_exclusive("col", "a.yml", &gql)
+            .expect("graphql");
+        let grpc = GrpcRequest::new("Hello", "localhost:1");
+        repo.create_grpc_request_exclusive("col", "b.yml", &grpc)
+            .expect("grpc");
+        let ws = WebSocketRequest::new("Chat", "ws://x");
+        repo.create_websocket_request_exclusive("col", "c.yml", &ws)
+            .expect("ws");
     }
 
     // --- Runtime path switching ---
