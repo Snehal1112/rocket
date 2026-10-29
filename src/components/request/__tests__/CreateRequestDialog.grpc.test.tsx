@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { toast } from 'sonner';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CreateRequestDialog } from '@/components/request/CreateRequestDialog';
 import { createDefaultLeaf, findTabInTree } from '@/lib/pane-utils';
@@ -12,8 +13,11 @@ vi.mock('@/lib/tauri-api', async () => {
     ...actual,
     saveRequest: vi.fn(),
     saveGrpcRequest: vi.fn(),
+    createGrpcRequest: vi.fn(),
   };
 });
+
+vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
 // Radix Select calls pointer-capture and scrollIntoView APIs that jsdom lacks.
 beforeAll(() => {
@@ -34,6 +38,8 @@ describe('CreateRequestDialog grpc', () => {
     usePaneStore.setState({ root: leaf, activeGroupId: leaf.groupId });
     vi.mocked(tauriApi.saveRequest).mockReset();
     vi.mocked(tauriApi.saveGrpcRequest).mockReset();
+    vi.mocked(tauriApi.createGrpcRequest).mockReset();
+    vi.mocked(toast.error).mockReset();
   });
 
   it('offers gRPC as a selectable type', async () => {
@@ -43,8 +49,8 @@ describe('CreateRequestDialog grpc', () => {
     expect(option.getAttribute('aria-disabled')).not.toBe('true');
   });
 
-  it('saves a real gRPC item, not an HTTP request tagged grpc', async () => {
-    vi.mocked(tauriApi.saveGrpcRequest).mockImplementation(async (_c, _p, request) => ({
+  it('creates through the exclusive wrapper, not the save wrapper', async () => {
+    vi.mocked(tauriApi.createGrpcRequest).mockImplementation(async (_c, _p, request) => ({
       ...request,
       fileName: 'say-hello.yml',
     }));
@@ -55,9 +61,10 @@ describe('CreateRequestDialog grpc', () => {
     await userEvent.type(screen.getByLabelText('URL'), 'localhost:50051');
     await userEvent.click(screen.getByRole('button', { name: 'Create' }));
 
-    await waitFor(() => expect(tauriApi.saveGrpcRequest).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(tauriApi.createGrpcRequest).toHaveBeenCalledTimes(1));
+    expect(tauriApi.saveGrpcRequest).not.toHaveBeenCalled();
     expect(tauriApi.saveRequest).not.toHaveBeenCalled();
-    const [collection, , payload] = vi.mocked(tauriApi.saveGrpcRequest).mock.calls[0];
+    const [collection, , payload] = vi.mocked(tauriApi.createGrpcRequest).mock.calls[0];
     expect(collection).toBe('api');
     expect(payload.url).toBe('localhost:50051');
     expect(payload.methodType).toBe('unary');
@@ -66,6 +73,26 @@ describe('CreateRequestDialog grpc', () => {
     const tab = findTabInTree(usePaneStore.getState().root, payload.uid)?.tab;
     expect(tab && 'request' in tab && tab.request.requestType).toBe('grpc');
     expect(tab?.source?.path).toBe('say-hello.yml');
+  });
+
+  it('shows the already exists toast and opens no tab', async () => {
+    vi.mocked(tauriApi.createGrpcRequest).mockRejectedValue(
+      new Error('Already exists: col/foo.yml'),
+    );
+    const initialRoot = usePaneStore.getState().root;
+    render(<CreateRequestDialog open collectionName='api' onClose={vi.fn()} />);
+
+    await chooseGrpc();
+    await userEvent.type(screen.getByLabelText('Request Name'), 'foo');
+    await userEvent.type(screen.getByLabelText('URL'), 'localhost:50051');
+    await userEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        'A request named "foo" already exists here. Pick another name.',
+      ),
+    );
+    expect(usePaneStore.getState().root).toEqual(initialRoot);
   });
 
   it('does not show the HTTP method select for gRPC', async () => {

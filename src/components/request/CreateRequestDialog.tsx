@@ -27,7 +27,7 @@ import {
   mapGraphQlToState,
   mapGrpcToState,
 } from '@/lib/pane-utils';
-import { createRequest, saveGraphQlRequest, saveGrpcRequest } from '@/lib/tauri-api';
+import { createGraphQlRequest, createGrpcRequest, createRequest } from '@/lib/tauri-api';
 import { createWebSocketItem } from '@/lib/websocket-create';
 import { usePaneStore } from '@/stores/pane-store';
 import type { HttpMethod, RequestTab } from '@/types/pane-types';
@@ -89,7 +89,7 @@ export function CreateRequestDialog({
       const uid = crypto.randomUUID();
       const filePath = folderPath ? `${folderPath}/${fsName}` : fsName;
       if (requestType === 'graphql') {
-        const saved = await saveGraphQlRequest(collectionName, filePath, {
+        const saved = await createGraphQlRequest(collectionName, filePath, {
           uid,
           name: trimmedName,
           method: 'POST',
@@ -114,7 +114,7 @@ export function CreateRequestDialog({
         return;
       }
       if (requestType === 'grpc') {
-        const saved = await saveGrpcRequest(collectionName, filePath, {
+        const saved = await createGrpcRequest(collectionName, filePath, {
           uid,
           name: trimmedName,
           url,
