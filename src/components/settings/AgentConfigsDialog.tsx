@@ -307,7 +307,7 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
         onOpenChange(next);
       }}
     >
-      <DialogContent className='flex max-h-[85vh] flex-col'>
+      <DialogContent className='flex max-h-[85vh] max-w-3xl flex-col'>
         <DialogHeader>
           <DialogTitle>AI Agents</DialogTitle>
           <DialogDescription>
