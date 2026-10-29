@@ -17,7 +17,7 @@ It is a large change. It touches the backend event bus, the Tauri bridge and mos
 
 ## What exists today (verified 2026-10-11 at main `9666d1a1`)
 
-- Backend bus: `EventPublisher` trait and a `DomainEvent` enum of about 60 variants (`crates/rocket-shared/src/events.rs`). `TauriEventBus` (`src-tauri/src/tauri_event_bus.rs`) maps each variant to one channel name in a single `match`. 39 channels are emitted. `let _ = app.emit` discards emit errors.
+- Backend bus: `EventPublisher` trait and a `DomainEvent` enum of 81 variants (`crates/rocket-shared/src/events.rs`). `TauriEventBus` (`src-tauri/src/tauri_event_bus.rs`) maps each variant to one channel name in a single `match`. 57 channels are emitted (56 from the event bus plus `backend-log`). Counted 2026-10-29. `let _ = app.emit` discards emit errors.
 - Frontend: only 8 channels are listened to from components and `App.tsx` (the `workspace-*` set, `collection-changed`, `git-changed`, `environment-changed`, `collection-trust-changed`). The Flow, assistant, WebSocket and gRPC streams have their own listeners in their own modules.
 - There is no central event-to-cache layer. About 57 `invalidateQueries`, `removeQueries` or `resetQueries` calls are spread over the code, 22 mutation `onSuccess` handlers, 9 synchronous `getQueryData` reads.
 - No backend-internal subscribers. Services cannot react to each other. The audit path uses a separate trait (`SecurityAuditPublisher`) with direct calls.
