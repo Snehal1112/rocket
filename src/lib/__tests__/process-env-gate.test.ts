@@ -1,7 +1,7 @@
 import { QueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { warnIfProcessEnvWithheld } from '@/lib/process-env-gate';
+import { CLOSED_PROCESS_ENV, warnIfProcessEnvWithheld } from '@/lib/process-env-gate';
 import { setQueryClient } from '@/lib/query-client';
 import * as tauriApi from '@/lib/tauri-api';
 import { useConsoleStore } from '@/stores/console-store';
@@ -56,5 +56,31 @@ describe('warnIfProcessEnvWithheld', () => {
     vi.mocked(tauriApi.getCollectionTrust).mockRejectedValue(new Error('boom'));
     await warnIfProcessEnvWithheld('c', ['{{process.env.HOME}}']);
     expect(toast.warning).not.toHaveBeenCalled();
+  });
+
+  const CLOSED_MESSAGE =
+    'Host environment variables are not available for a request reopened from History without a collection, so {{process.env.NAME}} was sent unresolved.';
+
+  it('warns for a closed scope when the request uses process.env', async () => {
+    await warnIfProcessEnvWithheld(
+      CLOSED_PROCESS_ENV,
+      [{ url: 'https://e.example/{{process.env.HOME}}' }],
+      'Get',
+    );
+    expect(toast.warning).toHaveBeenCalledTimes(1);
+    const entries = useConsoleStore.getState().entries;
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ kind: 'script', level: 'warn', requestName: 'Get' });
+    expect(entries[0]).toMatchObject({ message: CLOSED_MESSAGE });
+    expect(vi.mocked(toast.warning).mock.calls[0]?.[0]).toBe(CLOSED_MESSAGE);
+    const options = vi.mocked(toast.warning).mock.calls[0]?.[1] as { action?: unknown } | undefined;
+    expect(options?.action).toBeUndefined();
+    expect(tauriApi.getCollectionTrust).not.toHaveBeenCalled();
+  });
+
+  it('stays silent for a closed scope without the placeholder', async () => {
+    await warnIfProcessEnvWithheld(CLOSED_PROCESS_ENV, [{ url: 'https://e.example/' }], 'Get');
+    expect(toast.warning).not.toHaveBeenCalled();
+    expect(useConsoleStore.getState().entries).toHaveLength(0);
   });
 });

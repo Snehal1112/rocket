@@ -5,7 +5,11 @@ import { parseGraphQlResponse } from '@/lib/graphql-response';
 import { resolveInheritedFolderAuth } from '@/lib/inherited-auth';
 import { buildGetTokenRequest, buildRefreshRequest } from '@/lib/oauth2-requests';
 import { findTabInTree } from '@/lib/pane-utils';
-import { warnIfProcessEnvWithheld } from '@/lib/process-env-gate';
+import {
+  CLOSED_PROCESS_ENV,
+  type ProcessEnvScope,
+  warnIfProcessEnvWithheld,
+} from '@/lib/process-env-gate';
 import { environmentKeys } from '@/lib/queries/environment-queries';
 import { getQueryClient } from '@/lib/query-client';
 import type {
@@ -49,6 +53,7 @@ import type {
   RequestSettings,
   RequestState,
   ResponseState,
+  Tab,
 } from '@/types/pane-types';
 
 // Reads an environment flattened by the backend (its `extends` chain applied). A cycle
@@ -96,20 +101,35 @@ export async function getGlobalVariables(): Promise<Record<string, string>> {
 
 const NO_PROCESS_ENV: ProcessEnv = { vars: {}, dotEnvKeys: [] };
 
+export type { ProcessEnvScope } from '@/lib/process-env-gate';
+export { CLOSED_PROCESS_ENV } from '@/lib/process-env-gate';
+
+// The process env scope of a tab. A saved request uses its collection, a History tab its
+// entry's collection or none at all, and a scratch tab keeps full access. A History tab
+// that is gone mid-send (closed or parked) is treated as closed, never as full access.
+export function processEnvScopeOf(tab: Tab | undefined, tabId?: string): ProcessEnvScope {
+  if (!tab) return tabId?.startsWith('history-') ? CLOSED_PROCESS_ENV : undefined;
+  if (tab.source) return tab.source.collection;
+  if (tab.tabType === 'history') return tab.historyCollection ?? CLOSED_PROCESS_ENV;
+  return undefined;
+}
+
 // Fetches the process env of a collection. The backend returns an empty map for a collection
 // that is not allowed host environment access, and reads `.env` files of the active
 // environments only when it is. A failed read resolves to nothing, so a send never blocks
 // and nothing leaks.
-async function getProcessEnvVars(collection?: string | null): Promise<ProcessEnv> {
-  const scope = collection ?? null;
+// A closed scope has no host environment, so it returns nothing without a backend call.
+async function getProcessEnvVars(scope: ProcessEnvScope): Promise<ProcessEnv> {
+  if (scope === CLOSED_PROCESS_ENV) return NO_PROCESS_ENV;
+  const collection = scope ?? null;
   const { activeEnvId, activeCollection } = useEnvStore.getState();
-  const environment = scope && scope === activeCollection ? activeEnvId : null;
+  const environment = collection && collection === activeCollection ? activeEnvId : null;
   const globalName =
     getQueryClient().getQueryData<string | null>(environmentKeys.globalName) ?? null;
   try {
     return await getQueryClient().fetchQuery({
-      queryKey: environmentKeys.process(scope, environment, globalName),
-      queryFn: () => fetchProcessEnvVars(scope, environment, globalName),
+      queryKey: environmentKeys.process(collection, environment, globalName),
+      queryFn: () => fetchProcessEnvVars(collection, environment, globalName),
       // Always ask: a trust change or a pull may have withdrawn the access since the last send.
       staleTime: 0,
     });
@@ -313,10 +333,11 @@ export async function resolveRequestFieldsForPath(
   requestPath: string | undefined,
   request: RequestState,
   forSend = false,
+  processEnvScope: ProcessEnvScope = collection,
 ): Promise<ResolvedRequestFields> {
   const envVars = await getActiveVariables();
   const globalVars = await getGlobalVariables();
-  const processEnv = await getProcessEnvVars(collection);
+  const processEnv = await getProcessEnvVars(processEnvScope);
   const processEnvVars = processEnv.vars;
 
   let collectionVars: CollectionVariable[] = [];
@@ -486,6 +507,7 @@ export async function resolveRequestFields(
     found?.tab.source?.path,
     request,
     forSend,
+    processEnvScopeOf(found?.tab, tabId),
   );
 }
 
@@ -653,6 +675,7 @@ async function maybeAutoRefreshOrFetchToken(
 export async function buildOAuth2VarContext(
   collection: string | undefined,
   requestPath?: string,
+  processEnvScope: ProcessEnvScope = collection,
 ): Promise<Record<string, string>> {
   let collectionVars: CollectionVariable[] = [];
   if (collection) {
@@ -678,7 +701,7 @@ export async function buildOAuth2VarContext(
     }
   }
   return buildVariableContext({
-    processEnvVars: (await getProcessEnvVars(collection)).vars,
+    processEnvVars: (await getProcessEnvVars(processEnvScope)).vars,
     globalVars: await getGlobalVariables(),
     envVars: await getActiveVariables(collection),
     collectionVars,
@@ -699,9 +722,11 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
   const preRequestPath = found?.tab.source?.path;
   const preEnvName = useEnvStore.getState().activeEnvId ?? undefined;
 
-  await warnIfProcessEnvWithheld(preCollection, [request], found?.tab.title);
+  const processEnvScope = processEnvScopeOf(found?.tab, tabId);
 
-  const preVarCtx = await buildOAuth2VarContext(preCollection, preRequestPath);
+  await warnIfProcessEnvWithheld(processEnvScope, [request], found?.tab.title);
+
+  const preVarCtx = await buildOAuth2VarContext(preCollection, preRequestPath, processEnvScope);
 
   const effectiveRequest = await maybeAutoRefreshOrFetchToken(
     tabId,
