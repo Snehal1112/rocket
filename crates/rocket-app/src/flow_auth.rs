@@ -83,6 +83,8 @@ pub(crate) struct FlowCredentials {
     wire_values: Vec<(String, String)>,
     /// Ids of the OAuth2 Auth nodes, whose Bearer token was fetched or supplied.
     fetched: HashSet<String>,
+    /// Ids of the OAuth2 Auth nodes whose token this run requested from the endpoint.
+    requested: HashSet<String>,
 }
 
 impl std::fmt::Debug for FlowCredentials {
@@ -104,6 +106,12 @@ impl FlowCredentials {
     /// not text the flow holds.
     pub(crate) fn is_fetched_token(&self, node_id: &str) -> bool {
         self.fetched.contains(node_id)
+    }
+
+    /// Whether this run requested the token of `node_id` from the endpoint, so a UI-supplied
+    /// token is not one.
+    pub(crate) fn token_was_requested(&self, node_id: &str) -> bool {
+        self.requested.contains(node_id)
     }
 
     /// Replaces `auth` with the auto-apply credential when `auth` is `inherit`
@@ -249,6 +257,7 @@ pub(crate) async fn resolve_flow_credentials(
                 {
                     Some(token) => token.to_string(),
                     None if is_non_interactive(oauth) => {
+                        creds.requested.insert(node.id.clone());
                         tokio::time::timeout(fetch_timeout, fetcher.fetch_token(oauth, ctx))
                             .await
                             .map_err(|_| {
@@ -415,6 +424,28 @@ pub(crate) fn build_get_token_request(
     }
 }
 
+/// Whether any field `build_get_token_request` resolves holds a `{{process.env.`
+/// placeholder. The request is built with no variables, so every placeholder
+/// stays as written.
+pub(crate) fn uses_process_env(flow: &OAuth2Flow) -> bool {
+    let Ok(r) = build_get_token_request(flow, &FetchContext::default()) else {
+        return false;
+    };
+    let has = crate::process_env::names_process_env;
+    let has_opt = |s: &Option<String>| s.as_deref().is_some_and(has);
+    let has_params = |list: &Option<Vec<AdditionalParam>>| {
+        list.iter().flatten().any(|p| has(&p.key) || has(&p.value))
+    };
+    has_opt(&r.token_url)
+        || has(&r.client_id)
+        || has_opt(&r.client_secret)
+        || has_opt(&r.scope)
+        || has_opt(&r.username)
+        || has_opt(&r.password)
+        || has_params(&r.token_params)
+        || has_params(&r.refresh_params)
+}
+
 /// Picks the access token or, when the flow's token config asks for it, the ID token.
 fn select_token(flow: &OAuth2Flow, token: OAuthToken) -> DomainResult<String> {
     let token_config: Option<&OAuth2TokenConfig> = match flow {
@@ -446,7 +477,8 @@ pub(crate) mod test_support {
     use rocket_shared::error::{DomainError, DomainResult};
     use rocket_shared::oauth2::{OAuth2ClientCredentials, OAuth2Flow};
 
-    use super::{FetchContext, FlowTokenFetcher};
+    use super::{build_get_token_request, FetchContext, FlowTokenFetcher};
+    use crate::oauth2_service::OAuth2GetTokenRequest;
 
     pub(crate) fn client_credentials() -> OAuth2Flow {
         OAuth2Flow::ClientCredentials {
@@ -517,6 +549,49 @@ pub(crate) mod test_support {
         ) -> DomainResult<String> {
             *self.calls.lock().expect("lock calls") += 1;
             self.result.clone().map_err(DomainError::Http)
+        }
+    }
+
+    /// A fetcher that records the get-token request it would send and returns a fixed result.
+    pub(crate) struct CapturingFetcher {
+        result: Result<String, String>,
+        seen: Mutex<Vec<OAuth2GetTokenRequest>>,
+    }
+
+    impl CapturingFetcher {
+        pub(crate) fn ok(token: &str) -> Arc<Self> {
+            Arc::new(Self {
+                result: Ok(token.to_string()),
+                seen: Mutex::new(Vec::new()),
+            })
+        }
+        pub(crate) fn err(message: &str) -> Arc<Self> {
+            Arc::new(Self {
+                result: Err(message.to_string()),
+                seen: Mutex::new(Vec::new()),
+            })
+        }
+        pub(crate) fn seen(&self) -> Vec<OAuth2GetTokenRequest> {
+            self.seen.lock().expect("lock seen").clone()
+        }
+    }
+
+    #[async_trait]
+    impl FlowTokenFetcher for CapturingFetcher {
+        async fn fetch_token(&self, flow: &OAuth2Flow, ctx: &FetchContext) -> DomainResult<String> {
+            let request = build_get_token_request(flow, ctx)?;
+            self.seen.lock().expect("lock seen").push(request);
+            self.result.clone().map_err(DomainError::Http)
+        }
+    }
+
+    /// Hands one `Arc<CapturingFetcher>` to a service expecting a `Box<dyn FlowTokenFetcher>`.
+    pub(crate) struct SharedCapturingFetcher(pub(crate) Arc<CapturingFetcher>);
+
+    #[async_trait]
+    impl FlowTokenFetcher for SharedCapturingFetcher {
+        async fn fetch_token(&self, flow: &OAuth2Flow, ctx: &FetchContext) -> DomainResult<String> {
+            self.0.fetch_token(flow, ctx).await
         }
     }
 
@@ -1303,6 +1378,39 @@ mod tests {
                 "got: {err}"
             );
         }
+    }
+
+    #[test]
+    fn uses_process_env_finds_secret_and_params() {
+        let mut flow = client_credentials();
+        assert!(!uses_process_env(&flow));
+        if let OAuth2Flow::ClientCredentials { credentials, .. } = &mut flow {
+            credentials.client_secret = "{{process.env.CS}}".to_string();
+        }
+        assert!(uses_process_env(&flow));
+        if let OAuth2Flow::ClientCredentials { credentials, .. } = &mut flow {
+            credentials.client_secret = "{{ process.env.CS }}".to_string();
+        }
+        assert!(uses_process_env(&flow));
+
+        let mut flow = client_credentials();
+        if let OAuth2Flow::ClientCredentials {
+            additional_parameters,
+            ..
+        } = &mut flow
+        {
+            *additional_parameters = Some(OAuth2AdditionalParameters {
+                authorization_request: None,
+                access_token_request: Some(vec![OAuth2AdditionalParameter {
+                    name: "audience".to_string(),
+                    value: "{{process.env.X}}".to_string(),
+                    placement: None,
+                    enabled: true,
+                }]),
+                refresh_token_request: None,
+            });
+        }
+        assert!(uses_process_env(&flow));
     }
 }
 

@@ -9,7 +9,8 @@ use rocket_shared::types::{Body, BodyMode, Header, HttpMethod};
 use rocket_shared::VariableValue;
 
 use crate::execution_service::{
-    ExecuteRequestInput, ExecuteRequestOutput, RequestExecutionService, FLOW_INLINE_PATH_PREFIX,
+    process_env_withheld_entry, ExecuteRequestInput, ExecuteRequestOutput, RequestExecutionService,
+    FLOW_INLINE_PATH_PREFIX,
 };
 use crate::flow_auth::{
     resolve_flow_credentials, FetchContext, FlowAuthTokens, FlowCredentials, FlowTokenFetcher,
@@ -21,6 +22,8 @@ use crate::flow_debug::{build_debug_request, cap_exchange, sent_masks};
 use crate::flow_partial::{PartialPlan, PartialRun};
 use crate::flow_routing::{decide_fate, NodeFate, NodeOutcome};
 use crate::flow_run_cache::{CachedRun, FlowRunCache, RunResults};
+use crate::process_env::ProcessEnv;
+use crate::redaction::MIN_REDACTION_LEN;
 use crate::runner_sequence::{build_step_input, RunItem};
 
 /// One node's fully-executed result, kept around so a downstream edge's
@@ -810,6 +813,21 @@ pub(crate) struct NodeRunContext {
     pub(crate) node_id: String,
     /// Fires when the run is cancelled. A waiting node selects on it.
     pub(crate) cancel: CancelSignal,
+    /// The run's one process env decision, shared by every node.
+    pub(crate) process_env: Arc<ProcessEnv>,
+    /// The `.env` values of `process_env` long enough to mask.
+    pub(crate) dot_env_values: Arc<HashSet<String>>,
+}
+
+/// The values of `process_env.dot_env_keys` that are long enough to mask.
+pub(crate) fn dot_env_mask_values(process_env: &ProcessEnv) -> HashSet<String> {
+    process_env
+        .dot_env_keys
+        .iter()
+        .filter_map(|key| process_env.vars.get(key))
+        .filter(|value| value.len() >= MIN_REDACTION_LEN)
+        .cloned()
+        .collect()
 }
 
 /// Registers a run as in flight and removes every trace of it when dropped,
@@ -1161,6 +1179,14 @@ impl FlowExecutionService {
         let mut external_secrets = exec
             .resolve_external_secrets(Some(&input.collection), input.environment_name.as_deref())
             .await?;
+        // The gate is decided once per run. `.env` values are masked in steps only: they
+        // never join `external_secrets`, so no script write is held back.
+        let run_process_env = Arc::new(exec.process_env_for(
+            Some(&input.collection),
+            input.environment_name.as_deref(),
+            input.global_env_name.as_deref(),
+        ));
+        let run_dot_env_values = Arc::new(dot_env_mask_values(&run_process_env));
         // Resolve every Auth node before anything is announced, so a run that
         // cannot authenticate fails with no events, like a callback that
         // cannot open. Every credential secret joins `external_secrets`, so the
@@ -1168,12 +1194,13 @@ impl FlowExecutionService {
         let fetch_ctx = FetchContext {
             collection: input.collection.clone(),
             environment_name: input.environment_name.clone(),
-            vars: exec.build_variable_context(
+            vars: exec.variable_context_with_process_env(
                 input.global_env_name.as_deref(),
                 Some(&input.collection),
                 input.environment_name.as_deref(),
                 None,
                 &external_secrets,
+                &run_process_env.vars,
             ),
             external_secrets: external_secrets.clone(),
         };
@@ -1184,7 +1211,14 @@ impl FlowExecutionService {
             &fetch_ctx,
             self.token_fetch_timeout,
         )
-        .await?;
+        .await
+        .map_err(|e| match e {
+            // A token endpoint can echo a `.env` secret it was sent.
+            DomainError::InvalidInput(message) => DomainError::InvalidInput(
+                crate::redaction::redact_secrets(&message, &run_dot_env_values),
+            ),
+            other => other,
+        })?;
         for (node_id, secret) in credentials.secrets() {
             external_secrets.insert(format!("flow-auth.{node_id}"), secret.to_string());
         }
@@ -1318,6 +1352,8 @@ impl FlowExecutionService {
                         run_id: run_id.clone(),
                         node_id: node_id.clone(),
                         cancel: cancel_signal.clone(),
+                        process_env: Arc::clone(&run_process_env),
+                        dot_env_values: Arc::clone(&run_dot_env_values),
                     };
                     let started_at = std::time::Instant::now();
                     let result = match node_opt {
@@ -1425,6 +1461,7 @@ impl FlowExecutionService {
             &external_secrets,
         ));
         masking_secrets.extend(credentials.secret_forms());
+        masking_secrets.extend(run_dot_env_values.iter().cloned());
         masking_secrets.extend(sent_secrets);
         outcomes.retain(|id, _| !seeded.contains(id));
         captured.retain(|id, _| !seeded.contains(id));
@@ -1633,12 +1670,13 @@ impl FlowExecutionService {
         callbacks: &mut crate::flow_callbacks::RunCallbacks,
     ) -> DomainResult<ExecutedNode> {
         // Script logs redact the same secrets a Request node's script does.
-        let secret_values = exec.secret_values(
+        let mut secret_values = exec.secret_values(
             input.global_env_name.as_deref(),
             Some(&input.collection),
             input.environment_name.as_deref(),
             external_secrets,
         );
+        secret_values.extend(ctx.dot_env_values.iter().cloned());
         // Trace values are masked like an Output value: every secret variable
         // and every form of every Auth-node credential. The Request arm
         // rebinds `secret_values` later, so this set is built first.
@@ -1650,14 +1688,25 @@ impl FlowExecutionService {
                 // environment) and the callback URLs, so an If, Switch or Output
                 // sees the real value. A wire sends it as written, so this is the
                 // only pass. An unknown `{{name}}` stays as literal text.
-                let mut vars = exec.build_variable_context(
+                // The host map is copied only for a value that names `process.env`.
+                let names_process_env = crate::process_env::names_process_env(value.data());
+                let no_process_env = HashMap::new();
+                let mut vars = exec.variable_context_with_process_env(
                     input.global_env_name.as_deref(),
                     Some(&input.collection),
                     input.environment_name.as_deref(),
                     None,
                     external_secrets,
+                    if names_process_env {
+                        &ctx.process_env.vars
+                    } else {
+                        &no_process_env
+                    },
                 );
                 vars.extend(callbacks.vars().clone());
+                if !ctx.process_env.allowed && names_process_env {
+                    logs.extend(to_flow_logs(vec![process_env_withheld_entry()]));
+                }
                 let resolved = rocket_environment::resolve(value.data(), &vars).output;
                 // Wires get the raw value. The step shows it masked, then capped.
                 let (reported, cut) = mask_then_cap(&resolved, &trace_masks, STEP_VALUE_LIMIT);
@@ -1827,12 +1876,14 @@ impl FlowExecutionService {
                     Some((key, value)) => {
                         let mut secrets = external_secrets.clone();
                         secrets.insert(key, value);
-                        request_secret_values = std::borrow::Cow::Owned(exec.secret_values(
+                        let mut values = exec.secret_values(
                             input.global_env_name.as_deref(),
                             Some(&input.collection),
                             input.environment_name.as_deref(),
                             &secrets,
-                        ));
+                        );
+                        values.extend(ctx.dot_env_values.iter().cloned());
+                        request_secret_values = std::borrow::Cow::Owned(values);
                         request_secrets = std::borrow::Cow::Owned(secrets);
                     }
                     None => {
@@ -1998,7 +2049,15 @@ impl FlowExecutionService {
                     ..ExecutedNode::plain(CapturedOutput::Value(value))
                 })
             }
-            FlowNodeKind::Auth { label, .. } => {
+            FlowNodeKind::Auth { label, auth, .. } => {
+                // A fetch that used a withheld placeholder gets one warning. A
+                // supplied token made no fetch, so it never warns.
+                if !ctx.process_env.allowed
+                    && credentials.token_was_requested(&node.id)
+                    && matches!(auth, rocket_shared::types::Auth::OAuth2(oauth) if crate::flow_auth::uses_process_env(oauth))
+                {
+                    logs.extend(to_flow_logs(vec![process_env_withheld_entry()]));
+                }
                 // The credential was resolved at run start. The node only
                 // publishes its plain wire value, which is empty for types
                 // without a token. The step reports no value, so a token
@@ -4662,6 +4721,8 @@ mod tests {
             run_id: "run-1".to_string(),
             node_id: "poll".to_string(),
             cancel,
+            process_env: Default::default(),
+            dot_env_values: Default::default(),
         };
 
         service.publish_progress(&ctx, Some(3), Some(30), "attempt 3/30".to_string());
@@ -10291,6 +10352,467 @@ mod tests {
         );
     }
 
+    /// A `FixedDotEnv` that counts its reads.
+    struct CountingDotEnv {
+        inner: FixedDotEnv,
+        reads: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl rocket_environment::DotEnvLoader for CountingDotEnv {
+        fn load(
+            &self,
+            raw_path: &str,
+            base: Option<&std::path::Path>,
+        ) -> Result<Vec<(String, String)>, String> {
+            self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.inner.load(raw_path, base)
+        }
+
+        fn load_default(
+            &self,
+            base: Option<&std::path::Path>,
+        ) -> Result<Vec<(String, String)>, String> {
+            self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.inner.load_default(base)
+        }
+
+        fn describe(
+            &self,
+            raw_path: Option<&str>,
+            base: Option<&std::path::Path>,
+        ) -> rocket_environment::DotEnvFileInfo {
+            self.inner.describe(raw_path, base)
+        }
+    }
+
+    const DOT_ENV_INPUT_VALUE: &str = "dotenv-input-123456";
+
+    /// An exec whose environment `dev` names a `.env` file holding `ROCKET_IN_KEY`. The gate
+    /// allows the host environment or denies it. The count is the `.env` reads so far.
+    fn dotenv_exec(
+        allow: bool,
+        executor: &Arc<RecordingExecutor>,
+    ) -> (RequestExecutionService, Arc<std::sync::atomic::AtomicUsize>) {
+        let mut env = env_with(&[]);
+        env.dot_env_file_path = Some(".env".into());
+        let shared_env = Arc::new(std::sync::Mutex::new(env));
+        let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let trust = if allow {
+            crate::test_doubles::InMemoryTrustStore::allow_all()
+        } else {
+            crate::test_doubles::InMemoryTrustStore::new()
+        };
+        let exec = RequestExecutionService::new(
+            Box::new(SharedEnvRepo(Arc::clone(&shared_env))),
+            Arc::new(SharedExecutor(Arc::clone(executor))),
+            Box::new(NullHistoryRepo),
+            Box::new(crate::test_doubles::SharedCollectionRepo(
+                crate::test_doubles::InMemoryCollectionRepo::new(
+                    rocket_collection::Collection::new("my-api"),
+                ),
+            )),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        )
+        .with_trust_store(trust)
+        .with_collection_env_repo_factory(Box::new(DirEnvFactory(shared_env)))
+        .with_script_engine(Box::new(rocket_infra::scripting::DenoScriptEngine::new()))
+        .with_dot_env_loader(Box::new(CountingDotEnv {
+            inner: FixedDotEnv(vec![(
+                "ROCKET_IN_KEY".to_string(),
+                DOT_ENV_INPUT_VALUE.to_string(),
+            )]),
+            reads: Arc::clone(&reads),
+        }));
+        (exec, reads)
+    }
+
+    /// Runs `flow` against `exec` in environment `dev`.
+    async fn run_dev_flow(flow: Flow, exec: &RequestExecutionService) -> FlowRunSummary {
+        let service = FlowExecutionService::new(
+            Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
+            Box::new(FakeCollectionRepo::new().build()),
+            Box::new(NullEventPublisher),
+        );
+        let input = RunFlowInput {
+            environment_name: Some("dev".to_string()),
+            ..run_input("in")
+        };
+        service.run(exec, input).await.expect("run")
+    }
+
+    /// `input -> out`, the Input holding `text`.
+    fn input_to_output_flow(text: &str) -> Flow {
+        Flow {
+            name: "in".to_string(),
+            nodes: vec![input_node_with("i", text), output_node_named("out")],
+            edges: vec![FlowEdge {
+                target_field: "value".to_string(),
+                ..wire("e1", "i", "out")
+            }],
+            callback_host: None,
+        }
+    }
+
+    fn withheld_logs(step: &FlowStepResult) -> usize {
+        let line = process_env_withheld_entry();
+        step.logs
+            .iter()
+            .filter(|l| l.message == line.message && matches!(l.level, FlowLogLevel::Warn))
+            .count()
+    }
+
+    const CS_PLACEHOLDER: &str = "{{process.env.ROCKET_IN_KEY}}";
+
+    /// An OAuth2 Auth node whose client secret is `secret`, applied to inherit.
+    fn oauth_auth_node_with_secret(secret: &str) -> FlowNode {
+        let mut node = client_credentials_auth_node("a");
+        if let FlowNodeKind::Auth {
+            auth: rocket_shared::types::Auth::OAuth2(oauth),
+            ..
+        } = &mut node.kind
+        {
+            if let rocket_shared::oauth2::OAuth2Flow::ClientCredentials { credentials, .. } =
+                oauth.as_mut()
+            {
+                credentials.client_secret = secret.to_string();
+            }
+        }
+        node
+    }
+
+    /// Runs `auth_node` and a saved request `r` that inherits its auth, in environment `dev`.
+    async fn run_auth_nodes(
+        exec: &RequestExecutionService,
+        fetcher: &Arc<crate::flow_auth::test_support::CapturingFetcher>,
+        auth_node: FlowNode,
+        extra_nodes_and_edges: (Vec<FlowNode>, Vec<FlowEdge>),
+        tokens: FlowAuthTokens,
+    ) -> DomainResult<FlowRunSummary> {
+        let mut nodes = vec![auth_node, saved_flow_node("r", "req.yml")];
+        nodes.extend(extra_nodes_and_edges.0);
+        let flow = Flow {
+            name: "auth-flow".to_string(),
+            nodes,
+            edges: extra_nodes_and_edges.1,
+            callback_host: None,
+        };
+        let service = FlowExecutionService::new(
+            Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
+            Box::new(
+                FakeCollectionRepo::new()
+                    .with_request("my-api", "req.yml", inherit_saved_request())
+                    .build(),
+            ),
+            Box::new(NullEventPublisher),
+        )
+        .with_token_fetcher(Box::new(
+            crate::flow_auth::test_support::SharedCapturingFetcher(Arc::clone(fetcher)),
+        ));
+        let input = RunFlowInput {
+            environment_name: Some("dev".to_string()),
+            ..run_input("auth-flow")
+        };
+        service.run_with_auth(exec, input, tokens).await
+    }
+
+    async fn run_auth_flow(
+        exec: &RequestExecutionService,
+        fetcher: &Arc<crate::flow_auth::test_support::CapturingFetcher>,
+    ) -> DomainResult<FlowRunSummary> {
+        run_auth_nodes(
+            exec,
+            fetcher,
+            oauth_auth_node_with_secret(CS_PLACEHOLDER),
+            (Vec::new(), Vec::new()),
+            FlowAuthTokens::new(),
+        )
+        .await
+    }
+
+    #[tokio::test]
+    async fn flow_auth_fetch_sends_process_env_client_secret() {
+        use crate::flow_auth::test_support::CapturingFetcher;
+        let fetcher = CapturingFetcher::ok("tok-abcdef123456");
+        let (exec, _) = dotenv_exec(true, &RecordingExecutor::new());
+
+        let summary = run_auth_flow(&exec, &fetcher).await.expect("run");
+
+        let seen = fetcher.seen();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(seen[0].client_secret.as_deref(), Some(DOT_ENV_INPUT_VALUE));
+        assert!(!format!("{summary:?}").contains(DOT_ENV_INPUT_VALUE));
+    }
+
+    #[tokio::test]
+    async fn flow_auth_fetch_keeps_literal_when_denied() {
+        use crate::flow_auth::test_support::CapturingFetcher;
+        let fetcher = CapturingFetcher::ok("tok-abcdef123456");
+        let (exec, _) = dotenv_exec(false, &RecordingExecutor::new());
+
+        let summary = run_auth_flow(&exec, &fetcher).await.expect("run");
+
+        assert_eq!(
+            fetcher.seen()[0].client_secret.as_deref(),
+            Some(CS_PLACEHOLDER)
+        );
+        assert_eq!(withheld_logs(step_of(&summary, "a")), 1);
+    }
+
+    #[tokio::test]
+    async fn flow_auth_supplied_token_never_warns() {
+        use crate::flow_auth::test_support::CapturingFetcher;
+        let fetcher = CapturingFetcher::ok("tok-abcdef123456");
+        let (exec, _) = dotenv_exec(false, &RecordingExecutor::new());
+        let tokens = FlowAuthTokens::from([(
+            "a".to_string(),
+            crate::flow_auth::SuppliedToken {
+                access_token: "supplied-token-123456".to_string(),
+            },
+        )]);
+
+        let summary = run_auth_nodes(
+            &exec,
+            &fetcher,
+            oauth_auth_node_with_secret(CS_PLACEHOLDER),
+            (Vec::new(), Vec::new()),
+            tokens,
+        )
+        .await
+        .expect("run");
+
+        assert!(fetcher.seen().is_empty());
+        assert!(summary.steps.iter().all(|s| withheld_logs(s) == 0));
+    }
+
+    #[tokio::test]
+    async fn flow_auth_fetched_token_stays_literal() {
+        use crate::flow_auth::test_support::CapturingFetcher;
+        let fetcher = CapturingFetcher::ok("{{process.env.PATH}}");
+        let executor = RecordingExecutor::new();
+        let (exec, _) = dotenv_exec(true, &executor);
+
+        run_auth_flow(&exec, &fetcher).await.expect("run");
+
+        assert_eq!(
+            executor.sent_auths(),
+            vec![rocket_shared::types::Auth::Bearer {
+                token: "{{process.env.PATH}}".to_string()
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn flow_static_bearer_wire_snapshot_resolves_process_env() {
+        use crate::flow_auth::test_support::CapturingFetcher;
+        let fetcher = CapturingFetcher::ok("unused-token-123456");
+        let executor = RecordingExecutor::new();
+        let (exec, _) = dotenv_exec(true, &executor);
+        let auth_node = FlowNode {
+            id: "a".to_string(),
+            kind: FlowNodeKind::Auth {
+                label: "Static".to_string(),
+                auth: rocket_shared::types::Auth::Bearer {
+                    token: CS_PLACEHOLDER.to_string(),
+                },
+                apply_to_inherit: true,
+            },
+            position: NodePosition { x: 0.0, y: 0.0 },
+        };
+        let wire_to_out = FlowEdge {
+            target_field: "value".to_string(),
+            ..wire("e1", "a", "out")
+        };
+
+        let summary = run_auth_nodes(
+            &exec,
+            &fetcher,
+            auth_node,
+            (vec![output_node_named("out")], vec![wire_to_out]),
+            FlowAuthTokens::new(),
+        )
+        .await
+        .expect("run");
+
+        assert_eq!(
+            executor.sent_auths(),
+            vec![rocket_shared::types::Auth::Bearer {
+                token: DOT_ENV_INPUT_VALUE.to_string()
+            }]
+        );
+        assert!(!format!("{:?}", step_of(&summary, "out")).contains(DOT_ENV_INPUT_VALUE));
+    }
+
+    #[tokio::test]
+    async fn flow_auth_fetch_error_masks_dot_env_value() {
+        use crate::flow_auth::test_support::CapturingFetcher;
+        let fetcher = CapturingFetcher::err(&format!("endpoint said {DOT_ENV_INPUT_VALUE}"));
+        let (exec, _) = dotenv_exec(true, &RecordingExecutor::new());
+
+        let err = run_auth_flow(&exec, &fetcher)
+            .await
+            .expect_err("fetch fails");
+
+        let text = err.to_string();
+        assert!(text.contains("endpoint said"), "{text}");
+        assert!(!text.contains(DOT_ENV_INPUT_VALUE), "{text}");
+    }
+
+    #[tokio::test]
+    async fn flow_input_node_masks_dot_env_value_in_step_and_output() {
+        let (exec, _) = dotenv_exec(true, &RecordingExecutor::new());
+        let flow = input_to_output_flow("k={{process.env.ROCKET_IN_KEY}}");
+
+        let summary = run_dev_flow(flow, &exec).await;
+
+        for id in ["i", "out"] {
+            let step = step_of(&summary, id);
+            assert!(
+                !format!("{step:?}").contains(DOT_ENV_INPUT_VALUE),
+                "{step:?}"
+            );
+        }
+        assert_eq!(step_of(&summary, "i").value.as_deref(), Some("k=••••••"));
+    }
+
+    #[tokio::test]
+    async fn flow_input_node_resolves_process_env_when_allowed() {
+        let (exec, _) = dotenv_exec(true, &RecordingExecutor::new());
+
+        let summary = run_dev_flow(input_to_output_flow("{{process.env.PATH}}"), &exec).await;
+
+        let path = std::env::var("PATH").expect("PATH is set");
+        assert_eq!(
+            step_of(&summary, "out").value.as_deref(),
+            Some(path.as_str())
+        );
+    }
+
+    #[tokio::test]
+    async fn flow_input_node_keeps_process_env_literal_when_denied() {
+        let (exec, _) = dotenv_exec(false, &RecordingExecutor::new());
+
+        let summary = run_dev_flow(input_to_output_flow("{{process.env.PATH}}"), &exec).await;
+
+        assert_eq!(
+            step_of(&summary, "out").value.as_deref(),
+            Some("{{process.env.PATH}}")
+        );
+    }
+
+    #[tokio::test]
+    async fn flow_input_node_warns_only_for_a_placeholder_when_withheld() {
+        let (exec, _) = dotenv_exec(false, &RecordingExecutor::new());
+        let plain = run_dev_flow(input_to_output_flow("see process.env.X docs"), &exec).await;
+        assert_eq!(withheld_logs(step_of(&plain, "i")), 0);
+
+        let spaced = run_dev_flow(input_to_output_flow("{{ process.env.X }}"), &exec).await;
+        assert_eq!(withheld_logs(step_of(&spaced, "i")), 1);
+        assert_eq!(step_of(&spaced, "i").logs.len(), 1);
+    }
+
+    #[test]
+    fn dot_env_mask_values_keeps_only_long_dot_env_values() {
+        let process_env = ProcessEnv {
+            vars: HashMap::from([
+                ("SHORT".to_string(), "x".to_string()),
+                ("LONG".to_string(), "long-dot-env-value-123".to_string()),
+                ("OS_ONLY".to_string(), "long-os-only-value-456".to_string()),
+            ]),
+            dot_env_keys: vec!["SHORT".to_string(), "LONG".to_string()],
+            allowed: true,
+        };
+
+        assert_eq!(
+            dot_env_mask_values(&process_env),
+            HashSet::from(["long-dot-env-value-123".to_string()])
+        );
+    }
+
+    #[tokio::test]
+    async fn flow_input_node_warns_once_when_withheld() {
+        let (exec, _) = dotenv_exec(false, &RecordingExecutor::new());
+        let flow = input_to_output_flow("{{process.env.PATH}}-{{process.env.HOME}}");
+
+        let summary = run_dev_flow(flow, &exec).await;
+
+        let input_step = step_of(&summary, "i");
+        assert_eq!(input_step.logs.len(), 1, "{:?}", input_step.logs);
+        assert_eq!(withheld_logs(input_step), 1);
+    }
+
+    #[tokio::test]
+    async fn flow_input_node_unknown_process_env_stays_literal_without_warning() {
+        let (exec, _) = dotenv_exec(true, &RecordingExecutor::new());
+
+        let summary =
+            run_dev_flow(input_to_output_flow("{{process.env.ROCKET_NOPE_9}}"), &exec).await;
+
+        assert_eq!(
+            step_of(&summary, "out").value.as_deref(),
+            Some("{{process.env.ROCKET_NOPE_9}}")
+        );
+        assert_eq!(withheld_logs(step_of(&summary, "i")), 0);
+    }
+
+    #[tokio::test]
+    async fn flow_run_reads_no_dot_env_file_when_denied() {
+        let (exec, reads) = dotenv_exec(false, &RecordingExecutor::new());
+
+        run_dev_flow(input_to_output_flow("{{process.env.ROCKET_IN_KEY}}"), &exec).await;
+
+        assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn flow_dot_env_value_is_not_an_external_secret() {
+        let executor = RecordingExecutor::new();
+        let (exec, _) = dotenv_exec(true, &executor);
+        let flow = Flow {
+            name: "in".to_string(),
+            nodes: vec![
+                input_node_with("i", "https://api.example.com/{{process.env.ROCKET_IN_KEY}}"),
+                allow_wired_host(saved_flow_node("b", "req.yml")),
+            ],
+            edges: vec![wire("e1", "i", "b")],
+            callback_host: None,
+        };
+        let mut saved = Request::new("B", HttpMethod::Get, "https://api.example.com/b");
+        saved.pre_request_script = Some("rok.setEnvVar('copy', req.getUrl());".into());
+        let service = FlowExecutionService::new(
+            Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
+            Box::new(
+                FakeCollectionRepo::new()
+                    .with_request("my-api", "req.yml", saved)
+                    .build(),
+            ),
+            Box::new(NullEventPublisher),
+        );
+        let input = RunFlowInput {
+            environment_name: Some("dev".to_string()),
+            ..run_input("in")
+        };
+
+        let summary = service.run(&exec, input).await.expect("run");
+
+        let step = step_of(&summary, "b");
+        assert_eq!(step.error, None);
+        assert!(
+            step.logs
+                .iter()
+                .all(|l| !l.message.contains("was not saved")),
+            "{:?}",
+            step.logs
+        );
+        assert!(
+            !format!("{step:?}").contains(DOT_ENV_INPUT_VALUE),
+            "{step:?}"
+        );
+    }
+
     #[tokio::test]
     async fn static_bearer_from_process_env_is_masked_in_the_trace() {
         use rocket_shared::types::Auth;
@@ -11742,6 +12264,8 @@ mod tests {
             run_id: "run-1".to_string(),
             node_id: node_id.to_string(),
             cancel,
+            process_env: Default::default(),
+            dot_env_values: Default::default(),
         };
         let mut trace = NodeTrace::default();
         let result = service

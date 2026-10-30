@@ -14,24 +14,7 @@ use rocket_shared::types::{Auth, Header};
 use serde::Deserialize;
 
 use super::{resolve_auth, RequestExecutionService};
-
-/// Which host environment (`{{process.env.*}}` and `.env` files) a send may see. It is
-/// decided by the tab, on top of the collection trust gate.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
-#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
-pub enum ProcessEnvScopeInput {
-    /// A tab outside any collection: full host access.
-    Scratch,
-    /// A tab of a collection, with the environment the tab uses.
-    Collection {
-        name: String,
-        #[serde(default)]
-        environment_name: Option<String>,
-    },
-    /// No host environment at all.
-    #[default]
-    Closed,
-}
+use crate::process_env::ProcessEnvScopeInput;
 
 /// Where `{{variables}}` come from. Mirrors the scope fields of `ExecuteRequestInput`.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -754,34 +737,6 @@ mod tests {
         let svc = service(dev_env(), CollectionSettings::default());
         assert!(!path_ctx(&svc, Some("api"), collection_scope("other"))
             .contains_key("process.env.PATH"));
-    }
-
-    #[test]
-    fn scope_deserializes_scratch_collection_and_closed() {
-        let s: ProcessEnvScopeInput =
-            serde_json::from_value(serde_json::json!({ "kind": "scratch" })).expect("scratch");
-        assert_eq!(s, ProcessEnvScopeInput::Scratch);
-        let c: ProcessEnvScopeInput = serde_json::from_value(
-            serde_json::json!({ "kind": "collection", "name": "api", "environmentName": "dev" }),
-        )
-        .expect("collection");
-        assert_eq!(
-            c,
-            ProcessEnvScopeInput::Collection {
-                name: "api".into(),
-                environment_name: Some("dev".into())
-            }
-        );
-        let n: ProcessEnvScopeInput =
-            serde_json::from_value(serde_json::json!({ "kind": "collection", "name": "api" }))
-                .expect("no env");
-        assert_eq!(n, collection_scope("api"));
-        let x: ProcessEnvScopeInput =
-            serde_json::from_value(serde_json::json!({ "kind": "closed" })).expect("closed");
-        assert_eq!(x, ProcessEnvScopeInput::Closed);
-        assert_eq!(ProcessEnvScopeInput::default(), ProcessEnvScopeInput::Closed);
-        serde_json::from_value::<ProcessEnvScopeInput>(serde_json::json!({ "kind": "open" }))
-            .expect_err("unknown kind");
     }
 
     #[test]

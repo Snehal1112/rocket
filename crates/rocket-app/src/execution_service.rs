@@ -30,10 +30,10 @@ use std::sync::Arc;
 
 pub(crate) mod runtime_fill;
 pub mod websocket_resolution;
-use websocket_resolution::ProcessEnvScopeInput;
 use self::runtime_fill::{
     allow_new_names, fill_names, fill_pairs, swap_path_values, FieldTemplate, RequestTemplates,
 };
+use crate::process_env::{scope_target, ProcessEnv, ProcessEnvScopeInput};
 use std::cell::RefCell;
 
 #[cfg(test)]
@@ -514,17 +514,6 @@ pub struct DotEnvStatus {
     pub blocked: bool,
     /// The environment sets no path, so the default `<base>/.env` is described.
     pub uses_default: bool,
-}
-
-/// The `process.env` values of one send. `dot_env_keys` names the keys whose value came
-/// from a `.env` file, so they can be masked.
-#[derive(Debug, Clone, Default)]
-pub struct ProcessEnv {
-    pub vars: std::collections::HashMap<String, String>,
-    pub dot_env_keys: Vec<String>,
-    /// The trust gate's one decision for this send. False when it denied access, so
-    /// `vars` is empty.
-    pub allowed: bool,
 }
 
 pub struct RequestExecutionService {
@@ -1318,19 +1307,9 @@ impl RequestExecutionService {
         global_env_name: Option<&str>,
         scope: &ProcessEnvScopeInput,
     ) -> ProcessEnv {
-        match (collection, scope) {
-            (_, ProcessEnvScopeInput::Closed) => ProcessEnv::default(),
-            (Some(c), _) => self.process_env_for(Some(c), environment_name, global_env_name),
-            (
-                None,
-                ProcessEnvScopeInput::Collection {
-                    name,
-                    environment_name: scope_env,
-                },
-            ) => self.process_env_for(Some(name), scope_env.as_deref(), global_env_name),
-            (None, ProcessEnvScopeInput::Scratch) => {
-                self.process_env_for(None, environment_name, global_env_name)
-            }
+        match scope_target(collection, environment_name, scope) {
+            Some((c, e)) => self.process_env_for(c, e, global_env_name),
+            None => ProcessEnv::default(),
         }
     }
 
@@ -1378,6 +1357,28 @@ impl RequestExecutionService {
         scopes.process_env = self
             .process_env_for_scope(collection, environment_name, global_env_name, scope)
             .vars;
+        scopes.flatten_with_process_env()
+    }
+
+    /// `build_variable_context` with `process_env` as `process.env.NAME`. The caller read
+    /// the gate already, so this reads no file and decides nothing.
+    pub(crate) fn variable_context_with_process_env(
+        &self,
+        global_env_name: Option<&str>,
+        collection: Option<&str>,
+        environment_name: Option<&str>,
+        request_path: Option<&str>,
+        external_secrets: &std::collections::HashMap<String, String>,
+        process_env: &std::collections::HashMap<String, String>,
+    ) -> std::collections::HashMap<String, String> {
+        let mut scopes = self.build_variable_scopes(
+            global_env_name,
+            collection,
+            environment_name,
+            request_path,
+            external_secrets,
+        );
+        scopes.process_env = process_env.clone();
         scopes.flatten_with_process_env()
     }
 
@@ -8295,7 +8296,7 @@ mod tests {
             Some("api"),
             Some("dev"),
             None,
-            &websocket_resolution::ProcessEnvScopeInput::Closed,
+            &ProcessEnvScopeInput::Closed,
         );
         assert!(pe.vars.is_empty());
         assert!(!pe.allowed);
@@ -8316,15 +8317,12 @@ mod tests {
             None,
             None,
             None,
-            &websocket_resolution::ProcessEnvScopeInput::Collection {
+            &ProcessEnvScopeInput::Collection {
                 name: "api".into(),
                 environment_name: Some("dev".into()),
             },
         );
-        assert_eq!(
-            pe.vars.get("ROCKET_DOT_A").map(String::as_str),
-            Some("1")
-        );
+        assert_eq!(pe.vars.get("ROCKET_DOT_A").map(String::as_str), Some("1"));
     }
 
     #[test]
