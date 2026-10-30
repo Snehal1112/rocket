@@ -428,11 +428,10 @@ pub(crate) fn build_get_token_request(
 /// placeholder. The request is built with no variables, so every placeholder
 /// stays as written.
 pub(crate) fn uses_process_env(flow: &OAuth2Flow) -> bool {
-    const MARK: &str = "{{process.env.";
     let Ok(r) = build_get_token_request(flow, &FetchContext::default()) else {
         return false;
     };
-    let has = |s: &str| s.contains(MARK);
+    let has = crate::process_env::names_process_env;
     let has_opt = |s: &Option<String>| s.as_deref().is_some_and(has);
     let has_params = |list: &Option<Vec<AdditionalParam>>| {
         list.iter().flatten().any(|p| has(&p.key) || has(&p.value))
@@ -1387,6 +1386,10 @@ mod tests {
         assert!(!uses_process_env(&flow));
         if let OAuth2Flow::ClientCredentials { credentials, .. } = &mut flow {
             credentials.client_secret = "{{process.env.CS}}".to_string();
+        }
+        assert!(uses_process_env(&flow));
+        if let OAuth2Flow::ClientCredentials { credentials, .. } = &mut flow {
+            credentials.client_secret = "{{ process.env.CS }}".to_string();
         }
         assert!(uses_process_env(&flow));
 

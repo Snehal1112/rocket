@@ -36,6 +36,15 @@ pub struct ProcessEnv {
     pub allowed: bool,
 }
 
+/// Whether `text` holds a `{{process.env.NAME}}` placeholder, spaces inside the braces
+/// allowed, found the way a request send finds its names.
+pub(crate) fn names_process_env(text: &str) -> bool {
+    rocket_environment::resolve(text, &std::collections::HashMap::new())
+        .unresolved
+        .iter()
+        .any(|name| name.starts_with("process.env."))
+}
+
 /// The `(collection, environment)` a scope reads host values for, or `None` when the
 /// scope is closed. A `collection` given keeps its own gate and the scope can only close
 /// it. Without a `collection`, a `Collection` scope names the gate and the environment,
@@ -62,6 +71,14 @@ pub(crate) fn scope_target<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn names_process_env_needs_a_placeholder() {
+        assert!(names_process_env("a {{process.env.X}} b"));
+        assert!(names_process_env("{{ process.env.X }}"));
+        assert!(!names_process_env("see process.env.X docs"));
+        assert!(!names_process_env("{{other}}"));
+    }
 
     #[test]
     fn scope_target_closed_is_none() {

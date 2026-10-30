@@ -1688,16 +1688,23 @@ impl FlowExecutionService {
                 // environment) and the callback URLs, so an If, Switch or Output
                 // sees the real value. A wire sends it as written, so this is the
                 // only pass. An unknown `{{name}}` stays as literal text.
+                // The host map is copied only for a value that names `process.env`.
+                let names_process_env = crate::process_env::names_process_env(value.data());
+                let no_process_env = HashMap::new();
                 let mut vars = exec.variable_context_with_process_env(
                     input.global_env_name.as_deref(),
                     Some(&input.collection),
                     input.environment_name.as_deref(),
                     None,
                     external_secrets,
-                    &ctx.process_env.vars,
+                    if names_process_env {
+                        &ctx.process_env.vars
+                    } else {
+                        &no_process_env
+                    },
                 );
                 vars.extend(callbacks.vars().clone());
-                if !ctx.process_env.allowed && value.data().contains("process.env.") {
+                if !ctx.process_env.allowed && names_process_env {
                     logs.extend(to_flow_logs(vec![process_env_withheld_entry()]));
                 }
                 let resolved = rocket_environment::resolve(value.data(), &vars).output;
@@ -10693,6 +10700,35 @@ mod tests {
         assert_eq!(
             step_of(&summary, "out").value.as_deref(),
             Some("{{process.env.PATH}}")
+        );
+    }
+
+    #[tokio::test]
+    async fn flow_input_node_warns_only_for_a_placeholder_when_withheld() {
+        let (exec, _) = dotenv_exec(false, &RecordingExecutor::new());
+        let plain = run_dev_flow(input_to_output_flow("see process.env.X docs"), &exec).await;
+        assert_eq!(withheld_logs(step_of(&plain, "i")), 0);
+
+        let spaced = run_dev_flow(input_to_output_flow("{{ process.env.X }}"), &exec).await;
+        assert_eq!(withheld_logs(step_of(&spaced, "i")), 1);
+        assert_eq!(step_of(&spaced, "i").logs.len(), 1);
+    }
+
+    #[test]
+    fn dot_env_mask_values_keeps_only_long_dot_env_values() {
+        let process_env = ProcessEnv {
+            vars: HashMap::from([
+                ("SHORT".to_string(), "x".to_string()),
+                ("LONG".to_string(), "long-dot-env-value-123".to_string()),
+                ("OS_ONLY".to_string(), "long-os-only-value-456".to_string()),
+            ]),
+            dot_env_keys: vec!["SHORT".to_string(), "LONG".to_string()],
+            allowed: true,
+        };
+
+        assert_eq!(
+            dot_env_mask_values(&process_env),
+            HashSet::from(["long-dot-env-value-123".to_string()])
         );
     }
 
