@@ -1337,6 +1337,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             collection={tab.source?.collection}
             environmentName={activeEnvIdForScope ?? undefined}
             requestPath={tab.source?.path}
+            processEnvScope={processEnvScope}
             inheritMessage={
               inheritedAuthSource ? describeInheritedAuthSource(inheritedAuthSource) : undefined
             }

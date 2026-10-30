@@ -18,6 +18,11 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { sameOAuth2TokenConfig } from '@/lib/oauth2-token-config';
+import {
+  type ProcessEnvScope,
+  type ProcessEnvScopeInput,
+  toProcessEnvScopeInput,
+} from '@/lib/process-env-gate';
 import { oauth2DecodeJwt, oauth2GetToken, oauth2RefreshToken } from '@/lib/tauri-api';
 import type { VariableScopeEntry, VariableSource } from '@/lib/url-variables';
 import { resolveWithContext } from '@/lib/variable-context';
@@ -44,17 +49,36 @@ interface OAuth2AuthEditorProps {
   collection?: string;
   environmentName?: string;
   requestPath?: string;
+  /** The tab's process env scope. Without it the editor falls back to its collection. */
+  processEnvScope?: ProcessEnvScope;
 }
 
-export function OAuth2AuthEditor({
-  oauth2: o,
-  patchOAuth2,
-  variableContext,
-  onNavigateToSource,
-  collection,
-  environmentName,
-  requestPath,
-}: OAuth2AuthEditorProps) {
+/**
+ * The process env scope an editor sends with a token request. A tab passes its own scope.
+ * An editor with no tab (folder settings, Flow Auth node) uses its collection, or none.
+ */
+export function oauth2EditorScope(
+  scope: ProcessEnvScope | undefined,
+  collection: string | undefined,
+  hasScopeProp: boolean,
+): ProcessEnvScopeInput {
+  if (hasScopeProp) return toProcessEnvScopeInput(scope);
+  return collection ? toProcessEnvScopeInput(collection) : { kind: 'closed' };
+}
+
+export function OAuth2AuthEditor(props: OAuth2AuthEditorProps) {
+  const {
+    oauth2: o,
+    patchOAuth2,
+    variableContext,
+    onNavigateToSource,
+    collection,
+    environmentName,
+    requestPath,
+    processEnvScope,
+  } = props;
+  // A scratch tab passes `undefined` on purpose, so the key's presence is what counts.
+  const hasScopeProp = 'processEnvScope' in props;
   const [gettingToken, setGettingToken] = useState(false);
   const [tokenError, setTokenError] = useState('');
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -129,6 +153,7 @@ export function OAuth2AuthEditor({
         environmentName,
         requestPath,
         forceReauth: isForceReauth || undefined,
+        processEnv: oauth2EditorScope(processEnvScope, collection, hasScopeProp),
       });
       if (!sameOAuth2TokenConfig(o, latestRef.current)) {
         setTokenError(CONFIG_CHANGED_ERROR);
@@ -170,7 +195,7 @@ export function OAuth2AuthEditor({
     } finally {
       setGettingToken(false);
     }
-  }, [o, collection, environmentName, requestPath]);
+  }, [o, collection, environmentName, requestPath, processEnvScope, hasScopeProp]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: rv reads varCtxRef.current — stable across renders by design
   const handleRefreshToken = useCallback(async () => {
@@ -194,6 +219,7 @@ export function OAuth2AuthEditor({
         collection,
         environmentName,
         requestPath,
+        processEnv: oauth2EditorScope(processEnvScope, collection, hasScopeProp),
       });
       if (!sameOAuth2TokenConfig(o, latestRef.current)) {
         setTokenError(CONFIG_CHANGED_ERROR);
@@ -228,7 +254,7 @@ export function OAuth2AuthEditor({
     } finally {
       setGettingToken(false);
     }
-  }, [o, collection, environmentName, requestPath]);
+  }, [o, collection, environmentName, requestPath, processEnvScope, hasScopeProp]);
 
   const handleClearCache = useCallback(() => {
     patchOAuth2Ref.current({

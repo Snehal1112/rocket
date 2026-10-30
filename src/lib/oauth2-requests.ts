@@ -1,3 +1,4 @@
+import type { ProcessEnvScopeInput } from '@/lib/process-env-gate';
 import type { OAuth2GetTokenRequest, OAuth2RefreshRequest } from '@/lib/tauri-api';
 import type { AuthState } from '@/types/pane-types';
 
@@ -9,6 +10,8 @@ export interface OAuth2Target {
   collection?: string;
   environmentName?: string;
   requestPath?: string;
+  /** The host environment scope the backend resolves `{{process.env}}` under. */
+  processEnv: ProcessEnvScopeInput;
 }
 
 type Params = OAuth2State['authParams'];
@@ -46,6 +49,7 @@ export function buildGetTokenRequest(
     environmentName: target.environmentName,
     requestPath: target.requestPath,
     forceReauth: opts?.forceReauth || undefined,
+    processEnv: target.processEnv,
   };
 }
 
@@ -68,5 +72,6 @@ export function buildRefreshRequest(
     collection: target.collection,
     environmentName: target.environmentName,
     requestPath: target.requestPath,
+    processEnv: target.processEnv,
   };
 }

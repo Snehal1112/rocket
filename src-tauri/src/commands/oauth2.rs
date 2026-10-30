@@ -275,7 +275,14 @@ pub async fn oauth2_refresh_token(
             request.environment_name.as_deref(),
         )
         .await?;
-    svc.refresh_token_with_secrets(&request, &secrets).await
+    let host_env = exec.process_env_for_scope(
+        request.collection.as_deref(),
+        request.environment_name.as_deref(),
+        None,
+        &request.process_env,
+    );
+    svc.refresh_token_with_host_env(&request, &secrets, &host_env)
+        .await
 }
 
 /// Unified OAuth2 token acquisition for all grant types.
@@ -306,10 +313,16 @@ pub async fn oauth2_get_token(
             request.environment_name.as_deref(),
         )
         .await?;
-    let config = svc.resolve_get_token_request_with_secrets(&request, &secrets);
+    let host_env = exec.process_env_for_scope(
+        request.collection.as_deref(),
+        request.environment_name.as_deref(),
+        None,
+        &request.process_env,
+    );
+    let config = svc.resolve_get_token_request_with_host_env(&request, &secrets, &host_env);
 
     match config.grant_type.as_str() {
-        "client_credentials" | "password" => svc.get_token_direct(&config).await,
+        "client_credentials" | "password" => svc.get_token_with_host_env(&config, &host_env).await,
         "authorization_code" => auth_code_flow(&app, &svc, &config, config.force_reauth).await,
         "implicit" => implicit_flow(&app, &config).await,
         other => Err(DomainError::InvalidInput(format!(

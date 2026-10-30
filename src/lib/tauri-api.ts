@@ -1588,6 +1588,7 @@ export interface OAuth2GetTokenRequest {
   environmentName?: string;
   requestPath?: string;
   forceReauth?: boolean;
+  processEnv: ProcessEnvScopeInput;
 }
 
 export interface OAuth2RefreshRequest {
@@ -1603,6 +1604,7 @@ export interface OAuth2RefreshRequest {
   collection?: string;
   environmentName?: string;
   requestPath?: string;
+  processEnv: ProcessEnvScopeInput;
 }
 
 // Matches the Rust `OAuthToken` struct — snake_case on the wire (no serde rename).
