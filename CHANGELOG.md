@@ -1,5 +1,41 @@
 # Changelog
 
+## [2.1.3](https://github.com/Snehal1112/rocket/compare/v2.1.2...v2.1.3) (2026-10-30)
+
+### Features
+
+* **app:** add create commands for non-http requests ([d642ec5](https://github.com/Snehal1112/rocket/commit/d642ec51a9771b2bbe5135fff5098d70540bf021)), closes [#113](https://github.com/Snehal1112/rocket/issues/113)
+* **app:** include inherited secrets in flow lint and MCP view ([ea2e1b1](https://github.com/Snehal1112/rocket/commit/ea2e1b1186b9bf90d052b7b3bfd9ceb51c61ba1b)), closes [#110](https://github.com/Snehal1112/rocket/issues/110)
+* **app:** read merged bindings and certificates on send ([b9cdfd1](https://github.com/Snehal1112/rocket/commit/b9cdfd13149e6f71402637c5c382202e79445252)), closes [#110](https://github.com/Snehal1112/rocket/issues/110)
+* **app:** validate environment save against merged bindings ([1325a68](https://github.com/Snehal1112/rocket/commit/1325a686266e7de338024bc21e9e1313522d72eb)), closes [#110](https://github.com/Snehal1112/rocket/issues/110)
+* **curl:** parse --form on paste ([eb21b9e](https://github.com/Snehal1112/rocket/commit/eb21b9efde7a2ee3face673842575bf21fbe8773)), closes [#119](https://github.com/Snehal1112/rocket/issues/119)
+* **environment:** merge bindings and certificates in the flatten ([3f44798](https://github.com/Snehal1112/rocket/commit/3f44798b7e3a43f5c862596eca3f087441a44ece)), closes [#110](https://github.com/Snehal1112/rocket/issues/110)
+* **frontend:** apply the trust gate to History tabs ([41b48ee](https://github.com/Snehal1112/rocket/commit/41b48ee10cdea80a9512c85fc6b8399e6636ab8b)), closes [#116](https://github.com/Snehal1112/rocket/issues/116)
+* **frontend:** create graphql and grpc requests exclusively ([3779742](https://github.com/Snehal1112/rocket/commit/37797429c72234d36c20ab477f1c7b48ccbd1f6f)), closes [#113](https://github.com/Snehal1112/rocket/issues/113)
+* **frontend:** create websocket requests exclusively ([029483d](https://github.com/Snehal1112/rocket/commit/029483dc693d190bf48f753f1b194d0444885fa8)), closes [#113](https://github.com/Snehal1112/rocket/issues/113)
+* **frontend:** show inherited secrets and certs in environment dialog ([92fb355](https://github.com/Snehal1112/rocket/commit/92fb355e9c89781f12a1bff15117fed60275b609)), closes [#110](https://github.com/Snehal1112/rocket/issues/110)
+* **history:** scope process env for resent history requests ([3175cf8](https://github.com/Snehal1112/rocket/commit/3175cf8e809166b81ec58f06d81fb0ae842118ac)), closes [#116](https://github.com/Snehal1112/rocket/issues/116)
+* **import:** number clashing request files in Bruno and Postman imports ([234087d](https://github.com/Snehal1112/rocket/commit/234087d01d8203f7f7db4ca26c88470a6e6425df)), closes [#113](https://github.com/Snehal1112/rocket/issues/113)
+* **infra:** add exclusive create for non-http requests ([6a4dd2a](https://github.com/Snehal1112/rocket/commit/6a4dd2a3c199318c2434f1bf578b9c6738ad249f)), closes [#113](https://github.com/Snehal1112/rocket/issues/113)
+* **tauri:** add inherited bindings and certs to resolved environment ([41b910d](https://github.com/Snehal1112/rocket/commit/41b910d25a86b67d8daf383a24baeb49c4d0b9f0)), closes [#110](https://github.com/Snehal1112/rocket/issues/110)
+
+### Bug Fixes
+
+* **app:** escape load-test HTML report content ([c4a8c45](https://github.com/Snehal1112/rocket/commit/c4a8c45e624a88ee18416cb90149db876495c0e2)), closes [#117](https://github.com/Snehal1112/rocket/issues/117)
+* **app:** mask secrets in the req.setMethod error ([2f331ad](https://github.com/Snehal1112/rocket/commit/2f331ad7a3b94dee826fe17dc64fa38c02ede9ae)), closes [#115](https://github.com/Snehal1112/rocket/issues/115)
+* **app:** publish RequestSaved after the re-read ([f01b91d](https://github.com/Snehal1112/rocket/commit/f01b91d09e4f0a0478ab94bfd3ed015a590167b7)), closes [#115](https://github.com/Snehal1112/rocket/issues/115)
+* **environment:** let the dialog use inherited secret bindings ([bcdf452](https://github.com/Snehal1112/rocket/commit/bcdf452dcb407c8aee037c6442f42a8d81d701e3)), closes [#110](https://github.com/Snehal1112/rocket/issues/110)
+* **environment:** log cycle fallbacks and narrow binding type ([0290454](https://github.com/Snehal1112/rocket/commit/0290454dc98d65e6b0541cdb274ff11552b1dbea)), closes [#110](https://github.com/Snehal1112/rocket/issues/110)
+* **env:** keep unsaved global env edits on refetch ([90f61d7](https://github.com/Snehal1112/rocket/commit/90f61d74870d5a98d3124628e0ad335f37c6f114)), closes [#115](https://github.com/Snehal1112/rocket/issues/115)
+* **export:** neutralise formula cells in load-test CSV ([2dd1bb0](https://github.com/Snehal1112/rocket/commit/2dd1bb0fd06863cf03edd6b16fe92c4aebe3a8ae)), closes [#127](https://github.com/Snehal1112/rocket/issues/127)
+* **export:** pin Chart.js with an integrity hash ([da47ed6](https://github.com/Snehal1112/rocket/commit/da47ed6c92e0e677f02c04820a96894aeea1571e)), closes [#128](https://github.com/Snehal1112/rocket/issues/128)
+* **flow:** bind callback URLs to the starting window ([31d0e41](https://github.com/Snehal1112/rocket/commit/31d0e41fab38af851fc9eeebd416f5b4898dfe23)), closes [#115](https://github.com/Snehal1112/rocket/issues/115)
+* **frontend:** use singular label for one inherited secret ([8db7732](https://github.com/Snehal1112/rocket/commit/8db7732ccbcc72b54082c0b9de7a5d67c29c05cf)), closes [#110](https://github.com/Snehal1112/rocket/issues/110)
+* **git:** stop publishing from the conflicts query ([6ce73d2](https://github.com/Snehal1112/rocket/commit/6ce73d20c7e57d1ddb83a782322cd429e164c660)), closes [#115](https://github.com/Snehal1112/rocket/issues/115)
+* **infra:** create HTTP requests without hard links ([a409082](https://github.com/Snehal1112/rocket/commit/a409082da94195d064d6f530201c83f5f49283c2)), closes [#125](https://github.com/Snehal1112/rocket/issues/125)
+* **tauri:** limit app commands to the main window ([98d45e8](https://github.com/Snehal1112/rocket/commit/98d45e8353a8f8468233b2e162cf23c9175c62f7))
+* **tauri:** skip identical write of the ACL permission set ([abb268e](https://github.com/Snehal1112/rocket/commit/abb268e1caf1f3ba7e79ed4177a5a8aebbdedadc))
+
 ## [2.1.2](https://github.com/Snehal1112/rocket/compare/v2.1.1...v2.1.2) (2026-10-29)
 
 ### Features
