@@ -1347,6 +1347,37 @@ async fn nested_run_request_target_resolves_process_env() {
 }
 
 #[tokio::test]
+async fn nested_run_with_denied_gate_warns_in_the_caller_console() {
+    let mut collection = Collection::new("api");
+    collection.root.add_request(saved(
+        "Main",
+        "main.yml",
+        "await rok.runRequest('auth/login');",
+    ));
+    let mut login = saved("Login", "login.yml", "");
+    login.url = "https://api.test/{{process.env.ROCKET_T2_KEY}}".into();
+    let mut auth = Folder::new("auth");
+    auth.add_request(login);
+    collection.root.add_subfolder(auth);
+    let input = send_input(&collection, "main.yml");
+    let (svc, executor) = process_env_run_service(collection);
+    // The gate is open in the helper, so close it for this test.
+    let svc = svc.with_trust_store(crate::test_doubles::InMemoryTrustStore::new());
+    let out = svc.execute(input).await.expect("execute");
+    assert!(out.script_error.is_none(), "{:?}", out.script_error);
+    assert_eq!(
+        urls(&executor)[0],
+        "https://api.test/{{process.env.ROCKET_T2_KEY}}"
+    );
+    let warnings = out
+        .console_entries
+        .iter()
+        .filter(|e| super::is_process_env_withheld_entry(e))
+        .count();
+    assert_eq!(warnings, 1, "{:?}", out.console_entries);
+}
+
+#[tokio::test]
 async fn script_written_process_env_placeholder_stays_unresolved() {
     let collection = main_and_login(
         "req.setUrl('https://x.test/{{process.env.ROCKET_T1_KEY}}');",

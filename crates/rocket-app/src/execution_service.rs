@@ -348,6 +348,22 @@ struct ResolvedParts {
     process_env: SendProcessEnv,
 }
 
+/// The Console line for a backend send whose `{{process.env.NAME}}` was left unresolved.
+pub(crate) fn process_env_withheld_entry() -> ConsoleEntry {
+    ConsoleEntry {
+        level: ConsoleLevel::Warn,
+        message: "Host environment variables are not allowed for this collection, so \
+                  {{process.env.NAME}} was sent unresolved."
+            .to_string(),
+    }
+}
+
+/// Whether `entry` is the line `process_env_withheld_entry` builds.
+pub(crate) fn is_process_env_withheld_entry(entry: &ConsoleEntry) -> bool {
+    let expected = process_env_withheld_entry();
+    entry.level == expected.level && entry.message == expected.message
+}
+
 /// What one send knows about the host environment (`{{process.env.NAME}}`).
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SendProcessEnv {
@@ -356,8 +372,6 @@ pub(crate) struct SendProcessEnv {
     /// The values of the `process.env` names the field templates resolved.
     pub used_values: std::collections::HashSet<String>,
     /// The `process.env` names the templates reference while the gate is denied.
-    // Read by the warning line in a later task.
-    #[allow(dead_code)]
     pub withheld_names: Vec<String>,
 }
 
@@ -426,6 +440,9 @@ pub(crate) struct PhaseState {
     pub process_env: SendProcessEnv,
     /// `process.env` values used by the nested runs of this send, shared with the script host.
     pub nested_process_env_values: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    /// Set when a nested run withheld `process.env` values, so the caller's Console gets the
+    /// warning too. Shared with the script host.
+    pub nested_withheld: Arc<std::sync::atomic::AtomicBool>,
     /// Names a pre-request script added in text it wrote (URL, header, body). Script text is
     /// filled only for these and the names the first resolution could not resolve.
     pub script_names: std::collections::HashSet<String>,
@@ -1831,6 +1848,7 @@ impl RequestExecutionService {
             chain: state.run_chain.clone(),
             calling_url: state.http_request.url.clone(),
             nested_process_env_values: Arc::clone(&state.nested_process_env_values),
+            nested_withheld: Arc::clone(&state.nested_withheld),
         }
     }
 
@@ -2250,11 +2268,19 @@ impl RequestExecutionService {
             input.tests_script.as_deref(),
         );
 
+        let mut console = Vec::new();
+        // A send from the request tab was already warned by the frontend.
+        if !process_env.withheld_names.is_empty()
+            && input.run_source != rocket_shared::RunSource::Manual
+        {
+            console.push(process_env_withheld_entry());
+        }
+
         Ok(PhaseState {
             http_request,
             var_ctx,
             script_error: None,
-            console: Vec::new(),
+            console,
             test_results: Vec::new(),
             next_request: None,
             skip_request: false,
@@ -2277,6 +2303,7 @@ impl RequestExecutionService {
             nested_process_env_values: Arc::new(std::sync::Mutex::new(
                 std::collections::HashSet::new(),
             )),
+            nested_withheld: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             script_names: std::collections::HashSet::new(),
         })
     }
@@ -2840,6 +2867,15 @@ impl RequestExecutionService {
             crate::assertion_evaluator::evaluate_assertions(&input.assertions, &response);
         state.test_results.extend(assertion_results);
 
+        // A nested run that withheld `process.env` values warns in this Console too, once.
+        if state
+            .nested_withheld
+            .load(std::sync::atomic::Ordering::SeqCst)
+            && !state.console.iter().any(is_process_env_withheld_entry)
+        {
+            state.console.push(process_env_withheld_entry());
+        }
+
         // ── Emit events ───────────────────────────────────────────────────────
         self.publish_console(&request_name, &state.console);
 
@@ -3047,6 +3083,12 @@ impl RequestExecutionService {
         state.active_runs = Arc::clone(active_runs);
         state.run_chain = chain;
         state.seed_runtime(runtime);
+        // A nested run of a Manual send is not warned by `begin_phases`.
+        if !state.process_env.withheld_names.is_empty()
+            && !state.console.iter().any(is_process_env_withheld_entry)
+        {
+            state.console.push(process_env_withheld_entry());
+        }
         self.run_before_request_phase(&input, ExecutionMode::Standalone, &mut state)
             .await?;
         let response = self.send_request(&state).await?;
@@ -12618,6 +12660,71 @@ mod tests {
         let os_path = std::env::var("PATH").expect("PATH is set");
         assert!(output.run_process_env_values.contains(&os_path));
         assert!(!output.run_process_env_values.contains("abc123secret"));
+    }
+
+    fn withheld_input(source: rocket_shared::RunSource) -> ExecuteRequestInput {
+        let mut input = backend_input("https://x.test/{{process.env.ROCKET_T2_KEY}}");
+        input.headers = vec![rocket_shared::types::Header {
+            key: "X-Key".into(),
+            value: "{{process.env.ROCKET_T2_KEY}}".into(),
+            enabled: true,
+            description: None,
+        }];
+        input.run_source = source;
+        input
+    }
+
+    fn withheld_count(entries: &[ConsoleEntry]) -> usize {
+        entries
+            .iter()
+            .filter(|e| is_process_env_withheld_entry(e))
+            .count()
+    }
+
+    #[test]
+    fn withheld_entry_is_a_warning_with_the_frontend_text() {
+        let entry = process_env_withheld_entry();
+        assert_eq!(entry.level, ConsoleLevel::Warn);
+        assert_eq!(
+            entry.message,
+            "Host environment variables are not allowed for this collection, so \
+             {{process.env.NAME}} was sent unresolved."
+        );
+    }
+
+    #[tokio::test]
+    async fn backend_send_with_denied_gate_warns_once() {
+        let (svc, executor, _, _) = process_env_svc(&[("ROCKET_T2_KEY", "abc123secret")], false);
+        let input = withheld_input(rocket_shared::RunSource::Flow);
+        let output = svc.execute(input).await.expect("execute");
+        assert_eq!(withheld_count(&output.console_entries), 1);
+        assert_eq!(output.console_entries.len(), 1);
+        assert!(sent_url(&executor).contains("{{process.env.ROCKET_T2_KEY}}"));
+    }
+
+    #[tokio::test]
+    async fn manual_send_with_denied_gate_adds_no_backend_warning() {
+        let (svc, _, _, _) = process_env_svc(&[("ROCKET_T2_KEY", "abc123secret")], false);
+        let input = withheld_input(rocket_shared::RunSource::Manual);
+        let output = svc.execute(input).await.expect("execute");
+        assert_eq!(withheld_count(&output.console_entries), 0);
+    }
+
+    #[tokio::test]
+    async fn scratch_send_never_warns() {
+        let (svc, _, _, _) = process_env_svc(&[("ROCKET_T2_KEY", "abc123secret")], false);
+        let mut input = withheld_input(rocket_shared::RunSource::Flow);
+        input.collection = None;
+        let output = svc.execute(input).await.expect("execute");
+        assert_eq!(withheld_count(&output.console_entries), 0);
+    }
+
+    #[tokio::test]
+    async fn allowed_gate_does_not_warn() {
+        let (svc, _, _, _) = process_env_svc(&[("ROCKET_T2_KEY", "abc123secret")], true);
+        let input = withheld_input(rocket_shared::RunSource::Flow);
+        let output = svc.execute(input).await.expect("execute");
+        assert_eq!(withheld_count(&output.console_entries), 0);
     }
 
     #[tokio::test]

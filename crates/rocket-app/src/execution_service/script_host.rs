@@ -58,6 +58,8 @@ pub(crate) struct ExecutionScriptHost<'a> {
     pub(crate) calling_url: String,
     /// Collects the `process.env` values the nested runs used, for the calling send.
     pub(crate) nested_process_env_values: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    /// Set when a nested run warned that it withheld `process.env` values.
+    pub(crate) nested_withheld: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// Turns an executor response into what a script sees.
@@ -216,6 +218,14 @@ impl ScriptHost for ExecutionScriptHost<'_> {
         let scopes = self.stored_scopes(collection);
         if let Ok(mut used) = self.nested_process_env_values.lock() {
             used.extend(output.run_process_env_values.iter().cloned());
+        }
+        if output
+            .console_entries
+            .iter()
+            .any(super::is_process_env_withheld_entry)
+        {
+            self.nested_withheld
+                .store(true, std::sync::atomic::Ordering::SeqCst);
         }
         let (runtime_set, runtime_removed) = runtime_changes(&request.runtime_vars, &runtime);
         Ok(HostRunOutcome {

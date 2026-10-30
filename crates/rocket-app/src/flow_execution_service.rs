@@ -1996,7 +1996,8 @@ fn send_time_credential_value(
     external_secrets: &HashMap<String, String>,
 ) -> Option<String> {
     let template = crate::flow_auth::credential_template(&request_input.auth)?;
-    let mut vars = exec.build_variable_context(
+    // The send resolves `{{process.env.NAME}}` too, so the mask must match it.
+    let mut vars = exec.build_variable_context_with_process_env(
         request_input.global_env_name.as_deref(),
         request_input.collection.as_deref(),
         request_input.environment_name.as_deref(),
@@ -10041,6 +10042,149 @@ mod tests {
             !everything.contains(token),
             "the token sent leaked into run output: {everything}"
         );
+    }
+
+    /// Reads the same `.env` pairs for every path.
+    struct FixedDotEnv(Vec<(String, String)>);
+
+    impl rocket_environment::DotEnvLoader for FixedDotEnv {
+        fn load(
+            &self,
+            _raw_path: &str,
+            _base: Option<&std::path::Path>,
+        ) -> Result<Vec<(String, String)>, String> {
+            Ok(self.0.clone())
+        }
+
+        fn load_default(
+            &self,
+            _base: Option<&std::path::Path>,
+        ) -> Result<Vec<(String, String)>, String> {
+            Ok(Vec::new())
+        }
+
+        fn describe(
+            &self,
+            _raw_path: Option<&str>,
+            _base: Option<&std::path::Path>,
+        ) -> rocket_environment::DotEnvFileInfo {
+            rocket_environment::DotEnvFileInfo::default()
+        }
+    }
+
+    /// Hands out one shared environment and says where the collection lives.
+    struct DirEnvFactory(Arc<std::sync::Mutex<Environment>>);
+
+    impl rocket_environment::EnvironmentRepositoryFactory for DirEnvFactory {
+        fn for_collection(&self, _collection: &str) -> Box<dyn EnvironmentRepository> {
+            Box::new(SharedEnvRepo(Arc::clone(&self.0)))
+        }
+
+        fn collection_dir(&self, collection: &str) -> Option<std::path::PathBuf> {
+            Some(std::path::Path::new("/work").join(collection))
+        }
+    }
+
+    #[tokio::test]
+    async fn flow_request_node_sends_a_dot_env_value() {
+        let mut env = env_with(&[]);
+        env.dot_env_file_path = Some(".env".into());
+        let shared_env = Arc::new(std::sync::Mutex::new(env));
+        let executor = crate::test_doubles::RecordingExecutor::new();
+        let exec = RequestExecutionService::new(
+            Box::new(SharedEnvRepo(Arc::clone(&shared_env))),
+            Arc::new(SharedExecutor(Arc::clone(&executor))),
+            Box::new(NullHistoryRepo),
+            Box::new(crate::test_doubles::SharedCollectionRepo(
+                crate::test_doubles::InMemoryCollectionRepo::new(
+                    rocket_collection::Collection::new("my-api"),
+                ),
+            )),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all())
+        .with_collection_env_repo_factory(Box::new(DirEnvFactory(shared_env)))
+        .with_dot_env_loader(Box::new(FixedDotEnv(vec![(
+            "ROCKET_T2_KEY".to_string(),
+            "dotenv-value-123456".to_string(),
+        )])));
+        let flow = Flow {
+            name: "dot-env".to_string(),
+            nodes: vec![request_flow_node(
+                "r",
+                "https://api.example.com/{{process.env.ROCKET_T2_KEY}}",
+            )],
+            edges: Vec::new(),
+            callback_host: None,
+        };
+        let service = FlowExecutionService::new(
+            Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
+            Box::new(FakeCollectionRepo::new().build()),
+            Box::new(NullEventPublisher),
+        );
+        let input = RunFlowInput {
+            environment_name: Some("dev".to_string()),
+            ..run_input("dot-env")
+        };
+
+        let summary = service.run(&exec, input).await.expect("run");
+
+        assert_eq!(
+            executor.sent_urls(),
+            vec!["https://api.example.com/dotenv-value-123456".to_string()]
+        );
+        let everything = serde_json::to_string(&summary).expect("serialize summary");
+        assert!(
+            !everything.contains("dotenv-value-123456"),
+            "the .env value leaked into the run output: {everything}"
+        );
+    }
+
+    #[tokio::test]
+    async fn static_bearer_from_process_env_is_masked_in_the_trace() {
+        use rocket_shared::types::Auth;
+
+        // A unique name, so parallel tests do not collide.
+        std::env::set_var("ROCKET_T2_TOKEN", "os-token-abcdef123456");
+        let env = Arc::new(std::sync::Mutex::new(env_with(&[])));
+        let executor = LoginEchoExecutor::new(&env, "unused");
+        let exec = RequestExecutionService::new(
+            Box::new(SharedEnvRepo(Arc::clone(&env))),
+            Arc::clone(&executor) as Arc<dyn HttpExecutor>,
+            Box::new(NullHistoryRepo),
+            Box::new(crate::test_doubles::SharedCollectionRepo(
+                crate::test_doubles::InMemoryCollectionRepo::new(
+                    rocket_collection::Collection::new("my-api"),
+                ),
+            )),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
+        let service = template_auth_service(
+            Auth::Bearer {
+                token: "{{process.env.ROCKET_T2_TOKEN}}".to_string(),
+            },
+            false,
+        );
+
+        let summary = service.run(&exec, dev_input()).await.expect("run");
+
+        assert_eq!(
+            executor.sent_auths().last(),
+            Some(&Auth::Bearer {
+                token: "os-token-abcdef123456".to_string()
+            }),
+            "the request sends the resolved token"
+        );
+        assert_masked_in_run_output(&summary, "os-token-abcdef123456");
     }
 
     /// The canonical Login flow: the environment holds a stale `token` from a
