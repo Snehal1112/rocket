@@ -71,4 +71,4 @@ Pure logic that turns a Rocket collection into a Bruno ZIP or a Postman Collecti
 
 ## Tests
 
-- `cargo test -j4 -p rocket-export`. The Postman golden file is `tests/fixtures/postman-golden.json`. Update it only for an intended output change, by pasting the actual output.
+- `cargo test -j4 -p rocket-export`. The Postman golden file is `tests/fixtures/postman-golden.json`. Update it only for an intended output change, by pasting the actual output. The test compares parsed JSON, because CI's workspace build turns on serde_json's `preserve_order` and a per-crate build does not, so key order differs.

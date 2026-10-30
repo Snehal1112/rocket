@@ -264,5 +264,9 @@ fn full_collection_matches_golden() {
     // _postman_id is random, so the fixture stores a fixed marker.
     actual = actual.replace(doc["info"]["_postman_id"].as_str().expect("id"), "<uuid>");
     println!("{actual}");
-    assert_eq!(actual.trim(), GOLDEN.trim());
+    // Compare values, not text: a workspace build turns on serde_json's
+    // `preserve_order` (through deno_core), which changes the key order.
+    let actual: serde_json::Value = serde_json::from_str(&actual).expect("actual json");
+    let golden: serde_json::Value = serde_json::from_str(GOLDEN).expect("golden json");
+    assert_eq!(actual, golden);
 }
