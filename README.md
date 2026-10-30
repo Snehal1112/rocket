@@ -24,15 +24,17 @@
 - **File-based collections** stored as OpenCollection YAML on disk
 - **Multi-workspace** support with embedded and external collections
 - **Multiple protocols** — HTTP, GraphQL (schema introspection and subscriptions), gRPC, and WebSocket requests in the same collection tree
-- **Import from Postman, Bruno or WSDL** — collections, environments, and zipped exports, with auto-detection and optional new-workspace creation
+- **Import from Postman, Bruno, OpenAPI or WSDL** — collections, environments, and zipped exports, with auto-detection and optional new-workspace creation. OpenAPI 3.0, 3.1 and Swagger 2.0 load from a file or a link (GitHub links included), and a link import also pulls in remote `$ref` files
+- **OpenAPI sync** — keep a collection in step with its spec: review spec updates before they apply, keep your own values, reset a request to the spec and restore it, and run background checks once you approve the spec location on this machine (a GitHub token stays in the OS keychain)
+- **Export to Bruno or Postman** — a Bruno ZIP or a Postman Collection v2.1 file, with Postman environments when the collection has them. Literal credentials are blanked, `{{variable}}` references are kept, and scripts are translated to `pm.*` where a mapping exists. Flows, saved examples, and gRPC and WebSocket requests in Postman are not exported
 - **Full git integration** — staging, commits, branches, merges, push/pull/fetch (force-with-lease), stash, remote management, SSH key discovery, and real per-file conflict resolution, all via `libgit2` (no shell-outs)
 - **Collection Runner** — execute a whole collection or folder sequentially with live streamed progress and a results summary. History entries carry a run-source badge (manual, runner, load test, flow, agent) you can filter on
 - **Scripting & testing** — pre-request/post-response/test scripts in Monaco with real TypeScript IntelliSense for the `rok.*` API, a snippet sidebar, shared `.js` script files you can load with a local `require()`, plus a visual no-code assertions builder for scriptless checks
 - **Flow** — a visual workflow builder on a canvas. Wire saved requests together with Input, If, Switch, Transform, Auth, Wait-for-callback and Output nodes, run a whole flow or just part of it, and review per-step traces and saved run history. Flows are plain YAML files inside the collection
 - **AI Assistant** — a workspace chat panel that connects to an agent over ACP (Claude, Gemini, or a generic agent). The agent can read your workspace through MCP tools and propose changes (new requests and folders, script edits, renames, moves, environment variables, folder settings). Nothing is written until you accept each proposal. Conversations are stored per workspace with secrets masked, and agent credentials come from the vault, an environment variable, or the OS keychain
-- **Collection trust** — a trust gate shows which capabilities a collection requests (such as `{{process.env}}` access) and which you have allowed
+- **Collection trust** — a trust gate shows which capabilities a collection requests and which you have allowed. `{{process.env.NAME}}` reads the OS environment and the workspace, collection and environment `.env` files (the OS value wins) on HTTP sends, the runner, Flow, OAuth2 token requests, WebSocket, GraphQL subscriptions and gRPC. In a collection you have not allowed, the placeholder is sent as written with one Console warning and no `.env` file is read. `.env` values are masked in History, the Console and Flow traces
 - **Folder settings** — a per-folder tab for headers, auth, variables, docs, and scripts, stored in `folder.yml` and inherited by everything beneath the folder
-- **Environment variables** with `{{variable}}` template syntax, secret masking, and optional external secret-manager integration (RocketVault and Azure Key Vault) for pulling values from a vault
+- **Environment variables** with `{{variable}}` template syntax, secret masking, environments that extend another (inheriting its variables, secret bindings and client certificates), and optional external secret-manager integration (RocketVault and Azure Key Vault) for pulling values from a vault
 - **Multi-tab editor** with split panes, auto-save, and keyboard-driven navigation
 - **Authentication** — Basic, Bearer, API Key, Digest, NTLM, WSSE, OAuth 1.0, OAuth 2.0 (client credentials, password, authorization code with PKCE, and implicit grants), and AWS SigV4, plus mTLS client certificates and proxy support. Requests and folders can inherit auth from their parent
 - **Load testing** — phase-based (ramp-up/hold/ramp-down) or fixed-concurrency/RPS runs, a live dashboard with latency/throughput/error-rate/concurrency charts and percentile stats, and export to HTML/CSV/JSON/PDF
@@ -146,7 +148,8 @@ Frontend (React 19)  -->  Tauri IPC  -->  Rust Services  -->  Filesystem (~/.roc
 | `rocket-git` | Git operations via libgit2 |
 | `rocket-app` | Orchestration services |
 | `rocket-infra` | Filesystem implementations |
-| `rocket-import` | Bruno, Postman and WSDL importer |
+| `rocket-import` | Bruno, Postman, OpenAPI and WSDL importer |
+| `rocket-export` | Bruno and Postman exporter |
 | `src-tauri` | Tauri commands and app initialization |
 
 ### Frontend Stack
@@ -222,7 +225,8 @@ src/                           # React frontend
     git/                       # Git UI panel
     grpc/                      # gRPC request UI
     history/                   # Request history panel
-    import/                    # Postman/Bruno import dialog
+    export/                    # Bruno/Postman export dialog
+    import/                    # Postman/Bruno/OpenAPI import dialog
     layout/                    # App shell, sidebar, status bar
     panes/                     # Tab system and editor groups
     request/                   # Request editor, params, auth, body, scripts, runner, load testing
@@ -245,7 +249,8 @@ crates/                        # Rust backend
   rocket-git/
   rocket-app/
   rocket-infra/
-  rocket-import/                # Bruno, Postman and WSDL importers
+  rocket-import/                # Bruno, Postman, OpenAPI and WSDL importers
+  rocket-export/                # Bruno and Postman exporters
   rocket-grpc/
   rocket-flow/
   rocket-scripting/
