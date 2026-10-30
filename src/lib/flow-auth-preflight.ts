@@ -99,7 +99,15 @@ async function resolveEnv(scope: AuthNodeScope): Promise<AuthenticateEnv> {
   return {
     scope,
     rv: (s) => resolveWithContext(s, varCtx),
-    target: { collection: scope.collection, environmentName: scope.environmentName },
+    target: {
+      collection: scope.collection,
+      environmentName: scope.environmentName,
+      processEnv: {
+        kind: 'collection',
+        name: scope.collection,
+        environmentName: scope.environmentName,
+      },
+    },
   };
 }
 

@@ -10,6 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import type { ProcessEnvScope } from '@/lib/process-env-gate';
 import type { VariableScopeEntry, VariableSource } from '@/lib/url-variables';
 import type { AuthState } from '@/types/pane-types';
 import { OAuth1AuthEditor } from './OAuth1AuthEditor';
@@ -79,18 +80,22 @@ interface AuthEditorProps {
   requestPath?: string;
   /** Replaces the text of the Inherit card, for callers that know where auth comes from. */
   inheritMessage?: string;
+  /** The tab's process env scope for OAuth2 token requests. Leave it out when there is no tab. */
+  processEnvScope?: ProcessEnvScope;
 }
 
-export function AuthEditor({
-  auth,
-  onChange,
-  variableContext,
-  onNavigateToSource,
-  collection,
-  environmentName,
-  requestPath,
-  inheritMessage,
-}: AuthEditorProps) {
+export function AuthEditor(props: AuthEditorProps) {
+  const {
+    auth,
+    onChange,
+    variableContext,
+    onNavigateToSource,
+    collection,
+    environmentName,
+    requestPath,
+    inheritMessage,
+    processEnvScope,
+  } = props;
   const patchOAuth2 = useCallback(
     (patch: Partial<NonNullable<AuthState['oauth2']>>) => {
       onChange({
@@ -358,6 +363,8 @@ export function AuthEditor({
           collection={collection}
           environmentName={environmentName}
           requestPath={requestPath}
+          // A scratch tab's `undefined` scope must still reach the editor, so the key is kept.
+          {...('processEnvScope' in props ? { processEnvScope } : {})}
         />
       )}
 

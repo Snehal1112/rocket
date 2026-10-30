@@ -18,7 +18,28 @@ vi.mock('@/components/editor', () => ({
   ),
 }));
 
-import { OAuth2AuthEditor } from '../OAuth2AuthEditor';
+import { CLOSED_PROCESS_ENV } from '@/lib/process-env-gate';
+import { useEnvStore } from '@/stores/env-store';
+import { OAuth2AuthEditor, oauth2EditorScope } from '../OAuth2AuthEditor';
+
+describe('oauth2_editor_scope_falls_back_to_collection_or_closed', () => {
+  beforeEach(() => {
+    useEnvStore.setState({ activeCollection: null, activeEnvId: null });
+  });
+
+  it('uses the collection when no scope prop is given', () => {
+    expect(oauth2EditorScope(undefined, 'api', false)).toEqual({ kind: 'collection', name: 'api' });
+  });
+
+  it('is closed with no scope prop and no collection', () => {
+    expect(oauth2EditorScope(undefined, undefined, false)).toEqual({ kind: 'closed' });
+  });
+
+  it('lets the scope prop win over the collection', () => {
+    expect(oauth2EditorScope(CLOSED_PROCESS_ENV, 'api', true)).toEqual({ kind: 'closed' });
+    expect(oauth2EditorScope(undefined, undefined, true)).toEqual({ kind: 'scratch' });
+  });
+});
 
 const base = authStateForType('oauth2', { authType: 'none' }).oauth2 as NonNullable<
   ReturnType<typeof authStateForType>['oauth2']

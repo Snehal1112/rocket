@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use rocket_collection::CollectionRepository;
@@ -13,6 +13,9 @@ use rocket_http::{
 };
 use rocket_shared::error::{DomainError, DomainResult};
 use serde::Deserialize;
+
+use crate::process_env::{ProcessEnv, ProcessEnvScopeInput};
+use crate::redaction::{redact_secrets, MIN_REDACTION_LEN};
 
 // ─── Input types ───────────────────────────────────────────────────
 
@@ -58,6 +61,10 @@ pub struct OAuth2GetTokenRequest {
     pub request_path: Option<String>,
 
     pub force_reauth: Option<bool>,
+
+    /// Which host environment `{{process.env.*}}` may read. Omitted means closed.
+    #[serde(default)]
+    pub process_env: ProcessEnvScopeInput,
 }
 
 /// Request to refresh an existing OAuth2 token.
@@ -80,6 +87,10 @@ pub struct OAuth2RefreshRequest {
     pub collection: Option<String>,
     pub environment_name: Option<String>,
     pub request_path: Option<String>,
+
+    /// Which host environment `{{process.env.*}}` may read. Omitted means closed.
+    #[serde(default)]
+    pub process_env: ProcessEnvScopeInput,
 }
 
 /// Internal struct with all fields resolved (no more {{variables}}).
@@ -268,11 +279,13 @@ impl OAuth2Service {
         environment_name: Option<&str>,
         request_path: Option<&str>,
         external_secrets: &HashMap<String, String>,
+        process_env: &HashMap<String, String>,
     ) -> HashMap<String, String> {
-        // Precedence (lowest → highest): collection < env < folder < request.
+        // Precedence (lowest → highest): process env < collection < env < folder < request.
         // RocketVault values, keyed `alias.secretName`, are fetched by the caller.
         let mut ctx = VariableContext {
             external_secrets: external_secrets.clone(),
+            process_env: process_env.clone(),
             ..VariableContext::default()
         };
 
@@ -328,7 +341,33 @@ impl OAuth2Service {
             }
         }
 
-        ctx.flatten()
+        ctx.flatten_with_process_env()
+    }
+
+    /// `error` with the `.env` values of `process_env` masked, keeping its variant.
+    fn mask_dot_env(error: DomainError, process_env: &ProcessEnv) -> DomainError {
+        let secrets: HashSet<String> = process_env
+            .dot_env_keys
+            .iter()
+            .filter_map(|k| process_env.vars.get(k))
+            .filter(|v| v.len() >= MIN_REDACTION_LEN)
+            .cloned()
+            .collect();
+        if secrets.is_empty() {
+            return error;
+        }
+        let mask = |s: String| redact_secrets(&s, &secrets);
+        match error {
+            DomainError::Internal(m) => DomainError::Internal(mask(m)),
+            DomainError::InvalidInput(m) => DomainError::InvalidInput(mask(m)),
+            DomainError::NotFound(m) => DomainError::NotFound(mask(m)),
+            DomainError::AlreadyExists(m) => DomainError::AlreadyExists(mask(m)),
+            DomainError::Io(m) => DomainError::Io(mask(m)),
+            DomainError::Serialization(m) => DomainError::Serialization(mask(m)),
+            DomainError::Http(m) => DomainError::Http(mask(m)),
+            DomainError::Conflict(m) => DomainError::Conflict(mask(m)),
+            other => other,
+        }
     }
 
     /// Builds the `Authorization: Basic <base64(client_id:client_secret)>` header tuple
@@ -425,6 +464,17 @@ impl OAuth2Service {
         Self::post_token_request(&client, &url, &form, &extra_headers).await
     }
 
+    /// `get_token_direct` with `.env` values of `process_env` masked in its error.
+    pub async fn get_token_with_host_env(
+        &self,
+        config: &ResolvedOAuth2Config,
+        process_env: &ProcessEnv,
+    ) -> DomainResult<OAuthToken> {
+        self.get_token_direct(config)
+            .await
+            .map_err(|e| Self::mask_dot_env(e, process_env))
+    }
+
     /// Refreshes an OAuth2 token.
     pub async fn refresh_token(&self, req: &OAuth2RefreshRequest) -> DomainResult<OAuthToken> {
         self.refresh_token_with_secrets(req, &HashMap::new()).await
@@ -437,11 +487,35 @@ impl OAuth2Service {
         req: &OAuth2RefreshRequest,
         external_secrets: &HashMap<String, String>,
     ) -> DomainResult<OAuthToken> {
+        self.refresh_token_with_host_env(req, external_secrets, &ProcessEnv::default())
+            .await
+    }
+
+    /// Refreshes an OAuth2 token like `refresh_token_with_secrets`, and resolves
+    /// `{{process.env.*}}` from `process_env` too. `.env` values are masked in an error.
+    pub async fn refresh_token_with_host_env(
+        &self,
+        req: &OAuth2RefreshRequest,
+        external_secrets: &HashMap<String, String>,
+        process_env: &ProcessEnv,
+    ) -> DomainResult<OAuthToken> {
+        self.refresh_token_resolved(req, external_secrets, process_env)
+            .await
+            .map_err(|e| Self::mask_dot_env(e, process_env))
+    }
+
+    async fn refresh_token_resolved(
+        &self,
+        req: &OAuth2RefreshRequest,
+        external_secrets: &HashMap<String, String>,
+        process_env: &ProcessEnv,
+    ) -> DomainResult<OAuthToken> {
         let vars = self.build_variable_context(
             req.collection.as_deref(),
             req.environment_name.as_deref(),
             req.request_path.as_deref(),
             external_secrets,
+            &process_env.vars,
         );
         let r = |s: &str| resolve(s, &vars).output;
 
@@ -571,6 +645,20 @@ impl OAuth2Service {
         Self::post_token_request(&client, &url, &form, &extra_headers).await
     }
 
+    /// `exchange_code_for_token` with `.env` values of `process_env` masked in its error.
+    pub async fn exchange_code_for_token_with_host_env(
+        &self,
+        config: &ResolvedOAuth2Config,
+        code: &str,
+        redirect_uri: &str,
+        code_verifier: Option<&str>,
+        process_env: &ProcessEnv,
+    ) -> DomainResult<OAuthToken> {
+        self.exchange_code_for_token(config, code, redirect_uri, code_verifier)
+            .await
+            .map_err(|e| Self::mask_dot_env(e, process_env))
+    }
+
     /// Resolves all {{variables}} in the get-token request fields.
     pub fn resolve_get_token_request(&self, req: &OAuth2GetTokenRequest) -> ResolvedOAuth2Config {
         self.resolve_get_token_request_with_secrets(req, &HashMap::new())
@@ -583,11 +671,23 @@ impl OAuth2Service {
         req: &OAuth2GetTokenRequest,
         external_secrets: &HashMap<String, String>,
     ) -> ResolvedOAuth2Config {
+        self.resolve_get_token_request_with_host_env(req, external_secrets, &ProcessEnv::default())
+    }
+
+    /// Like `resolve_get_token_request_with_secrets`, and resolves `{{process.env.*}}` from
+    /// `process_env` as the lowest layer.
+    pub fn resolve_get_token_request_with_host_env(
+        &self,
+        req: &OAuth2GetTokenRequest,
+        external_secrets: &HashMap<String, String>,
+        process_env: &ProcessEnv,
+    ) -> ResolvedOAuth2Config {
         let vars = self.build_variable_context(
             req.collection.as_deref(),
             req.environment_name.as_deref(),
             req.request_path.as_deref(),
             external_secrets,
+            &process_env.vars,
         );
         let r = |s: &str| resolve(s, &vars).output;
 
@@ -739,7 +839,8 @@ pub(crate) mod tests {
             Box::new(ChainEnvRepo(vec![base, child])),
             Box::new(NullCollectionRepo::new()),
         );
-        let vars = svc.build_variable_context(None, Some("child"), None, &HashMap::new());
+        let vars =
+            svc.build_variable_context(None, Some("child"), None, &HashMap::new(), &HashMap::new());
         assert_eq!(
             vars.get("auth_host").map(String::as_str),
             Some("https://auth.example.com")
@@ -780,6 +881,7 @@ pub(crate) mod tests {
             environment_name: Some("test".into()),
             request_path: None,
             force_reauth: None,
+            process_env: Default::default(),
         };
         let resolved = svc.resolve_get_token_request(&req);
         assert_eq!(resolved.token_url, "https://auth.example.com/token");
@@ -1037,6 +1139,7 @@ pub(crate) mod tests {
             environment_name: Some("dev".into()),
             request_path: None,
             force_reauth: None,
+            process_env: Default::default(),
         }
     }
 
@@ -1143,6 +1246,7 @@ pub(crate) mod tests {
             collection: None,
             environment_name: Some("dev".into()),
             request_path: None,
+            process_env: Default::default(),
         };
 
         let err = svc.refresh_token(&req).await.unwrap_err();
@@ -1224,6 +1328,7 @@ pub(crate) mod tests {
             collection: None,
             environment_name: Some("dev".into()),
             request_path: None,
+            process_env: Default::default(),
         };
 
         let _ = svc.refresh_token_with_secrets(&req, &vault_secrets()).await;
@@ -1296,6 +1401,7 @@ pub(crate) mod tests {
                 collection: None,
                 environment_name: Some("dev".into()),
                 request_path: None,
+                process_env: Default::default(),
             };
 
             // The capturing provider fails on purpose, so only what it saw matters.
@@ -1439,7 +1545,13 @@ pub(crate) mod tests {
                 .expect("global env");
         }
         let ctx = |svc: &OAuth2Service| {
-            let vars = svc.build_variable_context(Some("api"), Some("g"), None, &HashMap::new());
+            let vars = svc.build_variable_context(
+                Some("api"),
+                Some("g"),
+                None,
+                &HashMap::new(),
+                &HashMap::new(),
+            );
             (vars.get("col").cloned(), vars.get("glob").cloned())
         };
 
@@ -1448,5 +1560,187 @@ pub(crate) mod tests {
         assert_eq!(ctx(&svc), (Some("b".into()), Some("b".into())));
         *path.lock().expect("lock") = a.path().to_path_buf();
         assert_eq!(ctx(&svc), (Some("a".into()), Some("a".into())));
+    }
+
+    // ─── Process env ─────────────────────────────────────
+
+    fn client_credentials_request(token_url: &str) -> OAuth2GetTokenRequest {
+        serde_json::from_value(serde_json::json!({
+            "grantType": "client_credentials",
+            "tokenUrl": token_url,
+            "clientId": "id",
+        }))
+        .expect("get-token request")
+    }
+
+    fn host_env(pairs: &[(&str, &str)], dot_env: &[&str]) -> ProcessEnv {
+        ProcessEnv {
+            vars: pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            dot_env_keys: dot_env.iter().map(|k| k.to_string()).collect(),
+            allowed: true,
+        }
+    }
+
+    #[test]
+    fn oauth2_service_resolves_process_env_map_as_lowest_layer() {
+        let svc = make_service_with_env(&[("my_secret", "env-wins")]);
+        let mut req = client_credentials_request("https://auth.example.com/token");
+        req.client_secret = Some("{{my_secret}}".into());
+        req.scope = Some("{{process.env.ROCKET_X}}".into());
+        req.environment_name = Some("test".into());
+        let env = host_env(&[("my_secret", "host"), ("ROCKET_X", "hostx")], &[]);
+
+        let config = svc.resolve_get_token_request_with_host_env(&req, &HashMap::new(), &env);
+        assert_eq!(config.client_secret, "env-wins");
+        assert_eq!(config.scope.as_deref(), Some("hostx"));
+
+        let closed = svc.resolve_get_token_request_with_host_env(
+            &req,
+            &HashMap::new(),
+            &ProcessEnv::default(),
+        );
+        assert_eq!(closed.scope.as_deref(), Some("{{process.env.ROCKET_X}}"));
+    }
+
+    #[test]
+    fn oauth2_get_token_request_defaults_to_closed_scope() {
+        let get: OAuth2GetTokenRequest = serde_json::from_value(serde_json::json!({
+            "grantType": "client_credentials", "clientId": "id"
+        }))
+        .expect("get-token");
+        assert_eq!(get.process_env, ProcessEnvScopeInput::Closed);
+        let refresh: OAuth2RefreshRequest = serde_json::from_value(serde_json::json!({
+            "refreshToken": "r", "tokenUrl": "https://x/token", "clientId": "id"
+        }))
+        .expect("refresh");
+        assert_eq!(refresh.process_env, ProcessEnvScopeInput::Closed);
+        let scratch: OAuth2GetTokenRequest = serde_json::from_value(serde_json::json!({
+            "grantType": "client_credentials", "clientId": "id",
+            "processEnv": { "kind": "scratch" }
+        }))
+        .expect("scratch");
+        assert_eq!(scratch.process_env, ProcessEnvScopeInput::Scratch);
+    }
+
+    #[tokio::test]
+    async fn oauth2_get_token_error_masks_dot_env_value() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(400)
+                    .set_body_string("bad secret dotenv-secret-654321"),
+            )
+            .mount(&server)
+            .await;
+        let svc = make_service_with_env(&[]);
+        let mut req = client_credentials_request(&format!("{}/token", server.uri()));
+        req.client_secret = Some("{{process.env.ROCKET_CS_KEY}}".into());
+        let env = host_env(
+            &[("ROCKET_CS_KEY", "dotenv-secret-654321")],
+            &["ROCKET_CS_KEY"],
+        );
+        let config = svc.resolve_get_token_request_with_host_env(&req, &HashMap::new(), &env);
+        assert_eq!(config.client_secret, "dotenv-secret-654321");
+        let err = svc
+            .get_token_with_host_env(&config, &env)
+            .await
+            .expect_err("400");
+        assert!(!err.to_string().contains("dotenv-secret-654321"), "{err}");
+        assert!(err.to_string().contains("400"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn oauth2_refresh_resolves_process_env_map() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .and(wiremock::matchers::body_string_contains(
+                "client_secret=dotenv-secret-654321",
+            ))
+            .respond_with(
+                wiremock::ResponseTemplate::new(200).set_body_json(
+                    serde_json::json!({"access_token": "t", "token_type": "bearer"}),
+                ),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        let svc = make_service_with_env(&[]);
+        let req: OAuth2RefreshRequest = serde_json::from_value(serde_json::json!({
+            "refreshToken": "r",
+            "tokenUrl": format!("{}/token", server.uri()),
+            "clientId": "id",
+            "clientSecret": "{{process.env.ROCKET_CS_KEY}}",
+        }))
+        .expect("refresh");
+        let env = host_env(
+            &[("ROCKET_CS_KEY", "dotenv-secret-654321")],
+            &["ROCKET_CS_KEY"],
+        );
+        let token = svc
+            .refresh_token_with_host_env(&req, &HashMap::new(), &env)
+            .await
+            .expect("refresh");
+        assert_eq!(token.access_token, "t");
+    }
+
+    #[tokio::test]
+    async fn oauth2_refresh_error_masks_dot_env_value() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(400)
+                    .set_body_string("bad secret dotenv-secret-654321"),
+            )
+            .mount(&server)
+            .await;
+        let svc = make_service_with_env(&[]);
+        let req: OAuth2RefreshRequest = serde_json::from_value(serde_json::json!({
+            "refreshToken": "r",
+            "tokenUrl": format!("{}/token", server.uri()),
+            "clientId": "id",
+            "clientSecret": "{{process.env.ROCKET_CS_KEY}}",
+        }))
+        .expect("refresh");
+        let env = host_env(
+            &[("ROCKET_CS_KEY", "dotenv-secret-654321")],
+            &["ROCKET_CS_KEY"],
+        );
+        let err = svc
+            .refresh_token_with_host_env(&req, &HashMap::new(), &env)
+            .await
+            .expect_err("400");
+        assert!(!err.to_string().contains("dotenv-secret-654321"), "{err}");
+        assert!(err.to_string().contains("400"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn oauth2_code_exchange_error_masks_dot_env_value() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(400)
+                    .set_body_string("bad secret dotenv-secret-654321"),
+            )
+            .mount(&server)
+            .await;
+        let svc = make_service_with_env(&[]);
+        let mut req = client_credentials_request(&format!("{}/token", server.uri()));
+        req.grant_type = "authorization_code".into();
+        req.client_secret = Some("{{process.env.ROCKET_CS_KEY}}".into());
+        let env = host_env(
+            &[("ROCKET_CS_KEY", "dotenv-secret-654321")],
+            &["ROCKET_CS_KEY"],
+        );
+        let config = svc.resolve_get_token_request_with_host_env(&req, &HashMap::new(), &env);
+        assert_eq!(config.client_secret, "dotenv-secret-654321");
+        let err = svc
+            .exchange_code_for_token_with_host_env(&config, "code", "http://cb", None, &env)
+            .await
+            .expect_err("400");
+        assert!(!err.to_string().contains("dotenv-secret-654321"), "{err}");
+        assert!(err.to_string().contains("400"), "{err}");
     }
 }

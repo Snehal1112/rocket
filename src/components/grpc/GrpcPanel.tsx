@@ -314,6 +314,7 @@ export function GrpcPanel({ tab, groupId }: GrpcPanelProps) {
               collection={tab.source?.collection}
               environmentName={scope.environmentName}
               requestPath={tab.source?.path}
+              processEnvScope={processEnvScopeOf(tab)}
             />
           </TabsContent>
           <TabsContent value='variables'>

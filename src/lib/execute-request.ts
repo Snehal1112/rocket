@@ -8,6 +8,8 @@ import { findTabInTree } from '@/lib/pane-utils';
 import {
   CLOSED_PROCESS_ENV,
   type ProcessEnvScope,
+  type ProcessEnvScopeInput,
+  toProcessEnvScopeInput,
   warnIfProcessEnvWithheld,
 } from '@/lib/process-env-gate';
 import { environmentKeys } from '@/lib/queries/environment-queries';
@@ -589,6 +591,7 @@ async function maybeAutoRefreshOrFetchToken(
   environmentName: string | undefined,
   requestPath: string | undefined,
   varCtx: Record<string, string>,
+  processEnv: ProcessEnvScopeInput,
 ): Promise<RequestState> {
   if (request.auth.authType !== 'oauth2' || !request.auth.oauth2) return request;
   const oauth = request.auth.oauth2;
@@ -619,7 +622,7 @@ async function maybeAutoRefreshOrFetchToken(
   ) {
     try {
       const result = await oauth2RefreshToken(
-        buildRefreshRequest(oauth, rv, { collection, environmentName, requestPath }),
+        buildRefreshRequest(oauth, rv, { collection, environmentName, requestPath, processEnv }),
       );
       applyToken({
         accessToken: result.access_token,
@@ -642,7 +645,7 @@ async function maybeAutoRefreshOrFetchToken(
     // browser or a webview as a side effect of Send would surprise the user.
     try {
       const result = await oauth2GetToken(
-        buildGetTokenRequest(oauth, rv, { collection, environmentName, requestPath }),
+        buildGetTokenRequest(oauth, rv, { collection, environmentName, requestPath, processEnv }),
       );
       applyToken({
         accessToken: result.access_token,
@@ -735,6 +738,7 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
     preEnvName,
     preRequestPath,
     preVarCtx,
+    toProcessEnvScopeInput(processEnvScope),
   );
 
   const {

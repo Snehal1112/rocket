@@ -234,6 +234,7 @@ export function WebSocketPanel({ tab, groupId }: WebSocketPanelProps) {
                 variableContext={variableContext}
                 collection={tab.source?.collection}
                 requestPath={tab.source?.path}
+                processEnvScope={processEnvScopeOf(tab)}
               />
             </div>
           </TabsContent>

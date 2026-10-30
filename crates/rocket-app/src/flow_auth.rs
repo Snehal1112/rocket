@@ -380,6 +380,7 @@ pub(crate) fn build_get_token_request(
             environment_name: ctx.environment_name.clone(),
             request_path: None,
             force_reauth: None,
+            process_env: Default::default(),
         }
     };
     match flow {

@@ -19,7 +19,20 @@ function oauthState(flow = 'authorization_code') {
 }
 
 const rv = (s: string) => s.replace('{{cid}}', 'resolved-cid');
-const target = { collection: 'api', environmentName: 'dev', requestPath: undefined };
+const target = {
+  collection: 'api',
+  environmentName: 'dev',
+  requestPath: undefined,
+  processEnv: { kind: 'collection', name: 'api', environmentName: 'dev' } as const,
+};
+
+describe('process env scope', () => {
+  it('carries the process env scope on get-token and refresh requests', () => {
+    const expected = { kind: 'collection', name: 'api', environmentName: 'dev' };
+    expect(buildGetTokenRequest(oauthState(), rv, target).processEnv).toEqual(expected);
+    expect(buildRefreshRequest(oauthState(), rv, target).processEnv).toEqual(expected);
+  });
+});
 
 describe('buildGetTokenRequest', () => {
   it('maps the OAuth2 state to a get-token request with variables resolved', () => {
