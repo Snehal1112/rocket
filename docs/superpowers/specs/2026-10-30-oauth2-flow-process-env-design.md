@@ -55,7 +55,7 @@ pub(crate) fn variable_context_with_process_env(&self, global_env_name: Option<&
     external_secrets: &HashMap<String, String>, process_env: &HashMap<String, String>) -> HashMap<String, String>
 ```
 
-It builds the scopes as `build_variable_context` does, sets `scopes.process_env` and returns `flatten_with_process_env()`. `FetchContext.vars` and the Input node's map use it with the run's `ProcessEnv.vars`. Every `.env` value of the run (the values of `dot_env_keys`, at least `MIN_REDACTION_LEN` long) is added to `external_secrets` under keys no template can reference, built like `flow_run_cache::previous_run_secret_key` (`flow_run_cache.rs:505`). So step traces, outputs, history and logs mask them through the existing paths. Request nodes are unchanged: they still read process env per send.
+It builds the scopes as `build_variable_context` does, sets `scopes.process_env` and returns `flatten_with_process_env()`. `FetchContext.vars` and the Input node's map use it with the run's `ProcessEnv.vars`. The run keeps its `.env` values (the values of `dot_env_keys`, at least `MIN_REDACTION_LEN` long) as `run_dot_env_values: HashSet<String>`. They join the step mask only: `execute_node` extends its `secret_values` (and so `trace_masks`) with them, the Request arm's own set gets them too, and the run's `masking_secrets` (the cache entry) adds them. They never join `external_secrets`, which is the RocketVault channel: a script write that holds a `.env` value is saved as usual, not held back, and `rok.getSecretVar` cannot read a `.env` value. This matches request nodes since #112 (`SendProcessEnv.dot_env_values`, `execution_service.rs:396`). Request nodes are unchanged: they still read process env per send.
 
 ### 2. Flow Input node
 
@@ -157,6 +157,7 @@ Commands: `cargo check -j4`, the tests above, `yarn tsc --noEmit`, `yarn check`.
 - The OAuth2 IPC DTOs use the same scope rule (TypeScript required, Rust default closed). Options: same rule, required on both sides. Chosen: same rule as `ExecuteRequestInput`, for one consistent contract. Decided by: call
 - Where do the OAuth2 process env resolution and error masking live? Options: `OAuth2Service` owns them with the `ProcessEnv` passed in, an injected provider trait, the Tauri command. Chosen: `OAuth2Service` owns them; the command only adds the `process_env_for_scope` service call next to the vault one. Decided by: user
 - Should `ProcessEnvScopeInput` move out of the WebSocket module? Options: move it with `ProcessEnv` and the pure scope logic into `process_env.rs`, move the type only, leave it. Chosen: move both types and `scope_target` into `crates/rocket-app/src/process_env.rs`, keeping the `rocket_app::ProcessEnvScopeInput` re-export. Decided by: user
-- Flow reads process env once per run for Input and Auth nodes, and its `.env` values join `external_secrets` under unreferenceable keys. Decided by: call
+- Flow reads process env once per run for Input and Auth nodes. Decided by: call
+- How do Flow Input and Auth nodes mask `.env` values? Options: the step mask only (`secret_values`), `external_secrets` (adds the vault hold-back and `rok.getSecretVar` reads), the step mask plus a hold-back. Chosen: the step mask only, as request nodes do since #112. Decided by: user
 - Executor errors are masked in `send_request` for every send, not only OAuth2 ones. Decided by: call
-- `OAuth2AuthEditor` without a scope prop uses its `collection` prop, or closed with none. Decided by: call
+- What scope does `OAuth2AuthEditor` use without a `processEnvScope` prop? Options: its `collection` prop or closed with none, always closed, a required prop. Chosen: its `collection` prop (that collection's own gate), or closed with none. Decided by: user
