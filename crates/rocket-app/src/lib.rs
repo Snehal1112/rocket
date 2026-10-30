@@ -59,6 +59,7 @@ pub mod load_test_service;
 pub mod mcp_read_views;
 pub mod mcp_tool_service;
 pub mod oauth2_service;
+mod process_env;
 pub mod openapi_change_link;
 pub mod openapi_connect;
 pub mod openapi_sync_apply;
@@ -115,11 +116,12 @@ pub use conversation_service::{
 pub use cookie_service::CookieService;
 pub use environment_service::EnvironmentService;
 pub use execution_service::websocket_resolution::{
-    ProcessEnvScopeInput, WebSocketConnectInput, WebSocketScope, WebSocketSendInput,
+    WebSocketConnectInput, WebSocketScope, WebSocketSendInput,
 };
 pub use execution_service::{
-    DotEnvStatus, ExecuteRequestInput, ExecuteRequestOutput, ProcessEnv, RequestExecutionService,
+    DotEnvStatus, ExecuteRequestInput, ExecuteRequestOutput, RequestExecutionService,
 };
+pub use process_env::{ProcessEnv, ProcessEnvScopeInput};
 pub use export_service::{ExportFormat, ExportService};
 pub use flow_auth::{
     FetchContext, FlowAuthTokens, FlowTokenFetcher, NoTokenFetcher, OAuth2ServiceFetcher,
