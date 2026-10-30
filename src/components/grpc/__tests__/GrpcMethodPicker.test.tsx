@@ -64,6 +64,7 @@ const input: GrpcExecuteInput = {
     methodType: 'unary',
     auth: { authType: 'none' },
   },
+  processEnv: { kind: 'scratch' },
 };
 
 function renderPicker(overrides: Partial<React.ComponentProps<typeof GrpcMethodPicker>> = {}) {

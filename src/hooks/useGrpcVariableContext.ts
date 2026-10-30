@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { CLOSED_PROCESS_ENV, type ProcessEnvScope } from '@/lib/process-env-gate';
 import {
   useEnvironments,
   useGlobalEnvironmentName,
@@ -14,6 +15,8 @@ import {
 } from '@/lib/tauri-api';
 import { buildScopedContext, secretKeysOf, type VariableScopeEntry } from '@/lib/url-variables';
 import { useEnvStore } from '@/stores/env-store';
+
+const NO_PROCESS_ENV_VARS: Record<string, string> = {};
 
 function enabledMap(vars: ResolvedVariable[] | undefined): Record<string, string> {
   const out: Record<string, string> = {};
@@ -35,6 +38,7 @@ export interface GrpcVariableScope {
  */
 export function useGrpcVariableContext(
   source: { collection: string; path: string } | undefined,
+  processEnvScope: ProcessEnvScope,
 ): GrpcVariableScope {
   const activeEnvId = useEnvStore((s) => s.activeEnvId);
   const activeCollection = useEnvStore((s) => s.activeCollection);
@@ -43,7 +47,12 @@ export function useGrpcVariableContext(
   // Flattened by the backend, so a variable inherited through `extends` is included.
   const { data: resolvedEnv } = useResolvedEnvironment(activeCollection, activeEnvId);
   const { data: resolvedGlobal } = useResolvedEnvironment(null, globalEnvName);
-  const { data: processEnvVars = {} } = useProcessEnvVars(source?.collection);
+  const closed = processEnvScope === CLOSED_PROCESS_ENV;
+  const { data: processEnvData } = useProcessEnvVars(
+    typeof processEnvScope === 'string' ? processEnvScope : null,
+    !closed,
+  );
+  const processEnvVars = closed ? NO_PROCESS_ENV_VARS : (processEnvData ?? NO_PROCESS_ENV_VARS);
 
   const [collectionVars, setCollectionVars] = useState<CollectionVariable[]>([]);
   const [folderVars, setFolderVars] = useState<CollectionVariable[]>([]);

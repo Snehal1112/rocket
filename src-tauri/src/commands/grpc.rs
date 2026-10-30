@@ -26,6 +26,8 @@ pub struct GrpcExecuteDto {
     /// Deadline in milliseconds. 0 or absent means none.
     #[serde(default)]
     pub timeout_ms: Option<u64>,
+    /// The tab's host environment scope. Required, so a sender cannot leave it out.
+    pub process_env: rocket_app::ProcessEnvScopeInput,
 }
 
 impl GrpcExecuteDto {
@@ -54,12 +56,13 @@ async fn resolve_input(
     let secrets = exec
         .resolve_external_secrets(dto.collection.as_deref(), dto.environment_name.as_deref())
         .await?;
-    let variables = exec.build_variable_context_with_process_env(
+    let variables = exec.build_variable_context_for_scope(
         dto.global_env_name.as_deref(),
         dto.collection.as_deref(),
         dto.environment_name.as_deref(),
         dto.request_path.as_deref(),
         &secrets,
+        &dto.process_env,
     );
     Ok(dto.into_input(variables))
 }
@@ -132,8 +135,22 @@ mod tests {
 
     fn dto_json(extra: &str) -> String {
         format!(
-            r#"{{"collection": "api", "request": {{"name": "Say", "url": "localhost:50051", "methodType": "unary"}}{extra}}}"#
+            r#"{{"collection": "api", "request": {{"name": "Say", "url": "localhost:50051", "methodType": "unary"}}, "processEnv": {{"kind": "scratch"}}{extra}}}"#
         )
+    }
+
+    #[test]
+    fn grpc_dto_without_process_env_fails_to_deserialize() {
+        let json = r#"{"collection": "api", "request": {"name": "Say", "url": "localhost:50051", "methodType": "unary"}}"#;
+        let err = serde_json::from_str::<GrpcExecuteDto>(json).expect_err("missing processEnv");
+        assert!(err.to_string().contains("processEnv"), "{err}");
+    }
+
+    #[test]
+    fn grpc_dto_reads_the_process_env_scope() {
+        let json = r#"{"collection": null, "request": {"name": "Say", "url": "localhost:50051", "methodType": "unary"}, "processEnv": {"kind": "closed"}}"#;
+        let dto: GrpcExecuteDto = serde_json::from_str(json).expect("dto");
+        assert_eq!(dto.process_env, rocket_app::ProcessEnvScopeInput::Closed);
     }
 
     #[test]

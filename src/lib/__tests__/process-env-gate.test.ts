@@ -1,12 +1,40 @@
 import { QueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { CLOSED_PROCESS_ENV, warnIfProcessEnvWithheld } from '@/lib/process-env-gate';
+import {
+  CLOSED_PROCESS_ENV,
+  toProcessEnvScopeInput,
+  warnIfProcessEnvWithheld,
+} from '@/lib/process-env-gate';
 import { setQueryClient } from '@/lib/query-client';
 import * as tauriApi from '@/lib/tauri-api';
 import { useConsoleStore } from '@/stores/console-store';
+import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { makeTrust } from '@/test/trust-fixtures';
+
+describe('toProcessEnvScopeInput', () => {
+  it('maps a scratch, a closed and a collection scope', () => {
+    useEnvStore.setState({ activeCollection: 'api', activeEnvId: 'dev' });
+    expect(toProcessEnvScopeInput(undefined)).toEqual({ kind: 'scratch' });
+    expect(toProcessEnvScopeInput(CLOSED_PROCESS_ENV)).toEqual({ kind: 'closed' });
+    expect(toProcessEnvScopeInput('api')).toEqual({
+      kind: 'collection',
+      name: 'api',
+      environmentName: 'dev',
+    });
+  });
+
+  it('toProcessEnvScopeInput omits the environment for a non-active collection', () => {
+    useEnvStore.setState({ activeCollection: 'api', activeEnvId: 'dev' });
+    expect(toProcessEnvScopeInput('clone')).toEqual({ kind: 'collection', name: 'clone' });
+  });
+
+  it('toProcessEnvScopeInput omits the environment when none is active', () => {
+    useEnvStore.setState({ activeCollection: 'api', activeEnvId: null });
+    expect(toProcessEnvScopeInput('api')).toEqual({ kind: 'collection', name: 'api' });
+  });
+});
 
 vi.mock('sonner', () => ({ toast: { warning: vi.fn() } }));
 vi.mock('@/lib/tauri-api', async () => {

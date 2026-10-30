@@ -1,3 +1,4 @@
+import { processEnvScopeOf } from '@/lib/execute-request';
 import { toPersistedAuth } from '@/lib/persisted-auth';
 import { toPersistedHeaders } from '@/lib/persisted-headers';
 import { warnIfProcessEnvWithheld } from '@/lib/process-env-gate';
@@ -42,7 +43,7 @@ export async function startSubscription(tab: RequestTab): Promise<void> {
   useWebSocketStore.getState().beginSession(tab.id, sessionId);
   try {
     const input = buildSubscribeInput(tab);
-    await warnIfProcessEnvWithheld(input.collection, [input], tab.title);
+    await warnIfProcessEnvWithheld(processEnvScopeOf(tab), [input], tab.title);
     await graphqlSubscribe(sessionId, input);
   } catch (err) {
     useWebSocketStore.getState().failSession(tab.id, sessionId, errorText(err));
