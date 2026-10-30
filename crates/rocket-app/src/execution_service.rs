@@ -1576,6 +1576,7 @@ impl RequestExecutionService {
             form: form_templates,
             auth: auth_templates.into_inner(),
             unresolved: unresolved.into_inner(),
+            literal_headers: literal.headers.clone(),
         };
         let mut send_env = SendProcessEnv {
             dot_env_values: process_env
@@ -2649,24 +2650,39 @@ impl RequestExecutionService {
                 })
                 .collect();
             request.url = swap_path_values(&request.url, &swaps);
-            request.url = fill_names(&request.url, &script_vars);
+            if !templates.url.is_literal() {
+                request.url = fill_names(&request.url, &script_vars);
+            }
         }
         let mut query: Vec<(&mut String, &mut String)> = request
             .query_params
             .iter_mut()
             .map(|q| (&mut q.key, &mut q.value))
             .collect();
-        fill_pairs(&mut query, &templates.query, runtime, &script_vars);
+        fill_pairs(
+            &mut query,
+            &templates.query,
+            runtime,
+            &script_vars,
+            &std::collections::HashSet::new(),
+        );
         let mut headers: Vec<(&mut String, &mut String)> = request
             .headers
             .iter_mut()
             .map(|h| (&mut h.key, &mut h.value))
             .collect();
-        fill_pairs(&mut headers, &templates.headers, runtime, &script_vars);
+        fill_pairs(
+            &mut headers,
+            &templates.headers,
+            runtime,
+            &script_vars,
+            &templates.literal_headers,
+        );
         if let Some(body) = request.body.as_mut() {
             if let Some(content) = body.content.as_mut() {
                 *content = match &templates.body {
                     Some(t) if t.output == *content => t.render(runtime),
+                    Some(t) if t.is_literal() => content.clone(),
                     _ => fill_names(content, &script_vars),
                 };
             }
@@ -2685,6 +2701,7 @@ impl RequestExecutionService {
             index.set(at + 1);
             match templates.auth.get(at) {
                 Some(t) if t.output == field => t.render(runtime),
+                Some(t) if t.is_literal() => field,
                 _ => fill_names(&field, &script_vars),
             }
         });

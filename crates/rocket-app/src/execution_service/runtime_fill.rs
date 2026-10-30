@@ -13,7 +13,8 @@
 //! RocketVault scope.
 //!
 //! A field a Flow wire or a fetched Auth-node token filled is recorded with
-//! `FieldTemplate::literal`, so neither pass puts a value into it.
+//! `FieldTemplate::literal`, so neither pass puts a value into it, even after a script
+//! rewrote it: its text may come from a response.
 
 use rocket_environment::resolve;
 use std::cell::{Cell, RefCell};
@@ -32,6 +33,8 @@ pub(crate) struct FieldTemplate {
     values: Vec<String>,
     /// The text the first pass produced.
     pub output: String,
+    /// The field is sent as written. See `FieldTemplate::literal`.
+    literal: bool,
 }
 
 impl FieldTemplate {
@@ -42,13 +45,20 @@ impl FieldTemplate {
             .filter_map(|n| n.strip_prefix("process.env."))
     }
 
-    /// A field sent as written. It has no placeholders, so neither pass puts a value into it.
+    /// A field sent as written. It has no placeholders, so neither pass puts a value into it,
+    /// and the runtime pass leaves it as it is after a script rewrote it.
     pub(crate) fn literal(text: &str) -> Self {
         Self {
             text: text.to_string(),
             output: text.to_string(),
+            literal: true,
             ..Self::default()
         }
+    }
+
+    /// The field is sent as written.
+    pub(crate) fn is_literal(&self) -> bool {
+        self.literal
     }
 
     /// Resolves `text` with `vars` and records what each placeholder became. The names no scope
@@ -81,6 +91,7 @@ impl FieldTemplate {
             names: names.into_inner(),
             values: values.into_inner(),
             output,
+            literal: false,
         }
     }
 
@@ -256,16 +267,20 @@ pub(crate) struct RequestTemplates {
     pub auth: Vec<FieldTemplate>,
     /// Names a placeholder of the request text named that no scope held.
     pub unresolved: HashSet<String>,
+    /// Header keys, lower case, whose values are sent as written.
+    pub literal_headers: HashSet<String>,
 }
 
 /// Matches the current key-value pairs to the templates in order, so that a pair a script
 /// did not change is rendered from its template and any other pair is filled as script text.
 /// A pair matches the first template, from the last match on, whose output equals it.
+/// A changed value whose key is in `literal_keys` (lower case) is left as it is.
 pub(crate) fn fill_pairs(
     pairs: &mut [(&mut String, &mut String)],
     templates: &[(FieldTemplate, FieldTemplate)],
     runtime: &HashMap<String, String>,
     script_vars: &HashMap<String, String>,
+    literal_keys: &HashSet<String>,
 ) {
     let mut cursor = 0;
     for (key, value) in pairs.iter_mut() {
@@ -280,8 +295,10 @@ pub(crate) fn fill_pairs(
                 cursor += offset + 1;
             }
             None => {
+                if !literal_keys.contains(&key.to_ascii_lowercase()) {
+                    **value = fill_names(value, script_vars);
+                }
                 **key = fill_names(key, script_vars);
-                **value = fill_names(value, script_vars);
             }
         }
     }
