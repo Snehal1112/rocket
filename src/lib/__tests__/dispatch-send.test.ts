@@ -17,6 +17,7 @@ const baseInput = {
   body: { mode: 'json' as const, content: 'stale' },
   auth: { authType: 'none' as const },
   options: { followRedirects: true, timeoutMs: 1000, verifySsl: true },
+  processEnv: { kind: 'closed' as const },
 };
 
 describe('dispatchSend', () => {

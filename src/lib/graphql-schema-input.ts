@@ -1,9 +1,13 @@
 import {
   getActiveGlobalEnvName,
   getActiveWorkspaceRequestGuardPolicy,
+  processEnvScopeOf,
   resolveRequestFields,
 } from '@/lib/execute-request';
+import { findTabInTree } from '@/lib/pane-utils';
+import { toProcessEnvScopeInput } from '@/lib/process-env-gate';
 import type { ExecuteRequestInput } from '@/lib/tauri-api';
+import { usePaneStore } from '@/stores/pane-store';
 import type { RequestState } from '@/types/pane-types';
 
 // The HTTP side of an introspection request: the tab's endpoint, headers, auth
@@ -31,5 +35,8 @@ export async function buildSchemaRequestInput(
     globalEnvName: getActiveGlobalEnvName(),
     requestName: 'GraphQL introspection',
     requestGuardPolicy: await getActiveWorkspaceRequestGuardPolicy(),
+    processEnv: toProcessEnvScopeInput(
+      processEnvScopeOf(findTabInTree(usePaneStore.getState().root, tabId)?.tab, tabId),
+    ),
   };
 }
