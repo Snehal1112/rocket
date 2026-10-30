@@ -838,6 +838,9 @@ impl McpToolService {
         // resolved (collection, environment, global, vault).
         let mut secrets = output.run_secret_values.clone();
         secrets.extend(literal_credentials);
+        // Every host value the request used (`.env` or OS) is sent for real, so it is masked
+        // in what goes back to the agent.
+        secrets.extend(output.run_process_env_values.iter().cloned());
         secrets.extend(output.run_sent_credentials.iter().cloned());
         secrets.extend(basic_header_values_from_secrets(
             &request_for_masking,
@@ -2443,6 +2446,139 @@ mod tests {
             );
         }
         assert!(result.body.contains("alice") || result.body.contains(REDACTED));
+    }
+
+    /// Serves one fixed `.env` file, whatever path is asked for.
+    struct FixedDotEnv(Vec<(String, String)>);
+    impl rocket_environment::DotEnvLoader for FixedDotEnv {
+        fn load(
+            &self,
+            _raw_path: &str,
+            _base: Option<&Path>,
+        ) -> Result<Vec<(String, String)>, String> {
+            Ok(self.0.clone())
+        }
+        fn load_default(&self, _base: Option<&Path>) -> Result<Vec<(String, String)>, String> {
+            Ok(Vec::new())
+        }
+        fn describe(
+            &self,
+            _raw_path: Option<&str>,
+            _base: Option<&Path>,
+        ) -> rocket_environment::DotEnvFileInfo {
+            rocket_environment::DotEnvFileInfo::default()
+        }
+    }
+
+    /// Runs a request whose URL is `https://api.test/{{process.env.<name>}}` in environment
+    /// `dev`, which has a `.env` file holding `dot_env`. The server echoes `echo`. Returns the
+    /// tool result and the URLs the executor received.
+    async fn run_with_host_env(
+        name: &str,
+        dot_env: &[(&str, &str)],
+        echo: &str,
+    ) -> (McpRunResult, Vec<String>) {
+        let repo = ConfigurableCollectionRepo::new();
+        repo.set_autonomy("my-api", true);
+        let request = CollectionRequest::new(
+            "Login",
+            HttpMethod::Get,
+            &format!("https://api.test/{{{{process.env.{name}}}}}"),
+        );
+        repo.with_request("my-api", "login.yml", request);
+        let env_factory = FakeEnvRepoFactory::new();
+        let mut env = Environment::new("dev");
+        env.dot_env_file_path = Some(".env".into());
+        env_factory.with_env(env);
+        let publisher = RecordingPublisher::new();
+        let executor = RecordingExecutor::new();
+        executor.set_body("api.test", echo);
+        let executor_dyn: Arc<dyn rocket_http::HttpExecutor> =
+            Arc::new(SharedExecutor(Arc::clone(&executor)));
+        let history = InMemoryHistoryRepo::new();
+        let loader = FixedDotEnv(
+            dot_env
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        );
+        let exec_svc = Arc::new(
+            RequestExecutionService::new(
+                Box::new(NullEnvRepo),
+                executor_dyn,
+                Box::new(SharedHistoryRepo(Arc::clone(&history))),
+                Box::new(SharedCollectionRepo(Arc::clone(&repo))),
+                Box::new(NullCookieRepo),
+                Box::new(SharedPublisher(Arc::clone(&publisher))),
+                Box::new(EmptySecretManagerRepo),
+                Arc::new(rocket_environment::NullSecretStore),
+                Arc::new(rocket_environment::NullVaultSecretFetcher),
+            )
+            .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all())
+            .with_collection_env_repo_factory(Box::new(SharedEnvFactory(Arc::clone(
+                &env_factory,
+            ))))
+            .with_dot_env_loader(Box::new(loader)),
+        );
+        let repo_dyn: Arc<dyn CollectionRepository> = repo.clone();
+        let publisher_dyn: Arc<dyn EventPublisher> = publisher.clone();
+        let svc = McpToolService::new(
+            repo_dyn,
+            env_factory,
+            exec_svc,
+            publisher_dyn,
+            FixedPolicyConfigRepo::permissive(),
+            dummy_workspace_path(),
+            Box::new(SharedHistoryRepo(history)),
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
+        svc.open_session("s1", AssistantMode::Agent);
+        let result = svc
+            .run_request("s1", "my-api", "login.yml", Some("dev"))
+            .await
+            .expect("run_request");
+        (result, executor.sent_urls())
+    }
+
+    #[tokio::test]
+    async fn run_request_sends_and_masks_a_dot_env_value_in_an_echoing_response() {
+        let value = "dotenv-value-t3-9f3a";
+        let (result, sent) = run_with_host_env(
+            "ROCKET_T3_KEY",
+            &[("ROCKET_T3_KEY", value)],
+            &format!("echo: {value}"),
+        )
+        .await;
+        assert!(sent.iter().any(|u| u.contains(value)), "{sent:?}");
+        assert!(!result.body.contains(value), "{}", result.body);
+        assert!(result.body.contains(REDACTED));
+    }
+
+    #[tokio::test]
+    async fn run_request_masks_a_used_os_value() {
+        let name = "ROCKET_T3_OS_KEY";
+        let value = "os-value-t3-77c1d2";
+        std::env::set_var(name, value);
+        let (result, sent) = run_with_host_env(name, &[], &format!("echo: {value}")).await;
+        std::env::remove_var(name);
+        assert!(sent.iter().any(|u| u.contains(value)), "{sent:?}");
+        assert!(!result.body.contains(value), "{}", result.body);
+        assert!(result.body.contains(REDACTED));
+    }
+
+    #[tokio::test]
+    async fn run_request_leaves_an_unused_host_value_alone() {
+        let unused_name = "ROCKET_T3_UNUSED";
+        let unused = "unused-os-value-t3-5e5e";
+        std::env::set_var(unused_name, unused);
+        let (result, _) = run_with_host_env(
+            "ROCKET_T3_KEY",
+            &[("ROCKET_T3_KEY", "dotenv-value-t3-9f3a")],
+            &format!("echo: {unused}"),
+        )
+        .await;
+        std::env::remove_var(unused_name);
+        assert!(result.body.contains(unused), "{}", result.body);
     }
 
     #[test]
