@@ -143,7 +143,7 @@ export function ConnectOpenApiDialog({
 
   return (
     <Dialog open={open} onOpenChange={requestClose}>
-      <DialogContent className='max-w-3xl'>
+      <DialogContent className='flex max-h-[85vh] max-w-3xl flex-col'>
         <DialogHeader>
           <DialogTitle>Connect to an OpenAPI spec</DialogTitle>
           <DialogDescription>
@@ -152,7 +152,7 @@ export function ConnectOpenApiDialog({
               : 'Link this collection to a spec so Rocket can keep it up to date. Nothing is changed until you connect.'}
           </DialogDescription>
         </DialogHeader>
-        <DialogBody className='flex max-h-[60vh] flex-col gap-4 overflow-y-auto'>
+        <DialogBody className='flex flex-col gap-4 overflow-y-auto'>
           {preview ? (
             <ConnectReviewStep rows={rows} onChange={onChoice} />
           ) : (
