@@ -94,6 +94,8 @@ Same resolution as today, with the run's process env added. When the gate denied
 | Unknown `{{process.env.NOPE}}` with gate allowed | Stays literal, no warning |
 | Static Auth node `Bearer {{process.env.T}}` | Wire snapshot equals the sent value, masked |
 | Token endpoint error echoes the secret | Masked in the step error, the IPC error and the send error |
+| Trust changes during a Flow run | Input and Auth nodes keep the run-start gate result; request nodes see the change on their next send |
+| Script writes a `.env` value | Saved as usual (no vault hold-back); masked in that step's outputs |
 
 ## Testing
 
@@ -154,10 +156,10 @@ Commands: `cargo check -j4`, the tests above, `yarn tsc --noEmit`, `yarn check`.
 - How does a tab send of an inherited OAuth2 auth with no cached token get `{{process.env}}`? Options: HTTP send gets a process env scope, frontend resolves the folder OAuth2, known limit. Chosen: the HTTP send carries a `processEnv` scope (`ProcessEnvScopeInput`, default closed), used only inside the inherited OAuth2 auth of a tab send. Decided by: user
 - Should the frontend keep filling OAuth2 fields before `oauth2_get_token` and `oauth2_refresh_token` once the backend resolves them too? Options: keep both passes, backend only now, backend only later. Chosen: keep both passes; the backend resolves what is left, process env included, under the tab's scope. Decided by: user
 - How strict is the new `processEnv` scope on `ExecuteRequestInput`? Options: TypeScript required with a Rust serde default of closed, required on both sides, only on `execute_request`. Chosen: required in the TypeScript type, `#[serde(default)]` closed in Rust, so a missed caller fails closed. Decided by: user
-- The OAuth2 IPC DTOs use the same scope rule (TypeScript required, Rust default closed). Options: same rule, required on both sides. Chosen: same rule as `ExecuteRequestInput`, for one consistent contract. Decided by: call
+- Do the OAuth2 IPC DTOs use the same scope rule as `ExecuteRequestInput`? Options: same rule (TypeScript required, Rust default closed), required on both sides. Chosen: same rule, for one consistent contract. Decided by: user
 - Where do the OAuth2 process env resolution and error masking live? Options: `OAuth2Service` owns them with the `ProcessEnv` passed in, an injected provider trait, the Tauri command. Chosen: `OAuth2Service` owns them; the command only adds the `process_env_for_scope` service call next to the vault one. Decided by: user
 - Should `ProcessEnvScopeInput` move out of the WebSocket module? Options: move it with `ProcessEnv` and the pure scope logic into `process_env.rs`, move the type only, leave it. Chosen: move both types and `scope_target` into `crates/rocket-app/src/process_env.rs`, keeping the `rocket_app::ProcessEnvScopeInput` re-export. Decided by: user
-- Flow reads process env once per run for Input and Auth nodes. Decided by: call
+- When does a Flow run check the gate for Input and Auth nodes? Options: once at run start, per Input node, one run-start check for request nodes too. Chosen: once at run start; a trust change mid-run reaches request nodes (they check per send) but not Input nodes. Decided by: user
 - How do Flow Input and Auth nodes mask `.env` values? Options: the step mask only (`secret_values`), `external_secrets` (adds the vault hold-back and `rok.getSecretVar` reads), the step mask plus a hold-back. Chosen: the step mask only, as request nodes do since #112. Decided by: user
-- Executor errors are masked in `send_request` for every send, not only OAuth2 ones. Decided by: call
+- Which executor errors does `send_request` mask? Options: every send, OAuth2 sends only, OAuth2 now with a follow-up ticket. Chosen: every send, with that send's secret values. Decided by: user
 - What scope does `OAuth2AuthEditor` use without a `processEnvScope` prop? Options: its `collection` prop or closed with none, always closed, a required prop. Chosen: its `collection` prop (that collection's own gate), or closed with none. Decided by: user
