@@ -741,6 +741,8 @@ mod wiring_tests {
             flow_vars: HashMap::new(),
             skip_folder_scripts: false,
             run_source: rocket_shared::RunSource::Manual,
+            backend_process_env: false,
+            host_env_free: Default::default(),
             method: HttpMethod::Get,
             url: url.into(),
             headers: vec![],

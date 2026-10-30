@@ -522,6 +522,7 @@ mod tests {
         let json = serde_json::to_value(to_process_env_dto(rocket_app::ProcessEnv {
             vars: Default::default(),
             dot_env_keys: vec!["A".into()],
+            allowed: true,
         }))?;
         assert_eq!(json["dotEnvKeys"][0], "A");
         Ok(())

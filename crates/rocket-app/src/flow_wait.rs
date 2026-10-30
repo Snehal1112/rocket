@@ -67,6 +67,7 @@ pub(crate) fn callback_output(call: &ReceivedCall, duration_ms: u64) -> ExecuteR
         run_secret_values: Default::default(),
         run_sent_credentials: Default::default(),
         run_process_env_values: Default::default(),
+        process_env_withheld: false,
     }
 }
 

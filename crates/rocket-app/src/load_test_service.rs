@@ -255,6 +255,8 @@ mod tests {
             flow_vars: std::collections::HashMap::new(),
             skip_folder_scripts: false,
             run_source: rocket_shared::RunSource::Manual,
+            backend_process_env: false,
+            host_env_free: Default::default(),
         };
 
         // One short Hold phase to keep the test fast.
@@ -372,6 +374,8 @@ mod tests {
             flow_vars: std::collections::HashMap::new(),
             skip_folder_scripts: false,
             run_source: rocket_shared::RunSource::Manual,
+            backend_process_env: false,
+            host_env_free: Default::default(),
         };
         let config = LoadTestConfigV2 {
             phases: vec![LoadTestPhase {

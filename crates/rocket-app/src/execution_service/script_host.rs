@@ -58,7 +58,7 @@ pub(crate) struct ExecutionScriptHost<'a> {
     pub(crate) calling_url: String,
     /// Collects the `process.env` values the nested runs used, for the calling send.
     pub(crate) nested_process_env_values: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
-    /// Set when a nested run warned that it withheld `process.env` values.
+    /// Set when a nested run sent a `process.env` value the gate withheld.
     pub(crate) nested_withheld: Arc<std::sync::atomic::AtomicBool>,
 }
 
@@ -216,14 +216,13 @@ impl ScriptHost for ExecutionScriptHost<'_> {
         .map_err(|e| HostError::Failed(format!("rok.runRequest: {e}")))?;
         // The nested run saved its writes, so the scopes are read back from storage.
         let scopes = self.stored_scopes(collection);
-        if let Ok(mut used) = self.nested_process_env_values.lock() {
-            used.extend(output.run_process_env_values.iter().cloned());
-        }
-        if output
-            .console_entries
-            .iter()
-            .any(super::is_process_env_withheld_entry)
-        {
+        // A poisoned lock still holds the values, and they must be masked.
+        self.nested_process_env_values
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .extend(output.run_process_env_values.iter().cloned());
+        // The calling send writes the Console line, so it shows once.
+        if output.process_env_withheld {
             self.nested_withheld
                 .store(true, std::sync::atomic::Ordering::SeqCst);
         }

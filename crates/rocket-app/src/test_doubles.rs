@@ -1431,6 +1431,7 @@ pub struct RecordingExecutor {
     sent: Mutex<Vec<String>>,
     sent_auth: Mutex<Vec<rocket_shared::types::Auth>>,
     sent_bodies: Mutex<Vec<Option<String>>>,
+    sent_headers: Mutex<Vec<Vec<rocket_shared::types::Header>>>,
     statuses: Mutex<HashMap<String, u16>>,
     bodies: Mutex<HashMap<String, String>>,
     error_messages: Mutex<HashMap<String, String>>,
@@ -1442,10 +1443,15 @@ impl RecordingExecutor {
             sent: Mutex::new(Vec::new()),
             sent_auth: Mutex::new(Vec::new()),
             sent_bodies: Mutex::new(Vec::new()),
+            sent_headers: Mutex::new(Vec::new()),
             statuses: Mutex::new(HashMap::new()),
             bodies: Mutex::new(HashMap::new()),
             error_messages: Mutex::new(HashMap::new()),
         })
+    }
+    /// The request headers of every send, in order.
+    pub fn sent_headers(&self) -> Vec<Vec<rocket_shared::types::Header>> {
+        self.sent_headers.lock().expect("lock").clone()
     }
     /// Registers a response body for any URL containing `url_substring`.
     pub fn set_body(&self, url_substring: &str, body: &str) {
@@ -1499,6 +1505,10 @@ impl HttpExecutor for RecordingExecutor {
             .lock()
             .expect("lock")
             .push(req.body.as_ref().and_then(|b| b.content.clone()));
+        self.sent_headers
+            .lock()
+            .expect("lock")
+            .push(req.headers.clone());
         let status = self
             .statuses
             .lock()

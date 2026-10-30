@@ -32,6 +32,13 @@ pub(crate) struct FieldTemplate {
 }
 
 impl FieldTemplate {
+    /// The `process.env.NAME` placeholders of the text, as `NAME`.
+    pub(crate) fn process_env_names(&self) -> impl Iterator<Item = &str> {
+        self.names
+            .iter()
+            .filter_map(|n| n.strip_prefix("process.env."))
+    }
+
     /// Resolves `text` with `vars` and records what each placeholder became. The names no scope
     /// held are added to `unresolved`.
     pub(crate) fn record(
@@ -237,26 +244,6 @@ pub(crate) struct RequestTemplates {
     pub auth: Vec<FieldTemplate>,
     /// Names a placeholder of the request text named that no scope held.
     pub unresolved: HashSet<String>,
-}
-
-impl RequestTemplates {
-    /// The `process.env.NAME` names the templates reference, as `NAME`.
-    pub(crate) fn process_env_names(&self) -> HashSet<String> {
-        let mut all: Vec<&FieldTemplate> = vec![&self.url];
-        all.extend(self.path_params.iter().map(|(_, t)| t));
-        for (k, v) in self.query.iter().chain(&self.headers) {
-            all.push(k);
-            all.push(v);
-        }
-        all.extend(self.body.iter());
-        all.extend(&self.form);
-        all.extend(&self.auth);
-        all.iter()
-            .flat_map(|t| &t.names)
-            .filter_map(|n| n.strip_prefix("process.env."))
-            .map(str::to_string)
-            .collect()
-    }
 }
 
 /// Matches the current key-value pairs to the templates in order, so that a pair a script

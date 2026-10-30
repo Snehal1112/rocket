@@ -1300,6 +1300,14 @@ impl rocket_environment::DotEnvLoader for FixedDotEnv {
 fn process_env_run_service(
     collection: Collection,
 ) -> (RequestExecutionService, Arc<KeepingExecutor>) {
+    process_env_run_service_with(collection, Box::new(NullEventPublisher))
+}
+
+/// Like `process_env_run_service`, publishing events to `events`.
+fn process_env_run_service_with(
+    collection: Collection,
+    events: Box<dyn rocket_shared::events::EventPublisher>,
+) -> (RequestExecutionService, Arc<KeepingExecutor>) {
     let executor = Arc::new(KeepingExecutor::default());
     let mut env = Environment::new("dev");
     env.dot_env_file_path = Some(".env".into());
@@ -1311,7 +1319,7 @@ fn process_env_run_service(
             collection,
         ))),
         Box::new(NullCookieRepo),
-        Box::new(NullEventPublisher),
+        events,
         Box::new(EmptySecretManagerRepo),
         Arc::new(rocket_environment::NullSecretStore),
         Arc::new(rocket_environment::NullVaultSecretFetcher),
@@ -1392,4 +1400,90 @@ async fn script_written_process_env_placeholder_stays_unresolved() {
         urls(&executor),
         vec!["https://x.test/{{process.env.ROCKET_T1_KEY}}".to_string()]
     );
+}
+
+const WITHHELD_TEXT: &str = "Host environment variables are not allowed for this collection, so \
+                             {{process.env.NAME}} was sent unresolved.";
+
+/// Main runs `auth/login`, whose URL is `login_url` and whose pre-request script is `login_pre`.
+fn main_and_nested(main_script: &str, login_url: &str, login_pre: &str) -> Collection {
+    let mut collection = Collection::new("api");
+    collection
+        .root
+        .add_request(saved("Main", "main.yml", main_script));
+    let mut login = saved("Login", "login.yml", login_pre);
+    login.url = login_url.to_string();
+    let mut auth = Folder::new("auth");
+    auth.add_request(login);
+    collection.root.add_subfolder(auth);
+    collection
+}
+
+fn withheld_lines(out: &ExecuteRequestOutput) -> usize {
+    console(out).iter().filter(|m| *m == WITHHELD_TEXT).count()
+}
+
+/// The warning lines in every `ConsoleOutput` event published.
+fn withheld_events(publisher: &crate::test_doubles::RecordingPublisher) -> usize {
+    publisher
+        .events()
+        .iter()
+        .map(|event| match event {
+            rocket_shared::events::DomainEvent::ConsoleOutput { entries, .. } => entries
+                .iter()
+                .filter(|e| e["message"] == WITHHELD_TEXT)
+                .count(),
+            _ => 0,
+        })
+        .sum()
+}
+
+#[tokio::test]
+async fn a_nested_withheld_run_warns_once_across_output_and_events() {
+    let collection = main_and_nested(
+        "await rok.runRequest('auth/login');",
+        "https://api.test/{{process.env.ROCKET_T2_KEY}}",
+        "",
+    );
+    let input = send_input(&collection, "main.yml");
+    let publisher = crate::test_doubles::RecordingPublisher::new();
+    let (svc, _) = process_env_run_service_with(
+        collection,
+        Box::new(crate::test_doubles::SharedPublisher(Arc::clone(&publisher))),
+    );
+    let svc = svc.with_trust_store(crate::test_doubles::InMemoryTrustStore::new());
+    let out = svc.execute(input).await.expect("execute");
+    assert!(out.script_error.is_none(), "{:?}", out.script_error);
+    assert_eq!(withheld_lines(&out), 1, "{:?}", console(&out));
+    assert_eq!(withheld_events(&publisher), 1, "{:?}", publisher.events());
+}
+
+#[tokio::test]
+async fn a_nested_script_warn_with_the_warning_text_adds_no_backend_line() {
+    let collection = main_and_nested(
+        "await rok.runRequest('auth/login');",
+        "https://api.test/login",
+        &format!("console.warn({WITHHELD_TEXT:?});"),
+    );
+    let input = send_input(&collection, "main.yml");
+    let (svc, _) = process_env_run_service(collection);
+    let out = svc.execute(input).await.expect("execute");
+    assert!(out.script_error.is_none(), "{:?}", out.script_error);
+    assert_eq!(withheld_lines(&out), 0, "{:?}", console(&out));
+}
+
+#[tokio::test]
+async fn a_script_warn_with_the_warning_text_does_not_hide_the_backend_line() {
+    let collection = main_and_nested(
+        &format!("console.warn({WITHHELD_TEXT:?}); await rok.runRequest('auth/login');"),
+        "https://api.test/{{process.env.ROCKET_T2_KEY}}",
+        "",
+    );
+    let input = send_input(&collection, "main.yml");
+    let (svc, _) = process_env_run_service(collection);
+    let svc = svc.with_trust_store(crate::test_doubles::InMemoryTrustStore::new());
+    let out = svc.execute(input).await.expect("execute");
+    assert!(out.script_error.is_none(), "{:?}", out.script_error);
+    // The script's own line and the backend's line.
+    assert_eq!(withheld_lines(&out), 2, "{:?}", console(&out));
 }

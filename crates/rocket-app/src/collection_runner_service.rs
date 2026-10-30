@@ -431,7 +431,9 @@ impl CollectionRunnerService {
         if state.skip_request {
             // Nothing was sent, so after-response and tests have no response to
             // run against — the step ends here (spec §4). `finish_phases` never
-            // runs either, so publish this step's console output directly.
+            // runs either, so publish this step's console output directly. This request was
+            // not sent, but a nested run its script started may have been.
+            state.warn_if_process_env_withheld(false);
             exec.publish_console(&item.name, &state.console);
             *carried_runtime = state.var_ctx.runtime.clone();
             return StepOutcome {
@@ -1843,5 +1845,73 @@ mod tests {
                 token: "from-folder".into()
             }]
         );
+    }
+
+    /// The `ConsoleOutput` lines of `events` that say `process.env` was sent unresolved.
+    fn withheld_lines(events: &[rocket_shared::events::DomainEvent]) -> usize {
+        events
+            .iter()
+            .map(|event| match event {
+                rocket_shared::events::DomainEvent::ConsoleOutput { entries, .. } => entries
+                    .iter()
+                    .filter(|e| {
+                        e["message"]
+                            .as_str()
+                            .is_some_and(|m| m.contains("was sent unresolved"))
+                    })
+                    .count(),
+                _ => 0,
+            })
+            .sum()
+    }
+
+    #[tokio::test]
+    async fn a_skipped_step_never_says_its_process_env_was_sent() {
+        let mut collection = Collection::new("my-api");
+        let mut first = req("First", "first.yml");
+        first.url = "https://api.test/{{process.env.ROCKET_T6_KEY}}".into();
+        collection.root.add_request(first);
+        let mut second = req("Second", "second.yml");
+        second.url = "https://api.test/{{process.env.ROCKET_T6_KEY}}".into();
+        collection.root.add_request(second);
+        let engine = ProgrammableEngine::new();
+        engine.on(
+            "First",
+            "before-request",
+            ScriptResult {
+                skip_request: true,
+                ..Default::default()
+            },
+        );
+        let repo = InMemoryCollectionRepo::new(collection);
+        let executor = RecordingExecutor::new();
+        let publisher = RecordingPublisher::new();
+        // The trust store is not wired, so the host environment gate is denied.
+        let exec = RequestExecutionService::new(
+            Box::new(NullEnvRepo),
+            Arc::new(SharedExecutor(Arc::clone(&executor))),
+            Box::new(SharedHistoryRepo(InMemoryHistoryRepo::new())),
+            Box::new(SharedCollectionRepo(Arc::clone(&repo))),
+            Box::new(NullCookieRepo),
+            Box::new(SharedPublisher(Arc::clone(&publisher))),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        )
+        .with_script_engine(Box::new(SharedEngine(Arc::clone(&engine))));
+        let runner = CollectionRunnerService::new(
+            Box::new(SharedCollectionRepo(Arc::clone(&repo))),
+            Box::new(rocket_shared::events::NullEventPublisher),
+        );
+
+        let summary = runner.run(&exec, sample_run_input()).await.expect("run");
+
+        assert_eq!(summary.steps[0].status, RunStepStatus::Skipped);
+        assert_eq!(
+            executor.sent_urls(),
+            vec!["https://api.test/{{process.env.ROCKET_T6_KEY}}".to_string()]
+        );
+        // Only the step that was sent says so.
+        assert_eq!(withheld_lines(&publisher.events()), 1);
     }
 }

@@ -215,6 +215,10 @@ pub fn build_step_input(
         flow_vars: std::collections::HashMap::new(),
         skip_folder_scripts: false,
         run_source,
+        // Every caller is a send the backend drives (the runner, Flow, `rok.runRequest`,
+        // the assistant), so the frontend never resolved its host environment.
+        backend_process_env: true,
+        host_env_free: Default::default(),
     }
 }
 

@@ -2478,13 +2478,25 @@ mod tests {
         dot_env: &[(&str, &str)],
         echo: &str,
     ) -> (McpRunResult, Vec<String>) {
+        let (result, sent, _) = run_with_host_env_asserting(name, dot_env, echo, Vec::new()).await;
+        (result, sent)
+    }
+
+    /// Like `run_with_host_env`, with `assertions` on the request. Also returns the service.
+    async fn run_with_host_env_asserting(
+        name: &str,
+        dot_env: &[(&str, &str)],
+        echo: &str,
+        assertions: Vec<rocket_shared::Assertion>,
+    ) -> (McpRunResult, Vec<String>, McpToolService) {
         let repo = ConfigurableCollectionRepo::new();
         repo.set_autonomy("my-api", true);
-        let request = CollectionRequest::new(
+        let mut request = CollectionRequest::new(
             "Login",
             HttpMethod::Get,
-            &format!("https://api.test/{{{{process.env.{name}}}}}"),
+            format!("https://api.test/{{{{process.env.{name}}}}}"),
         );
+        request.assertions = assertions;
         repo.with_request("my-api", "login.yml", request);
         let env_factory = FakeEnvRepoFactory::new();
         let mut env = Environment::new("dev");
@@ -2515,9 +2527,7 @@ mod tests {
                 Arc::new(rocket_environment::NullVaultSecretFetcher),
             )
             .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all())
-            .with_collection_env_repo_factory(Box::new(SharedEnvFactory(Arc::clone(
-                &env_factory,
-            ))))
+            .with_collection_env_repo_factory(Box::new(SharedEnvFactory(Arc::clone(&env_factory))))
             .with_dot_env_loader(Box::new(loader)),
         );
         let repo_dyn: Arc<dyn CollectionRepository> = repo.clone();
@@ -2537,7 +2547,7 @@ mod tests {
             .run_request("s1", "my-api", "login.yml", Some("dev"))
             .await
             .expect("run_request");
-        (result, executor.sent_urls())
+        (result, executor.sent_urls(), svc)
     }
 
     #[tokio::test]
@@ -2554,31 +2564,42 @@ mod tests {
         assert!(result.body.contains(REDACTED));
     }
 
+    // `PATH` and `HOME` are always set, so no test has to change the process environment.
+
     #[tokio::test]
     async fn run_request_masks_a_used_os_value() {
-        let name = "ROCKET_T3_OS_KEY";
-        let value = "os-value-t3-77c1d2";
-        std::env::set_var(name, value);
-        let (result, sent) = run_with_host_env(name, &[], &format!("echo: {value}")).await;
-        std::env::remove_var(name);
-        assert!(sent.iter().any(|u| u.contains(value)), "{sent:?}");
-        assert!(!result.body.contains(value), "{}", result.body);
+        let value = std::env::var("PATH").expect("PATH is set");
+        let (result, sent) = run_with_host_env("PATH", &[], &format!("echo: {value}")).await;
+        assert!(sent.iter().any(|u| u.contains(&value)), "{sent:?}");
+        assert!(!result.body.contains(&value), "{}", result.body);
         assert!(result.body.contains(REDACTED));
     }
 
     #[tokio::test]
+    async fn run_request_masks_a_used_os_value_in_the_cached_test_results() {
+        let value = std::env::var("PATH").expect("PATH is set");
+        // A failed assertion quotes the value it compared in its name and error.
+        let assertion = rocket_shared::Assertion::new("res.status", "eq", Some(value.clone()));
+        let (_, _, svc) = run_with_host_env_asserting("PATH", &[], "echo", vec![assertion]).await;
+        let cached = svc
+            .get_test_results("s1", "my-api", "login.yml")
+            .expect("cached test results");
+        assert_eq!(cached.len(), 1);
+        let text = format!("{} {:?}", cached[0].name, cached[0].error);
+        assert!(!text.contains(&value), "{text}");
+        assert!(text.contains(REDACTED), "{text}");
+    }
+
+    #[tokio::test]
     async fn run_request_leaves_an_unused_host_value_alone() {
-        let unused_name = "ROCKET_T3_UNUSED";
-        let unused = "unused-os-value-t3-5e5e";
-        std::env::set_var(unused_name, unused);
+        let unused = std::env::var("HOME").expect("HOME is set");
         let (result, _) = run_with_host_env(
             "ROCKET_T3_KEY",
             &[("ROCKET_T3_KEY", "dotenv-value-t3-9f3a")],
             &format!("echo: {unused}"),
         )
         .await;
-        std::env::remove_var(unused_name);
-        assert!(result.body.contains(unused), "{}", result.body);
+        assert!(result.body.contains(&unused), "{}", result.body);
     }
 
     #[test]

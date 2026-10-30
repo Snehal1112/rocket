@@ -81,6 +81,8 @@ pub(crate) struct FlowCredentials {
     auto_apply: Option<(String, Auth)>,
     /// `(node id, value)` for every credential that has a plain token or key value.
     wire_values: Vec<(String, String)>,
+    /// Ids of the OAuth2 Auth nodes, whose Bearer token was fetched or supplied.
+    fetched: HashSet<String>,
 }
 
 impl std::fmt::Debug for FlowCredentials {
@@ -96,6 +98,12 @@ impl FlowCredentials {
     /// The credential of Auth node `node_id`.
     pub(crate) fn auth_for_node(&self, node_id: &str) -> Option<&Auth> {
         self.by_node.get(node_id)
+    }
+
+    /// Whether the credential of `node_id` is a token a token response or the UI gave,
+    /// not text the flow holds.
+    pub(crate) fn is_fetched_token(&self, node_id: &str) -> bool {
+        self.fetched.contains(node_id)
     }
 
     /// Replaces `auth` with the auto-apply credential when `auth` is `inherit`
@@ -259,6 +267,7 @@ pub(crate) async fn resolve_flow_credentials(
                         )));
                     }
                 };
+                creds.fetched.insert(node.id.clone());
                 (
                     Auth::Bearer {
                         token: token.clone(),

@@ -139,6 +139,28 @@ pub struct ExecuteRequestInput {
     /// paths. Every history entry this run produces carries this tag.
     #[serde(default)]
     pub run_source: rocket_shared::RunSource,
+    /// When true, the send resolves `{{process.env.NAME}}` itself, behind the trust gate.
+    /// Only inputs the backend builds set it (Flow, the runner, `rok.runRequest`, the
+    /// assistant). The frontend resolves the host environment before it sends, so an input
+    /// from IPC is always false: the field is never read from or written to the wire.
+    #[serde(skip)]
+    pub backend_process_env: bool,
+    /// The fields a Flow wire or a fetched Auth-node token filled in. Their text did not
+    /// come from the saved request, so they never resolve `{{process.env.NAME}}`. Never
+    /// read from or written to the wire.
+    #[serde(skip)]
+    pub host_env_free: HostEnvFreeFields,
+}
+
+/// The request fields that resolve without the host environment. See
+/// `ExecuteRequestInput::host_env_free`.
+#[derive(Debug, Clone, Default)]
+pub struct HostEnvFreeFields {
+    pub url: bool,
+    pub body: bool,
+    pub auth: bool,
+    /// Header keys, lower case.
+    pub headers: std::collections::HashSet<String>,
 }
 
 /// Borrows an `EnvironmentRepository` instead of owning it, so
@@ -193,6 +215,9 @@ pub struct ExecuteRequestOutput {
     /// `rok.runRequest` runs included. Never serialized to IPC. Callers use it
     /// to mask text they hand on.
     pub run_process_env_values: std::collections::HashSet<String>,
+    /// True when the run, or a nested `rok.runRequest` run, sent a `{{process.env.NAME}}`
+    /// the trust gate withheld. Never serialized to IPC. A caller adds the Console line.
+    pub process_env_withheld: bool,
 }
 
 // Written by hand so the secret values are never printed, only counted.
@@ -207,6 +232,7 @@ impl std::fmt::Debug for ExecuteRequestOutput {
             .field("run_secret_values", &self.run_secret_values.len())
             .field("run_sent_credentials", &self.run_sent_credentials.len())
             .field("run_process_env_values", &self.run_process_env_values.len())
+            .field("process_env_withheld", &self.process_env_withheld)
             .finish()
     }
 }
@@ -359,6 +385,7 @@ pub(crate) fn process_env_withheld_entry() -> ConsoleEntry {
 }
 
 /// Whether `entry` is the line `process_env_withheld_entry` builds.
+#[cfg(test)]
 pub(crate) fn is_process_env_withheld_entry(entry: &ConsoleEntry) -> bool {
     let expected = process_env_withheld_entry();
     entry.level == expected.level && entry.message == expected.message
@@ -443,12 +470,32 @@ pub(crate) struct PhaseState {
     /// Set when a nested run withheld `process.env` values, so the caller's Console gets the
     /// warning too. Shared with the script host.
     pub nested_withheld: Arc<std::sync::atomic::AtomicBool>,
+    /// True for a `rok.runRequest` run. It reports a withheld value to its caller
+    /// (`ExecuteRequestOutput::process_env_withheld`) instead of writing the Console line.
+    pub nested: bool,
     /// Names a pre-request script added in text it wrote (URL, header, body). Script text is
     /// filled only for these and the names the first resolution could not resolve.
     pub script_names: std::collections::HashSet<String>,
 }
 
 impl PhaseState {
+    /// Whether a `{{process.env.NAME}}` the gate withheld was sent: by this request when
+    /// `sent` is true, or by a nested `rok.runRequest` run either way.
+    pub(crate) fn process_env_withheld(&self, sent: bool) -> bool {
+        (sent && !self.process_env.withheld_names.is_empty())
+            || self
+                .nested_withheld
+                .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Adds the withheld warning to this send's Console. A nested run leaves it to its
+    /// caller, so one send shows the line once.
+    pub(crate) fn warn_if_process_env_withheld(&mut self, sent: bool) {
+        if !self.nested && self.process_env_withheld(sent) {
+            self.console.push(process_env_withheld_entry());
+        }
+    }
+
     /// Seeds the runtime scope with variables carried over from earlier steps
     /// of the same collection run (spec §8.2). No-op for a single send.
     pub(crate) fn seed_runtime(&mut self, carried: &std::collections::HashMap<String, String>) {
@@ -475,6 +522,9 @@ pub struct DotEnvStatus {
 pub struct ProcessEnv {
     pub vars: std::collections::HashMap<String, String>,
     pub dot_env_keys: Vec<String>,
+    /// The trust gate's one decision for this send. False when it denied access, so
+    /// `vars` is empty.
+    pub allowed: bool,
 }
 
 pub struct RequestExecutionService {
@@ -1210,7 +1260,11 @@ impl RequestExecutionService {
         dot_env_keys.sort();
         let mut vars = file_values;
         vars.extend(os);
-        ProcessEnv { vars, dot_env_keys }
+        ProcessEnv {
+            vars,
+            dot_env_keys,
+            allowed: true,
+        }
     }
 
     /// Describes the `.env` file of an environment: its own path, or the default
@@ -1351,12 +1405,17 @@ impl RequestExecutionService {
         folders: &[FolderSettings],
     ) -> DomainResult<ResolvedParts> {
         // Build variable map: global_env < collection < env < folder < request.
-        // The host environment is read once per send, and only when the trust gate allows it.
-        let process_env = self.process_env_for(
-            input.collection.as_deref(),
-            input.environment_name.as_deref(),
-            input.global_env_name.as_deref(),
-        );
+        // The frontend resolves the host environment of its own sends, so only a send the
+        // backend built reads it: once per send, and only when the trust gate allows it.
+        let process_env = if input.backend_process_env {
+            self.process_env_for(
+                input.collection.as_deref(),
+                input.environment_name.as_deref(),
+                input.global_env_name.as_deref(),
+            )
+        } else {
+            ProcessEnv::default()
+        };
         let mut scopes = self.build_variable_scopes(
             input.global_env_name.as_deref(),
             input.collection.as_deref(),
@@ -1364,9 +1423,14 @@ impl RequestExecutionService {
             input.request_path.as_deref(),
             external_secrets,
         );
+        // Client certificates and the fields a Flow wire or token filled use the map
+        // without the host environment.
+        let mut plain_vars = scopes.flatten();
+        plain_vars.extend(input.flow_vars.clone());
         scopes.process_env = process_env.vars.clone();
         let mut vars = scopes.flatten_with_process_env();
         vars.extend(input.flow_vars.clone());
+        let free = &input.host_env_free;
 
         // Merge collection and folder-chain auth and headers with request-level values.
         let (effective_auth, effective_headers) = self.inherited_auth_and_headers(
@@ -1379,19 +1443,29 @@ impl RequestExecutionService {
         // Each field is recorded as a template, so the pass after the pre-request scripts can
         // put runtime values into it without reading a filled-in value again.
         let unresolved = RefCell::new(std::collections::HashSet::new());
-        let rec = |text: &str, json: bool| -> FieldTemplate {
-            FieldTemplate::record(text, json, &vars, &mut unresolved.borrow_mut())
+        // The `process.env` names of the fields that resolve with the host environment.
+        let host_names = RefCell::new(std::collections::BTreeSet::new());
+        let rec_with = |text: &str, json: bool, host_env: bool| -> FieldTemplate {
+            let map = if host_env { &vars } else { &plain_vars };
+            let template = FieldTemplate::record(text, json, map, &mut unresolved.borrow_mut());
+            if host_env {
+                host_names
+                    .borrow_mut()
+                    .extend(template.process_env_names().map(str::to_string));
+            }
+            template
         };
+        let rec = |text: &str, json: bool| rec_with(text, json, true);
 
         // Resolve {{placeholders}} in auth, URL and headers.
         let auth_templates = RefCell::new(Vec::new());
         let effective_auth = map_auth_fields(effective_auth, |s: String| {
-            let template = rec(&s, false);
+            let template = rec_with(&s, false, !free.auth);
             let output = template.output.clone();
             auth_templates.borrow_mut().push(template);
             output
         });
-        let url_template = rec(&input.url, false);
+        let url_template = rec_with(&input.url, false, !free.url);
         // Path parameter values may hold {{placeholders}}, so they resolve before they are
         // substituted. The substitution runs on the resolved URL, so a placeholder in the URL
         // itself never swallows a parameter.
@@ -1423,7 +1497,13 @@ impl RequestExecutionService {
             .collect();
         let header_templates: Vec<(FieldTemplate, FieldTemplate)> = effective_headers
             .iter()
-            .map(|h| (rec(&h.key, false), rec(&h.value, false)))
+            .map(|h| {
+                let host_env = !free.headers.contains(&h.key.to_ascii_lowercase());
+                (
+                    rec_with(&h.key, false, host_env),
+                    rec_with(&h.value, false, host_env),
+                )
+            })
             .collect();
         let resolved_headers: Vec<Header> = effective_headers
             .iter()
@@ -1443,7 +1523,7 @@ impl RequestExecutionService {
         let mut form_templates = Vec::new();
         let resolved_body = input.body.clone().map(|mut body| {
             if let Some(content) = &body.content {
-                let template = rec(content, body.mode == BodyMode::GraphQl);
+                let template = rec_with(content, body.mode == BodyMode::GraphQl, !free.body);
                 body.content = Some(template.output.clone());
                 body_template = Some(template);
             }
@@ -1476,7 +1556,7 @@ impl RequestExecutionService {
         // The selected environment decides which client certificates the executor may present.
         let mut options = input.options.clone();
         options.client_certificates =
-            self.environment_client_certificates(input, &vars, external_secrets);
+            self.environment_client_certificates(input, &plain_vars, external_secrets);
 
         let request = HttpRequest {
             method: input.method.clone(),
@@ -1506,14 +1586,14 @@ impl RequestExecutionService {
                 .collect(),
             ..SendProcessEnv::default()
         };
-        let gate_allows = self.process_env_allowed(input.collection.as_deref());
-        let mut names: Vec<String> = templates.process_env_names().into_iter().collect();
-        names.sort();
-        for name in names {
-            if !gate_allows {
-                send_env.withheld_names.push(name);
-            } else if let Some(value) = process_env.vars.get(&name) {
-                send_env.used_values.insert(value.clone());
+        // The gate decided once, in `process_env_for`, and that decision is used here too.
+        if input.backend_process_env {
+            for name in host_names.into_inner() {
+                if !process_env.allowed {
+                    send_env.withheld_names.push(name);
+                } else if let Some(value) = process_env.vars.get(&name) {
+                    send_env.used_values.insert(value.clone());
+                }
             }
         }
         Ok(ResolvedParts {
@@ -2268,19 +2348,11 @@ impl RequestExecutionService {
             input.tests_script.as_deref(),
         );
 
-        let mut console = Vec::new();
-        // A send from the request tab was already warned by the frontend.
-        if !process_env.withheld_names.is_empty()
-            && input.run_source != rocket_shared::RunSource::Manual
-        {
-            console.push(process_env_withheld_entry());
-        }
-
         Ok(PhaseState {
             http_request,
             var_ctx,
             script_error: None,
-            console,
+            console: Vec::new(),
             test_results: Vec::new(),
             next_request: None,
             skip_request: false,
@@ -2304,6 +2376,7 @@ impl RequestExecutionService {
                 std::collections::HashSet::new(),
             )),
             nested_withheld: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            nested: false,
             script_names: std::collections::HashSet::new(),
         })
     }
@@ -2867,14 +2940,8 @@ impl RequestExecutionService {
             crate::assertion_evaluator::evaluate_assertions(&input.assertions, &response);
         state.test_results.extend(assertion_results);
 
-        // A nested run that withheld `process.env` values warns in this Console too, once.
-        if state
-            .nested_withheld
-            .load(std::sync::atomic::Ordering::SeqCst)
-            && !state.console.iter().any(is_process_env_withheld_entry)
-        {
-            state.console.push(process_env_withheld_entry());
-        }
+        // The request was sent, so a withheld value gets its one Console line now.
+        state.warn_if_process_env_withheld(true);
 
         // ── Emit events ───────────────────────────────────────────────────────
         self.publish_console(&request_name, &state.console);
@@ -2930,9 +2997,15 @@ impl RequestExecutionService {
         });
 
         let mut run_process_env_values = state.process_env.used_values.clone();
-        if let Ok(nested) = state.nested_process_env_values.lock() {
-            run_process_env_values.extend(nested.iter().cloned());
-        }
+        // A poisoned lock still holds the values, and they must be masked.
+        run_process_env_values.extend(
+            state
+                .nested_process_env_values
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .iter()
+                .cloned(),
+        );
         ExecuteRequestOutput {
             response,
             test_results: state.test_results.clone(),
@@ -2942,6 +3015,7 @@ impl RequestExecutionService {
             run_secret_values: state.var_ctx.secret_values.clone(),
             run_sent_credentials: sent_credentials(&state.http_request),
             run_process_env_values,
+            process_env_withheld: state.process_env_withheld(true),
         }
     }
 
@@ -3083,12 +3157,7 @@ impl RequestExecutionService {
         state.active_runs = Arc::clone(active_runs);
         state.run_chain = chain;
         state.seed_runtime(runtime);
-        // A nested run of a Manual send is not warned by `begin_phases`.
-        if !state.process_env.withheld_names.is_empty()
-            && !state.console.iter().any(is_process_env_withheld_entry)
-        {
-            state.console.push(process_env_withheld_entry());
-        }
+        state.nested = true;
         self.run_before_request_phase(&input, ExecutionMode::Standalone, &mut state)
             .await?;
         let response = self.send_request(&state).await?;
@@ -3927,6 +3996,8 @@ mod tests {
             actions: vec![],
             request_guard_policy: rocket_workspace::RequestGuardPolicy::default(),
             run_source: rocket_shared::RunSource::Manual,
+            backend_process_env: false,
+            host_env_free: Default::default(),
         }
     }
 
@@ -12550,16 +12621,25 @@ mod tests {
         }
     }
 
-    /// A service for `process.env` sends, with handles to the executor and History.
-    fn process_env_svc(
-        pairs: &[(&str, &str)],
-        allow: bool,
-    ) -> (
+    /// A `process.env` service with handles to its executor, History and `.env` loader.
+    type ProcessEnvSvc = (
         RequestExecutionService,
         Arc<MockExecutor>,
         Arc<Mutex<Vec<HistoryEntry>>>,
         Arc<FakeDotEnv>,
-    ) {
+    );
+
+    /// A service for `process.env` sends, with handles to the executor and History.
+    fn process_env_svc(pairs: &[(&str, &str)], allow: bool) -> ProcessEnvSvc {
+        process_env_svc_with(env_with_dot_env("dev", ".env"), pairs, allow)
+    }
+
+    /// Like `process_env_svc`, with `env` as the collection environment.
+    fn process_env_svc_with(
+        env: Environment,
+        pairs: &[(&str, &str)],
+        allow: bool,
+    ) -> ProcessEnvSvc {
         let fake = FakeDotEnv::new(&[(".env", pairs)]);
         let executor = Arc::new(MockExecutor::new(200));
         let history = MockHistoryRepo::new();
@@ -12581,7 +12661,7 @@ mod tests {
             crate::test_doubles::InMemoryTrustStore::new()
         })
         .with_collection_env_repo_factory(Box::new(DirEnvRepoFactory {
-            env: env_with_dot_env("dev", ".env"),
+            env,
             dir: std::path::PathBuf::from("/work"),
         }))
         .with_dot_env_loader(Box::new(SharedDotEnv(Arc::clone(&fake))));
@@ -12592,6 +12672,7 @@ mod tests {
         let mut input = sample_input(url, Some("dev"));
         input.collection = Some("api".into());
         input.run_source = rocket_shared::RunSource::Flow;
+        input.backend_process_env = true;
         input
     }
 
@@ -12705,7 +12786,9 @@ mod tests {
     #[tokio::test]
     async fn manual_send_with_denied_gate_adds_no_backend_warning() {
         let (svc, _, _, _) = process_env_svc(&[("ROCKET_T2_KEY", "abc123secret")], false);
-        let input = withheld_input(rocket_shared::RunSource::Manual);
+        let mut input = withheld_input(rocket_shared::RunSource::Manual);
+        // A send from the request tab, whose gate the frontend already applied.
+        input.backend_process_env = false;
         let output = svc.execute(input).await.expect("execute");
         assert_eq!(withheld_count(&output.console_entries), 0);
     }
@@ -12732,8 +12815,160 @@ mod tests {
         let (svc, executor, _, _) = process_env_svc(&[("ROCKET_T1_KEY", "abc123secret")], true);
         let mut input = backend_input("https://x.test/abc");
         input.run_source = rocket_shared::RunSource::Manual;
+        input.backend_process_env = false;
         let output = svc.execute(input).await.expect("execute");
         assert_eq!(sent_url(&executor), "https://x.test/abc");
         assert!(output.run_process_env_values.is_empty());
+    }
+
+    // ── Final review fixes (issue #112) ──────────────────────────────────────
+
+    #[tokio::test]
+    async fn frontend_send_without_a_collection_keeps_a_process_env_placeholder() {
+        let (svc, executor, _, fake) = process_env_svc(&[("ROCKET_T1_KEY", "abc123secret")], true);
+        // A History tab sends no collection, and the frontend already decided its gate.
+        let input = sample_input("https://x.test/?p={{process.env.PATH}}", Some("dev"));
+        let output = svc.execute(input).await.expect("execute");
+        assert_eq!(
+            sent_url(&executor),
+            "https://x.test/?p={{process.env.PATH}}"
+        );
+        assert_eq!(fake.call_count() + fake.default_call_count(), 0);
+        assert!(output.run_process_env_values.is_empty());
+        assert_eq!(withheld_count(&output.console_entries), 0);
+    }
+
+    #[tokio::test]
+    async fn frontend_send_reads_no_dot_env_file() {
+        let (svc, executor, _, fake) = process_env_svc(&[("ROCKET_T1_KEY", "abc123secret")], true);
+        let mut input = sample_input("https://x.test/{{process.env.ROCKET_T1_KEY}}", Some("dev"));
+        input.collection = Some("api".into());
+        svc.execute(input).await.expect("execute");
+        assert_eq!(
+            sent_url(&executor),
+            "https://x.test/{{process.env.ROCKET_T1_KEY}}"
+        );
+        assert_eq!(fake.call_count() + fake.default_call_count(), 0);
+    }
+
+    /// Grants the host environment on the first lookup only, like a grant revoked mid-send.
+    #[derive(Default)]
+    struct FirstLookupTrustStore {
+        lookups: std::sync::atomic::AtomicUsize,
+    }
+
+    impl rocket_collection::CollectionTrustStore for FirstLookupTrustStore {
+        fn grant_for(
+            &self,
+            _: &rocket_collection::CollectionIdentity,
+        ) -> DomainResult<Option<rocket_collection::CollectionGrant>> {
+            if self
+                .lookups
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                > 0
+            {
+                return Ok(None);
+            }
+            Ok(Some(rocket_collection::CollectionGrant {
+                developer_mode: false,
+                context_roots: Vec::new(),
+                agent_run: false,
+                process_env: true,
+                source: rocket_collection::GrantSource::User,
+            }))
+        }
+        fn put(
+            &self,
+            _: &rocket_collection::CollectionIdentity,
+            _: rocket_collection::CollectionGrant,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
+        fn remove(&self, _: &rocket_collection::CollectionIdentity) -> DomainResult<()> {
+            Ok(())
+        }
+        fn rekey(
+            &self,
+            _: &rocket_collection::CollectionIdentity,
+            _: &rocket_collection::CollectionIdentity,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
+        fn migrated(&self) -> DomainResult<bool> {
+            Ok(true)
+        }
+        fn complete_migration(
+            &self,
+            _: Vec<(
+                rocket_collection::CollectionIdentity,
+                rocket_collection::CollectionGrant,
+            )>,
+            _: Vec<rocket_collection::MigrationNoticeEntry>,
+        ) -> DomainResult<()> {
+            Ok(())
+        }
+        fn migration_notice(&self) -> DomainResult<Vec<rocket_collection::MigrationNoticeEntry>> {
+            Ok(Vec::new())
+        }
+        fn dismiss_migration_notice(&self) -> DomainResult<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn the_gate_is_decided_once_per_send() {
+        let (svc, executor, _, _) = process_env_svc(&[], true);
+        let svc = svc.with_trust_store(Arc::new(FirstLookupTrustStore::default()));
+        let input = backend_input("https://x.test/?p={{process.env.PATH}}");
+        let output = svc.execute(input).await.expect("execute");
+        let os_path = std::env::var("PATH").expect("PATH is set");
+        // The value was sent, so it is reported for masking and no line says otherwise.
+        assert_eq!(sent_url(&executor), format!("https://x.test/?p={os_path}"));
+        assert!(output.run_process_env_values.contains(&os_path));
+        assert_eq!(withheld_count(&output.console_entries), 0);
+    }
+
+    #[tokio::test]
+    async fn a_poisoned_nested_value_lock_still_reports_the_values() {
+        let (svc, _, _, _) = process_env_svc(&[], true);
+        let input = backend_input("https://x.test/a");
+        let empty = std::collections::HashMap::new();
+        let mut state = svc.begin_phases(&input, &empty).expect("begin");
+        let shared = Arc::clone(&state.nested_process_env_values);
+        let poisoned = std::thread::spawn(move || {
+            let mut values = shared.lock().expect("lock");
+            values.insert("nested-value-123456".to_string());
+            panic!("poison the lock");
+        })
+        .join();
+        assert!(poisoned.is_err());
+        let response = svc.send_request(&state).await.expect("send");
+        let output = svc.finish_phases(&input, response, &mut state).await;
+        assert!(output
+            .run_process_env_values
+            .contains("nested-value-123456"));
+    }
+
+    #[tokio::test]
+    async fn certificate_fields_never_resolve_process_env() {
+        let mut env = env_with_dot_env("dev", ".env");
+        env.client_certificates = vec![ClientCertificate::Pkcs12 {
+            domain: "x.test".into(),
+            pkcs12_file_path: "/certs/client.p12".into(),
+            pkcs12_secret: None,
+            passphrase: Some("{{process.env.PATH}}".into()),
+        }];
+        let (svc, _, _, _) = process_env_svc_with(env, &[], true);
+        let input = backend_input("https://x.test/a?p={{process.env.PATH}}");
+        let resolved = svc
+            .resolve_request(&input, &std::collections::HashMap::new())
+            .expect("resolve_request");
+        let os_path = std::env::var("PATH").expect("PATH is set");
+        // The request itself still resolves it; the certificate does not.
+        assert_eq!(resolved.url, format!("https://x.test/a?p={os_path}"));
+        assert_eq!(
+            describe_all(&resolved.options.client_certificates),
+            ["pkcs12 x.test file:/certs/client.p12 pass:{{process.env.PATH}}"]
+        );
     }
 }

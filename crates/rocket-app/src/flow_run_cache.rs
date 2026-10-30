@@ -962,6 +962,7 @@ mod tests {
             run_secret_values: Default::default(),
             run_sent_credentials: Default::default(),
             run_process_env_values: Default::default(),
+            process_env_withheld: false,
         }
     }
 
