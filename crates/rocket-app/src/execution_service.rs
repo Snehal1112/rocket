@@ -13685,4 +13685,34 @@ mod tests {
         let text = format!("{:?}", saved[0]);
         assert!(!text.contains("abc123secret"), "{text}");
     }
+
+    /// Executor whose send fails with an error that quotes a `.env` value.
+    struct DotEnvEchoFailingExecutor;
+
+    #[async_trait]
+    impl HttpExecutor for DotEnvEchoFailingExecutor {
+        async fn execute(&self, _req: &HttpRequest) -> DomainResult<HttpResponse> {
+            Err(DomainError::Internal(
+                "Token endpoint returned 400: abc123secret".into(),
+            ))
+        }
+    }
+
+    #[tokio::test]
+    async fn executor_error_masks_dot_env_value() {
+        let (mut svc, _, _, _) = process_env_svc_with_folder_auth(
+            oauth_cc(OAUTH_PLACEHOLDER),
+            &[("ROCKET_T1_KEY", "abc123secret")],
+            true,
+        );
+        svc.executor = Arc::new(DotEnvEchoFailingExecutor);
+        let mut input = tab_input();
+        input.process_env = collection_scope();
+
+        let err = svc.execute(input).await.expect_err("the executor fails");
+
+        let text = err.to_string();
+        assert!(!text.contains("abc123secret"), "{text}");
+        assert!(text.contains("Token endpoint returned 400"), "{text}");
+    }
 }
