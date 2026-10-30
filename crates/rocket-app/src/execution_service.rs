@@ -30,6 +30,7 @@ use std::sync::Arc;
 
 pub(crate) mod runtime_fill;
 pub mod websocket_resolution;
+use websocket_resolution::ProcessEnvScopeInput;
 use self::runtime_fill::{
     allow_new_names, fill_names, fill_pairs, swap_path_values, FieldTemplate, RequestTemplates,
 };
@@ -1306,11 +1307,36 @@ impl RequestExecutionService {
         }
     }
 
+    /// Same as `process_env_for`, narrowed by the tab's scope. A `collection` given keeps
+    /// its own gate and the scope can only close it. Without a `collection`, a
+    /// `Collection` scope names the gate and the environment, `Scratch` keeps full host
+    /// access and `Closed` gives nothing.
+    pub fn process_env_for_scope(
+        &self,
+        collection: Option<&str>,
+        environment_name: Option<&str>,
+        global_env_name: Option<&str>,
+        scope: &ProcessEnvScopeInput,
+    ) -> ProcessEnv {
+        match (collection, scope) {
+            (_, ProcessEnvScopeInput::Closed) => ProcessEnv::default(),
+            (Some(c), _) => self.process_env_for(Some(c), environment_name, global_env_name),
+            (
+                None,
+                ProcessEnvScopeInput::Collection {
+                    name,
+                    environment_name: scope_env,
+                },
+            ) => self.process_env_for(Some(name), scope_env.as_deref(), global_env_name),
+            (None, ProcessEnvScopeInput::Scratch) => {
+                self.process_env_for(None, environment_name, global_env_name)
+            }
+        }
+    }
+
     /// Same as `build_variable_context`, plus the OS environment as `process.env.NAME`
-    /// (lowest priority) when `process_env_allowed`. HTTP requests get these from the
-    /// frontend, so the protocols that resolve in the backend (WebSocket, GraphQL
-    /// subscriptions, gRPC) use this. Without the permission the placeholders stay
-    /// unresolved.
+    /// (lowest priority) when `process_env_allowed`. Without the permission the
+    /// placeholders stay unresolved.
     pub fn build_variable_context_with_process_env(
         &self,
         global_env_name: Option<&str>,
@@ -1318,6 +1344,29 @@ impl RequestExecutionService {
         environment_name: Option<&str>,
         request_path: Option<&str>,
         external_secrets: &std::collections::HashMap<String, String>,
+    ) -> std::collections::HashMap<String, String> {
+        // `Scratch` leaves the gate to `collection`, which is the plain behaviour.
+        self.build_variable_context_for_scope(
+            global_env_name,
+            collection,
+            environment_name,
+            request_path,
+            external_secrets,
+            &ProcessEnvScopeInput::Scratch,
+        )
+    }
+
+    /// `build_variable_context_with_process_env` with the process env narrowed by the
+    /// tab's scope (see `process_env_for_scope`). WebSocket, GraphQL subscriptions and
+    /// gRPC resolve through this.
+    pub fn build_variable_context_for_scope(
+        &self,
+        global_env_name: Option<&str>,
+        collection: Option<&str>,
+        environment_name: Option<&str>,
+        request_path: Option<&str>,
+        external_secrets: &std::collections::HashMap<String, String>,
+        scope: &ProcessEnvScopeInput,
     ) -> std::collections::HashMap<String, String> {
         let mut scopes = self.build_variable_scopes(
             global_env_name,
@@ -1327,7 +1376,7 @@ impl RequestExecutionService {
             external_secrets,
         );
         scopes.process_env = self
-            .process_env_for(collection, environment_name, global_env_name)
+            .process_env_for_scope(collection, environment_name, global_env_name, scope)
             .vars;
         scopes.flatten_with_process_env()
     }
@@ -8229,6 +8278,51 @@ mod tests {
         );
         assert_eq!(
             ctx.get("process.env.ROCKET_DOT_A").map(String::as_str),
+            Some("1")
+        );
+    }
+
+    #[test]
+    fn closed_scope_reads_no_dot_env_file() {
+        let fake = FakeDotEnv::new(&[(".env", &[("ROCKET_DOT_A", "1")])]);
+        let svc = dot_env_svc(
+            Box::new(MockEnvRepo::empty()),
+            Some(env_with_dot_env("dev", ".env")),
+            Some(&fake),
+            true,
+        );
+        let pe = svc.process_env_for_scope(
+            Some("api"),
+            Some("dev"),
+            None,
+            &websocket_resolution::ProcessEnvScopeInput::Closed,
+        );
+        assert!(pe.vars.is_empty());
+        assert!(!pe.allowed);
+        assert!(fake.calls.lock().expect("calls").is_empty());
+        assert!(fake.default_calls.lock().expect("default calls").is_empty());
+    }
+
+    #[test]
+    fn collection_scope_reads_that_collections_environment_dot_env() {
+        let fake = FakeDotEnv::new(&[(".env", &[("ROCKET_DOT_A", "1")])]);
+        let svc = dot_env_svc(
+            Box::new(MockEnvRepo::empty()),
+            Some(env_with_dot_env("dev", ".env")),
+            Some(&fake),
+            true,
+        );
+        let pe = svc.process_env_for_scope(
+            None,
+            None,
+            None,
+            &websocket_resolution::ProcessEnvScopeInput::Collection {
+                name: "api".into(),
+                environment_name: Some("dev".into()),
+            },
+        );
+        assert_eq!(
+            pe.vars.get("ROCKET_DOT_A").map(String::as_str),
             Some("1")
         );
     }

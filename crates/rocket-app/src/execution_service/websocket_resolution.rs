@@ -15,6 +15,24 @@ use serde::Deserialize;
 
 use super::{resolve_auth, RequestExecutionService};
 
+/// Which host environment (`{{process.env.*}}` and `.env` files) a send may see. It is
+/// decided by the tab, on top of the collection trust gate.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum ProcessEnvScopeInput {
+    /// A tab outside any collection: full host access.
+    Scratch,
+    /// A tab of a collection, with the environment the tab uses.
+    Collection {
+        name: String,
+        #[serde(default)]
+        environment_name: Option<String>,
+    },
+    /// No host environment at all.
+    #[default]
+    Closed,
+}
+
 /// Where `{{variables}}` come from. Mirrors the scope fields of `ExecuteRequestInput`.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,6 +45,9 @@ pub struct WebSocketScope {
     pub global_env_name: Option<String>,
     #[serde(default)]
     pub request_path: Option<String>,
+    /// Required. It never widens `collection`: a collection keeps its own trust gate and a
+    /// closed scope closes it.
+    pub process_env: ProcessEnvScopeInput,
 }
 
 /// IPC input of `ws_connect`. Built from the open tab, like `ExecuteRequestInput`.
@@ -147,12 +168,13 @@ impl RequestExecutionService {
                 scope.environment_name.as_deref(),
             )
             .await?;
-        let vars = self.build_variable_context_with_process_env(
+        let vars = self.build_variable_context_for_scope(
             scope.global_env_name.as_deref(),
             scope.collection.as_deref(),
             scope.environment_name.as_deref(),
             scope.request_path.as_deref(),
             &secrets,
+            &scope.process_env,
         );
 
         let request_auth = input.auth.clone().unwrap_or(Auth::None);
@@ -213,12 +235,13 @@ impl RequestExecutionService {
         } else {
             std::collections::HashMap::new()
         };
-        let vars = self.build_variable_context_with_process_env(
+        let vars = self.build_variable_context_for_scope(
             scope.global_env_name.as_deref(),
             scope.collection.as_deref(),
             scope.environment_name.as_deref(),
             scope.request_path.as_deref(),
             &secrets,
+            &scope.process_env,
         );
         let resolved = resolve(data, &vars).output;
         match kind {
@@ -300,6 +323,7 @@ mod tests {
         serde_json::from_value(serde_json::json!({
             "url": url,
             "collection": "api",
+            "processEnv": { "kind": "collection", "name": "api" },
             "environmentName": "dev"
         }))
         .expect("input")
@@ -421,6 +445,7 @@ mod tests {
         let scope = WebSocketScope {
             collection: Some("api".into()),
             environment_name: Some("dev".into()),
+            process_env: collection_scope("api"),
             ..WebSocketScope::default()
         };
         let frame = svc
@@ -445,6 +470,7 @@ mod tests {
         let scope = WebSocketScope {
             collection: Some("api".into()),
             environment_name: Some("dev".into()),
+            process_env: collection_scope("api"),
             ..WebSocketScope::default()
         };
         let frame = svc
@@ -607,6 +633,7 @@ mod tests {
         let scope = WebSocketScope {
             collection: Some("api".into()),
             environment_name: Some("dev".into()),
+            process_env: collection_scope("api"),
             ..WebSocketScope::default()
         };
 
@@ -640,6 +667,7 @@ mod tests {
             "keepAliveMs": 500,
             "verifySsl": false,
             "collection": "api",
+            "processEnv": { "kind": "scratch" },
             "environmentName": "dev",
             "globalEnvName": "g",
             "requestPath": "chat.yml"
@@ -650,10 +678,142 @@ mod tests {
         assert_eq!(i.scope.request_path.as_deref(), Some("chat.yml"));
 
         let s: WebSocketSendInput = serde_json::from_value(serde_json::json!({
-            "kind": "binary", "data": "AQID", "collection": "api"
+            "kind": "binary", "data": "AQID", "collection": "api",
+            "processEnv": { "kind": "scratch" }
         }))
         .expect("send input");
         assert_eq!(s.kind, WebSocketMessageKind::Binary);
         assert_eq!(s.scope.collection.as_deref(), Some("api"));
+    }
+
+    fn path_ctx(
+        svc: &RequestExecutionService,
+        collection: Option<&str>,
+        scope: ProcessEnvScopeInput,
+    ) -> std::collections::HashMap<String, String> {
+        svc.build_variable_context_for_scope(
+            None,
+            collection,
+            None,
+            None,
+            &std::collections::HashMap::new(),
+            &scope,
+        )
+    }
+
+    fn collection_scope(name: &str) -> ProcessEnvScopeInput {
+        ProcessEnvScopeInput::Collection {
+            name: name.into(),
+            environment_name: None,
+        }
+    }
+
+    #[test]
+    fn closed_scope_gives_no_host_environment_even_for_a_trusted_collection() {
+        let svc = service(dev_env(), CollectionSettings::default())
+            .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
+        assert!(!path_ctx(&svc, Some("api"), ProcessEnvScopeInput::Closed)
+            .contains_key("process.env.PATH"));
+        assert!(
+            !path_ctx(&svc, None, ProcessEnvScopeInput::Closed).contains_key("process.env.PATH")
+        );
+    }
+
+    #[test]
+    fn history_collection_scope_follows_that_collections_gate() {
+        let path = std::env::var("PATH").ok();
+        let denied = service(dev_env(), CollectionSettings::default());
+        assert!(
+            !path_ctx(&denied, None, collection_scope("api")).contains_key("process.env.PATH")
+        );
+        let allowed = service(dev_env(), CollectionSettings::default())
+            .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
+        let ctx = path_ctx(&allowed, None, collection_scope("api"));
+        assert_eq!(ctx.get("process.env.PATH"), path.as_ref());
+    }
+
+    #[test]
+    fn scratch_scope_without_collection_keeps_host_environment() {
+        let svc = service(dev_env(), CollectionSettings::default());
+        let ctx = path_ctx(&svc, None, ProcessEnvScopeInput::Scratch);
+        assert_eq!(
+            ctx.get("process.env.PATH"),
+            std::env::var("PATH").ok().as_ref()
+        );
+    }
+
+    #[test]
+    fn scratch_scope_cannot_widen_a_denied_collection() {
+        let svc = service(dev_env(), CollectionSettings::default());
+        assert!(!path_ctx(&svc, Some("api"), ProcessEnvScopeInput::Scratch)
+            .contains_key("process.env.PATH"));
+    }
+
+    #[test]
+    fn collection_scope_for_another_collection_cannot_widen_a_denied_collection() {
+        let svc = service(dev_env(), CollectionSettings::default());
+        assert!(!path_ctx(&svc, Some("api"), collection_scope("other"))
+            .contains_key("process.env.PATH"));
+    }
+
+    #[test]
+    fn scope_deserializes_scratch_collection_and_closed() {
+        let s: ProcessEnvScopeInput =
+            serde_json::from_value(serde_json::json!({ "kind": "scratch" })).expect("scratch");
+        assert_eq!(s, ProcessEnvScopeInput::Scratch);
+        let c: ProcessEnvScopeInput = serde_json::from_value(
+            serde_json::json!({ "kind": "collection", "name": "api", "environmentName": "dev" }),
+        )
+        .expect("collection");
+        assert_eq!(
+            c,
+            ProcessEnvScopeInput::Collection {
+                name: "api".into(),
+                environment_name: Some("dev".into())
+            }
+        );
+        let n: ProcessEnvScopeInput =
+            serde_json::from_value(serde_json::json!({ "kind": "collection", "name": "api" }))
+                .expect("no env");
+        assert_eq!(n, collection_scope("api"));
+        let x: ProcessEnvScopeInput =
+            serde_json::from_value(serde_json::json!({ "kind": "closed" })).expect("closed");
+        assert_eq!(x, ProcessEnvScopeInput::Closed);
+        assert_eq!(ProcessEnvScopeInput::default(), ProcessEnvScopeInput::Closed);
+        serde_json::from_value::<ProcessEnvScopeInput>(serde_json::json!({ "kind": "open" }))
+            .expect_err("unknown kind");
+    }
+
+    #[test]
+    fn websocket_scope_without_process_env_fails_to_deserialize() {
+        let err = serde_json::from_value::<WebSocketConnectInput>(
+            serde_json::json!({ "url": "wss://h/ws", "collection": "api" }),
+        )
+        .expect_err("missing processEnv");
+        assert!(err.to_string().contains("processEnv"), "{err}");
+        serde_json::from_value::<WebSocketSendInput>(
+            serde_json::json!({ "kind": "text", "data": "x" }),
+        )
+        .expect_err("missing processEnv");
+    }
+
+    #[tokio::test]
+    async fn resolve_websocket_message_with_closed_scope_keeps_the_placeholder() {
+        let svc = service(dev_env(), CollectionSettings::default())
+            .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
+        let scope = WebSocketScope {
+            collection: None,
+            process_env: ProcessEnvScopeInput::Closed,
+            ..WebSocketScope::default()
+        };
+        let frame = svc
+            .resolve_websocket_message(
+                &scope,
+                WebSocketMessageKind::Text,
+                "{{process.env.PATH}}",
+            )
+            .await
+            .expect("message");
+        assert_eq!(frame, WebSocketFrame::Text("{{process.env.PATH}}".into()));
     }
 }
