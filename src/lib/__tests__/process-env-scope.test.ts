@@ -120,6 +120,28 @@ describe('process env scope', () => {
     expect(toast.warning).toHaveBeenCalledWith(expect.stringContaining('without a collection'));
   });
 
+  it('sends the tab collection scope with the request', async () => {
+    vi.mocked(tauriApi.getProcessEnvVars).mockResolvedValue(pe({}));
+    vi.mocked(tauriApi.getFolderChainVariables).mockResolvedValue([]);
+    vi.mocked(tauriApi.getCollectionTrust).mockResolvedValue(makeTrust());
+    const request = openTab({
+      id: 't1',
+      tabType: 'request',
+      source: { collection: 'api', path: 'users/list' },
+    });
+    await sendRequest('t1', request);
+    const input = vi.mocked(tauriApi.executeRequest).mock.lastCall?.[0];
+    expect(input?.processEnv).toEqual({ kind: 'collection', name: 'api' });
+  });
+
+  it('sends a closed scope for a History tab with no collection', async () => {
+    vi.mocked(tauriApi.getProcessEnvVars).mockResolvedValue(pe({}));
+    const request = openTab({ id: 'history-h6', historyCollection: null });
+    await sendRequest('history-h6', request);
+    const input = vi.mocked(tauriApi.executeRequest).mock.lastCall?.[0];
+    expect(input?.processEnv).toEqual({ kind: 'closed' });
+  });
+
   it('warns with the history collection on a resend', async () => {
     vi.mocked(tauriApi.getProcessEnvVars).mockResolvedValue(pe({}));
     vi.mocked(tauriApi.getCollectionTrust).mockResolvedValue(makeTrust());

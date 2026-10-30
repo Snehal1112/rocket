@@ -706,9 +706,7 @@ mod tests {
     fn history_collection_scope_follows_that_collections_gate() {
         let path = std::env::var("PATH").ok();
         let denied = service(dev_env(), CollectionSettings::default());
-        assert!(
-            !path_ctx(&denied, None, collection_scope("api")).contains_key("process.env.PATH")
-        );
+        assert!(!path_ctx(&denied, None, collection_scope("api")).contains_key("process.env.PATH"));
         let allowed = service(dev_env(), CollectionSettings::default())
             .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
         let ctx = path_ctx(&allowed, None, collection_scope("api"));
@@ -762,11 +760,7 @@ mod tests {
             ..WebSocketScope::default()
         };
         let frame = svc
-            .resolve_websocket_message(
-                &scope,
-                WebSocketMessageKind::Text,
-                "{{process.env.PATH}}",
-            )
+            .resolve_websocket_message(&scope, WebSocketMessageKind::Text, "{{process.env.PATH}}")
             .await
             .expect("message");
         assert_eq!(frame, WebSocketFrame::Text("{{process.env.PATH}}".into()));

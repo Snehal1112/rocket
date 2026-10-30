@@ -611,6 +611,8 @@ export interface ExecuteRequestInput {
   requestGuardPolicy?: RequestGuardPolicy;
   /** Who triggered the send. The backend defaults to manual when omitted. */
   runSource?: RunSource;
+  /** The host environment scope of the send, used for an inherited OAuth2 auth. */
+  processEnv: ProcessEnvScopeInput;
 }
 
 export interface FileChangedEvent {

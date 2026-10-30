@@ -788,6 +788,7 @@ export async function sendRequest(tabId: string, request: RequestState): Promise
       tags: effectiveRequest.tags ?? [],
       pathParams: resolvedPathParams,
       requestGuardPolicy,
+      processEnv: toProcessEnvScopeInput(processEnvScope),
     };
     const result = await dispatchSend(effectiveRequest, requestInput, resolvedGraphql);
 

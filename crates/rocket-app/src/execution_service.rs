@@ -24,6 +24,7 @@ use rocket_scripting::{
 };
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{DomainEvent, EventPublisher};
+use rocket_shared::oauth2::{OAuth2AdditionalParameters, OAuth2ClientCredentials, OAuth2Flow};
 use rocket_shared::types::{Auth, Body, BodyMode, Header, HttpMethod, QueryParam};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -146,6 +147,10 @@ pub struct ExecuteRequestInput {
     /// from IPC is always false: the field is never read from or written to the wire.
     #[serde(skip)]
     pub backend_process_env: bool,
+    /// The host environment a tab send may see in an inherited OAuth2 auth. The frontend
+    /// resolves every other field itself. Closed when omitted.
+    #[serde(default)]
+    pub process_env: ProcessEnvScopeInput,
     /// The fields a Flow wire or a fetched Auth-node token filled in. Their text did not
     /// come from the saved request, so it is sent as written: no variable of any scope,
     /// `process.env` included, is put into it. Never read from or written to the wire.
@@ -1510,9 +1515,44 @@ impl RequestExecutionService {
         };
 
         // Resolve {{placeholders}} in auth, URL and headers.
+        // A tab send resolves `process.env` in an OAuth2 auth only, under the tab's scope: the
+        // token fetch happens in the backend, after the frontend has resolved everything else.
+        // The gate decides once, here, and only an OAuth2 auth reads a `.env` file.
+        let auth_env = (!input.backend_process_env
+            && !literal.auth
+            && matches!(effective_auth, Auth::OAuth2(_)))
+        .then(|| {
+            self.process_env_for_scope(
+                input.collection.as_deref(),
+                input.environment_name.as_deref(),
+                input.global_env_name.as_deref(),
+                &input.process_env,
+            )
+        });
+        let auth_vars = auth_env.as_ref().map(|env| {
+            // The scope's values are the lowest layer, keyed like `flatten_with_process_env`.
+            let mut auth_vars: std::collections::HashMap<String, String> = env
+                .vars
+                .iter()
+                .map(|(k, v)| (format!("process.env.{k}"), v.clone()))
+                .collect();
+            auth_vars.extend(vars.clone());
+            auth_vars
+        });
+        let auth_host_names = RefCell::new(std::collections::BTreeSet::new());
         let auth_templates = RefCell::new(Vec::new());
         let effective_auth = map_auth_fields(effective_auth, |s: String| {
-            let template = field(&s, false, literal.auth);
+            let template = match &auth_vars {
+                Some(auth_vars) => {
+                    let template =
+                        FieldTemplate::record(&s, false, auth_vars, &mut unresolved.borrow_mut());
+                    auth_host_names
+                        .borrow_mut()
+                        .extend(template.process_env_names().map(str::to_string));
+                    template
+                }
+                None => field(&s, false, literal.auth),
+            };
             let output = template.output.clone();
             auth_templates.borrow_mut().push(template);
             output
@@ -1642,6 +1682,22 @@ impl RequestExecutionService {
                 if !process_env.allowed {
                     send_env.withheld_names.push(name);
                 } else if let Some(value) = process_env.vars.get(&name) {
+                    send_env.used_values.insert(value.clone());
+                }
+            }
+        }
+        // A tab send's OAuth2 fields use the scope's own env, with the same rules.
+        if let Some(auth_env) = auth_env {
+            send_env.dot_env_values.extend(
+                auth_env
+                    .dot_env_keys
+                    .iter()
+                    .filter_map(|k| auth_env.vars.get(k).cloned()),
+            );
+            for name in auth_host_names.into_inner() {
+                if !auth_env.allowed {
+                    send_env.withheld_names.push(name);
+                } else if let Some(value) = auth_env.vars.get(&name) {
                     send_env.used_values.insert(value.clone());
                 }
             }
@@ -2771,7 +2827,11 @@ impl RequestExecutionService {
     /// its URL, or for its OAuth2 client-credentials token URL, is fetched first.
     pub(crate) async fn send_request(&self, state: &PhaseState) -> DomainResult<HttpResponse> {
         let request = self.with_vault_certificates(&state.http_request).await;
-        let response = self.executor.execute(&request).await?;
+        let response = self
+            .executor
+            .execute(&request)
+            .await
+            .map_err(|e| crate::redaction::redact_error(e, &state.var_ctx.secret_values))?;
 
         tracing::info!(
             status = response.status,
@@ -3529,13 +3589,12 @@ fn merge_auth(request_auth: Auth, collection_auth: Option<Auth>) -> Auth {
 /// Resolves `{{placeholders}}` in the credential fields of an auth value.
 /// The Request tab resolves auth on the frontend, but the backend-only paths
 /// (Flow, collection runner) receive the raw collection auth, so it is done here.
-/// OAuth2 flows are left untouched.
+/// OAuth2 flows are resolved field by field, like every other auth type.
 fn resolve_auth(auth: Auth, vars: &std::collections::HashMap<String, String>) -> Auth {
     map_auth_fields(auth, |s: String| resolve(&s, vars).output)
 }
 
 /// Applies `r` to each credential field of an auth value that variables may fill.
-/// OAuth2 flows are left untouched.
 fn map_auth_fields(auth: Auth, r: impl Fn(String) -> String) -> Auth {
     match auth {
         Auth::Basic { username, password } => Auth::Basic {
@@ -3593,7 +3652,111 @@ fn map_auth_fields(auth: Auth, r: impl Fn(String) -> String) -> Auth {
             session_token: session_token.map(&r),
             profile_name: profile_name.map(&r),
         },
+        Auth::OAuth2(mut flow) => {
+            map_oauth2_fields(&mut flow, &r);
+            Auth::OAuth2(flow)
+        }
         other => other,
+    }
+}
+
+/// Applies `r` to every string field of an OAuth2 flow that variables may fill, in the order of
+/// the flow's struct fields. Placement, settings and token config stay as they are.
+fn map_oauth2_fields(flow: &mut OAuth2Flow, r: &impl Fn(String) -> String) {
+    // Takes the string out, maps it and puts it back, so no field is cloned.
+    let map = |s: &mut String| *s = r(std::mem::take(s));
+    let map_opt = |s: &mut Option<String>| {
+        if let Some(s) = s {
+            map(s);
+        }
+    };
+    let map_credentials = |c: &mut OAuth2ClientCredentials| {
+        map(&mut c.client_id);
+        map(&mut c.client_secret);
+    };
+    let map_params = |p: &mut Option<OAuth2AdditionalParameters>| {
+        let Some(p) = p else { return };
+        for list in [
+            &mut p.authorization_request,
+            &mut p.access_token_request,
+            &mut p.refresh_token_request,
+        ] {
+            for param in list.iter_mut().flatten() {
+                map(&mut param.name);
+                map(&mut param.value);
+            }
+        }
+    };
+    match flow {
+        OAuth2Flow::ClientCredentials {
+            access_token_url,
+            refresh_token_url,
+            credentials,
+            scope,
+            additional_parameters,
+            ..
+        } => {
+            map(access_token_url);
+            map_opt(refresh_token_url);
+            map_credentials(credentials);
+            map_opt(scope);
+            map_params(additional_parameters);
+        }
+        OAuth2Flow::ResourceOwnerPassword {
+            access_token_url,
+            refresh_token_url,
+            credentials,
+            resource_owner,
+            scope,
+            additional_parameters,
+            ..
+        } => {
+            map(access_token_url);
+            map_opt(refresh_token_url);
+            map_credentials(credentials);
+            if let Some(owner) = resource_owner {
+                map(&mut owner.username);
+                map(&mut owner.password);
+            }
+            map_opt(scope);
+            map_params(additional_parameters);
+        }
+        OAuth2Flow::AuthorizationCode {
+            authorization_url,
+            access_token_url,
+            refresh_token_url,
+            callback_url,
+            credentials,
+            scope,
+            state,
+            additional_parameters,
+            ..
+        } => {
+            map(authorization_url);
+            map(access_token_url);
+            map_opt(refresh_token_url);
+            map_opt(callback_url);
+            map_credentials(credentials);
+            map_opt(scope);
+            map_opt(state);
+            map_params(additional_parameters);
+        }
+        OAuth2Flow::Implicit {
+            authorization_url,
+            callback_url,
+            client_id,
+            scope,
+            state,
+            additional_parameters,
+            ..
+        } => {
+            map(authorization_url);
+            map_opt(callback_url);
+            map(client_id);
+            map_opt(scope);
+            map_opt(state);
+            map_params(additional_parameters);
+        }
     }
 }
 
@@ -4063,6 +4226,7 @@ mod tests {
             request_guard_policy: rocket_workspace::RequestGuardPolicy::default(),
             run_source: rocket_shared::RunSource::Manual,
             backend_process_env: false,
+            process_env: Default::default(),
             literal: Default::default(),
         }
     }
@@ -6319,21 +6483,24 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn oauth2_folder_auth_reaches_the_executor_unchanged() {
+        async fn inherited_oauth2_resolves_vars_on_backend_send() {
             use rocket_shared::oauth2::{OAuth2ClientCredentials, OAuth2Flow};
-            let oauth = Auth::OAuth2(Box::new(OAuth2Flow::ClientCredentials {
-                access_token_url: "https://auth.example.com/token".into(),
-                refresh_token_url: None,
-                credentials: OAuth2ClientCredentials {
-                    client_id: "folder-client".into(),
-                    client_secret: "folder-secret".into(),
-                    placement: None,
-                },
-                scope: Some("read".into()),
-                additional_parameters: None,
-                token_config: None,
-                settings: None,
-            }));
+            let oauth_with = |client_id: &str| {
+                Auth::OAuth2(Box::new(OAuth2Flow::ClientCredentials {
+                    access_token_url: "https://auth.example.com/token".into(),
+                    refresh_token_url: None,
+                    credentials: OAuth2ClientCredentials {
+                        client_id: client_id.into(),
+                        client_secret: "folder-secret".into(),
+                        placement: None,
+                    },
+                    scope: Some("read".into()),
+                    additional_parameters: None,
+                    token_config: None,
+                    settings: None,
+                }))
+            };
+            let oauth = oauth_with("{{token}}");
             let settings = CollectionSettings {
                 auth: Some(bearer("from-collection")),
                 ..Default::default()
@@ -6342,7 +6509,7 @@ mod tests {
             let mut input = input();
             input.auth = Auth::Inherit;
 
-            assert_eq!(resolve(&svc, &input).auth, oauth);
+            assert_eq!(resolve(&svc, &input).auth, oauth_with("jwt-from-env"));
         }
 
         #[tokio::test]
@@ -9888,6 +10055,162 @@ mod tests {
         }
     }
 
+    /// Executor whose send fails with an error that quotes a secret.
+    struct SecretEchoFailingExecutor;
+
+    #[async_trait]
+    impl HttpExecutor for SecretEchoFailingExecutor {
+        async fn execute(&self, _req: &HttpRequest) -> DomainResult<HttpResponse> {
+            Err(DomainError::Internal(
+                "Token endpoint returned 400: s3cret-value-99".into(),
+            ))
+        }
+    }
+
+    #[tokio::test]
+    async fn executor_error_is_masked() {
+        let mut env = Environment::new("dev");
+        env.set_variable(Variable::secret("cs", "s3cret-value-99"));
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::with_env(env)),
+            Arc::new(SecretEchoFailingExecutor),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        );
+
+        let err = svc
+            .execute(sample_input("https://example.com/{{cs}}", Some("dev")))
+            .await
+            .expect_err("the executor fails");
+
+        let text = err.to_string();
+        assert!(!text.contains("s3cret-value-99"), "{text}");
+        assert!(text.contains("Token endpoint returned 400"), "{text}");
+    }
+
+    #[test]
+    fn map_auth_fields_resolves_every_oauth2_field() {
+        use rocket_shared::oauth2::*;
+        // Builds the same flows with every templated field run through `f`.
+        let params = |f: &dyn Fn(&str) -> String| {
+            Some(vec![OAuth2AdditionalParameter {
+                name: f("{{k}}"),
+                value: f("{{v}}"),
+                placement: Some("body".into()),
+                enabled: true,
+            }])
+        };
+        let creds = |f: &dyn Fn(&str) -> String| OAuth2ClientCredentials {
+            client_id: f("{{cid}}"),
+            client_secret: f("{{cs}}"),
+            placement: Some("basic_auth_header".into()),
+        };
+        let settings = Some(OAuth2Settings {
+            auto_fetch_token: Some(true),
+            auto_refresh_token: None,
+            verify_ssl: Some(false),
+            use_system_browser: None,
+        });
+        let token_config = Some(OAuth2TokenConfig {
+            id: Some("{{keep}}".into()),
+            source: Some("accessToken".into()),
+            placement: Some(OAuth2TokenPlacement::Header {
+                header: "{{keep}}".into(),
+            }),
+        });
+        let flows = |f: &dyn Fn(&str) -> String| {
+            let additional = || {
+                Some(OAuth2AdditionalParameters {
+                    authorization_request: params(f),
+                    access_token_request: params(f),
+                    refresh_token_request: params(f),
+                })
+            };
+            vec![
+                OAuth2Flow::ResourceOwnerPassword {
+                    access_token_url: f("{{u}}/token"),
+                    refresh_token_url: Some(f("{{u}}/refresh")),
+                    credentials: creds(f),
+                    resource_owner: Some(OAuth2ResourceOwner {
+                        username: f("{{user}}"),
+                        password: f("{{pw}}"),
+                    }),
+                    scope: Some(f("{{scope}}")),
+                    additional_parameters: additional(),
+                    token_config: token_config.clone(),
+                    settings: settings.clone(),
+                },
+                OAuth2Flow::ClientCredentials {
+                    access_token_url: f("{{u}}/token"),
+                    refresh_token_url: Some(f("{{u}}/refresh")),
+                    credentials: creds(f),
+                    scope: Some(f("{{scope}}")),
+                    additional_parameters: additional(),
+                    token_config: token_config.clone(),
+                    settings: settings.clone(),
+                },
+                OAuth2Flow::AuthorizationCode {
+                    authorization_url: f("{{u}}/auth"),
+                    access_token_url: f("{{u}}/token"),
+                    refresh_token_url: Some(f("{{u}}/refresh")),
+                    callback_url: Some(f("{{u}}/cb")),
+                    credentials: creds(f),
+                    scope: Some(f("{{scope}}")),
+                    state: Some(f("{{state}}")),
+                    pkce: None,
+                    additional_parameters: additional(),
+                    token_config: token_config.clone(),
+                    settings: settings.clone(),
+                },
+                OAuth2Flow::Implicit {
+                    authorization_url: f("{{u}}/auth"),
+                    callback_url: Some(f("{{u}}/cb")),
+                    client_id: f("{{cid}}"),
+                    scope: Some(f("{{scope}}")),
+                    state: Some(f("{{state}}")),
+                    additional_parameters: additional(),
+                    token_config: token_config.clone(),
+                    settings: settings.clone(),
+                },
+            ]
+        };
+        let swap = |s: &str| s.replace("{{", "<").replace("}}", ">");
+        let before = flows(&|s| s.to_string());
+        let after = flows(&swap);
+        for (before, after) in before.into_iter().zip(after) {
+            let out = map_auth_fields(Auth::OAuth2(Box::new(before)), |s| swap(&s));
+            assert_eq!(out, Auth::OAuth2(Box::new(after)));
+        }
+    }
+
+    #[test]
+    fn auth_has_placeholder_sees_oauth2_fields() {
+        use rocket_shared::oauth2::*;
+        let flow = |secret: &str| {
+            Auth::OAuth2(Box::new(OAuth2Flow::ClientCredentials {
+                access_token_url: "https://auth.example.com/token".into(),
+                refresh_token_url: None,
+                credentials: OAuth2ClientCredentials {
+                    client_id: "id".into(),
+                    client_secret: secret.into(),
+                    placement: None,
+                },
+                scope: None,
+                additional_parameters: None,
+                token_config: None,
+                settings: None,
+            }))
+        };
+
+        assert!(auth_has_placeholder(&flow("{{cs}}")));
+        assert!(!auth_has_placeholder(&flow("literal")));
+    }
+
     fn capturing_svc(
         executor: Arc<dyn HttpExecutor>,
         engine: Box<dyn ScriptEngine>,
@@ -13180,5 +13503,186 @@ mod tests {
             describe_all(&resolved.options.client_certificates),
             ["pkcs12 x.test file:/certs/client.p12 pass:{{process.env.PATH}}"]
         );
+    }
+
+    // ── A tab send's process env scope reaches an inherited OAuth2 auth ──────
+
+    use std::collections::HashMap;
+
+    /// A client-credentials OAuth2 auth with `secret` as its client secret.
+    fn oauth_cc(secret: &str) -> Auth {
+        Auth::OAuth2(Box::new(
+            rocket_shared::oauth2::OAuth2Flow::ClientCredentials {
+                access_token_url: "https://idp.test/token".into(),
+                refresh_token_url: None,
+                credentials: rocket_shared::oauth2::OAuth2ClientCredentials {
+                    client_id: "id".into(),
+                    client_secret: secret.into(),
+                    placement: None,
+                },
+                scope: None,
+                additional_parameters: None,
+                token_config: None,
+                settings: None,
+            },
+        ))
+    }
+
+    /// The client secret of a client-credentials OAuth2 auth.
+    fn client_secret_of(auth: &Auth) -> String {
+        match auth {
+            Auth::OAuth2(flow) => match flow.as_ref() {
+                rocket_shared::oauth2::OAuth2Flow::ClientCredentials { credentials, .. } => {
+                    credentials.client_secret.clone()
+                }
+                other => panic!("not client credentials: {other:?}"),
+            },
+            other => panic!("not OAuth2: {other:?}"),
+        }
+    }
+
+    /// Like `process_env_svc_with`, with `auth` as the auth of the request's folder.
+    fn process_env_svc_with_folder_auth(
+        auth: Auth,
+        pairs: &[(&str, &str)],
+        allow: bool,
+    ) -> ProcessEnvSvc {
+        let (mut svc, executor, history, fake) =
+            process_env_svc_with(env_with_dot_env("dev", ".env"), pairs, allow);
+        svc.collection_repo =
+            Box::new(
+                StubCollectionRepo::empty().with_folder_chain(vec![FolderSettings {
+                    auth: Some(auth),
+                    ..FolderSettings::default()
+                }]),
+            );
+        (svc, executor, history, fake)
+    }
+
+    /// A tab send inheriting its auth from the folder.
+    fn tab_input() -> ExecuteRequestInput {
+        let mut input = sample_input("https://x.test/", Some("dev"));
+        input.collection = Some("api".into());
+        input.request_path = Some("users/list".into());
+        input.auth = Auth::Inherit;
+        input.backend_process_env = false;
+        input
+    }
+
+    fn collection_scope() -> ProcessEnvScopeInput {
+        ProcessEnvScopeInput::Collection {
+            name: "api".into(),
+            environment_name: Some("dev".into()),
+        }
+    }
+
+    const OAUTH_PLACEHOLDER: &str = "{{process.env.ROCKET_T1_KEY}}";
+
+    #[tokio::test]
+    async fn tab_send_inherited_oauth2_resolves_process_env_with_scope() {
+        let (svc, _, _, fake) = process_env_svc_with_folder_auth(
+            oauth_cc(OAUTH_PLACEHOLDER),
+            &[("ROCKET_T1_KEY", "abc123secret")],
+            true,
+        );
+        let mut input = tab_input();
+        input.process_env = collection_scope();
+        let resolved = svc
+            .resolve_request(&input, &HashMap::new())
+            .expect("resolve");
+        assert_eq!(client_secret_of(&resolved.auth), "abc123secret");
+        assert!(fake.call_count() + fake.default_call_count() > 0);
+    }
+
+    #[tokio::test]
+    async fn tab_send_inherited_oauth2_closed_scope_keeps_literal_and_warns() {
+        let (svc, _, _, fake) = process_env_svc_with_folder_auth(
+            oauth_cc(OAUTH_PLACEHOLDER),
+            &[("ROCKET_T1_KEY", "abc123secret")],
+            true,
+        );
+        let input = tab_input();
+        let resolved = svc
+            .resolve_request(&input, &HashMap::new())
+            .expect("resolve");
+        assert_eq!(client_secret_of(&resolved.auth), OAUTH_PLACEHOLDER);
+        let output = svc.execute(input).await.expect("execute");
+        assert_eq!(withheld_count(&output.console_entries), 1);
+        assert_eq!(fake.call_count() + fake.default_call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn tab_send_without_oauth2_reads_no_dot_env_file() {
+        let (svc, _, _, fake) = process_env_svc_with_folder_auth(
+            Auth::Bearer { token: "x".into() },
+            &[("ROCKET_T1_KEY", "abc123secret")],
+            true,
+        );
+        let mut input = tab_input();
+        input.process_env = collection_scope();
+        svc.execute(input).await.expect("execute");
+        assert_eq!(fake.call_count() + fake.default_call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn tab_send_scope_never_reaches_non_auth_fields() {
+        let (svc, executor, _, _) = process_env_svc_with_folder_auth(
+            oauth_cc(OAUTH_PLACEHOLDER),
+            &[("ROCKET_T1_KEY", "abc123secret")],
+            true,
+        );
+        let mut input = tab_input();
+        input.url = format!("https://x.test/?p={OAUTH_PLACEHOLDER}");
+        input.process_env = collection_scope();
+        let resolved = svc
+            .resolve_request(&input, &HashMap::new())
+            .expect("resolve");
+        assert_eq!(client_secret_of(&resolved.auth), "abc123secret");
+        svc.execute(input).await.expect("execute");
+        assert!(sent_url(&executor).contains(OAUTH_PLACEHOLDER));
+    }
+
+    #[tokio::test]
+    async fn backend_send_inherited_oauth2_uses_the_send_map() {
+        let (svc, _, _, _) = process_env_svc_with_folder_auth(
+            oauth_cc(OAUTH_PLACEHOLDER),
+            &[("ROCKET_T1_KEY", "abc123secret")],
+            true,
+        );
+        let mut input = tab_input();
+        input.backend_process_env = true;
+        let resolved = svc
+            .resolve_request(&input, &HashMap::new())
+            .expect("resolve");
+        assert_eq!(client_secret_of(&resolved.auth), "abc123secret");
+    }
+
+    #[test]
+    fn execute_request_input_defaults_to_closed_scope() {
+        let mut json =
+            serde_json::to_value(sample_input("https://x.test/", None)).expect("serialize input");
+        json.as_object_mut().expect("object").remove("processEnv");
+        let input: ExecuteRequestInput = serde_json::from_value(json.clone()).expect("parse");
+        assert_eq!(input.process_env, ProcessEnvScopeInput::Closed);
+        json["processEnv"] = serde_json::json!({"kind": "scratch"});
+        let input: ExecuteRequestInput = serde_json::from_value(json).expect("parse");
+        assert_eq!(input.process_env, ProcessEnvScopeInput::Scratch);
+    }
+
+    #[tokio::test]
+    async fn tab_send_masks_dot_env_value_of_oauth2() {
+        let (svc, _, history, _) = process_env_svc_with_folder_auth(
+            oauth_cc(OAUTH_PLACEHOLDER),
+            &[("ROCKET_T1_KEY", "abc123secret")],
+            true,
+        );
+        let mut input = tab_input();
+        input.process_env = collection_scope();
+        let output = svc.execute(input).await.expect("execute");
+        assert!(output.run_secret_values.contains("abc123secret"));
+        let saved = history.lock().expect("history");
+        assert_eq!(saved.len(), 1);
+        let text = format!("{:?}", saved[0]);
+        assert!(!text.contains("abc123secret"), "{text}");
     }
 }

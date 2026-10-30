@@ -59,6 +59,7 @@ export async function executeRunnerEntry(
       pathParams: resolved.pathParams,
       requestGuardPolicy,
       runSource: 'runner',
+      processEnv: { kind: 'collection', name: collection },
     };
 
     const result = graphql
