@@ -7,8 +7,8 @@ use rocket_collection::{CollectionItem, CollectionRepository, Folder};
 use rocket_environment::{flatten_with_repo, EnvironmentRepositoryFactory, Variable};
 use rocket_export::{
     bruno_zip, environment_notes, postman_bundle, postman_collection, postman_environment, slug,
-    CollectionExportTree, CollectionFileSource, ExportAction, ExportFolder, ExportItem,
-    ExportNote, ExportReport, PostmanOptions,
+    CollectionExportTree, CollectionFileSource, ExportAction, ExportFolder, ExportItem, ExportNote,
+    ExportReport, PostmanOptions,
 };
 use rocket_shared::error::{DomainError, DomainResult};
 
@@ -219,7 +219,8 @@ impl CollectionExportService {
                 v.value.clear();
             }
             report.items.extend(environment_notes(&env.name, &vars));
-            let doc = postman_environment(&env.name, &vars, &exported_at, env!("CARGO_PKG_VERSION"));
+            let doc =
+                postman_environment(&env.name, &vars, &exported_at, env!("CARGO_PKG_VERSION"));
             let bytes = serde_json::to_vec_pretty(&doc)
                 .map_err(|e| DomainError::Internal(format!("could not write JSON: {e}")))?;
             files.push((unique_env_file(&mut used, &slug(&env.name)), bytes));
@@ -272,10 +273,10 @@ mod tests {
         Collection, GrpcRequest, OpaqueProtocolItem, Request, RequestKind, RequestSummary,
         ScriptFileItem, WebSocketRequest,
     };
-    use rocket_shared::types::HttpMethod;
     use rocket_environment::{
         Environment, EnvironmentRepository, EnvironmentRepositoryFactory, Variable,
     };
+    use rocket_shared::types::HttpMethod;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
 
@@ -473,7 +474,11 @@ mod tests {
     #[test]
     fn environments_are_bundled_in_a_zip() {
         let state = EnvState {
-            envs: vec![env_with("Prod EU", None, vec![Variable::new("HOST", "x.test")])],
+            envs: vec![env_with(
+                "Prod EU",
+                None,
+                vec![Variable::new("HOST", "x.test")],
+            )],
             ..Default::default()
         };
         let out = with_envs(state)
@@ -487,7 +492,10 @@ mod tests {
         .expect("json");
         assert_eq!(env["name"], "Prod EU");
         assert_eq!(env["values"][0]["key"], "HOST");
-        assert_eq!(env["_postman_exported_using"], format!("Rocket/{}", env!("CARGO_PKG_VERSION")));
+        assert_eq!(
+            env["_postman_exported_using"],
+            format!("Rocket/{}", env!("CARGO_PKG_VERSION"))
+        );
         zip_entry(&out.bytes, "my-api.postman_collection.json");
     }
 
@@ -500,7 +508,11 @@ mod tests {
                     None,
                     vec![Variable::new("HOST", "base.test"), Variable::new("A", "1")],
                 ),
-                env_with("child", Some("base"), vec![Variable::new("HOST", "child.test")]),
+                env_with(
+                    "child",
+                    Some("base"),
+                    vec![Variable::new("HOST", "child.test")],
+                ),
             ],
             ..Default::default()
         };

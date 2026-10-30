@@ -742,6 +742,7 @@ mod wiring_tests {
             skip_folder_scripts: false,
             run_source: rocket_shared::RunSource::Manual,
             backend_process_env: false,
+            process_env: Default::default(),
             literal: Default::default(),
             method: HttpMethod::Get,
             url: url.into(),

@@ -1,11 +1,11 @@
 //! The host environment (`{{process.env.*}}` and `.env` files) a send may see: the
 //! scope a tab asks for, the values it got, and how the scope picks its target.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 /// Which host environment (`{{process.env.*}}` and `.env` files) a send may see. It is
 /// decided by the tab, on top of the collection trust gate.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",

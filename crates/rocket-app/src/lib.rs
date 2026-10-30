@@ -14,17 +14,15 @@ pub mod collection_export_service;
 pub(crate) mod collection_lock;
 pub mod collection_runner_service;
 pub mod collection_service;
+#[cfg(test)]
+mod collection_service_examples_tests;
 pub mod collection_trust;
 pub mod contract_service;
 pub(crate) mod conversation_secrets;
 pub mod conversation_service;
 pub mod cookie_service;
 #[cfg(test)]
-mod collection_service_examples_tests;
-#[cfg(test)]
 mod duplicate_request_e2e_tests;
-#[cfg(test)]
-mod openapi_sync_lock_tests;
 pub mod env_audit;
 pub mod environment_service;
 pub mod event_caps;
@@ -59,19 +57,21 @@ pub mod load_test_service;
 pub mod mcp_read_views;
 pub mod mcp_tool_service;
 pub mod oauth2_service;
-mod process_env;
 pub mod openapi_change_link;
 pub mod openapi_connect;
 pub mod openapi_sync_apply;
 pub mod openapi_sync_changes;
 pub mod openapi_sync_delete;
+#[cfg(test)]
+mod openapi_sync_lock_tests;
 pub mod openapi_sync_reset;
-pub mod openapi_sync_skips;
 pub mod openapi_sync_scheduler;
 pub mod openapi_sync_service;
+pub mod openapi_sync_skips;
 pub mod openapi_sync_spec_source;
 pub mod openapi_sync_spec_view;
 pub mod openapi_sync_view;
+mod process_env;
 pub mod proposal_service;
 pub mod proxy_settings_service;
 pub(crate) mod redaction;
@@ -121,7 +121,6 @@ pub use execution_service::websocket_resolution::{
 pub use execution_service::{
     DotEnvStatus, ExecuteRequestInput, ExecuteRequestOutput, RequestExecutionService,
 };
-pub use process_env::{ProcessEnv, ProcessEnvScopeInput};
 pub use export_service::{ExportFormat, ExportService};
 pub use flow_auth::{
     FetchContext, FlowAuthTokens, FlowTokenFetcher, NoTokenFetcher, OAuth2ServiceFetcher,
@@ -132,8 +131,8 @@ pub use flow_execution_service::{
     CapturedOutput, FlowExecutionService, FlowRunOptions, FlowRunSummary, FlowStepResult,
     RunFlowInput,
 };
-pub use flow_partial::PartialRun;
 pub use flow_lint_context::{LintEnvironment, LintSources};
+pub use flow_partial::PartialRun;
 pub use flow_references::{FlowReferenceUpdater, FlowRewriteReport};
 pub use flow_service::FlowService;
 pub use git_service::GitAppService;
@@ -154,25 +153,26 @@ pub use mcp_tool_service::{
     WORKSPACE_ASSISTANT_INSTRUCTIONS,
 };
 pub use oauth2_service::OAuth2Service;
-pub use openapi_sync_apply::{ApplyDeps, RendererFactory};
 pub use openapi_change_link::{ChangeLinkOutcome, ChangeLinkPreview};
 pub use openapi_connect::{
     request_digest, ConnectAmbiguous, ConnectOperationRow, ConnectOutcome, ConnectPair,
     ConnectPreview, ConnectRequestRow, ConnectRow,
 };
+pub use openapi_sync_apply::{ApplyDeps, RendererFactory};
 pub use openapi_sync_delete::DeleteTarget;
 pub use openapi_sync_reset::ResetReport;
-pub use openapi_sync_skips::SkippedRow;
-pub use openapi_sync_view::{
-    BackupRow, BadgeView, ChangeRow, ChangeValue, ChangesView, OverviewView, PlanView, SpecOpRow,
-    SpecSource, SpecSourceFormat, SpecTagGroup, SpecView, SpecViewState, UnchangedView,
-};
 pub use openapi_sync_scheduler::{
     OpenApiSyncScheduler, SchedulerConfig, SchedulerHandle, ServiceFactory,
 };
 pub use openapi_sync_service::{
     safe_message, CheckOutcome, OpenApiSyncService, SyncStatusView, SyncTarget,
 };
+pub use openapi_sync_skips::SkippedRow;
+pub use openapi_sync_view::{
+    BackupRow, BadgeView, ChangeRow, ChangeValue, ChangesView, OverviewView, PlanView, SpecOpRow,
+    SpecSource, SpecSourceFormat, SpecTagGroup, SpecView, SpecViewState, UnchangedView,
+};
+pub use process_env::{ProcessEnv, ProcessEnvScopeInput};
 pub use proposal_service::ProposalService;
 pub use proxy_settings_service::{PasswordChange, ProxySettingsService, ProxySettingsView};
 pub use runner_sequence::{build_step_input, flatten_run_set, RunItem};

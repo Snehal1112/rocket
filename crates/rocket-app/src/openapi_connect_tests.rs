@@ -413,14 +413,9 @@ async fn an_operation_no_row_mentions_is_skipped() {
 async fn a_kept_row_changes_nothing() {
     let w = world().await;
     hand_made(&w, &[("Mine", "GET", "{{baseUrl}}/mine")]);
-    let before = snapshot(
-        hand_root(&w)
-            .join("Mine.yml")
-            .parent()
-            .expect("parent"),
-    )
-    .get("Mine.yml")
-    .cloned();
+    let before = snapshot(hand_root(&w).join("Mine.yml").parent().expect("parent"))
+        .get("Mine.yml")
+        .cloned();
     let rows = vec![ConnectRow::Keep {
         uid: uid_of(&w, "Mine"),
     }];

@@ -26,6 +26,27 @@ pub(crate) fn redact_secrets(text: &str, secret_values: &HashSet<String>) -> Str
     out
 }
 
+/// `error` with the secret values masked in its message, keeping its variant. Variants with no
+/// free text pass through.
+pub(crate) fn redact_error(
+    error: rocket_shared::error::DomainError,
+    secret_values: &HashSet<String>,
+) -> rocket_shared::error::DomainError {
+    use rocket_shared::error::DomainError;
+    let mask = |text: String| redact_secrets(&text, secret_values);
+    match error {
+        DomainError::NotFound(m) => DomainError::NotFound(mask(m)),
+        DomainError::InvalidInput(m) => DomainError::InvalidInput(mask(m)),
+        DomainError::AlreadyExists(m) => DomainError::AlreadyExists(mask(m)),
+        DomainError::Io(m) => DomainError::Io(mask(m)),
+        DomainError::Serialization(m) => DomainError::Serialization(mask(m)),
+        DomainError::Http(m) => DomainError::Http(mask(m)),
+        DomainError::Internal(m) => DomainError::Internal(mask(m)),
+        DomainError::Conflict(m) => DomainError::Conflict(mask(m)),
+        other => other,
+    }
+}
+
 /// Every form of a secret value that must be masked.
 ///
 /// The whole value, its trimmed form, and, for a multi-line value such as a PEM, each line on its
