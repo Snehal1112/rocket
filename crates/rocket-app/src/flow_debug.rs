@@ -312,6 +312,7 @@ mod tests {
             deferred_history: None,
             run_secret_values: secrets(&["flow-secret-1", "script-set-secret"]),
             run_sent_credentials: secrets(&["sent-token-123"]),
+            run_process_env_values: Default::default(),
         };
         let mut sent = HttpRequest::new(
             HttpMethod::Get,

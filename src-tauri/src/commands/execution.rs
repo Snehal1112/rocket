@@ -144,6 +144,7 @@ mod tests {
             deferred_history: None,
             run_secret_values: Default::default(),
             run_sent_credentials: Default::default(),
+            run_process_env_values: Default::default(),
         };
         let json = serde_json::to_value(ExecuteRequestResponse::from(out)).expect("serialize");
         assert_eq!(json["isBinary"], true);
@@ -160,6 +161,7 @@ mod tests {
             deferred_history: None,
             run_secret_values: Default::default(),
             run_sent_credentials: Default::default(),
+            run_process_env_values: Default::default(),
         };
         let json = serde_json::to_value(ExecuteRequestResponse::from(out)).expect("serialize");
         assert!(json.get("isBinary").is_none());

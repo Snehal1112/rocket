@@ -189,6 +189,10 @@ pub struct ExecuteRequestOutput {
     /// Basic login forms, bearer token and Authorization header values. Never
     /// serialized to IPC. Callers use it to mask text they hand on.
     pub run_sent_credentials: std::collections::HashSet<String>,
+    /// The `process.env` values the run used in its request fields, nested
+    /// `rok.runRequest` runs included. Never serialized to IPC. Callers use it
+    /// to mask text they hand on.
+    pub run_process_env_values: std::collections::HashSet<String>,
 }
 
 // Written by hand so the secret values are never printed, only counted.
@@ -202,6 +206,7 @@ impl std::fmt::Debug for ExecuteRequestOutput {
             .field("deferred_history", &self.deferred_history)
             .field("run_secret_values", &self.run_secret_values.len())
             .field("run_sent_credentials", &self.run_sent_credentials.len())
+            .field("run_process_env_values", &self.run_process_env_values.len())
             .finish()
     }
 }
@@ -340,6 +345,20 @@ fn hold_back_vault_writes(
 struct ResolvedParts {
     request: HttpRequest,
     templates: RequestTemplates,
+    process_env: SendProcessEnv,
+}
+
+/// What one send knows about the host environment (`{{process.env.NAME}}`).
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SendProcessEnv {
+    /// The values of every `.env` key of the send, whether a field names it or not.
+    pub dot_env_values: std::collections::HashSet<String>,
+    /// The values of the `process.env` names the field templates resolved.
+    pub used_values: std::collections::HashSet<String>,
+    /// The `process.env` names the templates reference while the gate is denied.
+    // Read by the warning line in a later task.
+    #[allow(dead_code)]
+    pub withheld_names: Vec<String>,
 }
 
 /// Path parameters with the value `value` gives each template.
@@ -403,6 +422,10 @@ pub(crate) struct PhaseState {
     pub run_chain: Vec<String>,
     /// Each request field as the first resolution saw it, for `resolve_runtime_placeholders`.
     pub templates: RequestTemplates,
+    /// The host environment of this send. See `SendProcessEnv`.
+    pub process_env: SendProcessEnv,
+    /// `process.env` values used by the nested runs of this send, shared with the script host.
+    pub nested_process_env_values: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
     /// Names a pre-request script added in text it wrote (URL, header, body). Script text is
     /// filled only for these and the names the first resolution could not resolve.
     pub script_names: std::collections::HashSet<String>,
@@ -1311,13 +1334,21 @@ impl RequestExecutionService {
         folders: &[FolderSettings],
     ) -> DomainResult<ResolvedParts> {
         // Build variable map: global_env < collection < env < folder < request.
-        let mut vars = self.build_variable_context(
+        // The host environment is read once per send, and only when the trust gate allows it.
+        let process_env = self.process_env_for(
+            input.collection.as_deref(),
+            input.environment_name.as_deref(),
+            input.global_env_name.as_deref(),
+        );
+        let mut scopes = self.build_variable_scopes(
             input.global_env_name.as_deref(),
             input.collection.as_deref(),
             input.environment_name.as_deref(),
             input.request_path.as_deref(),
             external_secrets,
         );
+        scopes.process_env = process_env.vars.clone();
+        let mut vars = scopes.flatten_with_process_env();
         vars.extend(input.flow_vars.clone());
 
         // Merge collection and folder-chain auth and headers with request-level values.
@@ -1450,7 +1481,29 @@ impl RequestExecutionService {
             auth: auth_templates.into_inner(),
             unresolved: unresolved.into_inner(),
         };
-        Ok(ResolvedParts { request, templates })
+        let mut send_env = SendProcessEnv {
+            dot_env_values: process_env
+                .dot_env_keys
+                .iter()
+                .filter_map(|k| process_env.vars.get(k).cloned())
+                .collect(),
+            ..SendProcessEnv::default()
+        };
+        let gate_allows = self.process_env_allowed(input.collection.as_deref());
+        let mut names: Vec<String> = templates.process_env_names().into_iter().collect();
+        names.sort();
+        for name in names {
+            if !gate_allows {
+                send_env.withheld_names.push(name);
+            } else if let Some(value) = process_env.vars.get(&name) {
+                send_env.used_values.insert(value.clone());
+            }
+        }
+        Ok(ResolvedParts {
+            request,
+            templates,
+            process_env: send_env,
+        })
     }
 
     /// Returns the folder of `collection`, when the wiring knows where collections live.
@@ -1777,6 +1830,7 @@ impl RequestExecutionService {
             options: state.http_request.options.clone(),
             chain: state.run_chain.clone(),
             calling_url: state.http_request.url.clone(),
+            nested_process_env_values: Arc::clone(&state.nested_process_env_values),
         }
     }
 
@@ -2107,6 +2161,7 @@ impl RequestExecutionService {
         let ResolvedParts {
             request: http_request,
             templates,
+            process_env,
         } = self.resolve_request_parts(input, external_secrets, &folder_chain)?;
 
         // Emit a sensitive-auth audit event BEFORE dispatch when the resolved
@@ -2137,6 +2192,10 @@ impl RequestExecutionService {
         // Flow run variables (e.g. `callback.<name>`) behave like runtime
         // variables. A script that sets the same key later still wins.
         var_ctx.runtime.extend(input.flow_vars.clone());
+        // Every `.env` value is a secret, so it is masked in history, console and outputs.
+        var_ctx
+            .secret_values
+            .extend(process_env.dot_env_values.iter().cloned());
 
         let (sandbox_mode, file_scope, script_flow) = match input.collection.as_deref() {
             Some(col) => {
@@ -2214,6 +2273,10 @@ impl RequestExecutionService {
                 .into_iter()
                 .collect(),
             templates,
+            process_env,
+            nested_process_env_values: Arc::new(std::sync::Mutex::new(
+                std::collections::HashSet::new(),
+            )),
             script_names: std::collections::HashSet::new(),
         })
     }
@@ -2830,6 +2893,10 @@ impl RequestExecutionService {
             duration_ms: response.duration_ms,
         });
 
+        let mut run_process_env_values = state.process_env.used_values.clone();
+        if let Ok(nested) = state.nested_process_env_values.lock() {
+            run_process_env_values.extend(nested.iter().cloned());
+        }
         ExecuteRequestOutput {
             response,
             test_results: state.test_results.clone(),
@@ -2838,6 +2905,7 @@ impl RequestExecutionService {
             deferred_history,
             run_secret_values: state.var_ctx.secret_values.clone(),
             run_sent_credentials: sent_credentials(&state.http_request),
+            run_process_env_values,
         }
     }
 
@@ -12427,5 +12495,138 @@ mod tests {
             .iter()
             .all(|h| !h.value.contains("real-jwt-abc123")));
         assert!(!record.url.contains("real-jwt-abc123"), "{}", record.url);
+    }
+
+    // ── Backend sends resolve gated process env (issue #112) ─────────────────
+
+    struct SharedMockExec(Arc<MockExecutor>);
+
+    #[async_trait]
+    impl HttpExecutor for SharedMockExec {
+        async fn execute(&self, req: &HttpRequest) -> DomainResult<HttpResponse> {
+            self.0.execute(req).await
+        }
+    }
+
+    /// A service for `process.env` sends, with handles to the executor and History.
+    fn process_env_svc(
+        pairs: &[(&str, &str)],
+        allow: bool,
+    ) -> (
+        RequestExecutionService,
+        Arc<MockExecutor>,
+        Arc<Mutex<Vec<HistoryEntry>>>,
+        Arc<FakeDotEnv>,
+    ) {
+        let fake = FakeDotEnv::new(&[(".env", pairs)]);
+        let executor = Arc::new(MockExecutor::new(200));
+        let history = MockHistoryRepo::new();
+        let handle = history.saved_entries_handle();
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(SharedMockExec(Arc::clone(&executor))),
+            Box::new(history),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        )
+        .with_trust_store(if allow {
+            crate::test_doubles::InMemoryTrustStore::allow_all()
+        } else {
+            crate::test_doubles::InMemoryTrustStore::new()
+        })
+        .with_collection_env_repo_factory(Box::new(DirEnvRepoFactory {
+            env: env_with_dot_env("dev", ".env"),
+            dir: std::path::PathBuf::from("/work"),
+        }))
+        .with_dot_env_loader(Box::new(SharedDotEnv(Arc::clone(&fake))));
+        (svc, executor, handle, fake)
+    }
+
+    fn backend_input(url: &str) -> ExecuteRequestInput {
+        let mut input = sample_input(url, Some("dev"));
+        input.collection = Some("api".into());
+        input.run_source = rocket_shared::RunSource::Flow;
+        input
+    }
+
+    fn sent_url(executor: &MockExecutor) -> String {
+        executor
+            .last_url
+            .lock()
+            .expect("lock")
+            .clone()
+            .expect("a request was sent")
+    }
+
+    #[tokio::test]
+    async fn backend_send_resolves_a_dot_env_value_in_the_url() {
+        let (svc, executor, _, _) = process_env_svc(&[("ROCKET_T1_KEY", "abc123secret")], true);
+        let input = backend_input("https://x.test/{{process.env.ROCKET_T1_KEY}}");
+        svc.execute(input).await.expect("execute");
+        assert_eq!(sent_url(&executor), "https://x.test/abc123secret");
+    }
+
+    #[tokio::test]
+    async fn os_value_beats_a_dot_env_value_in_a_backend_send() {
+        let (svc, executor, _, _) = process_env_svc(&[("PATH", "from-file")], true);
+        let input = backend_input("https://x.test/?p={{process.env.PATH}}");
+        svc.execute(input).await.expect("execute");
+        let os_path = std::env::var("PATH").expect("PATH is set");
+        let url = sent_url(&executor);
+        assert_eq!(url, format!("https://x.test/?p={os_path}"));
+        assert!(!url.contains("from-file"));
+    }
+
+    #[tokio::test]
+    async fn denied_gate_reads_no_dot_env_file_and_keeps_the_placeholder() {
+        let (svc, executor, _, fake) = process_env_svc(&[("ROCKET_T1_KEY", "abc123secret")], false);
+        let input = backend_input("https://x.test/{{process.env.ROCKET_T1_KEY}}");
+        svc.execute(input).await.expect("execute");
+        assert!(sent_url(&executor).contains("{{process.env.ROCKET_T1_KEY}}"));
+        assert_eq!(fake.call_count(), 0);
+        assert_eq!(fake.default_call_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn dot_env_value_is_a_run_secret() {
+        let (svc, _, history, _) = process_env_svc(&[("ROCKET_T1_KEY", "abc123secret")], true);
+        let input = backend_input("https://x.test/{{process.env.ROCKET_T1_KEY}}");
+        let output = svc.execute(input).await.expect("execute");
+        assert!(output.run_secret_values.contains("abc123secret"));
+        let saved = history.lock().expect("history");
+        assert_eq!(saved.len(), 1);
+        assert!(!saved[0].url.contains("abc123secret"), "{}", saved[0].url);
+    }
+
+    #[tokio::test]
+    async fn short_dot_env_value_is_sent_and_not_masked() {
+        let (svc, executor, _, _) = process_env_svc(&[("ROCKET_T1_S", "ab")], true);
+        let input = backend_input("https://x.test/{{process.env.ROCKET_T1_S}}");
+        svc.execute(input).await.expect("send succeeds");
+        assert_eq!(sent_url(&executor), "https://x.test/ab");
+    }
+
+    #[tokio::test]
+    async fn used_os_value_is_reported_in_run_process_env_values() {
+        let (svc, _, _, _) = process_env_svc(&[("ROCKET_T1_KEY", "abc123secret")], true);
+        let input = backend_input("https://x.test/?p={{process.env.PATH}}");
+        let output = svc.execute(input).await.expect("execute");
+        let os_path = std::env::var("PATH").expect("PATH is set");
+        assert!(output.run_process_env_values.contains(&os_path));
+        assert!(!output.run_process_env_values.contains("abc123secret"));
+    }
+
+    #[tokio::test]
+    async fn frontend_resolved_manual_send_is_unchanged() {
+        let (svc, executor, _, _) = process_env_svc(&[("ROCKET_T1_KEY", "abc123secret")], true);
+        let mut input = backend_input("https://x.test/abc");
+        input.run_source = rocket_shared::RunSource::Manual;
+        let output = svc.execute(input).await.expect("execute");
+        assert_eq!(sent_url(&executor), "https://x.test/abc");
+        assert!(output.run_process_env_values.is_empty());
     }
 }

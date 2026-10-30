@@ -56,6 +56,8 @@ pub(crate) struct ExecutionScriptHost<'a> {
     pub(crate) chain: Vec<String>,
     /// The calling request's resolved URL, the base of the request guard check.
     pub(crate) calling_url: String,
+    /// Collects the `process.env` values the nested runs used, for the calling send.
+    pub(crate) nested_process_env_values: Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
 }
 
 /// Turns an executor response into what a script sees.
@@ -212,6 +214,9 @@ impl ScriptHost for ExecutionScriptHost<'_> {
         .map_err(|e| HostError::Failed(format!("rok.runRequest: {e}")))?;
         // The nested run saved its writes, so the scopes are read back from storage.
         let scopes = self.stored_scopes(collection);
+        if let Ok(mut used) = self.nested_process_env_values.lock() {
+            used.extend(output.run_process_env_values.iter().cloned());
+        }
         let (runtime_set, runtime_removed) = runtime_changes(&request.runtime_vars, &runtime);
         Ok(HostRunOutcome {
             response: Some(host_response(&output.response)),

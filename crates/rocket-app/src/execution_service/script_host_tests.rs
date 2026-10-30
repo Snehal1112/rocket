@@ -1265,3 +1265,100 @@ async fn a_cookie_with_a_newline_is_rejected_and_the_good_cookie_is_still_sent()
     assert!(lines.iter().any(|l| l == "status 200"), "{lines:?}");
     assert_eq!(jar_pairs(dir.path()), vec!["good=1".to_string()]);
 }
+
+// ── process.env in nested runs and script-written text (issue #112) ─────────
+
+/// Serves one `.env` file with fixed pairs, whatever path is asked for.
+struct FixedDotEnv(Vec<(String, String)>);
+
+impl rocket_environment::DotEnvLoader for FixedDotEnv {
+    fn load(
+        &self,
+        _raw_path: &str,
+        _base: Option<&std::path::Path>,
+    ) -> Result<Vec<(String, String)>, String> {
+        Ok(self.0.clone())
+    }
+
+    fn load_default(
+        &self,
+        _base: Option<&std::path::Path>,
+    ) -> Result<Vec<(String, String)>, String> {
+        Ok(Vec::new())
+    }
+
+    fn describe(
+        &self,
+        _raw_path: Option<&str>,
+        _base: Option<&std::path::Path>,
+    ) -> rocket_environment::DotEnvFileInfo {
+        rocket_environment::DotEnvFileInfo::default()
+    }
+}
+
+/// Like `run_service`, with the trust gate open and `ROCKET_T1_KEY` in the `.env` of `dev`.
+fn process_env_run_service(
+    collection: Collection,
+) -> (RequestExecutionService, Arc<KeepingExecutor>) {
+    let executor = Arc::new(KeepingExecutor::default());
+    let mut env = Environment::new("dev");
+    env.dot_env_file_path = Some(".env".into());
+    let svc = RequestExecutionService::new(
+        Box::new(MemoryEnvRepo(Arc::new(Mutex::new(env)))),
+        Arc::new(SharedKeeping(Arc::clone(&executor))),
+        Box::new(SharedHistoryRepo(InMemoryHistoryRepo::new())),
+        Box::new(SharedCollectionRepo(InMemoryCollectionRepo::new(
+            collection,
+        ))),
+        Box::new(NullCookieRepo),
+        Box::new(NullEventPublisher),
+        Box::new(EmptySecretManagerRepo),
+        Arc::new(rocket_environment::NullSecretStore),
+        Arc::new(rocket_environment::NullVaultSecretFetcher),
+    )
+    .with_script_engine(Box::new(rocket_infra::scripting::DenoScriptEngine::new()))
+    .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all())
+    .with_dot_env_loader(Box::new(FixedDotEnv(vec![(
+        "ROCKET_T1_KEY".to_string(),
+        "abc123secret".to_string(),
+    )])));
+    (svc, executor)
+}
+
+#[tokio::test]
+async fn nested_run_request_target_resolves_process_env() {
+    let mut collection = Collection::new("api");
+    collection.root.add_request(saved(
+        "Main",
+        "main.yml",
+        "await rok.runRequest('auth/login');",
+    ));
+    let mut login = saved("Login", "login.yml", "");
+    login.url = "https://api.test/{{process.env.ROCKET_T1_KEY}}".into();
+    let mut auth = Folder::new("auth");
+    auth.add_request(login);
+    collection.root.add_subfolder(auth);
+    let input = send_input(&collection, "main.yml");
+    let (svc, executor) = process_env_run_service(collection);
+    let out = svc.execute(input).await.expect("execute");
+    assert!(out.script_error.is_none(), "{:?}", out.script_error);
+    assert_eq!(urls(&executor)[0], "https://api.test/abc123secret");
+    assert!(out.run_process_env_values.contains("abc123secret"));
+}
+
+#[tokio::test]
+async fn script_written_process_env_placeholder_stays_unresolved() {
+    let collection = main_and_login(
+        "req.setUrl('https://x.test/{{process.env.ROCKET_T1_KEY}}');",
+        "",
+        "",
+    );
+    let input = send_input(&collection, "main.yml");
+    let (svc, executor) = process_env_run_service(collection);
+    let out = svc.execute(input).await.expect("execute");
+    assert!(out.script_error.is_none(), "{:?}", out.script_error);
+    assert_eq!(
+        urls(&executor),
+        vec!["https://x.test/{{process.env.ROCKET_T1_KEY}}".to_string()]
+    );
+}

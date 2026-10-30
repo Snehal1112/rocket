@@ -2636,6 +2636,7 @@ mod tests {
             deferred_history: None,
             run_secret_values: Default::default(),
             run_sent_credentials: Default::default(),
+            run_process_env_values: Default::default(),
         }
     }
 
