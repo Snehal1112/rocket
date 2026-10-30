@@ -11,6 +11,9 @@
 //! Text a script wrote is different: it has no template. In it only the names the first pass
 //! could not resolve, and the names the script itself added, are filled, and never from the
 //! RocketVault scope.
+//!
+//! A field a Flow wire or a fetched Auth-node token filled is recorded with
+//! `FieldTemplate::literal`, so neither pass puts a value into it.
 
 use rocket_environment::resolve;
 use std::cell::{Cell, RefCell};
@@ -37,6 +40,15 @@ impl FieldTemplate {
         self.names
             .iter()
             .filter_map(|n| n.strip_prefix("process.env."))
+    }
+
+    /// A field sent as written. It has no placeholders, so neither pass puts a value into it.
+    pub(crate) fn literal(text: &str) -> Self {
+        Self {
+            text: text.to_string(),
+            output: text.to_string(),
+            ..Self::default()
+        }
     }
 
     /// Resolves `text` with `vars` and records what each placeholder became. The names no scope
@@ -284,6 +296,18 @@ mod tests {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect()
+    }
+
+    #[test]
+    fn literal_template_renders_its_text_unchanged() {
+        let text = "https://e.test/{{apiKey}}?v={{vault.secret}}&id={{$guid}}";
+        let t = FieldTemplate::literal(text);
+        assert_eq!(t.output, text);
+        assert_eq!(
+            t.render(&vars(&[("apiKey", "x"), ("vault.secret", "s")])),
+            text
+        );
+        assert_eq!(t.process_env_names().count(), 0);
     }
 
     #[test]

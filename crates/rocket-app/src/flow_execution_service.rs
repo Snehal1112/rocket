@@ -572,8 +572,8 @@ fn build_inline_request(label: &str, inline: &InlineRequestData) -> DomainResult
 ///   and are skipped here, because they carry a credential rather than a value.
 ///
 /// A wired header is always enabled, so the wire takes effect. Every wired field is
-/// marked in `input.host_env_free`: its text came from another node, often a response,
-/// so it never resolves `{{process.env.NAME}}`. Any other
+/// marked in `input.literal`: its text came from another node, often a response,
+/// so it is sent as written and never resolves any variable. Any other
 /// path is a `DomainError` — never a silent no-op, since a wire the user drew
 /// that quietly does nothing would be far more confusing than a run that
 /// fails with a clear reason.
@@ -590,10 +590,10 @@ pub fn apply_wired_overrides(
         let applied = match e.target_field.as_str() {
             "url" => {
                 input.url = value.clone();
-                input.host_env_free.url = true;
+                input.literal.url = true;
                 Ok(())
             }
-            "body" => apply_body_override(input, value).map(|()| input.host_env_free.body = true),
+            "body" => apply_body_override(input, value).map(|()| input.literal.body = true),
             field => match field
                 .strip_prefix("headers[")
                 .and_then(|rest| rest.strip_suffix("].value"))
@@ -660,15 +660,12 @@ fn apply_header_override(
         header.value = value.to_string();
         header.enabled = true;
         let key = header.key.to_ascii_lowercase();
-        input.host_env_free.headers.insert(key);
+        input.literal.headers.insert(key);
         return Ok(());
     }
 
     let name = selector.trim();
-    input
-        .host_env_free
-        .headers
-        .insert(name.to_ascii_lowercase());
+    input.literal.headers.insert(name.to_ascii_lowercase());
     match input
         .headers
         .iter_mut()
@@ -1733,7 +1730,7 @@ impl FlowExecutionService {
                     .map(str::to_string);
                 // A fetched or supplied token came from a token response, so it never
                 // resolves `{{process.env.NAME}}`. A static Auth node is authored text.
-                request_input.host_env_free.auth = auth_from
+                request_input.literal.auth = auth_from
                     .as_deref()
                     .is_some_and(|id| credentials.is_fetched_token(id));
 
@@ -1754,7 +1751,7 @@ impl FlowExecutionService {
                             return Err(fail_wire(trace, edge, e, &trace_masks));
                         };
                         request_input.auth = credential.clone();
-                        request_input.host_env_free.auth =
+                        request_input.literal.auth =
                             credentials.is_fetched_token(&edge.source_node_id);
                         auth_from = Some(edge.source_node_id.clone());
                         continue;
@@ -2035,7 +2032,7 @@ fn send_time_credential_value(
     let template = crate::flow_auth::credential_template(&request_input.auth)?;
     // The send resolves `{{process.env.NAME}}` in the credential too, unless a token
     // response filled it, so the mask matches what is sent.
-    let host_env = request_input.backend_process_env && !request_input.host_env_free.auth;
+    let host_env = request_input.backend_process_env && !request_input.literal.auth;
     let vars = send_vars(exec, request_input, external_secrets, host_env);
     crate::flow_auth::resolve_fully(template, &vars).filter(|value| !value.is_empty())
 }
@@ -10412,12 +10409,21 @@ mod tests {
         executor.set_body("api.example.com/a", next);
         let exec = host_env_exec(&executor);
         let service = FlowExecutionService::new(
-            Box::new(FakeFlowRepository::new().with_flow("my-api", wired_url_flow(allow_wired_host))),
+            Box::new(
+                FakeFlowRepository::new().with_flow("my-api", wired_url_flow(allow_wired_host)),
+            ),
             Box::new(FakeCollectionRepo::new().build()),
             Box::new(NullEventPublisher),
         );
-        let summary = service.run(&exec, run_input("wired-url")).await.expect("run");
-        let b = summary.steps.iter().find(|s| s.node_id == "b").expect("b ran");
+        let summary = service
+            .run(&exec, run_input("wired-url"))
+            .await
+            .expect("run");
+        let b = summary
+            .steps
+            .iter()
+            .find(|s| s.node_id == "b")
+            .expect("b ran");
         (executor, b.error.clone())
     }
 
@@ -10429,8 +10435,14 @@ mod tests {
         assert!(message.contains("wire 'e1'"), "{message}");
         assert!(message.contains("https://evil.test"), "{message}");
         assert!(message.contains("https://api.example.com"), "{message}");
-        assert!(!message.contains("k=1"), "the query is never named: {message}");
-        assert_eq!(executor.sent_urls(), vec!["https://api.example.com/a".to_string()]);
+        assert!(
+            !message.contains("k=1"),
+            "the query is never named: {message}"
+        );
+        assert_eq!(
+            executor.sent_urls(),
+            vec!["https://api.example.com/a".to_string()]
+        );
     }
 
     #[tokio::test]
@@ -10451,7 +10463,9 @@ mod tests {
         let (executor, error) = run_wired_url(true, "https://other.test/x").await;
 
         assert_eq!(error, None, "the node opted in");
-        assert!(executor.sent_urls().contains(&"https://other.test/x".to_string()));
+        assert!(executor
+            .sent_urls()
+            .contains(&"https://other.test/x".to_string()));
     }
 
     #[test]
@@ -10460,13 +10474,31 @@ mod tests {
             HashMap::from([("base".to_string(), "https://h.test".to_string())]);
         let ok = |saved: &str, wired: &str| check_wired_origin(saved, wired, &vars).is_ok();
 
-        assert!(ok("{{base}}/a", "https://h.test/b"), "the saved URL resolves first");
-        assert!(ok("https://H.test/a", "https://h.test:443/b"), "default port, host case");
-        assert!(!ok("https://h.test/a", "http://h.test/a"), "a scheme change is refused");
-        assert!(!ok("https://h.test/a", "https://h.test:8443/a"), "a port change is refused");
-        assert!(!ok("https://h.test/a", "https://{{base}}/a"), "a wired placeholder");
+        assert!(
+            ok("{{base}}/a", "https://h.test/b"),
+            "the saved URL resolves first"
+        );
+        assert!(
+            ok("https://H.test/a", "https://h.test:443/b"),
+            "default port, host case"
+        );
+        assert!(
+            !ok("https://h.test/a", "http://h.test/a"),
+            "a scheme change is refused"
+        );
+        assert!(
+            !ok("https://h.test/a", "https://h.test:8443/a"),
+            "a port change is refused"
+        );
+        assert!(
+            !ok("https://h.test/a", "https://{{base}}/a"),
+            "a wired placeholder"
+        );
         assert!(!ok("https://h.test/a", "/relative"), "no absolute URL");
-        assert!(!ok("{{missing}}/a", "https://h.test/a"), "an unresolved saved host");
+        assert!(
+            !ok("{{missing}}/a", "https://h.test/a"),
+            "an unresolved saved host"
+        );
     }
 
     /// A flow whose client-credentials Auth node fetches `{{process.env.PATH}}` as its

