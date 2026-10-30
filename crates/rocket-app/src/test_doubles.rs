@@ -1148,9 +1148,7 @@ impl CollectionRepository for NullCollectionRepo {
     fn get_graphql_request(&self, collection: &str, path: &str) -> DomainResult<GraphQlRequest> {
         match &self.get_graphql_request {
             Some(f) => f(collection, path),
-            None => Err(DomainError::Internal(
-                "graphql read is not available".into(),
-            )),
+            None => Err(DomainError::Internal("graphql read is not available".into())),
         }
     }
     fn get_grpc_request(&self, collection: &str, path: &str) -> DomainResult<GrpcRequest> {
