@@ -1,5 +1,6 @@
 import { QueryClient } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { toast } from 'sonner';
 import { setQueryClient } from '@/lib/query-client';
 import * as tauriApi from '@/lib/tauri-api';
 import { createDefaultWebSocketRequestState } from '@/lib/websocket-mapper';
@@ -10,6 +11,7 @@ import {
   releaseWebSocketTab,
   sendSelectedMessage,
 } from '@/lib/websocket-session';
+import { useEnvStore } from '@/stores/env-store';
 import { useWebSocketStore } from '@/stores/websocket-store';
 import type { RequestTab } from '@/types/pane-types';
 
@@ -22,7 +24,7 @@ vi.mock('@/lib/tauri-api', async () => {
     wsDisconnect: vi.fn(),
   };
 });
-vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
+vi.mock('sonner', () => ({ toast: { error: vi.fn(), warning: vi.fn() } }));
 
 function wsTab(): RequestTab {
   const request = createDefaultWebSocketRequestState('wss://echo.example.com/ws');
@@ -49,8 +51,20 @@ function wsTab(): RequestTab {
   };
 }
 
+function historyTab(historyCollection: string | null): RequestTab {
+  return {
+    ...wsTab(),
+    id: 'history-h1',
+    tabType: 'history',
+    source: undefined,
+    historyCollection,
+  };
+}
+
 beforeEach(() => {
   setQueryClient(new QueryClient());
+  vi.mocked(toast.warning).mockClear();
+  useEnvStore.setState({ activeCollection: null, activeEnvId: null });
   useWebSocketStore.setState({ byTab: {}, tabBySession: {} });
   vi.mocked(tauriApi.wsConnect).mockReset().mockResolvedValue(undefined);
   vi.mocked(tauriApi.wsSend).mockReset().mockResolvedValue(undefined);
@@ -72,9 +86,42 @@ describe('buildConnectInput', () => {
     expect(input.keepAliveMs).toBeUndefined();
     expect(input.verifySsl).toBe(true);
   });
+
+  it('buildConnectInput sends the saved collection scope', () => {
+    useEnvStore.setState({ activeCollection: 'other', activeEnvId: 'dev' });
+    expect(buildConnectInput(wsTab()).processEnv).toEqual({ kind: 'collection', name: 'my-api' });
+  });
+
+  it('buildConnectInput sends a closed scope for a History tab without collection', () => {
+    const input = buildConnectInput(historyTab(null));
+    expect(input.processEnv).toEqual({ kind: 'closed' });
+    expect(input.collection).toBeUndefined();
+  });
+
+  it('buildConnectInput sends the History collection scope', () => {
+    const input = buildConnectInput(historyTab('clone'));
+    expect(input.processEnv).toEqual({ kind: 'collection', name: 'clone' });
+    expect(input.collection).toBeUndefined();
+  });
+
+  it('buildConnectInput sends a scratch scope for a scratch tab', () => {
+    const input = buildConnectInput({ ...wsTab(), source: undefined });
+    expect(input.processEnv).toEqual({ kind: 'scratch' });
+  });
 });
 
 describe('connectTab', () => {
+  it('connectTab warns with the History scope', async () => {
+    const tab = historyTab(null);
+    tab.request.headers = [{ id: 'h1', key: 'X', value: '{{process.env.HOME}}', enabled: true }];
+
+    await connectTab(tab);
+
+    expect(toast.warning).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(toast.warning).mock.calls[0][0]).toContain('reopened from History');
+    expect(tauriApi.wsConnect).toHaveBeenCalledTimes(1);
+  });
+
   it('registers the session before the connect call, so early events are routed', async () => {
     let registeredWhenInvoked: string | null = null;
     vi.mocked(tauriApi.wsConnect).mockImplementation(async (sessionId) => {
@@ -118,7 +165,21 @@ describe('sendSelectedMessage', () => {
       environmentName: undefined,
       globalEnvName: undefined,
       requestPath: 'chat.yml',
+      processEnv: { kind: 'collection', name: 'my-api' },
     });
+  });
+
+  it('sendSelectedMessage sends the History scope', async () => {
+    const tab = historyTab(null);
+    useWebSocketStore.getState().beginSession(tab.id, 'sess-1');
+    useWebSocketStore.setState((s) => ({
+      byTab: { ...s.byTab, [tab.id]: { ...s.byTab[tab.id], status: 'open' } },
+    }));
+
+    await sendSelectedMessage(tab);
+
+    const input = vi.mocked(tauriApi.wsSend).mock.calls[0][1];
+    expect(input.processEnv).toEqual({ kind: 'closed' });
   });
 
   it('does nothing when the tab is not connected', async () => {

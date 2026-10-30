@@ -17,6 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useWebSocketVariableContext } from '@/hooks/useWebSocketVariableContext';
 import { authStateForType } from '@/lib/auth-type-defaults';
 import { withCurrentAuthType } from '@/lib/auth-type-options';
+import { processEnvScopeOf } from '@/lib/execute-request';
 import { cn } from '@/lib/utils';
 import { parseOptionalMs } from '@/lib/websocket-mapper';
 import { createDefaultWebSocketDraft } from '@/lib/websocket-messages';
@@ -63,7 +64,10 @@ export function WebSocketPanel({ tab, groupId }: WebSocketPanelProps) {
   const updateRequest = usePaneStore((s) => s.updateRequest);
   const session = useWebSocketStore((s) => s.byTab[tab.id]) ?? IDLE_SESSION;
   const clearLog = useWebSocketStore((s) => s.clearLog);
-  const variableContext = useWebSocketVariableContext(tab.source?.collection);
+  const variableContext = useWebSocketVariableContext(
+    tab.source?.collection,
+    processEnvScopeOf(tab),
+  );
   const [saveToCollectionOpen, setSaveToCollectionOpen] = useState(false);
 
   const request = tab.request;

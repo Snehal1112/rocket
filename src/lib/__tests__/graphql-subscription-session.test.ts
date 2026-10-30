@@ -69,6 +69,17 @@ describe('buildSubscribeInput', () => {
     expect(input.verifySsl).toBe(true);
   });
 
+  it('buildSubscribeInput sends a closed scope for a History tab without collection', () => {
+    const tab: RequestTab = {
+      ...gqlTab(),
+      id: 'history-h1',
+      tabType: 'history',
+      source: undefined,
+      historyCollection: null,
+    };
+    expect(buildSubscribeInput(tab).processEnv).toEqual({ kind: 'closed' });
+  });
+
   it('omits blank variables and params', () => {
     const tab = gqlTab();
     tab.request.graphql = { query: 'subscription { n }', variables: '  ', connectionParams: ' ' };

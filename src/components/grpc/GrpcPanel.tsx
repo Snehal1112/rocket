@@ -10,8 +10,9 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useGrpcVariableContext } from '@/hooks/useGrpcVariableContext';
+import { processEnvScopeOf } from '@/lib/execute-request';
 import { createDefaultGrpcState, DEFAULT_GRPC_MESSAGE } from '@/lib/pane-utils';
-import { warnIfProcessEnvWithheld } from '@/lib/process-env-gate';
+import { toProcessEnvScopeInput, warnIfProcessEnvWithheld } from '@/lib/process-env-gate';
 import { toApiGrpcRequest } from '@/lib/request-save-mapper';
 import {
   type GrpcExecuteInput,
@@ -57,7 +58,7 @@ export function GrpcPanel({ tab, groupId }: GrpcPanelProps) {
   const setUnary = useGrpcStore((s) => s.setUnary);
   const cancelTabSession = useGrpcStore((s) => s.cancelTabSession);
 
-  const scope = useGrpcVariableContext(tab.source);
+  const scope = useGrpcVariableContext(tab.source, processEnvScopeOf(tab));
   const [section, setSection] = useState<Section>('message');
   const [saveOpen, setSaveOpen] = useState(false);
   const [error, setError] = useState('');
@@ -80,8 +81,9 @@ export function GrpcPanel({ tab, groupId }: GrpcPanelProps) {
       environmentName: scope.environmentName,
       globalEnvName: scope.globalEnvName,
       requestPath: tab.source?.path,
+      processEnv: toProcessEnvScopeInput(processEnvScopeOf(tab)),
     }),
-    [tab.id, tab.title, tab.source, request, grpc.messages, grpc.activeMessage, scope],
+    [tab, request, grpc.messages, grpc.activeMessage, scope],
   );
 
   const running = session?.status === 'running';
@@ -104,7 +106,7 @@ export function GrpcPanel({ tab, groupId }: GrpcPanelProps) {
       setUnary(tab.id, { status: 'sending' });
       try {
         const input = buildInput();
-        await warnIfProcessEnvWithheld(input.collection, [input], tab.title);
+        await warnIfProcessEnvWithheld(processEnvScopeOf(tab), [input], tab.title);
         const response = await grpcUnaryCall({ ...input, timeoutMs: UNARY_DEADLINE_MS });
         setUnary(tab.id, { status: 'done', response });
       } catch (err) {
@@ -119,7 +121,7 @@ export function GrpcPanel({ tab, groupId }: GrpcPanelProps) {
     attachSession(tab.id, id);
     try {
       const input = buildInput();
-      await warnIfProcessEnvWithheld(input.collection, [input], tab.title);
+      await warnIfProcessEnvWithheld(processEnvScopeOf(tab), [input], tab.title);
       await grpcStartSession(input, id);
     } catch (err) {
       // A cancel during the connect already ended the session. Anything else never opened.

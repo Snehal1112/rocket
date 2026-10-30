@@ -5,6 +5,7 @@
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import type { ProcessEnvScopeInput } from '@/lib/process-env-gate';
 import type { OAuth2AdditionalParam, OAuth2JwtClaims } from '@/types/pane-types';
 
 // ============================================================
@@ -3631,6 +3632,8 @@ export interface WebSocketScopeInput {
   environmentName?: string;
   globalEnvName?: string;
   requestPath?: string;
+  /** The tab's host environment scope. Required. */
+  processEnv: ProcessEnvScopeInput;
 }
 
 export interface WebSocketConnectInput extends WebSocketScopeInput {
@@ -4152,6 +4155,8 @@ export interface GrpcExecuteInput {
   requestPath?: string;
   /** Deadline in milliseconds. 0 or absent means none. */
   timeoutMs?: number;
+  /** The tab's host environment scope. Required. */
+  processEnv: ProcessEnvScopeInput;
 }
 
 export const grpcUnaryCall = (input: GrpcExecuteInput) =>

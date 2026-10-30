@@ -3,6 +3,7 @@ import { collectionTrustKeys } from '@/lib/queries/collection-trust-queries';
 import { getQueryClient } from '@/lib/query-client';
 import { getCollectionTrust } from '@/lib/tauri-api';
 import { useConsoleStore } from '@/stores/console-store';
+import { useEnvStore } from '@/stores/env-store';
 import { usePaneStore } from '@/stores/pane-store';
 
 const PLACEHOLDER = '{{process.env.';
@@ -12,6 +13,26 @@ export const CLOSED_PROCESS_ENV: unique symbol = Symbol('closed-process-env');
 
 /** A collection name, `CLOSED_PROCESS_ENV`, or `undefined` for a scratch request with full access. */
 export type ProcessEnvScope = string | typeof CLOSED_PROCESS_ENV | undefined;
+
+/** The wire form of a `ProcessEnvScope`, read by the backend as `ProcessEnvScopeInput`. */
+export type ProcessEnvScopeInput =
+  | { kind: 'scratch' }
+  | { kind: 'collection'; name: string; environmentName?: string }
+  | { kind: 'closed' };
+
+/**
+ * Maps a scope to the backend input. A collection carries the active environment only when
+ * it is the active collection, so another collection never reads its `.env` through it.
+ */
+export function toProcessEnvScopeInput(scope: ProcessEnvScope): ProcessEnvScopeInput {
+  if (scope === undefined) return { kind: 'scratch' };
+  if (scope === CLOSED_PROCESS_ENV) return { kind: 'closed' };
+  const { activeCollection, activeEnvId } = useEnvStore.getState();
+  if (scope === activeCollection && activeEnvId) {
+    return { kind: 'collection', name: scope, environmentName: activeEnvId };
+  }
+  return { kind: 'collection', name: scope };
+}
 
 /**
  * Warns before a send when the request text uses `{{process.env.NAME}}` and the collection

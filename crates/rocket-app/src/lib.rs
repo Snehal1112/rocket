@@ -115,7 +115,7 @@ pub use conversation_service::{
 pub use cookie_service::CookieService;
 pub use environment_service::EnvironmentService;
 pub use execution_service::websocket_resolution::{
-    WebSocketConnectInput, WebSocketScope, WebSocketSendInput,
+    ProcessEnvScopeInput, WebSocketConnectInput, WebSocketScope, WebSocketSendInput,
 };
 pub use execution_service::{
     DotEnvStatus, ExecuteRequestInput, ExecuteRequestOutput, ProcessEnv, RequestExecutionService,

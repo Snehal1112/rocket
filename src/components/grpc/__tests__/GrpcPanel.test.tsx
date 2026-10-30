@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDefaultLeaf, createDefaultRequestFor, findTabInTree } from '@/lib/pane-utils';
 import * as tauriApi from '@/lib/tauri-api';
 import { useGrpcStore } from '@/stores/grpc-store';
@@ -65,6 +65,14 @@ vi.mock('@/lib/tauri-api', async () => {
   };
 });
 
+// Radix Select calls pointer-capture and scrollIntoView APIs that jsdom lacks.
+beforeAll(() => {
+  HTMLElement.prototype.hasPointerCapture = vi.fn(() => false);
+  HTMLElement.prototype.setPointerCapture = vi.fn();
+  HTMLElement.prototype.releasePointerCapture = vi.fn();
+  HTMLElement.prototype.scrollIntoView = vi.fn();
+});
+
 const TAB_ID = 'tab-g';
 
 function grpcTab(methodType: tauriApi.GrpcMethodType, method = 'demo.Greeter/Say'): RequestTab {
@@ -86,13 +94,26 @@ function grpcTab(methodType: tauriApi.GrpcMethodType, method = 'demo.Greeter/Say
   };
 }
 
+function historyGrpcTab(): RequestTab {
+  return {
+    ...grpcTab('unary'),
+    id: 'history-h1',
+    tabType: 'history',
+    source: undefined,
+    historyCollection: null,
+  };
+}
+
+let mountedTabId = TAB_ID;
+
 // Reads the tab from the store like the real pane does, so edits show up.
 function Harness() {
-  const tab = usePaneStore((s) => findTabInTree(s.root, TAB_ID)?.tab);
+  const tab = usePaneStore((s) => findTabInTree(s.root, mountedTabId)?.tab);
   return tab && isRequestTab(tab) ? <GrpcPanel tab={tab} groupId='g' /> : null;
 }
 
 function mount(tab: RequestTab) {
+  mountedTabId = tab.id;
   const leaf = { ...createDefaultLeaf(), tabs: [tab], activeTabId: tab.id };
   usePaneStore.setState({ root: leaf, activeGroupId: leaf.groupId });
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -124,6 +145,30 @@ describe('GrpcPanel unary', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useGrpcStore.setState({ sessions: {}, sessionByTab: {}, unaryByTab: {} });
+  });
+
+  it('sends the process env scope of a History tab', async () => {
+    vi.mocked(tauriApi.grpcUnaryCall).mockResolvedValue(okResponse);
+    mount(historyGrpcTab());
+
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => expect(tauriApi.grpcUnaryCall).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(tauriApi.grpcUnaryCall).mock.calls[0][0].processEnv).toEqual({
+      kind: 'closed',
+    });
+  });
+
+  it("lists services with the tab's process env scope", async () => {
+    mount(historyGrpcTab());
+
+    await userEvent.click(screen.getByLabelText('Method'));
+
+    await waitFor(() =>
+      expect(vi.mocked(tauriApi.grpcListServices).mock.calls[0][0].processEnv).toEqual({
+        kind: 'closed',
+      }),
+    );
   });
 
   it('sends the editor state and shows the reply and status', async () => {

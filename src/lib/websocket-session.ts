@@ -1,7 +1,8 @@
 import { toast } from 'sonner';
+import { processEnvScopeOf } from '@/lib/execute-request';
 import { toPersistedAuth } from '@/lib/persisted-auth';
 import { toPersistedHeaders } from '@/lib/persisted-headers';
-import { warnIfProcessEnvWithheld } from '@/lib/process-env-gate';
+import { toProcessEnvScopeInput, warnIfProcessEnvWithheld } from '@/lib/process-env-gate';
 import { environmentKeys } from '@/lib/queries/environment-queries';
 import { getQueryClient } from '@/lib/query-client';
 import {
@@ -29,6 +30,7 @@ export function scopeFor(tab: RequestTab): WebSocketScopeInput {
     globalEnvName:
       getQueryClient().getQueryData<string | null>(environmentKeys.globalName) ?? undefined,
     requestPath: tab.source?.path,
+    processEnv: toProcessEnvScopeInput(processEnvScopeOf(tab)),
   };
 }
 
@@ -60,7 +62,7 @@ export async function connectTab(tab: RequestTab): Promise<void> {
   useWebSocketStore.getState().beginSession(tab.id, sessionId);
   try {
     const input = buildConnectInput(tab);
-    await warnIfProcessEnvWithheld(input.collection, [input], tab.title);
+    await warnIfProcessEnvWithheld(processEnvScopeOf(tab), [input], tab.title);
     await wsConnect(sessionId, input);
   } catch (err) {
     useWebSocketStore.getState().failSession(tab.id, sessionId, errorText(err));
@@ -75,7 +77,7 @@ export async function sendSelectedMessage(tab: RequestTab): Promise<void> {
   if (!message) return;
   try {
     const input = { kind: message.kind, data: message.data, ...scopeFor(tab) };
-    await warnIfProcessEnvWithheld(input.collection, [input.data], tab.title);
+    await warnIfProcessEnvWithheld(processEnvScopeOf(tab), [input.data], tab.title);
     await wsSend(session.sessionId, input);
   } catch (err) {
     toast.error(`Could not send: ${errorText(err)}`);

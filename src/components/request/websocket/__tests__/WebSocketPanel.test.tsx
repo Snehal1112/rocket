@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocketPanel } from '@/components/request/websocket/WebSocketPanel';
+import { CLOSED_PROCESS_ENV } from '@/lib/process-env-gate';
 import { createDefaultLeaf } from '@/lib/pane-utils';
 import { createDefaultWebSocketRequestState } from '@/lib/websocket-mapper';
 import * as session from '@/lib/websocket-session';
@@ -14,8 +15,9 @@ vi.mock('@/lib/websocket-session', () => ({
   disconnectTab: vi.fn().mockResolvedValue(undefined),
   sendSelectedMessage: vi.fn().mockResolvedValue(undefined),
 }));
+const variableContextMock = vi.hoisted(() => vi.fn(() => undefined));
 vi.mock('@/hooks/useWebSocketVariableContext', () => ({
-  useWebSocketVariableContext: () => undefined,
+  useWebSocketVariableContext: variableContextMock,
 }));
 // CodeMirror and Monaco do not run in jsdom; stand-ins keep the panel testable.
 vi.mock('@/components/editor', () => ({
@@ -178,6 +180,19 @@ describe('WebSocketPanel', () => {
     await user.click(screen.getByRole('button', { name: 'Delete message 1' }));
     expect(draft().map((m) => m.title)).toEqual(['message 2']);
     expect(draft().map((m) => m.selected)).toEqual([true]);
+  });
+
+  it('passes the History scope to the variable preview', () => {
+    const historyTab = {
+      ...tab(),
+      id: 'history-h1',
+      tabType: 'history',
+      source: undefined,
+      historyCollection: null,
+    } as unknown as RequestTab;
+    variableContextMock.mockClear();
+    render(<WebSocketPanel tab={historyTab} groupId='g1' />);
+    expect(variableContextMock).toHaveBeenCalledWith(undefined, CLOSED_PROCESS_ENV);
   });
 
   it('editing the body marks the tab dirty', async () => {

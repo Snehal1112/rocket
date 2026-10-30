@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { CLOSED_PROCESS_ENV, type ProcessEnvScope } from '@/lib/process-env-gate';
 import {
   useEnvironments,
   useGlobalEnvironment,
@@ -9,6 +10,8 @@ import { type CollectionVariable, getCollectionSettings } from '@/lib/tauri-api'
 import { buildScopedContext, secretKeysOf, type VariableScopeEntry } from '@/lib/url-variables';
 import { useEnvStore } from '@/stores/env-store';
 
+const NO_PROCESS_ENV_VARS: Record<string, string> = {};
+
 /**
  * Variable highlighting for the WebSocket panel: environment, global, process and collection
  * variables. Folder and request-level variables are resolved by the backend at connect time but
@@ -16,13 +19,19 @@ import { useEnvStore } from '@/stores/env-store';
  */
 export function useWebSocketVariableContext(
   collection: string | undefined,
+  processEnvScope: ProcessEnvScope,
 ): Map<string, VariableScopeEntry> {
   const activeEnvId = useEnvStore((s) => s.activeEnvId);
   const activeCollection = useEnvStore((s) => s.activeCollection);
   const { data: environments = [] } = useEnvironments(activeCollection);
   const { data: globalEnvName = null } = useGlobalEnvironmentName();
   const { data: globalEnv = null } = useGlobalEnvironment(globalEnvName);
-  const { data: processEnvVars = {} } = useProcessEnvVars(collection);
+  const closed = processEnvScope === CLOSED_PROCESS_ENV;
+  const { data: processEnvData } = useProcessEnvVars(
+    typeof processEnvScope === 'string' ? processEnvScope : null,
+    !closed,
+  );
+  const processEnvVars = closed ? NO_PROCESS_ENV_VARS : (processEnvData ?? NO_PROCESS_ENV_VARS);
   const [collectionVars, setCollectionVars] = useState<CollectionVariable[]>([]);
 
   useEffect(() => {

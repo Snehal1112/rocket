@@ -706,6 +706,7 @@ mod resolve_tests {
             "url": "https://{{host}}/graphql",
             "query": "subscription OnMsg($room: String) { msg(room: $room) { text } }",
             "collection": "api",
+            "processEnv": { "kind": "collection", "name": "api" },
             "environmentName": "dev"
         });
         if let (Some(base), Some(extra)) = (base.as_object_mut(), extra.as_object()) {
@@ -868,6 +869,7 @@ mod resolve_tests {
             "verifySsl": false,
             "timeoutMs": 2000,
             "collection": "api",
+            "processEnv": { "kind": "scratch" },
             "environmentName": "dev",
             "globalEnvName": "g",
             "requestPath": "q.yml"
@@ -876,6 +878,26 @@ mod resolve_tests {
         assert_eq!(i.subscription_url.as_deref(), Some("wss://h/ws"));
         assert_eq!(i.verify_ssl, Some(false));
         assert_eq!(i.scope.request_path.as_deref(), Some("q.yml"));
+    }
+
+    #[tokio::test]
+    async fn subscription_with_closed_scope_keeps_the_process_env_placeholder() {
+        let svc = service().with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
+        let start = resolve_graphql_subscription(
+            &svc,
+            input(serde_json::json!({
+                "collection": null,
+                "processEnv": { "kind": "closed" },
+                "headers": [{ "key": "X-Path", "value": "{{process.env.PATH}}", "enabled": true }]
+            })),
+        )
+        .await
+        .expect("resolve");
+        assert!(start
+            .connect
+            .headers
+            .iter()
+            .any(|(k, v)| k == "X-Path" && v == "{{process.env.PATH}}"));
     }
 }
 
