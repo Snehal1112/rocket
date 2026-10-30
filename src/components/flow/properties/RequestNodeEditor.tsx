@@ -131,6 +131,21 @@ export function RequestNodeEditor({
           Logs the request as sent and its response to the Console on each run. Secrets are masked.
         </p>
       </div>
+      <div className='space-y-1'>
+        <div className='flex items-center justify-between gap-2'>
+          <Label htmlFor='request-allow-wired-host'>Allow a wired URL to change the host</Label>
+          <Switch
+            id='request-allow-wired-host'
+            checked={kind.allowWiredHost === true}
+            onCheckedChange={(allowWiredHost) => onChange({ ...kind, allowWiredHost })}
+          />
+        </div>
+        <p className='text-xs text-muted-foreground'>
+          When a wire sets this request's URL, it may point to another host, and the saved headers
+          and auth are sent there too. Leave this off unless you trust where the wired URL comes
+          from.
+        </p>
+      </div>
       <RepeatUntilSection
         value={kind.repeatUntil ?? null}
         onChange={(repeatUntil) => onChange({ ...kind, repeatUntil })}

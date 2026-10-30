@@ -1713,6 +1713,7 @@ impl FlowExecutionService {
             FlowNodeKind::Request {
                 debug: debug_on,
                 repeat_until,
+                allow_wired_host,
                 ..
             } => {
                 let mut request_input = build_execute_request_input(
@@ -1778,6 +1779,8 @@ impl FlowExecutionService {
                     trace.record_wire(edge, &value, &trace_masks);
                     resolved.insert(edge.id.clone(), value);
                 }
+                // The saved URL, before a wire replaces it.
+                let saved_url = request_input.url.clone();
                 // One wire at a time, so a failure marks the wire it came from.
                 for edge in data_edges {
                     if let Err(err) = apply_wired_overrides(
@@ -1785,6 +1788,24 @@ impl FlowExecutionService {
                         &resolved,
                         std::slice::from_ref(*edge),
                     ) {
+                        trace.record_failure(edge, &err.to_string(), &trace_masks);
+                        return Err(err);
+                    }
+                }
+                // A response must not choose where the saved headers and auth go, unless
+                // the node allows it.
+                let url_wire = data_edges
+                    .iter()
+                    .find(|e| e.target_field == "url" && resolved.contains_key(&e.id));
+                if let (Some(edge), false) = (url_wire, *allow_wired_host) {
+                    let vars = send_vars(
+                        exec,
+                        &request_input,
+                        external_secrets,
+                        request_input.backend_process_env,
+                    );
+                    if let Err(err) = check_wired_origin(&saved_url, &request_input.url, &vars) {
+                        let err = crate::flow_trace::wire_err(edge, err);
                         trace.record_failure(edge, &err.to_string(), &trace_masks);
                         return Err(err);
                     }
@@ -2015,6 +2036,19 @@ fn send_time_credential_value(
     // The send resolves `{{process.env.NAME}}` in the credential too, unless a token
     // response filled it, so the mask matches what is sent.
     let host_env = request_input.backend_process_env && !request_input.host_env_free.auth;
+    let vars = send_vars(exec, request_input, external_secrets, host_env);
+    crate::flow_auth::resolve_fully(template, &vars).filter(|value| !value.is_empty())
+}
+
+/// The variables `resolve_request` uses for `request_input`: global < collection <
+/// environment < folder < request, vault values and flow variables, read now. With
+/// `host_env`, `{{process.env.NAME}}` resolves too.
+fn send_vars(
+    exec: &RequestExecutionService,
+    request_input: &ExecuteRequestInput,
+    external_secrets: &HashMap<String, String>,
+    host_env: bool,
+) -> HashMap<String, String> {
     let mut vars = if host_env {
         exec.build_variable_context_with_process_env(
             request_input.global_env_name.as_deref(),
@@ -2033,7 +2067,43 @@ fn send_time_credential_value(
         )
     };
     vars.extend(request_input.flow_vars.clone());
-    crate::flow_auth::resolve_fully(template, &vars).filter(|value| !value.is_empty())
+    vars
+}
+
+/// Refuses `wired_url` when its origin (scheme, host and port) differs from the origin of
+/// `saved_url` resolved with `vars`. The wired URL is read as written, so one that holds a
+/// placeholder or is no absolute URL is refused too. The error names both hosts, never a
+/// path or query.
+fn check_wired_origin(
+    saved_url: &str,
+    wired_url: &str,
+    vars: &HashMap<String, String>,
+) -> DomainResult<()> {
+    let origin = |text: &str| {
+        url::Url::parse(text)
+            .ok()
+            .map(|u| u.origin())
+            .filter(url::Origin::is_tuple)
+    };
+    let saved = origin(&rocket_environment::resolve(saved_url, vars).output);
+    let wired = (!wired_url.contains("{{"))
+        .then(|| origin(wired_url))
+        .flatten();
+    if let (Some(saved), Some(wired)) = (&saved, &wired) {
+        if saved == wired {
+            return Ok(());
+        }
+    }
+    let describe = |o: &Option<url::Origin>| {
+        o.as_ref()
+            .map_or_else(|| "no host".to_string(), url::Origin::ascii_serialization)
+    };
+    Err(DomainError::InvalidInput(format!(
+        "the wired URL goes to {}, not to {}, the saved request's host. Turn on \"Allow a wired \
+         URL to change the host\" on this node to send its saved headers and auth there",
+        describe(&wired),
+        describe(&saved)
+    )))
 }
 
 /// The captured output of `edge`'s source. Topological order guarantees it
@@ -2773,6 +2843,7 @@ mod tests {
             kind: FlowNodeKind::Request {
                 debug: false,
                 repeat_until: None,
+                allow_wired_host: false,
                 label: "Get Auth Token".to_string(),
                 source: RequestSource::Saved {
                     request_path: request_path.to_string(),
@@ -2788,6 +2859,7 @@ mod tests {
             kind: FlowNodeKind::Request {
                 debug: false,
                 repeat_until: None,
+                allow_wired_host: false,
                 label: "Ping".to_string(),
                 source: RequestSource::Inline {
                     request: InlineRequestData {
@@ -3454,6 +3526,7 @@ mod tests {
             kind: FlowNodeKind::Request {
                 debug: false,
                 repeat_until: None,
+                allow_wired_host: false,
                 label: format!("Node {id}"),
                 source: RequestSource::Inline {
                     request: InlineRequestData {
@@ -6953,6 +7026,7 @@ mod tests {
             kind: FlowNodeKind::Request {
                 debug,
                 repeat_until: None,
+                allow_wired_host: false,
                 label: "Login".to_string(),
                 source: RequestSource::Inline {
                     request: InlineRequestData {
@@ -10255,7 +10329,7 @@ mod tests {
             name: "wired".to_string(),
             nodes: vec![
                 request_flow_node("a", "https://api.example.com/a"),
-                request_flow_node("b", "https://api.example.com/b"),
+                allow_wired_host(request_flow_node("b", "https://api.example.com/b")),
                 request_flow_node("c", "https://api.example.com/c?p={{process.env.PATH}}"),
             ],
             edges: vec![
@@ -10292,6 +10366,107 @@ mod tests {
             .find(|h| h.key == "X-Wired")
             .map(|h| h.value.clone());
         assert_eq!(wired.as_deref(), Some(attack));
+    }
+
+    /// `node` with `allow_wired_host` on, for a test that wires a URL to another host.
+    fn allow_wired_host(mut node: FlowNode) -> FlowNode {
+        if let FlowNodeKind::Request {
+            allow_wired_host, ..
+        } = &mut node.kind
+        {
+            *allow_wired_host = true;
+        }
+        node
+    }
+
+    /// A flow `a -> b` whose `url` wire puts `a`'s response body into `b`'s URL. `b` is
+    /// saved as `https://api.example.com/b` with an `Authorization` header.
+    fn wired_url_flow(allow_wired_host: bool) -> Flow {
+        let mut b = request_flow_node("b", "https://api.example.com/b");
+        if let FlowNodeKind::Request {
+            allow_wired_host: allow,
+            source: RequestSource::Inline { request },
+            ..
+        } = &mut b.kind
+        {
+            *allow = allow_wired_host;
+            request.headers.push(InlineHeader {
+                name: "Authorization".to_string(),
+                value: "Bearer saved-secret".to_string(),
+            });
+        }
+        Flow {
+            name: "wired-url".to_string(),
+            nodes: vec![request_flow_node("a", "https://api.example.com/a"), b],
+            edges: vec![wire("e1", "a", "b")],
+            callback_host: None,
+        }
+    }
+
+    /// Runs `wired_url_flow`. Returns the executor and the error of node `b`, if any.
+    async fn run_wired_url(
+        allow_wired_host: bool,
+        next: &str,
+    ) -> (Arc<RecordingExecutor>, Option<String>) {
+        let executor = RecordingExecutor::new();
+        executor.set_body("api.example.com/a", next);
+        let exec = host_env_exec(&executor);
+        let service = FlowExecutionService::new(
+            Box::new(FakeFlowRepository::new().with_flow("my-api", wired_url_flow(allow_wired_host))),
+            Box::new(FakeCollectionRepo::new().build()),
+            Box::new(NullEventPublisher),
+        );
+        let summary = service.run(&exec, run_input("wired-url")).await.expect("run");
+        let b = summary.steps.iter().find(|s| s.node_id == "b").expect("b ran");
+        (executor, b.error.clone())
+    }
+
+    #[tokio::test]
+    async fn a_wired_url_to_another_host_is_refused() {
+        let (executor, error) = run_wired_url(false, "https://evil.test/x?k=1").await;
+
+        let message = error.expect("the wired host differs from the saved one");
+        assert!(message.contains("wire 'e1'"), "{message}");
+        assert!(message.contains("https://evil.test"), "{message}");
+        assert!(message.contains("https://api.example.com"), "{message}");
+        assert!(!message.contains("k=1"), "the query is never named: {message}");
+        assert_eq!(executor.sent_urls(), vec!["https://api.example.com/a".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn a_wired_url_on_the_saved_origin_is_sent() {
+        let next = "https://api.example.com:443/b?page=2";
+        let (executor, error) = run_wired_url(false, next).await;
+
+        assert_eq!(error, None, "same origin");
+        assert!(
+            executor.sent_urls().iter().any(|u| u.contains("page=2")),
+            "{:?}",
+            executor.sent_urls()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_node_that_allows_a_wired_host_sends_there() {
+        let (executor, error) = run_wired_url(true, "https://other.test/x").await;
+
+        assert_eq!(error, None, "the node opted in");
+        assert!(executor.sent_urls().contains(&"https://other.test/x".to_string()));
+    }
+
+    #[test]
+    fn check_wired_origin_compares_scheme_host_and_port() {
+        let vars: HashMap<String, String> =
+            HashMap::from([("base".to_string(), "https://h.test".to_string())]);
+        let ok = |saved: &str, wired: &str| check_wired_origin(saved, wired, &vars).is_ok();
+
+        assert!(ok("{{base}}/a", "https://h.test/b"), "the saved URL resolves first");
+        assert!(ok("https://H.test/a", "https://h.test:443/b"), "default port, host case");
+        assert!(!ok("https://h.test/a", "http://h.test/a"), "a scheme change is refused");
+        assert!(!ok("https://h.test/a", "https://h.test:8443/a"), "a port change is refused");
+        assert!(!ok("https://h.test/a", "https://{{base}}/a"), "a wired placeholder");
+        assert!(!ok("https://h.test/a", "/relative"), "no absolute URL");
+        assert!(!ok("{{missing}}/a", "https://h.test/a"), "an unresolved saved host");
     }
 
     /// A flow whose client-credentials Auth node fetches `{{process.env.PATH}}` as its

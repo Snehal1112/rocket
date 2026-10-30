@@ -596,6 +596,7 @@ mod tests {
             FlowNodeKind::Request {
                 debug: false,
                 repeat_until: None,
+                allow_wired_host: false,
                 label: id.to_string(),
                 source: RequestSource::Saved {
                     request_path: format!("{id}.yml"),
@@ -1450,6 +1451,7 @@ mod tests {
                     request_path: format!("{id}.yml"),
                 },
                 repeat_until: Some(repeat),
+                allow_wired_host: false,
             },
         )
     }
@@ -1811,6 +1813,7 @@ mod tests {
             FlowNodeKind::Request {
                 debug: false,
                 repeat_until: None,
+                allow_wired_host: false,
                 label: id.to_string(),
                 source: RequestSource::Inline {
                     request: crate::node::InlineRequestData {
@@ -1943,6 +1946,7 @@ mod tests {
             FlowNodeKind::Request {
                 debug: false,
                 repeat_until: None,
+                allow_wired_host: false,
                 label: label.to_string(),
                 source: RequestSource::Saved {
                     request_path: format!("{id}.yml"),

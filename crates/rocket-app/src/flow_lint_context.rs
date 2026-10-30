@@ -266,6 +266,7 @@ mod tests {
                 },
                 debug: false,
                 repeat_until: None,
+                allow_wired_host: false,
             },
         )
     }
@@ -280,6 +281,7 @@ mod tests {
                 },
                 debug: false,
                 repeat_until: None,
+                allow_wired_host: false,
             },
         )
     }

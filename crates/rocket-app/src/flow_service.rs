@@ -457,6 +457,7 @@ mod tests {
         FlowNodeKind::Request {
             debug: false,
             repeat_until: None,
+            allow_wired_host: false,
             label: label.to_string(),
             source: rocket_flow::RequestSource::Saved {
                 request_path: format!("{label}.yml"),
@@ -670,6 +671,7 @@ mod tests {
                         },
                         debug: false,
                         repeat_until: None,
+                        allow_wired_host: false,
                     },
                 ),
             ],
@@ -781,6 +783,7 @@ mod tests {
             FlowNodeKind::Request {
                 debug: false,
                 repeat_until: None,
+                allow_wired_host: false,
                 label: "Login".to_string(),
                 source: rocket_flow::RequestSource::Saved {
                     request_path: "login.yml".to_string(),
@@ -1349,6 +1352,7 @@ mod tests {
                     },
                     debug: false,
                     repeat_until: None,
+                    allow_wired_host: false,
                 },
             )],
             edges: vec![],
@@ -1396,6 +1400,7 @@ mod tests {
                     },
                     debug: false,
                     repeat_until: None,
+                    allow_wired_host: false,
                 },
             )],
             edges: vec![],
@@ -1457,6 +1462,7 @@ mod tests {
                 },
                 debug: false,
                 repeat_until: None,
+                allow_wired_host: false,
             },
         ));
         let dev = crate::flow_lint_context::LintEnvironment {

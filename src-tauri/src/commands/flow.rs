@@ -148,6 +148,8 @@ pub enum FlowNodeKindDto {
         debug: bool,
         #[serde(default)]
         repeat_until: Option<RepeatUntilDto>,
+        #[serde(default)]
+        allow_wired_host: bool,
     },
     Input {
         label: String,
@@ -195,11 +197,13 @@ impl From<FlowNodeKind> for FlowNodeKindDto {
                 source,
                 debug,
                 repeat_until,
+                allow_wired_host,
             } => FlowNodeKindDto::Request {
                 label,
                 source: source.into(),
                 debug,
                 repeat_until: repeat_until.map(Into::into),
+                allow_wired_host,
             },
             FlowNodeKind::Input { label, value } => FlowNodeKindDto::Input { label, value },
             FlowNodeKind::Output { label } => FlowNodeKindDto::Output { label },
@@ -247,11 +251,13 @@ impl From<FlowNodeKindDto> for FlowNodeKind {
                 source,
                 debug,
                 repeat_until,
+                allow_wired_host,
             } => FlowNodeKind::Request {
                 label,
                 source: source.into(),
                 debug,
                 repeat_until: repeat_until.map(Into::into),
+                allow_wired_host,
             },
             FlowNodeKindDto::Input { label, value } => FlowNodeKind::Input { label, value },
             FlowNodeKindDto::Output { label } => FlowNodeKind::Output { label },
@@ -925,6 +931,7 @@ mod tests {
                         },
                         debug: false,
                         repeat_until: None,
+                        allow_wired_host: false,
                     },
                     position: NodePositionDto { x: 0.0, y: 0.0 },
                 },
@@ -982,6 +989,7 @@ mod tests {
             },
             debug: true,
             repeat_until: None,
+            allow_wired_host: false,
         };
         let domain: FlowNodeKind = dto.into();
         assert!(matches!(domain, FlowNodeKind::Request { debug: true, .. }));
@@ -998,6 +1006,22 @@ mod tests {
     }
 
     #[test]
+    fn request_allow_wired_host_is_camel_case_and_converts_both_ways() {
+        let json = r#"{"kind":"Request","label":"L","source":{"type":"Saved","requestPath":"a.yml"},"allowWiredHost":true}"#;
+        let dto: FlowNodeKindDto = serde_json::from_str(json).expect("deserialize");
+        let domain: FlowNodeKind = dto.into();
+        assert!(matches!(
+            domain,
+            FlowNodeKind::Request {
+                allow_wired_host: true,
+                ..
+            }
+        ));
+        let back = serde_json::to_string(&FlowNodeKindDto::from(domain)).expect("serialize");
+        assert!(back.contains("\"allowWiredHost\":true"), "got: {back}");
+    }
+
+    #[test]
     fn request_repeat_until_converts_both_ways_and_defaults_to_none() {
         let dto = FlowNodeKindDto::Request {
             label: "Poll".to_string(),
@@ -1005,6 +1029,7 @@ mod tests {
                 request_path: "jobs/get.yml".to_string(),
             },
             debug: false,
+            allow_wired_host: false,
             repeat_until: Some(RepeatUntilDto {
                 condition: "response.body.done".to_string(),
                 interval_ms: 500,
@@ -1045,6 +1070,7 @@ mod tests {
             parsed,
             FlowNodeKindDto::Request {
                 repeat_until: None,
+                allow_wired_host: false,
                 ..
             }
         ));

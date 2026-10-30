@@ -26,6 +26,11 @@ pub enum FlowNodeKind {
         /// When set, the request is sent again until `condition` holds.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         repeat_until: Option<RepeatUntil>,
+        /// When true, a wired `url` may send this request to another origin than the
+        /// saved request's. Off by default, so a response cannot choose where the saved
+        /// headers and auth go.
+        #[serde(default, skip_serializing_if = "is_false")]
+        allow_wired_host: bool,
     },
     Input {
         label: String,
@@ -190,6 +195,7 @@ mod tests {
         let kind = FlowNodeKind::Request {
             debug: false,
             repeat_until: None,
+            allow_wired_host: false,
             label: "Get Auth Token".to_string(),
             source: RequestSource::Saved {
                 request_path: "auth/login.yml".to_string(),
@@ -375,9 +381,36 @@ mod tests {
             },
             debug: false,
             repeat_until: None,
+            allow_wired_host: false,
         };
         let yaml = serde_yaml::to_string(&kind).expect("serialize");
         assert!(!yaml.contains("repeat_until"), "got: {yaml}");
+    }
+
+    #[test]
+    fn request_allow_wired_host_defaults_off_and_is_saved_only_when_on() {
+        let old = r#"{"kind":"Request","label":"L","source":{"type":"Saved","request_path":"a.yml"}}"#;
+        let mut kind: FlowNodeKind = serde_json::from_str(old).expect("an old node loads");
+        let FlowNodeKind::Request {
+            allow_wired_host, ..
+        } = &mut kind
+        else {
+            panic!("a Request node, got {kind:?}");
+        };
+        assert!(!*allow_wired_host);
+        let off = serde_json::to_string(&kind).expect("serialize");
+        assert!(!off.contains("allow_wired_host"), "got: {off}");
+
+        if let FlowNodeKind::Request {
+            allow_wired_host, ..
+        } = &mut kind
+        {
+            *allow_wired_host = true;
+        }
+        let on = serde_json::to_string(&kind).expect("serialize");
+        assert!(on.contains("\"allow_wired_host\":true"), "got: {on}");
+        let back: FlowNodeKind = serde_json::from_str(&on).expect("deserialize");
+        assert_eq!(kind, back);
     }
 
     #[test]
@@ -388,6 +421,7 @@ mod tests {
                 request_path: "jobs/get-job.yml".to_string(),
             },
             debug: false,
+            allow_wired_host: false,
             repeat_until: Some(RepeatUntil {
                 condition: "response.body.status === \"done\"".to_string(),
                 interval_ms: 2000,

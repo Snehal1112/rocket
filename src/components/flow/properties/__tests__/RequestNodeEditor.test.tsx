@@ -117,6 +117,21 @@ describe('RequestNodeEditor', () => {
     );
   });
 
+  it('leaves the wired host switch off when allowWiredHost is absent', () => {
+    renderEditor(savedKind);
+    expect(
+      screen.getByRole('switch', { name: 'Allow a wired URL to change the host' }),
+    ).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it('turns the wired host switch on', async () => {
+    const onChange = renderEditor(savedKind);
+    await userEvent.click(
+      screen.getByRole('switch', { name: 'Allow a wired URL to change the host' }),
+    );
+    expect(onChange).toHaveBeenCalledWith({ ...savedKind, allowWiredHost: true });
+  });
+
   it('shows the saved editor for a Saved source and repoints on pick', async () => {
     vi.mocked(getCollection).mockResolvedValue(collection);
     const onChange = renderEditor(savedKind);

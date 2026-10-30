@@ -137,6 +137,7 @@ fn request(id: &str, url: &str) -> FlowNode {
         FlowNodeKind::Request {
             debug: false,
             repeat_until: None,
+            allow_wired_host: false,
             label: id.to_string(),
             source: RequestSource::Inline {
                 request: InlineRequestData {

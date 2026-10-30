@@ -528,6 +528,7 @@ mod tests {
                 kind: FlowNodeKind::Request {
                     debug: false,
                     repeat_until: None,
+                    allow_wired_host: false,
                     label: "Get User".to_string(),
                     source: RequestSource::Saved {
                         request_path: "users/get-user.yml".to_string(),
@@ -553,6 +554,7 @@ mod tests {
                 kind: FlowNodeKind::Request {
                     debug: false,
                     repeat_until: None,
+                    allow_wired_host: false,
                     label: "Ad Hoc Login".to_string(),
                     source: RequestSource::Inline {
                         request: InlineRequestData {
@@ -586,6 +588,7 @@ mod tests {
                 kind: FlowNodeKind::Request {
                     debug: false,
                     repeat_until: None,
+                    allow_wired_host: false,
                     label: "Ping".to_string(),
                     source: RequestSource::Inline {
                         request: InlineRequestData {
@@ -624,6 +627,7 @@ mod tests {
             kind: FlowNodeKind::Request {
                 debug: false,
                 repeat_until: None,
+                allow_wired_host: false,
                 label: "Call".to_string(),
                 source: RequestSource::Saved {
                     request_path: "call.yml".to_string(),
@@ -992,6 +996,7 @@ edges:
                     source: RequestSource::Saved {
                         request_path: "jobs/get-job.yml".to_string(),
                     },
+                    allow_wired_host: false,
                     repeat_until: Some(RepeatUntil {
                         condition: "response.body.status === \"done\"".to_string(),
                         interval_ms: 500,

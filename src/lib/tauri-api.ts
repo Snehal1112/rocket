@@ -2975,6 +2975,7 @@ export type FlowNodeKind =
       source: RequestSource;
       debug?: boolean;
       repeatUntil?: RepeatUntil | null;
+      allowWiredHost?: boolean;
     }
   | { kind: 'Input'; label: string; value: unknown }
   | { kind: 'Output'; label: string }

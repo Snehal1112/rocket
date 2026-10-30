@@ -101,6 +101,7 @@ mod tests {
             FlowNodeKind::Request {
                 debug: false,
                 repeat_until: None,
+                allow_wired_host: false,
                 label: label.to_string(),
                 source: RequestSource::Saved {
                     request_path: format!("{id}.yml"),

@@ -465,6 +465,7 @@ mod tests {
                 label: id.to_string(),
                 debug: false,
                 repeat_until: None,
+                allow_wired_host: false,
                 source: RequestSource::Inline {
                     request: InlineRequestData {
                         method: "get".to_string(),
@@ -923,6 +924,7 @@ mod tests {
                         label: "s".to_string(),
                         debug: false,
                         repeat_until: None,
+                        allow_wired_host: false,
                         source: RequestSource::Saved {
                             request_path: "pay.yml".to_string(),
                         },
@@ -953,6 +955,7 @@ mod tests {
                         label: "s".to_string(),
                         debug: false,
                         repeat_until: None,
+                        allow_wired_host: false,
                         source: RequestSource::Saved {
                             request_path: "pay.yml".to_string(),
                         },

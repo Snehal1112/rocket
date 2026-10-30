@@ -927,6 +927,7 @@ mod tests {
                 },
                 debug: false,
                 repeat_until: None,
+                allow_wired_host: false,
             },
         )
     }
@@ -2095,6 +2096,7 @@ mod tests {
                         },
                         debug: false,
                         repeat_until: None,
+                        allow_wired_host: false,
                     },
                 ),
                 wait("w1", "canarycallback9f3a"),
@@ -2419,6 +2421,7 @@ mod tests {
                 },
                 debug: false,
                 repeat_until: None,
+                allow_wired_host: false,
             },
         )
     }
@@ -2553,6 +2556,7 @@ mod tests {
                 },
                 debug: false,
                 repeat_until: None,
+                allow_wired_host: false,
             },
         )
     }

@@ -232,6 +232,7 @@ pub(crate) mod test_support {
                         },
                         debug: false,
                         repeat_until: None,
+                        allow_wired_host: false,
                     },
                     position: NodePosition { x: 0.0, y: 0.0 },
                 })

@@ -133,6 +133,7 @@ mod tests {
                     kind: FlowNodeKind::Request {
                         debug: false,
                         repeat_until: None,
+                        allow_wired_host: false,
                         label: "Login".to_string(),
                         source: RequestSource::Saved {
                             request_path: "auth/login.yml".to_string(),
@@ -382,6 +383,7 @@ mod tests {
                     },
                     debug,
                     repeat_until: None,
+                    allow_wired_host: false,
                 },
                 position: NodePosition { x: 0.0, y: 0.0 },
             }],
