@@ -645,6 +645,20 @@ impl OAuth2Service {
         Self::post_token_request(&client, &url, &form, &extra_headers).await
     }
 
+    /// `exchange_code_for_token` with `.env` values of `process_env` masked in its error.
+    pub async fn exchange_code_for_token_with_host_env(
+        &self,
+        config: &ResolvedOAuth2Config,
+        code: &str,
+        redirect_uri: &str,
+        code_verifier: Option<&str>,
+        process_env: &ProcessEnv,
+    ) -> DomainResult<OAuthToken> {
+        self.exchange_code_for_token(config, code, redirect_uri, code_verifier)
+            .await
+            .map_err(|e| Self::mask_dot_env(e, process_env))
+    }
+
     /// Resolves all {{variables}} in the get-token request fields.
     pub fn resolve_get_token_request(&self, req: &OAuth2GetTokenRequest) -> ResolvedOAuth2Config {
         self.resolve_get_token_request_with_secrets(req, &HashMap::new())
@@ -1670,5 +1684,63 @@ pub(crate) mod tests {
             .await
             .expect("refresh");
         assert_eq!(token.access_token, "t");
+    }
+
+    #[tokio::test]
+    async fn oauth2_refresh_error_masks_dot_env_value() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(400)
+                    .set_body_string("bad secret dotenv-secret-654321"),
+            )
+            .mount(&server)
+            .await;
+        let svc = make_service_with_env(&[]);
+        let req: OAuth2RefreshRequest = serde_json::from_value(serde_json::json!({
+            "refreshToken": "r",
+            "tokenUrl": format!("{}/token", server.uri()),
+            "clientId": "id",
+            "clientSecret": "{{process.env.ROCKET_CS_KEY}}",
+        }))
+        .expect("refresh");
+        let env = host_env(
+            &[("ROCKET_CS_KEY", "dotenv-secret-654321")],
+            &["ROCKET_CS_KEY"],
+        );
+        let err = svc
+            .refresh_token_with_host_env(&req, &HashMap::new(), &env)
+            .await
+            .expect_err("400");
+        assert!(!err.to_string().contains("dotenv-secret-654321"), "{err}");
+        assert!(err.to_string().contains("400"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn oauth2_code_exchange_error_masks_dot_env_value() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(400)
+                    .set_body_string("bad secret dotenv-secret-654321"),
+            )
+            .mount(&server)
+            .await;
+        let svc = make_service_with_env(&[]);
+        let mut req = client_credentials_request(&format!("{}/token", server.uri()));
+        req.grant_type = "authorization_code".into();
+        req.client_secret = Some("{{process.env.ROCKET_CS_KEY}}".into());
+        let env = host_env(
+            &[("ROCKET_CS_KEY", "dotenv-secret-654321")],
+            &["ROCKET_CS_KEY"],
+        );
+        let config = svc.resolve_get_token_request_with_host_env(&req, &HashMap::new(), &env);
+        assert_eq!(config.client_secret, "dotenv-secret-654321");
+        let err = svc
+            .exchange_code_for_token_with_host_env(&config, "code", "http://cb", None, &env)
+            .await
+            .expect_err("400");
+        assert!(!err.to_string().contains("dotenv-secret-654321"), "{err}");
+        assert!(err.to_string().contains("400"), "{err}");
     }
 }

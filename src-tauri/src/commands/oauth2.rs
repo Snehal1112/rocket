@@ -5,7 +5,7 @@ use std::time::Duration;
 use rocket_app::oauth2_service::{
     OAuth2GetTokenRequest, OAuth2RefreshRequest, OAuth2Service, ResolvedOAuth2Config,
 };
-use rocket_app::RequestExecutionService;
+use rocket_app::{ProcessEnv, RequestExecutionService};
 use rocket_http::{
     acquire_token, apply_params_to_url, decode_jwt, generate_pkce, JwtClaims, OAuthConfig,
     OAuthToken, PkcePair,
@@ -275,12 +275,15 @@ pub async fn oauth2_refresh_token(
             request.environment_name.as_deref(),
         )
         .await?;
-    let host_env = exec.process_env_for_scope(
-        request.collection.as_deref(),
-        request.environment_name.as_deref(),
-        None,
-        &request.process_env,
-    );
+    // The trust store and `.env` files are read from disk, so keep it off the async workers.
+    let host_env = tokio::task::block_in_place(|| {
+        exec.process_env_for_scope(
+            request.collection.as_deref(),
+            request.environment_name.as_deref(),
+            None,
+            &request.process_env,
+        )
+    });
     svc.refresh_token_with_host_env(&request, &secrets, &host_env)
         .await
 }
@@ -313,17 +316,22 @@ pub async fn oauth2_get_token(
             request.environment_name.as_deref(),
         )
         .await?;
-    let host_env = exec.process_env_for_scope(
-        request.collection.as_deref(),
-        request.environment_name.as_deref(),
-        None,
-        &request.process_env,
-    );
+    // The trust store and `.env` files are read from disk, so keep it off the async workers.
+    let host_env = tokio::task::block_in_place(|| {
+        exec.process_env_for_scope(
+            request.collection.as_deref(),
+            request.environment_name.as_deref(),
+            None,
+            &request.process_env,
+        )
+    });
     let config = svc.resolve_get_token_request_with_host_env(&request, &secrets, &host_env);
 
     match config.grant_type.as_str() {
         "client_credentials" | "password" => svc.get_token_with_host_env(&config, &host_env).await,
-        "authorization_code" => auth_code_flow(&app, &svc, &config, config.force_reauth).await,
+        "authorization_code" => {
+            auth_code_flow(&app, &svc, &config, config.force_reauth, &host_env).await
+        }
         "implicit" => implicit_flow(&app, &config).await,
         other => Err(DomainError::InvalidInput(format!(
             "Unsupported grant type: {other}"
@@ -337,6 +345,7 @@ async fn auth_code_flow(
     svc: &OAuth2Service,
     config: &ResolvedOAuth2Config,
     force_reauth: bool,
+    host_env: &ProcessEnv,
 ) -> Result<OAuthToken, DomainError> {
     let pkce: Option<PkcePair> = if config.use_pkce {
         Some(generate_pkce())
@@ -419,11 +428,12 @@ async fn auth_code_flow(
         (code, config.callback_url.clone())
     };
 
-    svc.exchange_code_for_token(
+    svc.exchange_code_for_token_with_host_env(
         config,
         &code,
         &actual_redirect_uri,
         pkce.as_ref().map(|p| p.code_verifier.as_str()),
+        host_env,
     )
     .await
 }
