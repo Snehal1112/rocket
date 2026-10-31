@@ -541,7 +541,7 @@
 }
 
 /* Elevation levels. Surface and shadow travel together, so do not add a bg-* utility to the same
-   element. Secondary text is lifted on raised and overlay because 48% is under 4.5:1 there. */
+   element. Secondary text is lifted on overlay only, because 48% is under 4.5:1 there. Raised is the sidebar and keeps its text colour. */
 .elevation-sunken {
   background-color: hsl(var(--elevation-sunken-bg));
 }
@@ -560,7 +560,6 @@
   box-shadow: var(--elevation-shadow-overlay);
 }
 
-.dark .elevation-raised,
 .dark .elevation-overlay {
   --muted-foreground: 0 0% 56%;
 }

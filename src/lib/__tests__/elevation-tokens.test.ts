@@ -95,13 +95,13 @@ describe('elevation tokens', () => {
     }
   });
 
-  it('keeps secondary text at 4.5:1 on raised and overlay in dark', () => {
-    const scoped = cssBlock(css, '.dark .elevation-raised, .dark .elevation-overlay');
+  it('keeps secondary text at 4.5:1 on overlay in dark and leaves the sidebar text alone', () => {
+    const scoped = cssBlock(css, '.dark .elevation-overlay');
     const muted = hslTriple(scoped, '--muted-foreground');
     expect(muted).toEqual([0, 0, 56]);
-    for (const level of ['raised', 'overlay']) {
-      expect(contrast(muted, hslTriple(dark, `--elevation-${level}-bg`))).toBeGreaterThanOrEqual(4.5);
-    }
+    expect(contrast(muted, hslTriple(dark, '--elevation-overlay-bg'))).toBeGreaterThanOrEqual(4.5);
+    // The raised level is the sidebar, whose text colour must not change.
+    expect(css).not.toMatch(/\.dark \.elevation-raised/);
   });
 
   it('gives each class its surface, and raised and overlay their shadow', () => {

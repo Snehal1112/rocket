@@ -37,7 +37,7 @@ as an `.elevation-*` class.
 
 - Raised: the Collections sidebar wrapper in `src/App.tsx` (`elevation-raised`, and `--sidebar-bg`
   aliases the raised token).
-- Sunken: the Settings page, its sticky Save bar and the console output well.
+- Sunken: the Settings page, its sticky Save bar and the console output well (white in light).
 - Default: dark `--background`, `--statusbar-bg`, `--panel-bg` and `--titlebar-bg` alias the default
   surface. The light title bar already shares the sidebar value, so light is not aliased.
 - Dark cards: flat panels on `--background`, one small step above the editor, with one 1px
@@ -57,9 +57,9 @@ shadow shows over Settings. The editor wrapper stays `isolate` and `inert`.
 ## Contrast
 
 Body text is 9.9:1 or better on every dark level. The global `--muted-foreground` (48%) is below 4.5:1
-on the dark levels. Raised and overlay lift it with
-`.dark .elevation-raised, .dark .elevation-overlay { --muted-foreground: 0 0% 56% }`. The baseline on
-the other levels is a follow-up, not fixed.
+on the dark levels. Only `.dark .elevation-overlay` lifts it (`--muted-foreground: 0 0% 56%`). The
+sidebar is raised and keeps its text colour, so the app looks as it did. The baseline on the other
+levels is a follow-up, not fixed.
 
 ## WebKitGTK
 
@@ -74,7 +74,8 @@ never a new hex. If you need to show height, use the level's shadow.
 
 Both themes, in the running app:
 
-1. Settings open: the sidebar shows its shadow over Settings, and the Settings page is darker.
+1. Settings open: the sidebar shows its shadow over Settings. In dark the Settings page is darker
+   than the sidebar; in light it is white.
 2. Sidebar colour matches VS Code 2026 (`#191A1B` dark, `#FAFAFD` light).
 3. Console panel with output: the output well is visibly darker than the panel in dark mode.
 4. Cards: one thin border, flat fill, nested cards one step lighter.
