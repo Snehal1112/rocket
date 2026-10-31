@@ -118,3 +118,16 @@ describe('elevation tokens', () => {
     }
   });
 });
+
+describe('elevation Tailwind colours', () => {
+  it('exposes the four surfaces as Tailwind colours', async () => {
+    // @ts-expect-error The config is plain JavaScript without types.
+    const config = (await import('../../../tailwind.config.js')).default;
+    expect(config.theme.extend.colors.elevation).toEqual({
+      sunken: 'hsl(var(--elevation-sunken-bg))',
+      surface: 'hsl(var(--elevation-surface-bg))',
+      raised: 'hsl(var(--elevation-raised-bg))',
+      overlay: 'hsl(var(--elevation-overlay-bg))',
+    });
+  });
+});

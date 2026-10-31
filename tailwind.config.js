@@ -129,6 +129,12 @@ export default {
   				'gutter-added':   'hsl(var(--editor-gutter-added))',
   				'gutter-deleted': 'hsl(var(--editor-gutter-deleted))',
   			},
+  			elevation: {
+  				sunken:  'hsl(var(--elevation-sunken-bg))',
+  				surface: 'hsl(var(--elevation-surface-bg))',
+  				raised:  'hsl(var(--elevation-raised-bg))',
+  				overlay: 'hsl(var(--elevation-overlay-bg))',
+  			},
   			diff: {
   				'inserted-text': 'var(--diff-inserted-text)',
   				'removed-text':  'var(--diff-removed-text)',
