@@ -1047,7 +1047,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
 
   const urlBar = (
     <>
-      <div className='flex items-center gap-2 border-b border-border px-3 py-2 bg-card'>
+      <div className='flex items-center gap-2 border-b border-border px-3 py-2 bg-elevation-surface'>
         <MethodSelect
           value={request.method}
           onChange={(method) => updateRequest(tab.id, { method })}
@@ -1161,7 +1161,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
   );
 
   const sectionTabs = (
-    <div className='flex-1 flex flex-col min-h-0 bg-card'>
+    <div className='flex-1 flex flex-col min-h-0 bg-elevation-sunken'>
       <RocketTabBar tabs={tabDefs} rightContent={tabRightContent} />
       {activeSection === 'docs' ? (
         <div className='flex-1 flex flex-col overflow-hidden p-3 min-h-0'>
@@ -1637,7 +1637,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
           {/* Request side — full width when response is suppressed. */}
           <div
             className={cn(
-              'flex flex-col overflow-hidden bg-card',
+              'flex flex-col overflow-hidden bg-elevation-sunken',
               expandFull ? 'flex-1' : 'min-w-[20%] max-w-[80%]',
             )}
             style={expandFull ? undefined : { width: `${requestWidth}%` }}
@@ -1664,7 +1664,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
                   'focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-1',
                   isDragging
                     ? 'bg-primary/15 border-primary/50'
-                    : 'bg-muted/30 border-border hover:bg-accent/50 hover:border-primary/40',
+                    : 'bg-elevation-surface border-border hover:bg-accent/50 hover:border-primary/40',
                 )}
               >
                 <div
@@ -1676,7 +1676,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
               </div>
 
               {/* Response side */}
-              <div className='flex-1 flex flex-col overflow-hidden bg-card min-w-0'>
+              <div className='flex-1 flex flex-col overflow-hidden bg-elevation-sunken min-w-0'>
                 {responseArea}
               </div>
             </>
@@ -1692,7 +1692,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
       {/* ── Request area ── */}
       <div
         className={cn(
-          'flex flex-col overflow-hidden bg-card',
+          'flex flex-col overflow-hidden bg-elevation-sunken',
           expandFull ? 'flex-1' : 'h-(--req-h) min-h-[20%] max-h-[80%]',
         )}
         style={expandFull ? undefined : ({ '--req-h': `${requestHeight}%` } as React.CSSProperties)}
@@ -1720,7 +1720,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
               'focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-1',
               isDragging
                 ? 'bg-primary/15 border-primary/50'
-                : 'bg-muted/30 border-border hover:bg-accent/50 hover:border-primary/40',
+                : 'bg-elevation-surface border-border hover:bg-accent/50 hover:border-primary/40',
             )}
           >
             <div
@@ -1731,7 +1731,9 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             />
           </div>
 
-          <div className='flex-1 flex flex-col overflow-hidden bg-card min-h-0'>{responseArea}</div>
+          <div className='flex-1 flex flex-col overflow-hidden bg-elevation-sunken min-h-0'>
+            {responseArea}
+          </div>
         </>
       )}
       {dialogs}

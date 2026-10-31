@@ -182,6 +182,42 @@ describe('raised assistant panel', () => {
   });
 });
 
+describe('overlay shadow colour', () => {
+  it('is black in both themes, not a blue tint', () => {
+    expect(shadowOf(light, '--elevation-shadow-overlay')).not.toContain('9, 30, 66');
+    expect(shadowOf(light, '--elevation-shadow-overlay')).toContain('rgba(0, 0, 0');
+  });
+});
+
+describe('chrome, pinned and lift shadows', () => {
+  it('drops the chrome shadow down, the pinned shadow up, darker in dark', () => {
+    expect(shadowOf(dark, '--elevation-shadow-chrome')).toMatch(/^0 \d+px/);
+    expect(shadowOf(light, '--elevation-shadow-chrome')).toMatch(/^0 \d+px/);
+    expect(shadowOf(dark, '--elevation-shadow-pinned')).toMatch(/^0 -\d+px/);
+    expect(shadowOf(light, '--elevation-shadow-pinned')).toMatch(/^0 -\d+px/);
+    for (const name of ['chrome', 'pinned', 'lift']) {
+      const token = `--elevation-shadow-${name}`;
+      expect(maxAlpha(shadowOf(dark, token))).toBeGreaterThan(maxAlpha(shadowOf(light, token)));
+    }
+  });
+
+  it('keeps the lift small, at most 6px of blur', () => {
+    for (const block of [light, dark]) {
+      const blurs = [...shadowOf(block, '--elevation-shadow-lift').matchAll(/-?\d+(?:px)? -?\d+px (\d+)px/g)];
+      expect(blurs.length).toBeGreaterThan(0);
+      for (const m of blurs) expect(Number(m[1])).toBeLessThanOrEqual(6);
+    }
+  });
+
+  it('defines shadow-only classes, so no fill changes', () => {
+    for (const name of ['chrome', 'pinned']) {
+      const rule = cssBlock(css, `.elevation-${name}`);
+      expect(rule).toContain(`box-shadow: var(--elevation-shadow-${name})`);
+      expect(rule).not.toMatch(/background/);
+    }
+  });
+});
+
 describe('default surface', () => {
   it('aliases the dark shell tokens to the default surface', () => {
     for (const name of ['--background', '--statusbar-bg', '--panel-bg', '--titlebar-bg']) {
@@ -218,5 +254,11 @@ describe('muted text on the lightest dark surfaces', () => {
 
   it('leaves the global dark token alone', () => {
     expect(hslTriple(dark, '--muted-foreground')).toEqual([0, 0, 48]);
+  });
+});
+
+describe('primary button lift', () => {
+  it('uses the lift token as a utility so the focus ring still composes', () => {
+    expect(css).not.toContain('.elevation-lift');
   });
 });

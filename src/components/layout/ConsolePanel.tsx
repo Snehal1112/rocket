@@ -323,7 +323,7 @@ export function ConsolePanel({ isOpen, height, onHeightChange }: ConsolePanelPro
       />
 
       {/* Toolbar. */}
-      <div className='flex items-center gap-2 px-2 py-1 border-b border-border shrink-0'>
+      <div className='elevation-chrome relative z-[1] flex items-center gap-2 px-2 py-1 border-b border-border shrink-0'>
         <span className='text-sm font-medium'>Console</span>
         {visible.length > 0 && (
           <span className='text-2xs px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground'>

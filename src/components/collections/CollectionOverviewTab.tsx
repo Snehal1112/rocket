@@ -196,6 +196,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
     [tab.id, updateCollectionSection],
   );
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-attach once the skeleton is replaced and when the section changes.
   useEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
@@ -204,15 +205,16 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
     const handleScroll = () => setIsScrolled(viewport.scrollTop > 0);
     viewport.addEventListener('scroll', handleScroll, { passive: true });
     return () => viewport.removeEventListener('scroll', handleScroll);
-  }, []);
+  }, [loading, activeSection]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-attach once the skeleton is replaced and when the section changes.
   useEffect(() => {
     const el = overviewScrollRef.current;
     if (!el) return;
     const handleScroll = () => setIsOverviewScrolled(el.scrollTop > 0);
     el.addEventListener('scroll', handleScroll, { passive: true });
     return () => el.removeEventListener('scroll', handleScroll);
-  }, []);
+  }, [loading, activeSection]);
 
   // Load the collection on mount (settings are included in the response).
   useEffect(() => {
@@ -326,9 +328,8 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
       {/* Collection header — shadow appears when overview left panel is scrolled. */}
       <div
         className={cn(
-          'shrink-0 border-b border-border px-6 pt-5 pb-0 transition-shadow duration-200',
-          isOverviewScrolled &&
-            'shadow-[0_2px_8px_rgba(0,0,0,0.08)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.3)]',
+          'relative z-[1] shrink-0 border-b border-border px-6 pt-5 pb-0 transition-shadow duration-200',
+          isOverviewScrolled && 'elevation-chrome',
         )}
       >
         <div className='flex items-center gap-2.5 mb-1'>
@@ -362,7 +363,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
       </div>
 
       {/* Tab content. */}
-      <div ref={scrollContainerRef} className='relative flex-1 min-h-0 h-full'>
+      <div ref={scrollContainerRef} className='relative flex-1 min-h-0 h-full bg-elevation-sunken'>
         {/* Scroll elevation overlay — paints over content when scrolled. */}
         <div
           className={cn(

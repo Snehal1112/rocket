@@ -79,7 +79,7 @@ export function RocketTabBar({ tabs, rightContent }: RocketTabBarProps) {
   return (
     <div
       ref={containerRef}
-      className='flex items-center border-b border-border px-3 shrink-0 min-w-0'
+      className='flex items-center border-b border-border bg-elevation-surface px-3 shrink-0 min-w-0'
       role='tablist'
     >
       {tabs.map((tab, i) => (

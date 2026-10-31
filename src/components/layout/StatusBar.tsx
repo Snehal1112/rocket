@@ -37,7 +37,7 @@ export function StatusBar({ isConsoleOpen, onConsoleToggle }: StatusBarProps) {
   }, []);
 
   return (
-    <div className='flex h-6 shrink-0 items-center gap-0.5 border-t border-statusbar-border bg-statusbar-bg px-1 text-[11px]'>
+    <div className='elevation-pinned relative z-[6] flex h-6 shrink-0 items-center gap-0.5 border-t border-statusbar-border bg-statusbar-bg px-1 text-[11px]'>
       <Button
         variant='ghost'
         size='icon'

@@ -265,7 +265,7 @@ export function ResponseBodyViewer({
   return (
     <div className='flex h-full flex-col overflow-hidden'>
       {/* ── Status bar ── */}
-      <div className='flex items-center gap-2 border-b border-border px-3 py-1.5 shrink-0 bg-card'>
+      <div className='flex items-center gap-2 border-b border-border px-3 py-1.5 shrink-0 bg-elevation-surface'>
         <span
           className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-semibold tracking-wide ${statusBadgeColor(response.status)}`}
         >
@@ -315,7 +315,7 @@ export function ResponseBodyViewer({
       </div>
 
       {/* ── Tab bar ── */}
-      <div className='flex items-center border-b border-border px-1 shrink-0 bg-card'>
+      <div className='flex items-center border-b border-border px-1 shrink-0 bg-elevation-surface'>
         <div className='flex flex-1 items-center' role='tablist'>
           {graphqlView && (
             <>

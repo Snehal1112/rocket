@@ -31,7 +31,7 @@ export function buildVariableHoverDom(
 ): HTMLElement {
   const card = node(
     'div',
-    'cm-variable-hover max-w-sm rounded-sm border border-border bg-card px-2 py-1.5 text-xs text-popover-foreground shadow-md',
+    'cm-variable-hover max-w-sm rounded-sm border border-border bg-card px-2 py-1.5 text-xs text-popover-foreground shadow-(--elevation-shadow-overlay)',
   );
 
   if (varName.startsWith('$') && isDynamicVar(varName.slice(1))) {
