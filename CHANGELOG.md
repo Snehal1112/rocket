@@ -1,5 +1,55 @@
 # Changelog
 
+## [2.1.4](https://github.com/Snehal1112/rocket/compare/v2.1.3...v2.1.4) (2026-10-31)
+
+### Features
+
+* **app:** add process env scope for realtime sends ([8e9f455](https://github.com/Snehal1112/rocket/commit/8e9f45536648b51ec4beb1a1e75f1dc30799dc4f)), closes [#131](https://github.com/Snehal1112/rocket/issues/131)
+* **app:** mask used host values in run_request ([c2999e8](https://github.com/Snehal1112/rocket/commit/c2999e896c96b5d3defb3cb5c95e5d56755a2092)), closes [#112](https://github.com/Snehal1112/rocket/issues/112)
+* **app:** resolve and mask OAuth2 token requests with a process env ([7b95cf3](https://github.com/Snehal1112/rocket/commit/7b95cf36accd50f06ffd06543a928e96583f07dd)), closes [#132](https://github.com/Snehal1112/rocket/issues/132)
+* **app:** resolve inherited OAuth2 under the send's process env ([7e69002](https://github.com/Snehal1112/rocket/commit/7e690025b7e9b8c956b1b71efb51b083d82c592c)), closes [#132](https://github.com/Snehal1112/rocket/issues/132)
+* **app:** resolve process env in backend sends ([2d0e53e](https://github.com/Snehal1112/rocket/commit/2d0e53e1483440850bf85b54ba1bc9249811df8c)), closes [#112](https://github.com/Snehal1112/rocket/issues/112)
+* **app:** warn when backend sends withhold env ([f08dbee](https://github.com/Snehal1112/rocket/commit/f08dbee9bd6a1a4d49f41d50ddf8e1608d9869c1)), closes [#112](https://github.com/Snehal1112/rocket/issues/112)
+* **flow:** resolve process env in Input and Auth nodes ([a8ce849](https://github.com/Snehal1112/rocket/commit/a8ce849ea7b2e0522fb10da46b8bde59a43b43d1)), closes [#132](https://github.com/Snehal1112/rocket/issues/132)
+* **frontend:** send the process env scope with OAuth2 token requests ([1cf0ab6](https://github.com/Snehal1112/rocket/commit/1cf0ab611cca137ca55d9eada2163fa6396a8c26)), closes [#132](https://github.com/Snehal1112/rocket/issues/132)
+* **frontend:** send the process env scope with tab sends ([f3ea49f](https://github.com/Snehal1112/rocket/commit/f3ea49f2f07f7b81c31d2098e57e4996bab49e68)), closes [#132](https://github.com/Snehal1112/rocket/issues/132)
+* **frontend:** send the tab's process env scope on realtime sends ([3aeecbe](https://github.com/Snehal1112/rocket/commit/3aeecbe3bc5da031ff5172fa695c6ff16492b5c8)), closes [#131](https://github.com/Snehal1112/rocket/issues/131)
+* **settings:** add settings store and page shell ([06674fd](https://github.com/Snehal1112/rocket/commit/06674fd5c5d94059ac7fc4333d6cd8ce7a50eefd))
+* **settings:** draw settings over the editor area ([4064e81](https://github.com/Snehal1112/rocket/commit/4064e81fd529cf010a89a4eb3b00aa8fefd0bea5))
+* **settings:** move AI agents into settings ([3b999fb](https://github.com/Snehal1112/rocket/commit/3b999fb858c5685a669e7f091502bde444a1923a))
+* **settings:** move proxy and secret managers in ([bbe940c](https://github.com/Snehal1112/rocket/commit/bbe940c1b1d21bfa83ee059198a8520fb58a66fe))
+* **theme:** add elevation tokens ([da19fbf](https://github.com/Snehal1112/rocket/commit/da19fbf80fe32d78f6e1cbbcd859055ba302973f))
+* **theme:** apply elevation to chrome, wells and overlays ([3b2ed8f](https://github.com/Snehal1112/rocket/commit/3b2ed8f68ac7aa3a73b9a2cd19cb2887d69899c1))
+* **theme:** expose elevation colours to Tailwind ([1ee0394](https://github.com/Snehal1112/rocket/commit/1ee03946f15adb1edea000f18997840cc631e8ee))
+* **theme:** put dialogs and sheets on the overlay level ([325a243](https://github.com/Snehal1112/rocket/commit/325a24304cbb17ad997c260c1732ec826e992561))
+* **theme:** put menus on the overlay level ([47d7b8e](https://github.com/Snehal1112/rocket/commit/47d7b8e16357177b23825e5a29c5f0e8f07b32a6))
+* **theme:** put toasts and hover tips on the overlay level ([974ac76](https://github.com/Snehal1112/rocket/commit/974ac76ea70b23bca21f42904f63e87d4b41fb0d))
+* **theme:** raise the collections sidebar ([16b5dbc](https://github.com/Snehal1112/rocket/commit/16b5dbc4970f5471b1211fa1346602d5b2944891))
+* **theme:** use the sunken level for settings and the console well ([74355f3](https://github.com/Snehal1112/rocket/commit/74355f3514e46e5d6265620bc3b3b3eec3abfe92))
+
+### Bug Fixes
+
+* **app:** detect process env placeholders like a request send ([5dd8581](https://github.com/Snehal1112/rocket/commit/5dd85818b0da38662ade1257b13f859c40e88392)), closes [#132](https://github.com/Snehal1112/rocket/issues/132)
+* **app:** keep backend process env opt-in and literal ([4165b13](https://github.com/Snehal1112/rocket/commit/4165b13c174799e0a23d1012a62c4e85aa526c3e)), closes [#112](https://github.com/Snehal1112/rocket/issues/112)
+* **app:** keep wired fields literal after scripts ([e18fd8d](https://github.com/Snehal1112/rocket/commit/e18fd8d89b6c851ca3ba8107c39ee75cecb78425)), closes [#129](https://github.com/Snehal1112/rocket/issues/129)
+* **app:** mask .env values in OAuth2 code exchange errors ([2cbb0e2](https://github.com/Snehal1112/rocket/commit/2cbb0e232b319a10ed93ad75bad92a7465b785bc)), closes [#132](https://github.com/Snehal1112/rocket/issues/132)
+* **app:** send wired flow fields as written ([0d0b1f4](https://github.com/Snehal1112/rocket/commit/0d0b1f499dd24f12ec242de1196d25e8ea1a189b)), closes [#112](https://github.com/Snehal1112/rocket/issues/112) [#130](https://github.com/Snehal1112/rocket/issues/130) [#129](https://github.com/Snehal1112/rocket/issues/129)
+* **flow:** refuse wired URLs that change the host ([3635e07](https://github.com/Snehal1112/rocket/commit/3635e0774493527c0d595682010978b47f2b8289)), closes [#130](https://github.com/Snehal1112/rocket/issues/130)
+* **flow:** skip send-time mask for fetched tokens ([fc211c4](https://github.com/Snehal1112/rocket/commit/fc211c41255cabbdf787177e2906e5f8061adc04)), closes [#129](https://github.com/Snehal1112/rocket/issues/129)
+* **frontend:** pass the process env scope in gRPC and WebSocket panels ([d956831](https://github.com/Snehal1112/rocket/commit/d95683118342879dbd44e3f410078fc6405735af)), closes [#132](https://github.com/Snehal1112/rocket/issues/132)
+* **settings:** guard tab shortcuts while open ([1a77d3e](https://github.com/Snehal1112/rocket/commit/1a77d3e2f6a90d3517573ef4fe98bbdd32b23be0))
+* **settings:** keep the sidebar shadow above settings ([ab56235](https://github.com/Snehal1112/rocket/commit/ab56235dc104f49ca3918e35470c651d672f9d53))
+* **theme:** leave sidebar secondary text alone ([3f35635](https://github.com/Snehal1112/rocket/commit/3f356355f20628d38e502a0ad032e6164b488b35))
+* **theme:** lift muted text where contrast fails worst ([7d22597](https://github.com/Snehal1112/rocket/commit/7d22597d463d012691a2dae013431c2af917d80f))
+* **theme:** make dark cards flat on the shell colour ([99862fd](https://github.com/Snehal1112/rocket/commit/99862fdce16b3d5dde18f717172c698b56db4ffd)), closes [#202122](https://github.com/Snehal1112/rocket/issues/202122) [#181A1B](https://github.com/Snehal1112/rocket/issues/181A1B)
+* **theme:** raise the AI Assistant panel ([994976c](https://github.com/Snehal1112/rocket/commit/994976c7bff21e1ab84ef8ab314fde6f98c19469))
+* **theme:** use one border weight like VS Code 2026 ([428a84c](https://github.com/Snehal1112/rocket/commit/428a84c0fd4f443aa03e99806d96b78e1a168d9f))
+* **theme:** use VS Code colours for raised and overlay ([e1310fc](https://github.com/Snehal1112/rocket/commit/e1310fcf0c0f30e4ece750b20e2a16afed30f477)), closes [#191A1B](https://github.com/Snehal1112/rocket/issues/191A1B) [#202122](https://github.com/Snehal1112/rocket/issues/202122)
+
+### Reverts
+
+* **theme:** restore menu and dialog look ([9e0c102](https://github.com/Snehal1112/rocket/commit/9e0c1024c9d353b9afd5f87c10e407550596ee01))
+
 ## [2.1.3](https://github.com/Snehal1112/rocket/compare/v2.1.2...v2.1.3) (2026-10-30)
 
 ### Features
