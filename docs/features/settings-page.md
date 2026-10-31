@@ -12,6 +12,7 @@ sub-projects R-73 to R-77). Plans: `docs/superpowers/plans/settings-page-shell/`
   sessions and editors come back unchanged.
 - It is global: a workspace or collection switch keeps it open.
 - It is not saved in UI state, so Settings starts closed after a restart.
+- Settings is the sunken elevation level and the Collections sidebar is raised. See `docs/features/elevation.md`.
 
 ## Sections
 
