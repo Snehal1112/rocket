@@ -161,3 +161,10 @@ describe('default surface', () => {
     expect(hslTriple(dark, '--elevation-surface-bg')).toEqual([210, 5, 10]);
   });
 });
+
+describe('cards', () => {
+  it('keeps dark cards flat on the shell colour and nested cards on --accent', () => {
+    expect(css).toMatch(/\.dark \[data-slot="card"\]\s*\{[^}]*background-color:\s*hsl\(var\(--background\)\)/);
+    expect(css).toMatch(/\.dark \[data-slot="card"\] \[data-slot="card"\]\s*\{[^}]*hsl\(var\(--accent\)\)/);
+  });
+});

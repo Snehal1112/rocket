@@ -593,15 +593,16 @@ html.windows.window-inactive #root {
 /* Card elevation — VSCode 2026 surface layer stack.
    TWO MECHANISMS, ONE INTENT:
    1. [data-slot="card"] rules below — override the <Card> shadcn component's bg-card
-      utility. In dark mode this lifts cards to --popover (#202122, L=13%), above the
-      shell (#191A1B, L=10%). Nested <Card> components step up to --accent (#252627, L=15%).
+      utility. In dark mode cards are flat panels on the shell colour (--background, #181A1B,
+      L=10%), one small step above the editor, like the collection overview panels. Nested
+      <Card> components step up to --accent (#252627, L=15%).
    2. bg-card utility used directly on plain divs (RequestPanel, EditorGroup, etc.)
       gets the raw --card token (#121314, L=7.5%), which is intentionally DARKER than
       the shell. This matches VSCode's editor.background sitting below sideBar.background.
       Do not "fix" this — it is the correct VSCode Dark elevation for editor surfaces.
 
    Light: shell #EEF0F4 (L=94.5%) → card #F6F7FA (L=97.3%) — card is elevated (lighter).
-   Dark:  shell #191A1B (L=10%)   → card #202122 (L=13%)   — card is elevated (lighter).
+   Dark:  editor #121314 (L=7.5%) → card #181A1B (L=10%) — flat panel, a small step above the editor.
           editor divs #121314 (L=7.5%) — editor is recessed below shell (correct for VSCode). */
 [data-slot="card"] {
   border-color: #dcdde0;
@@ -609,7 +610,7 @@ html.windows.window-inactive #root {
 }
 
 .dark [data-slot="card"] {
-  background-color: hsl(var(--popover));
+  background-color: hsl(var(--background));
   border-color: hsl(var(--border));
   box-shadow: 0 0 0 1px hsl(var(--input) / 0.6);
 }
