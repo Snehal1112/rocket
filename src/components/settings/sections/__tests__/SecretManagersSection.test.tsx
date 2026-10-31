@@ -1,9 +1,20 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { SecretManagerConnectionsDialog } from '@/components/settings/SecretManagerConnectionsDialog';
+import { SettingsPage } from '@/components/settings/SettingsPage';
 import * as tauriApi from '@/lib/tauri-api';
+import { useSettingsStore } from '@/stores/settings-store';
+import { SecretManagersSection } from '../SecretManagersSection';
+
+// Radix Select calls pointer-capture and scroll APIs that jsdom lacks.
+if (!Element.prototype.hasPointerCapture) {
+  Element.prototype.hasPointerCapture = () => false;
+}
+if (!Element.prototype.scrollIntoView) {
+  Element.prototype.scrollIntoView = () => undefined;
+}
 
 vi.mock('@/lib/tauri-api', async () => {
   const actual = await vi.importActual<typeof tauriApi>('@/lib/tauri-api');
@@ -16,19 +27,11 @@ vi.mock('@/lib/tauri-api', async () => {
   };
 });
 
-function renderDialog() {
+function renderSection(ui: ReactNode = <SecretManagersSection />) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  render(
-    <QueryClientProvider client={client}>
-      <SecretManagerConnectionsDialog
-        open
-        // biome-ignore lint/suspicious/noEmptyBlockStatements: no-op stub for the test harness.
-        onOpenChange={() => {}}
-      />
-    </QueryClientProvider>,
-  );
+  render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
 }
 
 beforeEach(() => {
@@ -36,14 +39,14 @@ beforeEach(() => {
   vi.mocked(tauriApi.listSecretManagerConnections).mockResolvedValue([]);
 });
 
-describe('SecretManagerConnectionsDialog', () => {
+describe('SecretManagersSection', () => {
   it('renders an empty state with no connections', async () => {
-    renderDialog();
+    renderSection();
     expect(await screen.findByText(/no connections configured/i)).toBeInTheDocument();
   });
 
   it('adding a connection calls save with the right shape and the typed client secret', async () => {
-    renderDialog();
+    renderSection();
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: /add connection/i }));
     await user.type(screen.getByLabelText(/^label$/i), 'Prod Vault');
@@ -59,7 +62,7 @@ describe('SecretManagerConnectionsDialog', () => {
   });
 
   it('adding a connection without a client secret does not call save', async () => {
-    renderDialog();
+    renderSection();
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: /add connection/i }));
     await user.type(screen.getByLabelText(/^label$/i), 'Prod Vault');
@@ -81,7 +84,7 @@ describe('SecretManagerConnectionsDialog', () => {
         allowInsecureHttp: false,
       },
     ]);
-    renderDialog();
+    renderSection();
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: /edit connection/i }));
     await user.click(screen.getByRole('button', { name: /^save$/i }));
@@ -93,7 +96,7 @@ describe('SecretManagerConnectionsDialog', () => {
   });
 
   it('adding a connection with a blank client ID does not call save', async () => {
-    renderDialog();
+    renderSection();
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: /add connection/i }));
     await user.type(screen.getByLabelText(/^label$/i), 'Prod Vault');
@@ -116,7 +119,7 @@ describe('SecretManagerConnectionsDialog', () => {
       { ...conn, id: 'conn-2', label: 'Staging' },
     ]);
     vi.mocked(tauriApi.testSecretManagerConnection).mockResolvedValue(undefined);
-    renderDialog();
+    renderSection();
     const user = userEvent.setup();
     await user.type(await screen.findByLabelText(/vault name to test staging/i), 'stage-vault');
 
@@ -127,7 +130,7 @@ describe('SecretManagerConnectionsDialog', () => {
   });
 
   it('shows a provider selector on the add form', async () => {
-    renderDialog();
+    renderSection();
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: /add connection/i }));
 
@@ -135,7 +138,7 @@ describe('SecretManagerConnectionsDialog', () => {
   });
 
   it('saves a new connection with provider rocketvault by default', async () => {
-    renderDialog();
+    renderSection();
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: /add connection/i }));
     await user.type(screen.getByLabelText(/^label$/i), 'Prod Vault');
@@ -163,7 +166,7 @@ describe('SecretManagerConnectionsDialog', () => {
 
   async function openAzureEdit(connection = azureConnection) {
     vi.mocked(tauriApi.listSecretManagerConnections).mockResolvedValue([connection]);
-    renderDialog();
+    renderSection();
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: /edit connection/i }));
     return user;
@@ -231,7 +234,7 @@ describe('SecretManagerConnectionsDialog', () => {
         allowInsecureHttp: false,
       },
     ]);
-    renderDialog();
+    renderSection();
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: /edit connection/i }));
     await user.click(screen.getByRole('button', { name: /^save$/i }));
@@ -244,7 +247,7 @@ describe('SecretManagerConnectionsDialog', () => {
   it('marks only the providers without an implementation as not available yet', async () => {
     Element.prototype.hasPointerCapture = () => false;
     Element.prototype.scrollIntoView = () => undefined;
-    renderDialog();
+    renderSection();
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: /add connection/i }));
     await user.click(screen.getByRole('combobox', { name: /provider/i }));
@@ -259,5 +262,43 @@ describe('SecretManagerConnectionsDialog', () => {
     expect(
       screen.getByRole('option', { name: /google secret manager \(not available yet\)/i }),
     ).toBeInTheDocument();
+  });
+
+  it('has a heading', async () => {
+    renderSection();
+    expect(screen.getByRole('heading', { name: 'Secret Manager Connections' })).toBeInTheDocument();
+  });
+
+  it('drops an open edit form when the section unmounts', async () => {
+    const client = new QueryClient();
+    const user = userEvent.setup();
+    const view = render(
+      <QueryClientProvider client={client}>
+        <SecretManagersSection />
+      </QueryClientProvider>,
+    );
+    await user.click(await screen.findByRole('button', { name: /add connection/i }));
+    expect(screen.getByLabelText(/^label$/i)).toBeInTheDocument();
+    view.unmount();
+    render(
+      <QueryClientProvider client={client}>
+        <SecretManagersSection />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByRole('button', { name: /add connection/i })).toBeInTheDocument();
+    expect(screen.queryByLabelText(/^label$/i)).toBeNull();
+  });
+
+  it('keeps Settings open when Esc closes the provider list', async () => {
+    useSettingsStore.getState().reset();
+    useSettingsStore.getState().openSettings('secret-managers');
+    renderSection(<SettingsPage />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /add connection/i }));
+    await user.click(screen.getByRole('combobox', { name: /provider/i }));
+    expect(await screen.findByRole('listbox')).toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('listbox')).toBeNull();
+    expect(useSettingsStore.getState().open).toBe(true);
   });
 });

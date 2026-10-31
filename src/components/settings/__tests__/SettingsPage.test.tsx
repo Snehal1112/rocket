@@ -11,7 +11,12 @@ vi.mock('@tauri-apps/plugin-os', () => ({
   version: () => '6.1',
   arch: () => 'x86_64',
 }));
-vi.mock('@/lib/tauri-api', () => ({ getAppDataDir: vi.fn().mockResolvedValue('/data') }));
+vi.mock('@/lib/tauri-api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/tauri-api')>()),
+  getAppDataDir: vi.fn().mockResolvedValue('/data'),
+  getProxySettings: vi.fn().mockResolvedValue({ mode: 'system', hasPassword: false }),
+  saveProxySettings: vi.fn(),
+}));
 
 const nav = () => screen.getByRole('navigation', { name: 'Settings sections' });
 
@@ -26,18 +31,18 @@ describe('SettingsPage', () => {
     const labels = within(nav())
       .getAllByRole('button')
       .map((b) => b.textContent);
-    expect(labels).toEqual(['Support', 'About']);
-    expect(screen.getByRole('heading', { name: 'Support' })).toBeInTheDocument();
-    expect(within(nav()).getByRole('button', { name: 'Support' })).toHaveAttribute(
+    expect(labels).toEqual(['Proxy', 'Secret Managers', 'Support', 'About']);
+    expect(screen.getByRole('heading', { name: 'Proxy' })).toBeInTheDocument();
+    expect(within(nav()).getByRole('button', { name: 'Proxy' })).toHaveAttribute(
       'aria-current',
       'page',
     );
   });
 
   it('shows the first section for a section that is not registered', () => {
-    useSettingsStore.getState().setSection('proxy');
+    useSettingsStore.getState().setSection('ai');
     render(<SettingsPage />);
-    expect(screen.getByRole('heading', { name: 'Support' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Proxy' })).toBeInTheDocument();
   });
 
   it('switches the panel when a section is clicked', async () => {
@@ -58,7 +63,7 @@ describe('SettingsPage', () => {
     render(<SettingsPage />);
     expect(screen.getByRole('button', { name: 'Close settings' })).toBeDisabled();
     expect(within(nav()).getByRole('button', { name: 'About' })).toBeDisabled();
-    expect(within(nav()).getByRole('button', { name: 'Support' })).toBeEnabled();
+    expect(within(nav()).getByRole('button', { name: 'Proxy' })).toBeEnabled();
   });
 
   it('closes on Esc from the page', () => {

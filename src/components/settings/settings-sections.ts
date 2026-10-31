@@ -1,6 +1,8 @@
-import { Info, LifeBuoy, type LucideIcon } from 'lucide-react';
+import { Globe, Info, KeyRound, LifeBuoy, type LucideIcon } from 'lucide-react';
 import type { ComponentType } from 'react';
 import { AboutSection } from '@/components/settings/sections/AboutSection';
+import { ProxySection } from '@/components/settings/sections/ProxySection';
+import { SecretManagersSection } from '@/components/settings/sections/SecretManagersSection';
 import { SupportSection } from '@/components/settings/sections/SupportSection';
 import type { SettingsSection } from '@/stores/settings-store';
 
@@ -15,6 +17,14 @@ export interface SettingsSectionDef {
 
 // Bruno's order. Later sections go in at their Bruno position (spec section 4.5).
 export const SETTINGS_SECTIONS: SettingsSectionDef[] = [
+  { id: 'proxy', label: 'Proxy', icon: Globe, Component: ProxySection },
+  {
+    id: 'secret-managers',
+    label: 'Secret Managers',
+    icon: KeyRound,
+    Component: SecretManagersSection,
+    wide: true,
+  },
   { id: 'support', label: 'Support', icon: LifeBuoy, Component: SupportSection },
   { id: 'about', label: 'About', icon: Info, Component: AboutSection },
 ];
