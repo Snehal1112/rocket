@@ -167,6 +167,13 @@
     --editor-line-number-active: 0 0% 12.5%; /* editorLineNumber.activeForeground #202020 */
     --editor-widget-bg: 240 50% 99%; /* editorWidget.background          #FAFAFD */
     --editor-widget-border: 210 7% 90%; /* editorWidget.border              #E4E5E6 */
+    /* Elevation: four levels, each surface pairs with a shadow where it floats */
+    --elevation-sunken-bg: 0 0% 100%; /* sunken, below the shell: editor, Settings */
+    --elevation-surface-bg: 220 21.4% 94.5%; /* default, the shell: title bar, status bar */
+    --elevation-raised-bg: 240 50% 99%; /* raised, sidebar and cards */
+    --elevation-overlay-bg: 0 0% 100%; /* overlay, menus, dialogs, toasts */
+    --elevation-shadow-raised: 2px 0 4px rgba(0, 0, 0, 0.08), 4px 0 12px rgba(0, 0, 0, 0.05);
+    --elevation-shadow-overlay: 0 2px 6px rgba(9, 30, 66, 0.12), 0 8px 24px rgba(9, 30, 66, 0.18);
     /* VSCode 2026 Light: gutter decoration tokens */
     --editor-gutter-added: 88 74% 26%; /* editorGutter.addedBackground     #587c0c */
     --editor-gutter-deleted: 3 93% 35%; /* editorGutter.deletedBackground   #ad0707 */
@@ -352,6 +359,13 @@
     --editor-line-number-active: 210 1% 74%; /* editorLineNumber.activeForeground #BBBEBF */
     --editor-widget-bg: 210 3% 13%; /* editorWidget.background          #202122 */
     --editor-widget-border: 210 2% 17%; /* editorWidget.border              #2A2B2C */
+    /* Elevation: higher levels are lighter, and the shadow stays */
+    --elevation-sunken-bg: 210 5% 7.5%; /* sunken, below the shell: editor, Settings  #121314 */
+    --elevation-surface-bg: 210 5% 10%; /* default, the shell: title bar, status bar  #181A1B */
+    --elevation-raised-bg: 210 5% 12.5%; /* raised, sidebar and cards                  #1E2021 */
+    --elevation-overlay-bg: 210 3% 15%; /* overlay, menus, dialogs, toasts            #252627 */
+    --elevation-shadow-raised: 2px 0 6px rgba(0, 0, 0, 0.45), 6px 0 16px rgba(0, 0, 0, 0.3);
+    --elevation-shadow-overlay: 0 2px 6px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.55);
     /* VSCode 2026 Dark: gutter decoration tokens */
     --editor-gutter-added: 137 47% 69%; /* editorGutter.addedBackground     #72C892 */
     --editor-gutter-deleted: 9 85% 70%; /* editorGutter.deletedBackground   #F28772 */
@@ -538,6 +552,31 @@
 
 .dark .sidebar-elevation {
   box-shadow: none;
+}
+
+/* Elevation levels. Surface and shadow travel together, so do not add a bg-* utility to the same
+   element. Secondary text is lifted on raised and overlay because 48% is under 4.5:1 there. */
+.elevation-sunken {
+  background-color: hsl(var(--elevation-sunken-bg));
+}
+
+.elevation-surface {
+  background-color: hsl(var(--elevation-surface-bg));
+}
+
+.elevation-raised {
+  background-color: hsl(var(--elevation-raised-bg));
+  box-shadow: var(--elevation-shadow-raised);
+}
+
+.elevation-overlay {
+  background-color: hsl(var(--elevation-overlay-bg));
+  box-shadow: var(--elevation-shadow-overlay);
+}
+
+.dark .elevation-raised,
+.dark .elevation-overlay {
+  --muted-foreground: 0 0% 56%;
 }
 
 /* Linux/Windows: decorations off — 1px window border matching VS Code's approach.

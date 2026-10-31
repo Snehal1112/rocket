@@ -1,0 +1,120 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { describe, expect, it } from 'vitest';
+
+const css = readFileSync(resolve(process.cwd(), 'src/globals.css'), 'utf8');
+
+type Hsl = [number, number, number];
+
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Returns the body of the first rule whose selector is exactly `selector`.
+function cssBlock(source: string, selector: string): string {
+  const match = new RegExp(`^\\s*${escapeRegExp(selector).replace(/,\s/g, ',\\s*')}\\s*\\{`, 'm').exec(source);
+  if (!match) throw new Error(`No rule for ${selector}`);
+  const start = match.index + match[0].length;
+  return source.slice(start, source.indexOf('}', start));
+}
+
+function hslTriple(block: string, name: string): Hsl {
+  const match = new RegExp(`${escapeRegExp(name)}:\\s*([\\d.]+)\\s+([\\d.]+)%\\s+([\\d.]+)%`).exec(block);
+  if (!match) throw new Error(`No HSL triple for ${name}`);
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+function luminance([h, s, l]: Hsl): number {
+  const sat = s / 100;
+  const light = l / 100;
+  const k = (n: number) => (n + h / 30) % 12;
+  const a = sat * Math.min(light, 1 - light);
+  const channel = (n: number) => {
+    const c = light - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(0) + 0.7152 * channel(8) + 0.0722 * channel(4);
+}
+
+function contrast(a: Hsl, b: Hsl): number {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+const LEVELS = ['sunken', 'surface', 'raised', 'overlay'] as const;
+const light = cssBlock(css, ':root');
+const dark = cssBlock(css, '.dark');
+
+const maxAlpha = (value: string) =>
+  Math.max(...[...value.matchAll(/rgba\([^)]*,\s*([\d.]+)\)/g)].map((m) => Number(m[1])));
+
+const shadowOf = (block: string, name: string) => {
+  const match = new RegExp(`${name}:\\s*([^;]+);`).exec(block);
+  if (!match) throw new Error(`No shadow ${name}`);
+  return match[1];
+};
+
+describe('elevation tokens', () => {
+  it('defines all four surfaces in light and dark', () => {
+    for (const block of [light, dark]) {
+      for (const level of LEVELS) {
+        expect(() => hslTriple(block, `--elevation-${level}-bg`)).not.toThrow();
+      }
+    }
+  });
+
+  it('makes each dark level lighter than the one below by at least 2 points', () => {
+    const lightness = LEVELS.map((level) => hslTriple(dark, `--elevation-${level}-bg`)[2]);
+    expect(lightness).toEqual([7.5, 10, 12.5, 15]);
+    for (let i = 1; i < lightness.length; i++) {
+      expect(lightness[i] - lightness[i - 1]).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it("keeps light surfaces on today's values", () => {
+    expect(hslTriple(light, '--elevation-sunken-bg')).toEqual([0, 0, 100]);
+    expect(hslTriple(light, '--elevation-surface-bg')).toEqual([220, 21.4, 94.5]);
+    expect(hslTriple(light, '--elevation-raised-bg')).toEqual([240, 50, 99]);
+    expect(hslTriple(light, '--elevation-overlay-bg')).toEqual([0, 0, 100]);
+  });
+
+  it('defines raised and overlay shadows in both themes, darker in dark', () => {
+    for (const name of ['--elevation-shadow-raised', '--elevation-shadow-overlay']) {
+      expect(maxAlpha(shadowOf(dark, name))).toBeGreaterThan(maxAlpha(shadowOf(light, name)));
+    }
+  });
+
+  it('keeps body text at 4.5:1 or better on every dark level', () => {
+    const fg = hslTriple(dark, '--foreground');
+    for (const level of LEVELS) {
+      expect(contrast(fg, hslTriple(dark, `--elevation-${level}-bg`))).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it('keeps secondary text at 4.5:1 on raised and overlay in dark', () => {
+    const scoped = cssBlock(css, '.dark .elevation-raised, .dark .elevation-overlay');
+    const muted = hslTriple(scoped, '--muted-foreground');
+    expect(muted).toEqual([0, 0, 56]);
+    for (const level of ['raised', 'overlay']) {
+      expect(contrast(muted, hslTriple(dark, `--elevation-${level}-bg`))).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it('gives each class its surface, and raised and overlay their shadow', () => {
+    for (const level of LEVELS) {
+      const block = cssBlock(css, `.elevation-${level}`);
+      expect(block).toContain(`background-color: hsl(var(--elevation-${level}-bg))`);
+      if (level === 'raised' || level === 'overlay') {
+        expect(block).toContain(`box-shadow: var(--elevation-shadow-${level})`);
+      } else {
+        expect(block).not.toContain('box-shadow');
+      }
+    }
+  });
+
+  it('forbids color-mix and backdrop-filter in elevation rules', () => {
+    const rules = css.match(/[^{}]*elevation[^{}]*\{[^}]*\}/g) ?? [];
+    expect(rules.length).toBeGreaterThan(0);
+    for (const rule of rules) {
+      expect(rule).not.toMatch(/color-mix|backdrop-filter/);
+    }
+  });
+});
