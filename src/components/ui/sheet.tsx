@@ -34,7 +34,7 @@ function SheetContent({ side = 'right', className, children, ...props }: SheetCo
       <DialogPrimitive.Content
         data-slot='sheet-content'
         className={cn(
-          'fixed z-50 bg-background shadow-lg transition ease-in-out data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:duration-300 data-[state=open]:duration-500',
+          'fixed z-50 elevation-overlay transition ease-in-out data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:duration-300 data-[state=open]:duration-500',
           side === 'right' &&
             'inset-y-0 right-0 h-full border-l border-border data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right',
           side === 'left' &&
