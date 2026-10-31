@@ -156,6 +156,32 @@ describe('raised sidebar', () => {
   });
 });
 
+describe('raised assistant panel', () => {
+  it('mirrors the raised shadow so it falls on the editor side, darker in dark', () => {
+    expect(shadowOf(dark, '--elevation-shadow-raised-end')).toMatch(/^-\d+px 0/);
+    expect(shadowOf(light, '--elevation-shadow-raised-end')).toMatch(/^-\d+px 0/);
+    expect(maxAlpha(shadowOf(dark, '--elevation-shadow-raised-end'))).toBeGreaterThan(
+      maxAlpha(shadowOf(light, '--elevation-shadow-raised-end')),
+    );
+  });
+
+  it('defines .elevation-raised-end with the raised colour and the mirrored shadow', () => {
+    const rule = cssBlock(css, '.elevation-raised-end');
+    expect(rule).toContain('background-color: hsl(var(--elevation-raised-bg))');
+    expect(rule).toContain('box-shadow: var(--elevation-shadow-raised-end)');
+  });
+
+  it('puts the panel on the raised level above the editor, without a plain background', () => {
+    const panel = readFileSync(
+      resolve(process.cwd(), 'src/components/assistant/AssistantPanel.tsx'),
+      'utf8',
+    );
+    expect(panel).toContain('elevation-raised-end');
+    expect(panel).toMatch(/relative z-\[5\]/);
+    expect(panel).not.toMatch(/className='relative flex w-\(--assistant-w\)[^']*bg-background/);
+  });
+});
+
 describe('default surface', () => {
   it('aliases the dark shell tokens to the default surface', () => {
     for (const name of ['--background', '--statusbar-bg', '--panel-bg', '--titlebar-bg']) {

@@ -173,6 +173,7 @@
     --elevation-raised-bg: 240 50% 99%; /* raised, sidebar and cards */
     --elevation-overlay-bg: 0 0% 100%; /* overlay, menus, dialogs, toasts */
     --elevation-shadow-raised: 2px 0 4px rgba(0, 0, 0, 0.08), 4px 0 12px rgba(0, 0, 0, 0.05);
+    --elevation-shadow-raised-end: -2px 0 4px rgba(0, 0, 0, 0.08), -4px 0 12px rgba(0, 0, 0, 0.05);
     --elevation-shadow-overlay: 0 2px 6px rgba(9, 30, 66, 0.12), 0 8px 24px rgba(9, 30, 66, 0.18);
     /* VSCode 2026 Light: gutter decoration tokens */
     --editor-gutter-added: 88 74% 26%; /* editorGutter.addedBackground     #587c0c */
@@ -365,6 +366,7 @@
     --elevation-raised-bg: 210 5% 10%; /* raised, sideBar.background, shadow lifts it  #191A1B */
     --elevation-overlay-bg: 210 3% 13%; /* overlay, editorWidget.background            #202122 */
     --elevation-shadow-raised: 2px 0 6px rgba(0, 0, 0, 0.45), 6px 0 16px rgba(0, 0, 0, 0.3);
+    --elevation-shadow-raised-end: -2px 0 6px rgba(0, 0, 0, 0.45), -6px 0 16px rgba(0, 0, 0, 0.3);
     --elevation-shadow-overlay: 0 2px 6px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.55);
     /* VSCode 2026 Dark: gutter decoration tokens */
     --editor-gutter-added: 137 47% 69%; /* editorGutter.addedBackground     #72C892 */
@@ -553,6 +555,12 @@
 .elevation-raised {
   background-color: hsl(var(--elevation-raised-bg));
   box-shadow: var(--elevation-shadow-raised);
+}
+
+/* Raised on the right edge: the same surface, with the shadow falling toward the editor. */
+.elevation-raised-end {
+  background-color: hsl(var(--elevation-raised-bg));
+  box-shadow: var(--elevation-shadow-raised-end);
 }
 
 .elevation-overlay {

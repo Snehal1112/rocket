@@ -37,6 +37,8 @@ as an `.elevation-*` class.
 
 - Raised: the Collections sidebar wrapper in `src/App.tsx` (`elevation-raised`, and `--sidebar-bg`
   aliases the raised token).
+- Raised, right edge: the AI Assistant panel (`elevation-raised-end`, `--elevation-shadow-raised-end`,
+  the same shadow mirrored toward the editor, `relative z-[5]`).
 - Sunken: the Settings page, its sticky Save bar and the console output well (white in light).
 - Default: dark `--background`, `--statusbar-bg`, `--panel-bg` and `--titlebar-bg` alias the default
   surface. The light title bar already shares the sidebar value, so light is not aliased.
