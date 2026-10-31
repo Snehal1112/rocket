@@ -174,3 +174,23 @@ describe('cards', () => {
     expect(css).toMatch(/\.dark \[data-slot="card"\] \[data-slot="card"\]\s*\{[^}]*hsl\(var\(--accent\)\)/);
   });
 });
+
+describe('muted text on the lightest dark surfaces', () => {
+  const accent = hslTriple(dark, '--accent');
+
+  it('lifts secondary text on nested cards to 4.5:1', () => {
+    const nested = cssBlock(css, '.dark [data-slot="card"] [data-slot="card"]');
+    const muted = hslTriple(nested, '--muted-foreground');
+    expect(muted).toEqual([0, 0, 56]);
+    expect(contrast(muted, accent)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('lifts secondary text on solid accent surfaces to 4.5:1', () => {
+    const muted = hslTriple(cssBlock(css, '.dark .bg-accent'), '--muted-foreground');
+    expect(contrast(muted, accent)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('leaves the global dark token alone', () => {
+    expect(hslTriple(dark, '--muted-foreground')).toEqual([0, 0, 48]);
+  });
+});

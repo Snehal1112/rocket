@@ -56,10 +56,11 @@ shadow shows over Settings. The editor wrapper stays `isolate` and `inert`.
 
 ## Contrast
 
-Body text is 9.9:1 or better on every dark level. The global `--muted-foreground` (48%) is below 4.5:1
-on the dark levels. Only `.dark .elevation-overlay` lifts it (`--muted-foreground: 0 0% 56%`). The
-sidebar is raised and keeps its text colour, so the app looks as it did. The baseline on the other
-levels is a follow-up, not fixed.
+Body text is 9.9:1 or better on every dark level. The global dark `--muted-foreground` (48%) is
+4.35 on the editor and 4.11 on the shell, sidebar and cards, so it stays as it is to keep the look.
+It is lifted to 56% only where it fails worst: nested cards and solid `bg-accent` rows (3.54 at 48%,
+4.66 at 56%), and `.elevation-overlay` (3.77 at 48%, 4.97 at 56%). The collection overview lifts it
+to 60%. The light shell (`#EEF0F4`) is 4.33 and is not lifted. Pinned in `elevation-tokens.test.ts`.
 
 ## WebKitGTK
 

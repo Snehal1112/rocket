@@ -628,6 +628,13 @@ html.windows.window-inactive #root {
   background-color: hsl(var(--accent));
   border-color: hsl(var(--border));
   box-shadow: none;
+  /* 48% reads at 3.5:1 on --accent, so lift it here like the collection overview does. */
+  --muted-foreground: 0 0% 56%;
+}
+
+/* Solid --accent surfaces (active rows) have the same problem, so lift secondary text on them too. */
+.dark .bg-accent {
+  --muted-foreground: 0 0% 56%;
 }
 
 /* Collection overview — VS Code uses flat workbench panels rather than elevated cards.
