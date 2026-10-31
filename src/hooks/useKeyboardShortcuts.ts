@@ -6,6 +6,7 @@ import { findActiveLeaf } from '@/lib/pane-utils';
 import { workspaceKeys } from '@/lib/queries/workspace-queries';
 import type { Workspace } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
+import { useSettingsStore } from '@/stores/settings-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import { isFlowTab, isRequestTab, isScriptTab } from '@/types/pane-types';
 
@@ -22,6 +23,13 @@ export function useKeyboardShortcuts() {
     const handler = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
       if (!mod) return;
+
+      // Cmd/Ctrl+, opens or closes Settings.
+      if (e.key === ',') {
+        e.preventDefault();
+        useSettingsStore.getState().toggleSettings();
+        return;
+      }
 
       const store = usePaneStore.getState();
       const { root, activeGroupId } = store;

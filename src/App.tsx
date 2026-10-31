@@ -5,6 +5,7 @@ import { AssistantPanel } from '@/components/assistant/AssistantPanel';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { CollectionsSidebar } from '@/components/layout/CollectionsSidebar';
 import { ConsolePanel } from '@/components/layout/ConsolePanel';
+import { MainArea } from '@/components/layout/MainArea';
 import { OpenApiSyncNotifier } from '@/components/layout/OpenApiSyncNotifier';
 import { StatusBar } from '@/components/layout/StatusBar';
 import { TrustMigrationNotice } from '@/components/layout/TrustMigrationNotice';
@@ -245,14 +246,14 @@ function App() {
           {/* expanded hit area — absolutely positioned, doesn't affect layout */}
           <div className='absolute inset-y-0 -left-1 -right-1' />
         </div>
-        <main className='flex-1 flex flex-col min-w-0 overflow-hidden'>
+        <MainArea>
           <WorkspaceToolbar />
           <div className='flex-1 min-h-0 overflow-hidden'>
             <ErrorBoundary>
               <PaneRenderer node={root} />
             </ErrorBoundary>
           </div>
-        </main>
+        </MainArea>
         {assistantPanelOpen && (
           <ErrorBoundary>
             <AssistantPanel />
