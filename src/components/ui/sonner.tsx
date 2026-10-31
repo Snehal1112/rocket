@@ -28,7 +28,6 @@ function Toaster(props: ToasterProps) {
       theme={isDark ? 'dark' : 'light'}
       richColors
       closeButton
-      toastOptions={{ style: { boxShadow: 'var(--elevation-shadow-overlay)' } }}
       style={
         {
           fontFamily: 'var(--font-sans)',

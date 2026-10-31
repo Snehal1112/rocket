@@ -302,7 +302,7 @@
     --checkbox-border: 210 2% 21%; /* checkbox.border                #333536 */
     --checkbox-fg: 0 0% 55%; /* checkbox.foreground            #8C8C8C */
     /* VSCode 2026 Dark: dropdown tokens */
-    --dropdown-bg: var(--elevation-overlay-bg); /* dropdown.background, overlay level */
+    --dropdown-bg: 210 5% 10%; /* dropdown.background            #191A1B */
     --dropdown-border: 210 2% 21%; /* dropdown.border                #333536 */
     --dropdown-fg: 0 0% 75%; /* dropdown.foreground            #bfbfbf */
     /* VSCode 2026 Dark: badge tokens */
