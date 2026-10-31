@@ -14,7 +14,8 @@ export function MainArea({ children }: { children: ReactNode }) {
         {children}
       </div>
       {settingsOpen && (
-        <div className='absolute inset-0 z-20'>
+        // Below the sidebar (z-5) so the sidebar shadow shows over Settings.
+        <div className='absolute inset-0 z-[1]'>
           <ErrorBoundary>
             <SettingsPage />
           </ErrorBoundary>
