@@ -49,6 +49,7 @@ import {
 } from '@/lib/tauri-api';
 import { restoreActiveEnv, useEnvStore } from '@/stores/env-store';
 import { useFlowAuthStore } from '@/stores/flow-auth-store';
+import { useSettingsStore } from '@/stores/settings-store';
 import type {
   CollectionSection,
   CollectionTab,
@@ -465,6 +466,9 @@ export const usePaneStore = create<PaneState>((set, get) => ({
   ...buildInitialState(),
 
   openTab(tab, groupId) {
+    // The user asked for this tab, so Settings steps aside. A locked Settings stays on top.
+    useSettingsStore.getState().closeSettings();
+
     // Exit workspace mode when a non-workspace tab is opened.
     if (tab.tabType !== 'workspace' && get().isWorkspaceMode()) {
       get().closeAll();
@@ -1591,6 +1595,8 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     // (from a previous collection switch) are not considered "open" here.
     const target = findTarget(root);
     if (!target) return false;
+    // Focusing a collection tab is a request to see it, so Settings steps aside.
+    useSettingsStore.getState().closeSettings();
 
     // Activate the tab and navigate to the requested section.
     get().updateCollectionSection(target.tabId, section);

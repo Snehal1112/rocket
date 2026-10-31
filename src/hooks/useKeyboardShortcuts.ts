@@ -31,6 +31,20 @@ export function useKeyboardShortcuts() {
         return;
       }
 
+      // Settings covers the tabs, so shortcuts that act on the hidden active tab are off.
+      const settings = useSettingsStore.getState();
+      if (settings.open) {
+        if (e.key === 'Enter' || e.key === 's') {
+          e.preventDefault();
+          return;
+        }
+        if (e.key === 'w') {
+          e.preventDefault();
+          settings.closeSettings();
+          return;
+        }
+      }
+
       const store = usePaneStore.getState();
       const { root, activeGroupId } = store;
       const activeLeaf = findActiveLeaf(root, activeGroupId);
