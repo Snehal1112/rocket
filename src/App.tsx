@@ -201,7 +201,7 @@ function App() {
       <div className='flex-1 flex overflow-hidden'>
         <div
           style={{ '--sidebar-w': `${sidebarWidth}px` } as React.CSSProperties}
-          className='sidebar-elevation w-(--sidebar-w) shrink-0 relative z-[5]'
+          className='elevation-raised w-(--sidebar-w) shrink-0 relative z-[5]'
         >
           <ErrorBoundary>
             <CollectionsSidebar />

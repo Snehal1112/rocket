@@ -131,3 +131,21 @@ describe('elevation Tailwind colours', () => {
     });
   });
 });
+
+describe('raised sidebar', () => {
+  it('aliases --sidebar-bg to the raised token in both themes', () => {
+    for (const block of [light, dark]) {
+      expect(block).toMatch(/--sidebar-bg:\s*var\(--elevation-raised-bg\)/);
+    }
+  });
+
+  it('no longer switches the sidebar shadow off in dark', () => {
+    expect(css).not.toContain('sidebar-elevation');
+  });
+
+  it('puts elevation-raised on the sidebar wrapper and keeps its stacking', () => {
+    const app = readFileSync(resolve(process.cwd(), 'src/App.tsx'), 'utf8');
+    expect(app).toContain('elevation-raised w-(--sidebar-w) shrink-0 relative z-[5]');
+    expect(app).not.toContain('sidebar-elevation');
+  });
+});

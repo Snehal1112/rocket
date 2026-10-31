@@ -146,7 +146,7 @@
     --panel-title-active-fg: 0 0% 12.5%; /* panelTitle.activeForeground     #202020 */
     --panel-title-inactive-fg: 0 0% 37.6%; /* panelTitle.inactiveForeground   #606060 */
     /* VSCode 2026 Light: sidebar tokens */
-    --sidebar-bg: 240 50% 99%; /* sideBar.background              #FAFAFD */
+    --sidebar-bg: var(--elevation-raised-bg); /* sideBar.background, raised level */
     --sidebar-border: 210 7% 89%; /* sideBar.border                  same as --border light */
     /* VSCode 2026 Light: title bar tokens */
     --titlebar-bg: 240 50% 99%; /* titleBar.activeBackground       #FAFAFD */
@@ -338,7 +338,7 @@
     --panel-title-active-fg: 0 0% 75%; /* panelTitle.activeForeground     #bfbfbf */
     --panel-title-inactive-fg: 0 0% 55%; /* panelTitle.inactiveForeground   #8C8C8C */
     /* VSCode 2026 Dark: sidebar tokens */
-    --sidebar-bg: 210 5% 10%; /* sideBar.background              #191A1B */
+    --sidebar-bg: var(--elevation-raised-bg); /* sideBar.background, raised level */
     --sidebar-border: 210 2% 17%; /* sideBar.border                  #2A2B2C */
     /* VSCode 2026 Dark: title bar tokens */
     --titlebar-bg: 210 5% 10%; /* titleBar.activeBackground       #191A1B */
@@ -538,20 +538,6 @@
       scroll-behavior: auto;
     }
   }
-}
-
-/* Sidebar elevation — rightward shadow makes the sidebar feel like an elevated layer
-   above the content area, matching VSCode 2026 Light's visual treatment.
-   Light: visible shadow (sidebar is lighter than content in dark mode so shadow is wrong there).
-   Dark: suppressed — dark sidebar is already a lower surface, shadow would deepen incorrectly. */
-.sidebar-elevation {
-  box-shadow:
-    2px 0 4px rgba(0, 0, 0, 0.08),
-    4px 0 12px rgba(0, 0, 0, 0.05);
-}
-
-.dark .sidebar-elevation {
-  box-shadow: none;
 }
 
 /* Elevation levels. Surface and shadow travel together, so do not add a bg-* utility to the same
