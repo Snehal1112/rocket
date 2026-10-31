@@ -53,3 +53,19 @@ it('renders a dialog on the overlay level and leaves its scrim alone', async () 
   expect(await screen.findByRole('dialog')).toHaveClass('elevation-overlay');
   expect(read('dialog')).toContain('bg-black/80');
 });
+
+it('gives the toast the overlay shadow', () => {
+  expect(read('sonner')).toContain('var(--elevation-shadow-overlay)');
+});
+
+it('puts the editor hover tip on the overlay level', () => {
+  const src = readFileSync(resolve(process.cwd(), 'src/components/editor/extensions/variable-hover.ts'), 'utf8');
+  expect(src).toContain('elevation-overlay');
+  expect(src).not.toMatch(/shadow-md|bg-card/);
+});
+
+it('keeps the tooltip inverse and says why', () => {
+  const src = read('tooltip');
+  expect(src).toContain('bg-primary');
+  expect(src).toMatch(/inverse/i);
+});
