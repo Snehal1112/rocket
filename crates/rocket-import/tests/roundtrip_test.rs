@@ -79,7 +79,10 @@ fn unzip(bytes: &[u8], dest: &Path) {
 
 /// Exports `collection` of `workspace` as a Bruno ZIP and imports it into a fresh workspace.
 /// Returns the import report and the number of request files before and after.
-fn bruno_round_trip(workspace: &Path, collection: &str) -> (ImportReport, usize, usize, Vec<String>) {
+fn bruno_round_trip(
+    workspace: &Path,
+    collection: &str,
+) -> (ImportReport, usize, usize, Vec<String>) {
     let source = FsCollectionFileSource::new(Arc::new(Mutex::new(workspace.to_path_buf())));
     let files = source.list_files(collection).expect("list files");
     let source_paths: Vec<String> = files.iter().map(|f| f.rel_path.clone()).collect();
@@ -93,7 +96,10 @@ fn bruno_round_trip(workspace: &Path, collection: &str) -> (ImportReport, usize,
 
     for path in &source_paths {
         if !root.join(path).exists() {
-            println!("  not in the export: {path} ({})", export_report_note(&_export_report, path));
+            println!(
+                "  not in the export: {path} ({})",
+                export_report_note(&_export_report, path)
+            );
         }
     }
 
@@ -112,7 +118,8 @@ fn request_shape(r: &rocket_collection::Request) -> serde_json::Value {
     let names = |v: Vec<String>| serde_json::json!(v);
     let body_is_form = r.body.as_ref().is_some_and(|b| {
         let mode = serde_json::to_value(&b.mode).unwrap_or_default();
-        mode.as_str().is_some_and(|m| m.to_lowercase().contains("form"))
+        mode.as_str()
+            .is_some_and(|m| m.to_lowercase().contains("form"))
     });
     serde_json::json!({
         "name": r.name,
@@ -130,7 +137,12 @@ fn request_shape(r: &rocket_collection::Request) -> serde_json::Value {
 }
 
 /// Reads every HTTP request file of the source and of the round trip and lists the differences.
-fn compare_requests(src_ws: &Path, dst_ws: &Path, collection: &str, paths: &[String]) -> Vec<String> {
+fn compare_requests(
+    src_ws: &Path,
+    dst_ws: &Path,
+    collection: &str,
+    paths: &[String],
+) -> Vec<String> {
     let src = FsCollectionRepo::new_standalone(src_ws.join("collections"));
     let dst = FsCollectionRepo::new_standalone(dst_ws.join("collections"));
     let mut diffs = Vec::new();
@@ -149,7 +161,10 @@ fn compare_requests(src_ws: &Path, dst_ws: &Path, collection: &str, paths: &[Str
         if !matches!(kind, Ok(rocket_collection::RequestKind::Http)) {
             continue;
         }
-        let (a, b) = (src.get_request(collection, path), dst.get_request(collection, path));
+        let (a, b) = (
+            src.get_request(collection, path),
+            dst.get_request(collection, path),
+        );
         match (a, b) {
             (Ok(a), Ok(b)) => {
                 let (a, b) = (request_shape(&a), request_shape(&b));

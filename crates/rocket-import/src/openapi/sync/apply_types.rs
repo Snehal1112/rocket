@@ -105,4 +105,3 @@ pub struct ApplyOutput {
     pub finalized: bool,
     pub report: ApplyReport,
 }
-

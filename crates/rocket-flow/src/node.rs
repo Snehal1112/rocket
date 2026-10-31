@@ -389,7 +389,8 @@ mod tests {
 
     #[test]
     fn request_allow_wired_host_defaults_off_and_is_saved_only_when_on() {
-        let old = r#"{"kind":"Request","label":"L","source":{"type":"Saved","request_path":"a.yml"}}"#;
+        let old =
+            r#"{"kind":"Request","label":"L","source":{"type":"Saved","request_path":"a.yml"}}"#;
         let mut kind: FlowNodeKind = serde_json::from_str(old).expect("an old node loads");
         let FlowNodeKind::Request {
             allow_wired_host, ..

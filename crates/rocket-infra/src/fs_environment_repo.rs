@@ -743,8 +743,14 @@ mod tests {
         repo.save(&env).expect("save");
 
         let text = std::fs::read_to_string(dir.path().join("QA.yml")).expect("read back");
-        assert!(text.contains("name: QA"), "saved file must carry a name: {text}");
-        assert_eq!(repo.get("QA").expect("reload").get_value("extra"), Some("1"));
+        assert!(
+            text.contains("name: QA"),
+            "saved file must carry a name: {text}"
+        );
+        assert_eq!(
+            repo.get("QA").expect("reload").get_value("extra"),
+            Some("1")
+        );
     }
 
     #[test]

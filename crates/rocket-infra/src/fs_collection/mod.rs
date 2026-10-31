@@ -11,8 +11,8 @@ use rocket_collection::{
 use rocket_shared::action::HttpRequestExample;
 use rocket_shared::error::{DomainError, DomainResult};
 
-pub(crate) mod folder_file;
 mod examples;
+pub(crate) mod folder_file;
 mod folder_settings;
 mod folders;
 mod paths;

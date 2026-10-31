@@ -8,8 +8,8 @@ use super::apply_types::{
 };
 use super::merge::Choice;
 use super::plan::{
-    build_sync_plan, item_digest, variable_digest, merge_item_indexed, CurrentRequest, SyncInputs, SyncItem,
-    SyncPlan, VariableKind,
+    build_sync_plan, item_digest, merge_item_indexed, variable_digest, CurrentRequest, SyncInputs,
+    SyncItem, SyncPlan, VariableKind,
 };
 use crate::converter::openapi::{baseline_hash, CONVERTER_VERSION};
 use crate::error::ImportResult;
@@ -54,10 +54,7 @@ fn plan_linked(pi: &SyncInputs, links: &[(String, String)]) -> LinkedPlan {
 /// The plan `build_apply` works from once the rename links are applied. Callers compute the
 /// digests they show or approve on this plan, so both sides agree. A link that is refused
 /// is left out here and reported as stale by `build_apply`.
-pub fn plan_with_links(
-    inputs: &SyncInputs,
-    links: &[(String, String)],
-) -> ImportResult<SyncPlan> {
+pub fn plan_with_links(inputs: &SyncInputs, links: &[(String, String)]) -> ImportResult<SyncPlan> {
     Ok(plan_linked(inputs, links).plan)
 }
 
@@ -339,8 +336,7 @@ impl<'a> Applier<'a> {
         let (Some(cur), Some(&at)) = (
             self.cur_by_uid.get(uid.as_str()).copied(),
             self.src_at.get(key),
-        )
-        else {
+        ) else {
             self.mark_stale(key);
             return;
         };
@@ -360,9 +356,10 @@ impl<'a> Applier<'a> {
         );
         let bytes = self.inputs.renderer.render(request_path, &outcome.merged);
         let staged = match (rewritable, bytes) {
-            (true, Ok(bytes)) => {
-                self.stage(request_filename_for(request_path), FileChangeKind::Put(bytes))
-            }
+            (true, Ok(bytes)) => self.stage(
+                request_filename_for(request_path),
+                FileChangeKind::Put(bytes),
+            ),
             _ => false,
         };
         if !staged {
@@ -443,7 +440,10 @@ impl<'a> Applier<'a> {
     fn apply_variables(&mut self, plan: &SyncPlan) -> ImportResult<()> {
         let mut chosen: HashSet<&str> = HashSet::new();
         for approval in &self.inputs.selection.variables {
-            let Some(change) = plan.variable_changes.iter().find(|c| c.name == approval.name)
+            let Some(change) = plan
+                .variable_changes
+                .iter()
+                .find(|c| c.name == approval.name)
             else {
                 continue;
             };

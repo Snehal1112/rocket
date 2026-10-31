@@ -435,7 +435,10 @@ pub fn action_line(a: &ActionSetVariable) -> Option<String> {
         _ => "pm.variables",
     };
     let value = expression_js(&a.selector.expression)?;
-    Some(format!("{target}.set({}, {value});", json_string(&a.variable.name)))
+    Some(format!(
+        "{target}.set({}, {value});",
+        json_string(&a.variable.name)
+    ))
 }
 
 #[cfg(test)]
@@ -624,8 +627,15 @@ mod tests {
         assert!(l.contains("pm.expect(pm.response.json().a[0].b)"), "{l}");
         let l = line(&assertion("res.body.x-y", "eq", Some("1")));
         assert!(l.contains("pm.response.json()[\"x-y\"]"), "{l}");
-        let l = line(&assertion("res.headers.content-type", "contains", Some("json")));
-        assert!(l.contains("pm.response.headers.get(\"content-type\")"), "{l}");
+        let l = line(&assertion(
+            "res.headers.content-type",
+            "contains",
+            Some("json"),
+        ));
+        assert!(
+            l.contains("pm.response.headers.get(\"content-type\")"),
+            "{l}"
+        );
         let l = line(&assertion("res.responseTime", "lt", Some("500")));
         assert!(l.contains("pm.response.responseTime"), "{l}");
     }

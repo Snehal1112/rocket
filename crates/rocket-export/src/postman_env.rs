@@ -17,7 +17,11 @@ use crate::sensitive::is_sensitive_name;
 fn exported_value(v: &Variable) -> &str {
     let keep_ref = is_variable_reference(&v.value);
     if v.secret {
-        if keep_ref { v.value.as_str() } else { "" }
+        if keep_ref {
+            v.value.as_str()
+        } else {
+            ""
+        }
     } else if is_sensitive_name(&v.key) && !keep_ref {
         ""
     } else {
@@ -70,7 +74,10 @@ pub fn environment_notes(name: &str, vars: &[Variable]) -> Vec<ExportNote> {
                     detail: Some(v.key.clone()),
                 });
             }
-        } else if is_sensitive_name(&v.key) && !v.value.is_empty() && !is_variable_reference(&v.value) {
+        } else if is_sensitive_name(&v.key)
+            && !v.value.is_empty()
+            && !is_variable_reference(&v.value)
+        {
             notes.push(ExportNote {
                 path: path.clone(),
                 feature: "Variable".into(),
@@ -101,7 +108,9 @@ pub fn postman_bundle(
 ) -> DomainResult<Vec<u8>> {
     let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
     let options = SimpleFileOptions::default();
-    writer.start_file(collection_file.0, options).map_err(zip_err)?;
+    writer
+        .start_file(collection_file.0, options)
+        .map_err(zip_err)?;
     writer.write_all(collection_file.1).map_err(zip_err)?;
     for (file_name, bytes) in envs {
         writer
@@ -132,7 +141,10 @@ mod tests {
     fn secret_variable_value_is_empty_even_when_hydrated() {
         let doc = postman_environment(
             "prod",
-            &[secret("API_KEY", "hydrated-value"), Variable::new("HOST", "x.test")],
+            &[
+                secret("API_KEY", "hydrated-value"),
+                Variable::new("HOST", "x.test"),
+            ],
             STAMP,
             "2.1.1",
         );

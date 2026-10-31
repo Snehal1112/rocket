@@ -42,11 +42,17 @@ pub fn postman_auth(auth: &Auth) -> PostmanAuth {
         Auth::Bearer { token } => block("bearer", vec![("token", token.clone())]),
         Auth::Basic { username, password } => block(
             "basic",
-            vec![("username", username.clone()), ("password", password.clone())],
+            vec![
+                ("username", username.clone()),
+                ("password", password.clone()),
+            ],
         ),
         Auth::Digest { username, password } => block(
             "digest",
-            vec![("username", username.clone()), ("password", password.clone())],
+            vec![
+                ("username", username.clone()),
+                ("password", password.clone()),
+            ],
         ),
         Auth::Ntlm {
             username,
@@ -69,7 +75,15 @@ pub fn postman_auth(auth: &Auth) -> PostmanAuth {
             vec![
                 ("key", key.clone()),
                 ("value", value.clone()),
-                ("in", if placement == "query" { "query" } else { "header" }.into()),
+                (
+                    "in",
+                    if placement == "query" {
+                        "query"
+                    } else {
+                        "header"
+                    }
+                    .into(),
+                ),
             ],
         ),
         Auth::AwsSigV4 {
@@ -267,7 +281,9 @@ mod tests {
 
     #[test]
     fn bearer_maps_to_token_key() {
-        let out = postman_auth(&Auth::Bearer { token: "{{t}}".into() });
+        let out = postman_auth(&Auth::Bearer {
+            token: "{{t}}".into(),
+        });
         assert_eq!(
             out,
             PostmanAuth::Value(json!({
@@ -279,10 +295,16 @@ mod tests {
 
     #[test]
     fn basic_digest_ntlm_keys() {
-        let b = value(&Auth::Basic { username: "u".into(), password: "p".into() });
+        let b = value(&Auth::Basic {
+            username: "u".into(),
+            password: "p".into(),
+        });
         assert_eq!(kv(&b, "basic", "username").as_deref(), Some("u"));
         assert_eq!(kv(&b, "basic", "password").as_deref(), Some("p"));
-        let d = value(&Auth::Digest { username: "u".into(), password: "p".into() });
+        let d = value(&Auth::Digest {
+            username: "u".into(),
+            password: "p".into(),
+        });
         assert_eq!(d["type"], "digest");
         assert_eq!(kv(&d, "digest", "password").as_deref(), Some("p"));
         let n = value(&Auth::Ntlm {
@@ -348,9 +370,15 @@ mod tests {
         assert_eq!(grant(&pw), "password_credentials");
         assert_eq!(kv(&value(&pw), "oauth2", "username").as_deref(), Some("u"));
         assert_eq!(grant(&ac(None)), "authorization_code");
-        let on = OAuth2PKCE { disabled: None, method: Some("S256".into()) };
+        let on = OAuth2PKCE {
+            disabled: None,
+            method: Some("S256".into()),
+        };
         assert_eq!(grant(&ac(Some(on))), "authorization_code_with_pkce");
-        let off = OAuth2PKCE { disabled: Some(true), method: None };
+        let off = OAuth2PKCE {
+            disabled: Some(true),
+            method: None,
+        };
         assert_eq!(grant(&ac(Some(off))), "authorization_code");
         let imp = Auth::OAuth2(Box::new(OAuth2Flow::Implicit {
             authorization_url: "https://a".into(),
@@ -367,32 +395,55 @@ mod tests {
 
     #[test]
     fn oauth2_places_token_and_client_auth() {
-        let tc = |p| OAuth2TokenConfig { id: Some("tk".into()), source: None, placement: Some(p) };
+        let tc = |p| OAuth2TokenConfig {
+            id: Some("tk".into()),
+            source: None,
+            placement: Some(p),
+        };
         let h = value(&cc(
             Some("body"),
-            Some(tc(OAuth2TokenPlacement::Header { header: "Authorization".into() })),
+            Some(tc(OAuth2TokenPlacement::Header {
+                header: "Authorization".into(),
+            })),
         ));
-        assert_eq!(kv(&h, "oauth2", "client_authentication").as_deref(), Some("body"));
+        assert_eq!(
+            kv(&h, "oauth2", "client_authentication").as_deref(),
+            Some("body")
+        );
         assert_eq!(kv(&h, "oauth2", "addTokenTo").as_deref(), Some("header"));
         assert_eq!(kv(&h, "oauth2", "tokenName").as_deref(), Some("tk"));
         let q = value(&cc(
             Some("basic_auth_header"),
-            Some(tc(OAuth2TokenPlacement::Query { query: "access_token".into() })),
+            Some(tc(OAuth2TokenPlacement::Query {
+                query: "access_token".into(),
+            })),
         ));
-        assert_eq!(kv(&q, "oauth2", "client_authentication").as_deref(), Some("header"));
-        assert_eq!(kv(&q, "oauth2", "addTokenTo").as_deref(), Some("queryParams"));
+        assert_eq!(
+            kv(&q, "oauth2", "client_authentication").as_deref(),
+            Some("header")
+        );
+        assert_eq!(
+            kv(&q, "oauth2", "addTokenTo").as_deref(),
+            Some("queryParams")
+        );
     }
 
     #[test]
     fn inherit_none_and_unsupported() {
         assert_eq!(postman_auth(&Auth::Inherit), PostmanAuth::Omit);
-        assert_eq!(postman_auth(&Auth::None), PostmanAuth::Value(json!({"type": "noauth"})));
+        assert_eq!(
+            postman_auth(&Auth::None),
+            PostmanAuth::Value(json!({"type": "noauth"}))
+        );
         assert_eq!(
             postman_auth(&Auth::OAuth1(Box::default())),
             PostmanAuth::Skipped("oauth1")
         );
         assert_eq!(
-            postman_auth(&Auth::Wsse { username: "u".into(), password: "p".into() }),
+            postman_auth(&Auth::Wsse {
+                username: "u".into(),
+                password: "p".into()
+            }),
             PostmanAuth::Skipped("wsse")
         );
     }
@@ -400,14 +451,34 @@ mod tests {
     #[test]
     fn scrub_auth_blanks_literals_and_keeps_references() {
         let mut notes = Vec::new();
-        let a = scrub_auth(&Auth::Bearer { token: "abc".into() }, "r", &mut notes);
-        assert_eq!(a, Auth::Bearer { token: String::new() });
-        let b = scrub_auth(
-            &Auth::Basic { username: "u".into(), password: "{{pw}}".into() },
+        let a = scrub_auth(
+            &Auth::Bearer {
+                token: "abc".into(),
+            },
             "r",
             &mut notes,
         );
-        assert_eq!(b, Auth::Basic { username: "u".into(), password: "{{pw}}".into() });
+        assert_eq!(
+            a,
+            Auth::Bearer {
+                token: String::new()
+            }
+        );
+        let b = scrub_auth(
+            &Auth::Basic {
+                username: "u".into(),
+                password: "{{pw}}".into(),
+            },
+            "r",
+            &mut notes,
+        );
+        assert_eq!(
+            b,
+            Auth::Basic {
+                username: "u".into(),
+                password: "{{pw}}".into()
+            }
+        );
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].action, ExportAction::Blanked);
     }
@@ -433,7 +504,10 @@ mod tests {
     #[test]
     fn scrub_url_blanks_password() {
         let mut notes = Vec::new();
-        assert_eq!(scrub_url("https://u:p@h/x", "r", &mut notes), "https://u:@h/x");
+        assert_eq!(
+            scrub_url("https://u:p@h/x", "r", &mut notes),
+            "https://u:@h/x"
+        );
         assert_eq!(
             scrub_url("https://u:{{p}}@h/x", "r", &mut notes),
             "https://u:{{p}}@h/x"

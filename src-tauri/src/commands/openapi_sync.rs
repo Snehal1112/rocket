@@ -9,8 +9,8 @@ use std::collections::BTreeMap;
 use rocket_app::{
     safe_message, BackupRow, BadgeView, ChangeLinkOutcome, ChangeLinkPreview, ChangeRow,
     ChangeValue, ChangesView, CheckOutcome, ConnectOperationRow, ConnectOutcome, ConnectPreview,
-    ConnectRequestRow, ConnectRow, OpenApiSyncService, OverviewView, PlanView, ResetReport,
-    DeleteTarget, SkippedRow, SpecSource, SpecSourceFormat, SpecView, SpecViewState, SyncStatusView,
+    ConnectRequestRow, ConnectRow, DeleteTarget, OpenApiSyncService, OverviewView, PlanView,
+    ResetReport, SkippedRow, SpecSource, SpecSourceFormat, SpecView, SpecViewState, SyncStatusView,
 };
 use rocket_collection::openapi_source::{SyncInterval, SyncStatus};
 use rocket_collection::ConsentState;
@@ -755,14 +755,22 @@ fn connect_preview_dto(p: ConnectPreview) -> ConnectPreviewDto {
         spec_sha256: p.spec_sha256,
         matched: p.matched.into_iter().map(connect_pair_dto).collect(),
         suggested: p.suggested.into_iter().map(connect_pair_dto).collect(),
-        in_spec_only: p.in_spec_only.into_iter().map(connect_operation_dto).collect(),
+        in_spec_only: p
+            .in_spec_only
+            .into_iter()
+            .map(connect_operation_dto)
+            .collect(),
         yours_only: p.yours_only.into_iter().map(connect_request_dto).collect(),
         ambiguous: p
             .ambiguous
             .into_iter()
             .map(|g| ConnectAmbiguousDto {
                 requests: g.requests.into_iter().map(connect_request_dto).collect(),
-                operations: g.operations.into_iter().map(connect_operation_dto).collect(),
+                operations: g
+                    .operations
+                    .into_iter()
+                    .map(connect_operation_dto)
+                    .collect(),
             })
             .collect(),
     }
@@ -1236,7 +1244,9 @@ fn delete_error(error: DomainError) -> String {
         {
             m
         }
-        DomainError::Conflict(m) if m.contains("changed on disk") || m.contains("not finished") => m,
+        DomainError::Conflict(m) if m.contains("changed on disk") || m.contains("not finished") => {
+            m
+        }
         DomainError::Conflict(_) => "A sync is running. Try again when it is done.".to_string(),
         DomainError::NotFound(_) => "The collection was not found.".to_string(),
         _ => "Deleting failed. Nothing was changed.".to_string(),
@@ -2377,7 +2387,10 @@ mod tests {
         };
         assert_eq!(
             connect_row_from_dto(row("link", Some("u"), Some("k"))),
-            Ok(ConnectRow::Link { uid: "u".into(), key: "k".into() })
+            Ok(ConnectRow::Link {
+                uid: "u".into(),
+                key: "k".into()
+            })
         );
         assert_eq!(
             connect_row_from_dto(row("add", None, Some("k"))),
@@ -2507,10 +2520,14 @@ mod tests {
     #[test]
     fn change_link_errors_pass_only_fixed_sentences() {
         assert_eq!(
-            change_link_error(DomainError::Conflict("This is already the spec link.".to_string())),
+            change_link_error(DomainError::Conflict(
+                "This is already the spec link.".to_string()
+            )),
             "This is already the spec link."
         );
-        let other = change_link_error(DomainError::Internal("cannot write /home/me/secret".to_string()));
+        let other = change_link_error(DomainError::Internal(
+            "cannot write /home/me/secret".to_string(),
+        ));
         assert_eq!(other, "Changing the link failed. Nothing was changed.");
         assert!(!other.contains("secret"));
         assert_eq!(
@@ -2583,10 +2600,14 @@ mod tests {
     #[test]
     fn connect_errors_are_fixed_sentences() {
         assert_eq!(
-            connect_error(DomainError::InvalidInput("Enter the spec link.".to_string())),
+            connect_error(DomainError::InvalidInput(
+                "Enter the spec link.".to_string()
+            )),
             "Enter the spec link."
         );
-        let other = connect_error(DomainError::Internal("cannot write /home/me/secret".to_string()));
+        let other = connect_error(DomainError::Internal(
+            "cannot write /home/me/secret".to_string(),
+        ));
         assert_eq!(other, "Connecting failed. Nothing was changed.");
         assert!(!other.contains("secret"));
     }
@@ -2605,10 +2626,15 @@ mod tests {
         let changed = reset_error(DomainError::Conflict(
             "The request changed on disk. Reload and try again.".to_string(),
         ));
-        assert_eq!(changed, "The request changed on disk. Reload and try again.");
+        assert_eq!(
+            changed,
+            "The request changed on disk. Reload and try again."
+        );
         let missing = reset_error(DomainError::NotFound("x".to_string()));
         assert_eq!(missing, "There is no backup for this request.");
-        let other = reset_error(DomainError::Internal("cannot write /home/me/secret".to_string()));
+        let other = reset_error(DomainError::Internal(
+            "cannot write /home/me/secret".to_string(),
+        ));
         assert_eq!(other, "Reset failed. Nothing was changed.");
         assert!(!other.contains("secret"));
     }

@@ -16,9 +16,7 @@ use rocket_collection::openapi_baseline::{
 use rocket_collection::openapi_source::{
     OpenApiSource, SourceOperation, SpecLocation, SyncInterval, SyncStatus, SOURCE_FILE_VERSION,
 };
-use rocket_collection::{
-    validate_rel_path, CollectionSettings, CollectionVariable, Request,
-};
+use rocket_collection::{validate_rel_path, CollectionSettings, CollectionVariable, Request};
 use rocket_shared::error::DomainResult;
 use rocket_shared::types::Header;
 use std::collections::{BTreeMap, HashSet};
@@ -371,7 +369,11 @@ fn new_endpoint_is_put_in_its_tag_folder_with_a_unique_name() {
     assert_eq!(paths(&out), vec!["Pets/Get-pet-2.yml"]);
     let req = put_request(&out, "Pets/Get-pet-2.yml");
     assert_eq!(req.name, "Get pet (2)");
-    assert!(out.report.applied.iter().any(|a| a.kind == AppliedKind::Created));
+    assert!(out
+        .report
+        .applied
+        .iter()
+        .any(|a| a.kind == AppliedKind::Created));
 }
 
 #[test]
@@ -494,14 +496,19 @@ fn choice_spec_applies_a_conflict_resolution() {
     assert_eq!(conflict.field, "query:limit");
     // With no choice the user's value stays.
     let kept = run(&w, &spec, &approve(&plan, &["listPets"]));
-    assert_eq!(put_request(&kept, "Pets/List-pets.yml").query_params.len(), 1);
+    assert_eq!(
+        put_request(&kept, "Pets/List-pets.yml").query_params.len(),
+        1
+    );
 
     let mut sel = approve(&plan, &["listPets"]);
     sel.items[0]
         .choices
         .insert(conflict.field.clone(), Choice::Spec);
     let out = run(&w, &spec, &sel);
-    assert!(put_request(&out, "Pets/List-pets.yml").query_params.is_empty());
+    assert!(put_request(&out, "Pets/List-pets.yml")
+        .query_params
+        .is_empty());
 }
 
 #[test]
@@ -810,12 +817,20 @@ fn security_variable_is_added_once() {
         .collect();
     assert!(!names.is_empty());
     let mut sel = approve(&plan, &[]);
-    let twice: Vec<&str> = names.iter().chain(names.iter()).map(String::as_str).collect();
+    let twice: Vec<&str> = names
+        .iter()
+        .chain(names.iter())
+        .map(String::as_str)
+        .collect();
     sel.variables = approve_vars(&plan, &twice);
     let out = run(&w, &spec, &sel);
     let settings = settings_of(&out).expect("settings staged");
     for name in &names {
-        let found: Vec<_> = settings.variables.iter().filter(|v| &v.key == name).collect();
+        let found: Vec<_> = settings
+            .variables
+            .iter()
+            .filter(|v| &v.key == name)
+            .collect();
         assert_eq!(found.len(), 1);
         assert!(found[0].secret && found[0].value.is_empty());
     }
@@ -828,7 +843,13 @@ fn apply_of_5000_items_is_linear() {
         .collect();
     let w = world(&old);
     let next: Vec<O> = (0..5000)
-        .map(|i| o(&format!("op{i}"), &format!("/p{i}"), &format!("Renamed {i}")))
+        .map(|i| {
+            o(
+                &format!("op{i}"),
+                &format!("/p{i}"),
+                &format!("Renamed {i}"),
+            )
+        })
         .collect();
     let spec = parsed(BASE, &next);
     let sel = approve(&plan_of(&w, &spec), &[]);

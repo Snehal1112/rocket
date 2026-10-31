@@ -610,13 +610,17 @@ fn collection_with_root(root_yaml: &str) -> (TempDir, FsCollectionRepo) {
 fn collection_docs_written_as_an_object_are_read() {
     let (_dir, repo) = collection_with_root(BRUNO_ROOT_WITH_DOCS_OBJECT);
     let settings = repo.get_settings("col").expect("settings must load");
-    assert_eq!(settings.docs.as_deref(), Some("## Introduction\n\nSome text."));
+    assert_eq!(
+        settings.docs.as_deref(),
+        Some("## Introduction\n\nSome text.")
+    );
     repo.get_strict("col").expect("strict load must work");
 }
 
 #[test]
 fn collection_docs_written_as_a_string_or_null_still_read() {
-    let (_dir, repo) = collection_with_root("opencollection: 1.0.0\ninfo:\n  name: col\ndocs: Plain\n");
+    let (_dir, repo) =
+        collection_with_root("opencollection: 1.0.0\ninfo:\n  name: col\ndocs: Plain\n");
     assert_eq!(
         repo.get_settings("col").expect("settings").docs.as_deref(),
         Some("Plain")
@@ -634,8 +638,14 @@ fn saving_settings_keeps_the_content_of_object_docs() {
     let reloaded = repo.get_settings("col").expect("reload");
     assert_eq!(reloaded.docs, settings.docs);
     let text = fs::read_to_string(dir.path().join("col/opencollection.yml")).expect("read root");
-    assert!(text.contains("Some text."), "docs content must survive: {text}");
-    assert!(text.contains("node_modules"), "other extensions must survive: {text}");
+    assert!(
+        text.contains("Some text."),
+        "docs content must survive: {text}"
+    );
+    assert!(
+        text.contains("node_modules"),
+        "other extensions must survive: {text}"
+    );
 }
 
 // ---- uid-less HTTP requests (Bruno imports have no `uid` key) ----

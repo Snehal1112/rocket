@@ -117,15 +117,20 @@ fn request_docs_written_as_an_object_are_read_for_every_request_kind() {
     let request = oc_http_request_to_request(http);
     assert_eq!(request.docs, Some(Description::text("Notes")));
 
-    let graphql = format!("info:\n  name: A\n  type: graphql\ngraphql:\n  url: https://x.test\n{DOCS_OBJECT}");
-    let graphql: OcGraphQLRequest = serde_yaml::from_str(&graphql).expect("graphql with object docs");
+    let graphql = format!(
+        "info:\n  name: A\n  type: graphql\ngraphql:\n  url: https://x.test\n{DOCS_OBJECT}"
+    );
+    let graphql: OcGraphQLRequest =
+        serde_yaml::from_str(&graphql).expect("graphql with object docs");
     assert_eq!(graphql.docs.as_deref(), Some("Notes"));
 
     let grpc = format!("info:\n  name: A\n  type: grpc\ngrpc:\n  url: h:1\n{DOCS_OBJECT}");
     let grpc: OcGrpcRequest = serde_yaml::from_str(&grpc).expect("grpc with object docs");
     assert_eq!(grpc.docs.as_deref(), Some("Notes"));
 
-    let websocket = format!("info:\n  name: A\n  type: websocket\nwebsocket:\n  url: ws://x.test\n{DOCS_OBJECT}");
+    let websocket = format!(
+        "info:\n  name: A\n  type: websocket\nwebsocket:\n  url: ws://x.test\n{DOCS_OBJECT}"
+    );
     let websocket: OcWebSocketRequest =
         serde_yaml::from_str(&websocket).expect("websocket with object docs");
     assert_eq!(websocket.docs.as_deref(), Some("Notes"));

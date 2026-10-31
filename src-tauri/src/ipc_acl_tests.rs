@@ -48,7 +48,10 @@ fn parse_generate_handler(source: &str) -> BTreeSet<String> {
 fn parse_generate_handler_keeps_entry_after_trailing_comment() {
     let source = "generate_handler![\n    foo, // note\n    bar,\n]";
     let names = parse_generate_handler(source);
-    assert!(names.contains("foo") && names.contains("bar"), "got {names:?}");
+    assert!(
+        names.contains("foo") && names.contains("bar"),
+        "got {names:?}"
+    );
 }
 
 #[test]

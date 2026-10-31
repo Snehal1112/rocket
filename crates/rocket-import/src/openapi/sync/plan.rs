@@ -421,8 +421,13 @@ pub fn variable_digest(change: &VariableChange) -> String {
         VariableKind::BaseUrl => "base_url",
         VariableKind::AddSecurity => "add_security",
     };
-    let canonical =
-        serde_json::json!([change.name, kind, change.baseline, change.yours, change.spec]);
+    let canonical = serde_json::json!([
+        change.name,
+        kind,
+        change.baseline,
+        change.yours,
+        change.spec
+    ]);
     format!("{:x}", Sha256::digest(canonical.to_string().as_bytes()))
 }
 
@@ -576,7 +581,12 @@ fn hint_renames(drafts: &mut [Draft]) {
 fn variable_changes(inputs: &SyncInputs) -> Vec<VariableChange> {
     let mut out = Vec::new();
     let non_empty = |s: &str| (!s.trim().is_empty()).then(|| s.to_string());
-    let spec = inputs.incoming.doc().servers.first().and_then(|s| non_empty(s));
+    let spec = inputs
+        .incoming
+        .doc()
+        .servers
+        .first()
+        .and_then(|s| non_empty(s));
     let yours = inputs.current_base_url.and_then(non_empty);
     // With no baseline the user's value stands in for it, so only the spec's news shows.
     let baseline = match inputs.baseline {

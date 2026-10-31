@@ -6,7 +6,9 @@ use rocket_app::collection_export_service::{
     CollectionExportService, ExportOutput, PostmanExportOptions,
 };
 use rocket_export::ExportReport;
-use rocket_infra::{FsCollectionFileSource, SharedCollectionEnvironmentRepo, SharedPathCollectionRepo};
+use rocket_infra::{
+    FsCollectionFileSource, SharedCollectionEnvironmentRepo, SharedPathCollectionRepo,
+};
 use rocket_shared::error::DomainError;
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -44,7 +46,8 @@ pub async fn export_collection_bruno(
 ) -> Result<ExportResultDto, DomainError> {
     let workspace = Arc::clone(&*workspace_path);
     run_export(move || {
-        let service = CollectionExportService::new(Box::new(FsCollectionFileSource::new(workspace)));
+        let service =
+            CollectionExportService::new(Box::new(FsCollectionFileSource::new(workspace)));
         service.export_bruno(&collection, include_environments)
     })
     .await
@@ -81,11 +84,15 @@ pub async fn export_collection_postman(
         let service = CollectionExportService::new(Box::new(FsCollectionFileSource::new(
             Arc::clone(&workspace),
         )))
-        .with_collections(Box::new(SharedPathCollectionRepo::new(Arc::clone(&workspace))))
-        .with_environments(Box::new(SharedCollectionEnvironmentRepo::with_secret_store(
-            workspace,
-            crate::env_secret_store(),
-        )));
+        .with_collections(Box::new(SharedPathCollectionRepo::new(Arc::clone(
+            &workspace,
+        ))))
+        .with_environments(Box::new(
+            SharedCollectionEnvironmentRepo::with_secret_store(
+                workspace,
+                crate::env_secret_store(),
+            ),
+        ));
         service.export_postman(&collection, &options)
     })
     .await

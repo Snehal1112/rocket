@@ -157,7 +157,9 @@ mod tests {
 
     fn run(req: &Request, preserve: bool) -> (Vec<serde_json::Value>, Vec<ExportNote>) {
         let mut notes = Vec::new();
-        let opts = PostmanOptions { preserve_scripts: preserve };
+        let opts = PostmanOptions {
+            preserve_scripts: preserve,
+        };
         let events = request_events(req, &opts, "users/r", &mut notes);
         (events, notes)
     }
@@ -174,7 +176,10 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(events[0]["listen"], "prerequest");
         assert_eq!(events[0]["script"]["type"], "text/javascript");
-        assert_eq!(events[0]["script"]["exec"], json!(["pm.variables.set('a', 1);"]));
+        assert_eq!(
+            events[0]["script"]["exec"],
+            json!(["pm.variables.set('a', 1);"])
+        );
         assert_eq!(events[1]["listen"], "test");
         assert_eq!(
             events[1]["script"]["exec"],
@@ -245,7 +250,10 @@ mod tests {
         let mut r = request();
         let mut off = Assertion::new("res.status", "eq", Some("200".into()));
         off.disabled = Some(true);
-        r.assertions = vec![Assertion::new("res.status", "matches", Some("2..".into())), off];
+        r.assertions = vec![
+            Assertion::new("res.status", "matches", Some("2..".into())),
+            off,
+        ];
         let (events, notes) = run(&r, false);
         assert!(events.is_empty());
         assert_eq!(notes.len(), 1);
@@ -262,7 +270,10 @@ mod tests {
                 expression: "res.body.id".into(),
                 method: "jsonq".into(),
             },
-            variable: ActionVariable { name: "n".into(), scope: "runtime".into() },
+            variable: ActionVariable {
+                name: "n".into(),
+                scope: "runtime".into(),
+            },
             disabled: None,
             description: None,
         }];
@@ -281,7 +292,10 @@ mod tests {
                 expression: "res.body.id".into(),
                 method: "jsonq".into(),
             },
-            variable: ActionVariable { name: "n".into(), scope: "collection".into() },
+            variable: ActionVariable {
+                name: "n".into(),
+                scope: "collection".into(),
+            },
             disabled: None,
             description: None,
         }];
@@ -305,6 +319,9 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(events[0]["listen"], "prerequest");
         assert_eq!(events[1]["listen"], "test");
-        assert_eq!(events[1]["script"]["exec"], json!(["pm.test('t', () => {});"]));
+        assert_eq!(
+            events[1]["script"]["exec"],
+            json!(["pm.test('t', () => {});"])
+        );
     }
 }

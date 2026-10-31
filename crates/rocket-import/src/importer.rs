@@ -1164,7 +1164,10 @@ fn collect_yml_files(root: &Path, dir: &Path, out: &mut Vec<String>) {
             collect_yml_files(root, &path, out);
             continue;
         }
-        if !matches!(path.extension().and_then(|e| e.to_str()), Some("yml" | "yaml")) {
+        if !matches!(
+            path.extension().and_then(|e| e.to_str()),
+            Some("yml" | "yaml")
+        ) {
             continue;
         }
         if let Ok(rel) = path.strip_prefix(root) {
@@ -2012,8 +2015,14 @@ mod wsdl_tests {
     fn unique_import_path_numbers_a_clash_and_ignores_case() {
         let mut used = std::collections::HashSet::new();
         assert_eq!(unique_import_path(&mut used, "api/Get.yml"), "api/Get.yml");
-        assert_eq!(unique_import_path(&mut used, "api/get.yml"), "api/get 2.yml");
-        assert_eq!(unique_import_path(&mut used, "api/GET.yml"), "api/GET 3.yml");
+        assert_eq!(
+            unique_import_path(&mut used, "api/get.yml"),
+            "api/get 2.yml"
+        );
+        assert_eq!(
+            unique_import_path(&mut used, "api/GET.yml"),
+            "api/GET 3.yml"
+        );
     }
 
     #[test]
@@ -2068,7 +2077,12 @@ mod wsdl_tests {
     #[test]
     fn bruno_import_keeps_both_files_when_case_variants_clash() {
         let found = import_bru_names(&["Get", "get"]);
-        assert_eq!(found.len(), 2, "got: {:?}", found.iter().map(|f| &f.0).collect::<Vec<_>>());
+        assert_eq!(
+            found.len(),
+            2,
+            "got: {:?}",
+            found.iter().map(|f| &f.0).collect::<Vec<_>>()
+        );
         assert!(found.iter().any(|f| f.0.ends_with(" 2.yml")));
         for i in 0..2 {
             let url = format!("https://example.com/{i}");
@@ -2433,7 +2447,10 @@ mod open_check_tests {
         assert_eq!(report.imported, 2);
         assert_eq!(report.skipped.len(), 1, "{:?}", report.skipped);
         assert_eq!(report.skipped[0].path, "sub/bad.yml");
-        assert!(matches!(report.skipped[0].reason, SkipReason::ParseError(_)));
+        assert!(matches!(
+            report.skipped[0].reason,
+            SkipReason::ParseError(_)
+        ));
     }
 
     #[test]

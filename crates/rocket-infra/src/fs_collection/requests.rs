@@ -9,9 +9,9 @@ use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
 use crate::conversions::{
-    derived_grpc_uid, derived_http_uid, graphql_to_oc, grpc_to_oc, oc_graphql_to_domain, oc_grpc_to_domain,
-    oc_http_request_to_request, oc_websocket_to_request, request_to_oc_http_request,
-    websocket_to_oc_websocket, with_file_identity,
+    derived_grpc_uid, derived_http_uid, graphql_to_oc, grpc_to_oc, oc_graphql_to_domain,
+    oc_grpc_to_domain, oc_http_request_to_request, oc_websocket_to_request,
+    request_to_oc_http_request, websocket_to_oc_websocket, with_file_identity,
 };
 use crate::oc::{OcGraphQLRequest, OcGrpcRequest, OcHttpRequest, OcWebSocketRequest};
 
@@ -248,11 +248,7 @@ pub(super) fn fallback_create_new_with(
     Ok(())
 }
 
-pub(super) fn fallback_create_new(
-    file_path: &Path,
-    bytes: &[u8],
-    label: &str,
-) -> DomainResult<()> {
+pub(super) fn fallback_create_new(file_path: &Path, bytes: &[u8], label: &str) -> DomainResult<()> {
     use std::io::Write;
 
     fallback_create_new_with(file_path, label, |file| {
@@ -345,8 +341,9 @@ fn create_typed_request_exclusive(
     let collection_dir = repo.collection_path(collection);
     let normalized = request_filename_for(path);
     let file_path = repo.validate_path(&collection_dir, Path::new(&normalized))?;
-    let yaml = to_yaml()
-        .map_err(|e| DomainError::Internal(format!("Failed to serialize {kind} request YAML: {e}")))?;
+    let yaml = to_yaml().map_err(|e| {
+        DomainError::Internal(format!("Failed to serialize {kind} request YAML: {e}"))
+    })?;
     write_new_file_exclusive(
         &file_path,
         yaml.as_bytes(),

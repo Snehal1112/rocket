@@ -5,10 +5,10 @@ use rocket_collection::{Collection, CollectionItem, CollectionSummary, Folder, R
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
+use crate::conversions::derived_http_uid;
 use crate::migration::{
     detect_format, is_migration_interrupted, migrate_collection, CollectionFormat,
 };
-use crate::conversions::derived_http_uid;
 use crate::oc::{OcCollection, OcInfo};
 use rocket_collection::generate_uid;
 

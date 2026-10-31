@@ -27,5 +27,8 @@ pub enum ExportItem {
     GraphQl(Box<GraphQlRequest>),
     Folder(ExportFolder),
     /// An item that no exporter writes. `kind` names it in the report.
-    Skipped { path: String, kind: String },
+    Skipped {
+        path: String,
+        kind: String,
+    },
 }

@@ -6,20 +6,18 @@ use rocket_collection::{
     inherited_headers, CollectionVariable, FolderSettings, GraphQlRequest, Request,
 };
 use rocket_shared::description::Description;
-use rocket_shared::types::{
-    Auth, Body, BodyMode, FormDataType, Header, PathParam, QueryParam,
-};
 use rocket_shared::error::DomainResult;
+use rocket_shared::types::{Auth, Body, BodyMode, FormDataType, Header, PathParam, QueryParam};
 use serde_json::{json, Map, Value};
 
 use crate::events::{folder_events, request_events};
 use crate::postman_auth::{noauth_block, postman_auth, PostmanAuth};
+use crate::report::{ExportAction, ExportNote, ExportReport};
 use crate::scrub::{
     is_variable_reference, scrub_auth, scrub_form_entries, scrub_header_values, scrub_path_params,
     scrub_typed_rows, scrub_url,
 };
 use crate::sensitive::is_sensitive_name;
-use crate::report::{ExportAction, ExportNote, ExportReport};
 use crate::tree::{CollectionExportTree, ExportFolder, ExportItem};
 
 pub const POSTMAN_SCHEMA: &str =
@@ -38,14 +36,24 @@ pub fn postman_collection(
 ) -> DomainResult<(Value, ExportReport)> {
     let mut report = ExportReport::default();
     let mut info = Map::new();
-    info.insert("_postman_id".into(), json!(uuid::Uuid::new_v4().to_string()));
+    info.insert(
+        "_postman_id".into(),
+        json!(uuid::Uuid::new_v4().to_string()),
+    );
     info.insert("name".into(), json!(tree.name));
     if let Some(docs) = &tree.settings.docs {
         info.insert("description".into(), json!(docs));
     }
     info.insert("schema".into(), json!(POSTMAN_SCHEMA));
 
-    let items = folder_items(&tree.root, &[], &tree.settings.headers, opts, &mut report, "");
+    let items = folder_items(
+        &tree.root,
+        &[],
+        &tree.settings.headers,
+        opts,
+        &mut report,
+        "",
+    );
     let mut doc = Map::new();
     doc.insert("info".into(), Value::Object(info));
     doc.insert("item".into(), Value::Array(items));
@@ -104,7 +112,12 @@ fn variables_json(
                 value.clear();
                 report.items.push(ExportNote {
                     path: path.to_string(),
-                    feature: if v.secret { "Secret variable" } else { "Variable" }.into(),
+                    feature: if v.secret {
+                        "Secret variable"
+                    } else {
+                        "Variable"
+                    }
+                    .into(),
                     action: ExportAction::Blanked,
                     detail: Some(if v.secret {
                         v.key.clone()
@@ -210,7 +223,14 @@ fn folder_items(
                         detail: None,
                     });
                 }
-                out.push(request_item(&name, r, &headers, opts, &join(path, &name), report));
+                out.push(request_item(
+                    &name,
+                    r,
+                    &headers,
+                    opts,
+                    &join(path, &name),
+                    report,
+                ));
                 report.exported += 1;
             }
             ExportItem::GraphQl(r) => {
@@ -257,7 +277,10 @@ fn header_json(h: &Header) -> Value {
 fn merged_headers(inherited: &[Header], own: &[Header]) -> Vec<Header> {
     let mut out: Vec<Header> = inherited
         .iter()
-        .filter(|i| !own.iter().any(|o| o.enabled && o.key.eq_ignore_ascii_case(&i.key)))
+        .filter(|i| {
+            !own.iter()
+                .any(|o| o.enabled && o.key.eq_ignore_ascii_case(&i.key))
+        })
         .cloned()
         .collect();
     out.extend(own.iter().cloned());
@@ -279,7 +302,10 @@ fn request_item(
     report: &mut ExportReport,
 ) -> Value {
     let mut headers = merged_headers(inherited, &r.headers);
-    let clean_body = r.body.as_ref().map(|b| scrub_body(b, path, &mut report.items));
+    let clean_body = r
+        .body
+        .as_ref()
+        .map(|b| scrub_body(b, path, &mut report.items));
     let body = clean_body.as_ref().and_then(|b| body_json(b, &mut headers));
     let headers = scrub_header_values(headers, path, &mut report.items);
     let mut req = Map::new();
@@ -287,12 +313,20 @@ fn request_item(
     if let Some(a) = auth_value(&r.auth, path, report) {
         req.insert("auth".into(), a);
     }
-    req.insert("header".into(), Value::Array(headers.iter().map(header_json).collect()));
+    req.insert(
+        "header".into(),
+        Value::Array(headers.iter().map(header_json).collect()),
+    );
     if let Some(b) = body {
         req.insert("body".into(), b);
     }
     let url = scrub_url(&r.url, path, &mut report.items);
-    let query = scrub_typed_rows(r.query_params.clone(), "Query parameter", path, &mut report.items);
+    let query = scrub_typed_rows(
+        r.query_params.clone(),
+        "Query parameter",
+        path,
+        &mut report.items,
+    );
     let path_params = scrub_path_params(r.path_params.clone(), path, &mut report.items);
     req.insert("url".into(), postman_url(&url, &query, &path_params));
     if let Some(d) = desc_value(&r.description).or_else(|| desc_value(&r.docs)) {
@@ -329,7 +363,10 @@ fn graphql_item(
     if let Some(a) = auth_value(&r.auth, path, report) {
         req.insert("auth".into(), a);
     }
-    req.insert("header".into(), Value::Array(headers.iter().map(header_json).collect()));
+    req.insert(
+        "header".into(),
+        Value::Array(headers.iter().map(header_json).collect()),
+    );
     req.insert(
         "body".into(),
         json!({
@@ -341,7 +378,12 @@ fn graphql_item(
         }),
     );
     let url = scrub_url(&r.url, path, &mut report.items);
-    let query = scrub_typed_rows(r.query_params.clone(), "Query parameter", path, &mut report.items);
+    let query = scrub_typed_rows(
+        r.query_params.clone(),
+        "Query parameter",
+        path,
+        &mut report.items,
+    );
     let path_params = scrub_path_params(r.path_params.clone(), path, &mut report.items);
     req.insert("url".into(), postman_url(&url, &query, &path_params));
     if let Some(d) = desc_value(&r.description).or_else(|| desc_value(&r.docs)) {
@@ -361,7 +403,10 @@ fn graphql_item(
 fn scrub_body(body: &Body, path: &str, notes: &mut Vec<ExportNote>) -> Body {
     let mut out = body.clone();
     if matches!(out.mode, BodyMode::FormUrlEncoded | BodyMode::FormData) {
-        out.form_data = out.form_data.take().map(|e| scrub_form_entries(e, path, notes));
+        out.form_data = out
+            .form_data
+            .take()
+            .map(|e| scrub_form_entries(e, path, notes));
     }
     out
 }
@@ -479,9 +524,7 @@ pub fn postman_url(url: &str, query: &[QueryParam], path_params: &[PathParam]) -
         };
         let host_part = authority.rsplit('@').next().unwrap_or(authority);
         let (host, port) = match host_part.rsplit_once(':') {
-            Some((h, p)) if !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()) => {
-                (h, Some(p))
-            }
+            Some((h, p)) if !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()) => (h, Some(p)),
             _ => (host_part, None),
         };
         obj.insert("protocol".into(), json!(protocol));
@@ -630,7 +673,9 @@ mod tests {
             description: None,
         }];
         let doc = one(r);
-        let url = doc["item"][0]["request"]["url"].as_object().expect("object");
+        let url = doc["item"][0]["request"]["url"]
+            .as_object()
+            .expect("object");
         assert!(!url.contains_key("protocol"));
         assert!(!url.contains_key("host"));
         assert!(!url.contains_key("path"));
@@ -769,7 +814,13 @@ mod tests {
         let mut with_ct = body_req(body_of(BodyMode::Json, "{}"));
         with_ct.headers = vec![Header::new("content-type", "application/vnd.api+json")];
         let doc = one(with_ct);
-        assert_eq!(doc["item"][0]["request"]["header"].as_array().expect("h").len(), 1);
+        assert_eq!(
+            doc["item"][0]["request"]["header"]
+                .as_array()
+                .expect("h")
+                .len(),
+            1
+        );
     }
 
     #[test]
@@ -790,7 +841,10 @@ mod tests {
         fd.form_data = Some(rows);
         let doc = one(body_req(fd));
         let b = &doc["item"][0]["request"]["body"];
-        assert_eq!(b["formdata"][2], json!({"key": "f", "type": "file", "src": "/tmp/f.txt"}));
+        assert_eq!(
+            b["formdata"][2],
+            json!({"key": "f", "type": "file", "src": "/tmp/f.txt"})
+        );
         assert_eq!(b["formdata"][1]["disabled"], true);
     }
 
@@ -839,7 +893,9 @@ mod tests {
         let t = tree_with(vec![ExportItem::Folder(ExportFolder {
             name: "f".into(),
             settings: FolderSettings {
-                auth: Some(Auth::Bearer { token: "{{t}}".into() }),
+                auth: Some(Auth::Bearer {
+                    token: "{{t}}".into(),
+                }),
                 ..Default::default()
             },
             items: vec![ExportItem::Request(Box::new(r))],
@@ -880,7 +936,9 @@ mod tests {
             },
             items: vec![ExportItem::Request(Box::new(r))],
         })]);
-        t.settings.auth = Some(Auth::Bearer { token: "{{t}}".into() });
+        t.settings.auth = Some(Auth::Bearer {
+            token: "{{t}}".into(),
+        });
         let (doc, _) = export(&t);
         assert!(doc["item"][0].get("auth").is_none());
         assert_eq!(doc["auth"]["type"], "bearer");
@@ -944,12 +1002,17 @@ mod tests {
         let mut t = tree_with(vec![ExportItem::Folder(ExportFolder {
             name: "f".into(),
             settings: FolderSettings {
-                auth: Some(Auth::Basic { username: "u".into(), password: "p".into() }),
+                auth: Some(Auth::Basic {
+                    username: "u".into(),
+                    password: "p".into(),
+                }),
                 ..Default::default()
             },
             items: vec![],
         })]);
-        t.settings.auth = Some(Auth::Bearer { token: "abc".into() });
+        t.settings.auth = Some(Auth::Bearer {
+            token: "abc".into(),
+        });
         let (doc, report) = export(&t);
         assert_eq!(doc["auth"]["type"], "bearer");
         assert_eq!(doc["auth"]["bearer"][0]["value"], "");
@@ -999,7 +1062,10 @@ mod tests {
             .filter(|n| n.action == ExportAction::Skipped && n.feature.starts_with("auth "))
             .count();
         assert_eq!(skipped, 2);
-        assert!(report.items.iter().all(|n| n.action != ExportAction::Blanked));
+        assert!(report
+            .items
+            .iter()
+            .all(|n| n.action != ExportAction::Blanked));
     }
 
     #[test]
@@ -1024,7 +1090,10 @@ mod tests {
                 tests_script: Some("test('t', () => {});".into()),
                 ..Default::default()
             },
-            items: vec![ExportItem::Request(Box::new(r)), ExportItem::Request(Box::new(req("plain", "https://x.test")))],
+            items: vec![
+                ExportItem::Request(Box::new(r)),
+                ExportItem::Request(Box::new(req("plain", "https://x.test"))),
+            ],
         })]);
         let (doc, _) = export(&t);
         let folder = &doc["item"][0];
@@ -1045,8 +1114,13 @@ mod tests {
         let mut r = req("r", "https://x.test");
         r.pre_request_script = Some("rok.setVar('a', 1);".into());
         let t = tree_with(vec![ExportItem::Request(Box::new(r))]);
-        let (doc, _) =
-            postman_collection(&t, &PostmanOptions { preserve_scripts: true }).expect("export");
+        let (doc, _) = postman_collection(
+            &t,
+            &PostmanOptions {
+                preserve_scripts: true,
+            },
+        )
+        .expect("export");
         assert_eq!(
             doc["item"][0]["event"][0]["script"]["exec"],
             json!(["rok.setVar('a', 1);"])
@@ -1090,23 +1164,35 @@ mod tests {
 
     #[test]
     fn query_pairs_are_scrubbed_by_name_in_raw_and_query() {
-        let r = req("q", "https://x.test/p?access_token=abc&token_type=Bearer&a=1");
+        let r = req(
+            "q",
+            "https://x.test/p?access_token=abc&token_type=Bearer&a=1",
+        );
         let (doc, report) = export(&tree_with(vec![ExportItem::Request(Box::new(r))]));
         let url = &doc["item"][0]["request"]["url"];
-        assert_eq!(url["raw"], "https://x.test/p?access_token=&token_type=Bearer&a=1");
+        assert_eq!(
+            url["raw"],
+            "https://x.test/p?access_token=&token_type=Bearer&a=1"
+        );
         assert_eq!(url["query"][0]["key"], "access_token");
         assert_eq!(url["query"][0]["value"], "");
         assert_eq!(url["query"][1]["value"], "Bearer");
         assert_eq!(
             blanked_details(&report),
-            vec![("URL query".to_string(), Some("access_token (by name)".to_string()))]
+            vec![(
+                "URL query".to_string(),
+                Some("access_token (by name)".to_string())
+            )]
         );
     }
 
     #[test]
     fn query_table_rows_are_scrubbed_by_name() {
         let mut r = req("q", "https://x.test/p");
-        r.query_params = vec![Header::new("api_key", "abc"), Header::disabled("debug", "x")];
+        r.query_params = vec![
+            Header::new("api_key", "abc"),
+            Header::disabled("debug", "x"),
+        ];
         let doc = one(r);
         let url = &doc["item"][0]["request"]["url"];
         assert_eq!(url["raw"], "https://x.test/p?api_key=");
@@ -1120,7 +1206,10 @@ mod tests {
         r.query_params = vec![Header::new("api_key", "{{k}}")];
         let (doc, report) = export(&tree_with(vec![ExportItem::Request(Box::new(r))]));
         let url = &doc["item"][0]["request"]["url"];
-        assert_eq!(url["raw"], "https://x.test/p?access_token={{t}}&api_key={{k}}");
+        assert_eq!(
+            url["raw"],
+            "https://x.test/p?access_token={{t}}&api_key={{k}}"
+        );
         assert!(blanked_details(&report).is_empty());
     }
 
@@ -1149,7 +1238,10 @@ mod tests {
     #[test]
     fn header_rows_use_the_name_rule() {
         let mut r = req("h", "https://x.test");
-        r.headers = vec![Header::new("X-Auth-Token", "abc"), Header::new("X-Request-Id", "1")];
+        r.headers = vec![
+            Header::new("X-Auth-Token", "abc"),
+            Header::new("X-Request-Id", "1"),
+        ];
         let doc = one(r);
         let h = &doc["item"][0]["request"]["header"];
         assert_eq!(h[0]["value"], "");
@@ -1178,9 +1270,14 @@ mod tests {
             settings: None,
         }));
         let doc = one(r);
-        let rows = doc["item"][0]["request"]["auth"]["oauth2"].as_array().expect("rows");
+        let rows = doc["item"][0]["request"]["auth"]["oauth2"]
+            .as_array()
+            .expect("rows");
         let get = |k: &str| rows.iter().find(|r| r["key"] == k).expect("row")["value"].clone();
-        assert_eq!(get("accessTokenUrl"), "https://u:@idp.test/token?client_secret=&a=1");
+        assert_eq!(
+            get("accessTokenUrl"),
+            "https://u:@idp.test/token?client_secret=&a=1"
+        );
         assert_eq!(get("authUrl"), "https://idp.test/auth?state=s");
         assert_eq!(get("redirect_uri"), "https://u:@app.test/cb");
     }
@@ -1211,7 +1308,10 @@ mod tests {
         assert_eq!(
             blanked_details(&report),
             vec![
-                ("Variable".to_string(), Some("api_token (by name)".to_string())),
+                (
+                    "Variable".to_string(),
+                    Some("api_token (by name)".to_string())
+                ),
                 ("Secret variable".to_string(), Some("s2".to_string())),
             ]
         );

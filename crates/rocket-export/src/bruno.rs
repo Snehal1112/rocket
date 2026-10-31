@@ -43,7 +43,9 @@ fn drop_examples(value: &mut Value) -> bool {
             }
             removed
         }
-        Value::Sequence(items) => items.iter_mut().fold(false, |acc, i| drop_examples(i) | acc),
+        Value::Sequence(items) => items
+            .iter_mut()
+            .fold(false, |acc, i| drop_examples(i) | acc),
         _ => false,
     }
 }
@@ -276,7 +278,10 @@ mod tests {
 
     fn sample() -> Vec<SourceFile> {
         vec![
-            file("opencollection.yml", "opencollection: \"1.0.0\"\ninfo:\n  name: my-api\n"),
+            file(
+                "opencollection.yml",
+                "opencollection: \"1.0.0\"\ninfo:\n  name: my-api\n",
+            ),
             file("users/folder.yml", "info:\n  name: users\n"),
             file(
                 "users/get.yml",
@@ -348,13 +353,19 @@ mod tests {
     fn bruno_zip_skips_rocket_only_directories_and_reports_them() {
         let files = vec![
             file("opencollection.yml", "info:\n  name: a\n"),
-            file("users/get.yml", "info:\n  name: get\nhttp:\n  method: GET\n  url: https://x\n"),
+            file(
+                "users/get.yml",
+                "info:\n  name: get\nhttp:\n  method: GET\n  url: https://x\n",
+            ),
             file("flows/f.yml", "name: f\n"),
             file("flows/deep/g.yml", "name: g\n"),
             file(".rocket/contracts/a.yml", "name: c\n"),
         ];
         let (bytes, report) = bruno_zip(files, "a", true).expect("zip builds");
-        assert_eq!(names(&bytes), vec!["a/opencollection.yml", "a/users/get.yml"]);
+        assert_eq!(
+            names(&bytes),
+            vec!["a/opencollection.yml", "a/users/get.yml"]
+        );
         assert_eq!(report.exported, 2);
         let skipped: Vec<&str> = report
             .items
@@ -412,7 +423,10 @@ mod tests {
 
     #[test]
     fn bruno_zip_keeps_proto_and_js_files() {
-        let files = vec![file("protos/a.proto", "syntax"), file("shared/util.js", "x")];
+        let files = vec![
+            file("protos/a.proto", "syntax"),
+            file("shared/util.js", "x"),
+        ];
         let (bytes, _) = bruno_zip(files, "a", true).expect("zip builds");
         assert_eq!(names(&bytes), vec!["a/protos/a.proto", "a/shared/util.js"]);
     }
@@ -428,12 +442,19 @@ mod tests {
     }
 
     fn feature_notes<'a>(report: &'a ExportReport, feature: &str) -> Vec<&'a ExportNote> {
-        report.items.iter().filter(|n| n.feature == feature).collect()
+        report
+            .items
+            .iter()
+            .filter(|n| n.feature == feature)
+            .collect()
     }
 
     #[test]
     fn flat_folder_yml_is_converted_to_the_info_shape() {
-        let files = vec![file("users/folder.yml", "name: users\nuid: u1\ntype: folder\n")];
+        let files = vec![file(
+            "users/folder.yml",
+            "name: users\nuid: u1\ntype: folder\n",
+        )];
         let (bytes, report) = bruno_zip(files, "a", true).expect("zip builds");
         let v = yaml(&bytes, "a/users/folder.yml");
         assert_eq!(v["info"]["name"].as_str(), Some("users"));
@@ -445,7 +466,10 @@ mod tests {
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].action, ExportAction::Translated);
         assert_eq!(notes[0].path, "users/folder.yml");
-        assert_eq!(notes[0].detail.as_deref(), Some("converted to the info shape"));
+        assert_eq!(
+            notes[0].detail.as_deref(),
+            Some("converted to the info shape")
+        );
     }
 
     #[test]

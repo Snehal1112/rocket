@@ -150,7 +150,12 @@ fn yaml_scrub_auth(rel_path: &str, auth: &mut Mapping, notes: &mut Vec<ExportNot
             }
         }
     }
-    for key in ["accessTokenUrl", "refreshTokenUrl", "authorizationUrl", "callbackUrl"] {
+    for key in [
+        "accessTokenUrl",
+        "refreshTokenUrl",
+        "authorizationUrl",
+        "callbackUrl",
+    ] {
         if let Some(slot) = auth.get_mut(key) {
             yaml_scrub_url(rel_path, slot, notes);
         }
@@ -213,7 +218,9 @@ fn scrub_rows(rel_path: &str, rows: &mut Value, feature: &str, notes: &mut Vec<E
             _ => continue,
         };
         let changed = match row.get_mut("value") {
-            Some(Value::Sequence(parts)) => parts.iter_mut().fold(false, |c, p| blank_string(p) | c),
+            Some(Value::Sequence(parts)) => {
+                parts.iter_mut().fold(false, |c, p| blank_string(p) | c)
+            }
             Some(slot) => blank_string(slot),
             None => false,
         };
@@ -323,7 +330,9 @@ fn blank_query_values(text: &str) -> Option<(String, Vec<String>)> {
         .split('&')
         .map(|pair| match pair.split_once('=') {
             Some((name, value))
-                if !value.is_empty() && !is_variable_reference(value) && is_sensitive_name(name) =>
+                if !value.is_empty()
+                    && !is_variable_reference(value)
+                    && is_sensitive_name(name) =>
             {
                 blanked.push(name.to_string());
                 format!("{name}=")
@@ -345,7 +354,11 @@ fn scrub_url_query(rel_path: &str, text: &mut String, notes: &mut Vec<ExportNote
     };
     *text = clean;
     for name in blanked {
-        notes.push(blank_note(rel_path, "URL query", &format!("{name} (by name)")));
+        notes.push(blank_note(
+            rel_path,
+            "URL query",
+            &format!("{name} (by name)"),
+        ));
     }
 }
 
@@ -469,7 +482,9 @@ pub fn scrub_header_values(
     headers
         .into_iter()
         .map(|mut h| {
-            if is_sensitive_header(&h.key) && !h.value.is_empty() && !is_variable_reference(&h.value)
+            if is_sensitive_header(&h.key)
+                && !h.value.is_empty()
+                && !is_variable_reference(&h.value)
             {
                 h.value.clear();
                 notes.push(blank_note(path, "Credential", &format!("header {}", h.key)));
@@ -545,7 +560,11 @@ pub fn scrub_path_params(
             if is_sensitive_name(&p.name) && !p.value.is_empty() && !is_variable_reference(&p.value)
             {
                 p.value.clear();
-                notes.push(blank_note(path, "Path parameter", &format!("{} (by name)", p.name)));
+                notes.push(blank_note(
+                    path,
+                    "Path parameter",
+                    &format!("{} (by name)", p.name),
+                ));
             }
             p
         })
@@ -567,7 +586,11 @@ pub fn scrub_form_entries(
                 && !is_variable_reference(&e.value)
             {
                 e.value.clear();
-                notes.push(blank_note(path, "Form field", &format!("{} (by name)", e.key)));
+                notes.push(blank_note(
+                    path,
+                    "Form field",
+                    &format!("{} (by name)", e.key),
+                ));
             }
             e
         })
@@ -687,14 +710,21 @@ items:
         assert_eq!(auth(6)["consumerKey"], Value::String("ck".into()));
         assert_eq!(auth(7)["credentials"]["clientSecret"], empty());
         assert_eq!(auth(7)["resourceOwner"]["password"], empty());
-        assert_eq!(auth(7)["resourceOwner"]["username"], Value::String("ro".into()));
-        assert_eq!(auth(7)["credentials"]["clientId"], Value::String("cid".into()));
+        assert_eq!(
+            auth(7)["resourceOwner"]["username"],
+            Value::String("ro".into())
+        );
+        assert_eq!(
+            auth(7)["credentials"]["clientId"],
+            Value::String("cid".into())
+        );
         assert_eq!(auth(7)["accessTokenUrl"], Value::String("https://t".into()));
     }
 
     #[test]
     fn scrubs_collection_and_folder_auth() {
-        let mut collection = yaml("request:\n  auth:\n    type: basic\n    username: u\n    password: p\n");
+        let mut collection =
+            yaml("request:\n  auth:\n    type: basic\n    username: u\n    password: p\n");
         let mut folder = yaml("request:\n  auth:\n    type: bearer\n    token: t\n");
         let mut req = yaml("runtime:\n  auth:\n    type: bearer\n    token: t2\n");
         let mut notes = Vec::new();
@@ -723,14 +753,18 @@ request:
         scrub_yaml("r.yml", &mut v, &mut notes);
         assert_eq!(v["runtime"]["variables"][0]["value"], empty());
         assert_eq!(v["runtime"]["variables"][0]["initial"], empty());
-        assert_eq!(v["runtime"]["variables"][1]["value"], Value::String("plain".into()));
+        assert_eq!(
+            v["runtime"]["variables"][1]["value"],
+            Value::String("plain".into())
+        );
         assert_eq!(v["request"]["variables"][0]["value"], empty());
         assert_eq!(notes.len(), 2);
     }
 
     #[test]
     fn blanks_literal_authorization_header() {
-        let mut v = yaml("http:\n  headers:\n    - name: Authorization\n      value: Bearer abc123\n");
+        let mut v =
+            yaml("http:\n  headers:\n    - name: Authorization\n      value: Bearer abc123\n");
         let mut notes = Vec::new();
         scrub_yaml("r.yml", &mut v, &mut notes);
         assert_eq!(v["http"]["headers"][0]["value"], empty());
@@ -739,7 +773,9 @@ request:
 
     #[test]
     fn keeps_bearer_prefix_with_reference() {
-        let mut v = yaml("http:\n  headers:\n    - name: authorization\n      value: \"Bearer {{token}}\"\n");
+        let mut v = yaml(
+            "http:\n  headers:\n    - name: authorization\n      value: \"Bearer {{token}}\"\n",
+        );
         let mut notes = Vec::new();
         scrub_yaml("r.yml", &mut v, &mut notes);
         assert_eq!(
@@ -756,8 +792,14 @@ request:
         let mut notes = Vec::new();
         scrub_yaml("r.yml", &mut a, &mut notes);
         scrub_yaml("r.yml", &mut b, &mut notes);
-        assert_eq!(a["http"]["url"], Value::String("https://user:@host/x".into()));
-        assert_eq!(b["http"]["url"], Value::String("https://user:{{pw}}@host/x".into()));
+        assert_eq!(
+            a["http"]["url"],
+            Value::String("https://user:@host/x".into())
+        );
+        assert_eq!(
+            b["http"]["url"],
+            Value::String("https://user:{{pw}}@host/x".into())
+        );
         assert_eq!(notes.len(), 1);
     }
 
@@ -801,8 +843,14 @@ request:
         let mut notes = Vec::new();
         scrub_yaml("rpc/get.yml", &mut v, &mut notes);
         assert_eq!(v["grpc"]["metadata"][0]["value"], empty());
-        assert_eq!(v["grpc"]["metadata"][1]["value"], Value::String("keep".into()));
-        assert_eq!(v["grpc"]["metadata"][2]["value"], Value::String("{{c}}".into()));
+        assert_eq!(
+            v["grpc"]["metadata"][1]["value"],
+            Value::String("keep".into())
+        );
+        assert_eq!(
+            v["grpc"]["metadata"][2]["value"],
+            Value::String("{{c}}".into())
+        );
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].action, ExportAction::Blanked);
     }
@@ -909,9 +957,18 @@ request:
         );
         let mut notes = Vec::new();
         scrub_yaml("r.yml", &mut v, &mut notes);
-        assert_eq!(v["http"]["url"], Value::String("https://x.test/p?access_token={{t}}".into()));
-        assert_eq!(v["http"]["params"][0]["value"], Value::String("{{k}}".into()));
-        assert_eq!(v["http"]["headers"][0]["value"], Value::String("{{t}}".into()));
+        assert_eq!(
+            v["http"]["url"],
+            Value::String("https://x.test/p?access_token={{t}}".into())
+        );
+        assert_eq!(
+            v["http"]["params"][0]["value"],
+            Value::String("{{k}}".into())
+        );
+        assert_eq!(
+            v["http"]["headers"][0]["value"],
+            Value::String("{{t}}".into())
+        );
         assert_eq!(v["http"]["headers"][1]["value"], empty());
         assert_eq!(notes.len(), 1);
     }
@@ -979,7 +1036,9 @@ request:
 
     #[test]
     fn url_query_pairs_are_scrubbed_by_name() {
-        let mut a = yaml("http:\n  url: \"https://x.test/p?a=1&access_token=abc&token_type=Bearer&sig=ok\"\n");
+        let mut a = yaml(
+            "http:\n  url: \"https://x.test/p?a=1&access_token=abc&token_type=Bearer&sig=ok\"\n",
+        );
         let mut b = yaml("http:\n  url: \"https://x.test/p\"\n");
         let mut c = yaml("http:\n  url: \"https://u:pw@x.test/p?access_token=abc#frag\"\n");
         let mut notes = Vec::new();
@@ -1004,7 +1063,9 @@ request:
         let mut v = yaml(
             "http:\n  auth:\n    type: oauth2\n    accessTokenUrl: \"https://u:pw@idp.test/token?client_secret=x&a=1\"\n    authorizationUrl: \"https://idp.test/auth?state=s\"\n    refreshTokenUrl: \"{{base}}/r?token={{t}}\"\n",
         );
-        let mut o1 = yaml("http:\n  auth:\n    type: oauth1\n    callbackUrl: \"https://u:pw@app.test/cb\"\n");
+        let mut o1 = yaml(
+            "http:\n  auth:\n    type: oauth1\n    callbackUrl: \"https://u:pw@app.test/cb\"\n",
+        );
         let mut notes = Vec::new();
         scrub_yaml("r.yml", &mut v, &mut notes);
         scrub_yaml("r.yml", &mut o1, &mut notes);
@@ -1013,8 +1074,14 @@ request:
             a["accessTokenUrl"],
             Value::String("https://u:@idp.test/token?client_secret=&a=1".into())
         );
-        assert_eq!(a["authorizationUrl"], Value::String("https://idp.test/auth?state=s".into()));
-        assert_eq!(a["refreshTokenUrl"], Value::String("{{base}}/r?token={{t}}".into()));
+        assert_eq!(
+            a["authorizationUrl"],
+            Value::String("https://idp.test/auth?state=s".into())
+        );
+        assert_eq!(
+            a["refreshTokenUrl"],
+            Value::String("{{base}}/r?token={{t}}".into())
+        );
         assert_eq!(
             o1["http"]["auth"]["callbackUrl"],
             Value::String("https://u:@app.test/cb".into())
@@ -1041,7 +1108,10 @@ request:
     fn variables_are_blanked_by_name() {
         let rows = "    - {name: api_token, value: abc}\n    - {name: plain_name, value: abc}\n    - {name: db_password, value: \"{{ref}}\"}\n";
         let mut coll = yaml(&format!("request:\n  variables:\n{rows}"));
-        let mut env = yaml(&format!("name: dev\nvariables:\n{}", rows.replace("    -", "  -")));
+        let mut env = yaml(&format!(
+            "name: dev\nvariables:\n{}",
+            rows.replace("    -", "  -")
+        ));
         let mut notes = Vec::new();
         scrub_yaml("opencollection.yml", &mut coll, &mut notes);
         scrub_yaml("environments/dev.yml", &mut env, &mut notes);

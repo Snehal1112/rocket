@@ -3445,9 +3445,15 @@ fn create_typed_requests_exclusive_write_readable_files() {
     repo.create_websocket_request_exclusive("col", "c.yml", &ws)
         .expect("ws");
     let got = repo.get_graphql_request("col", "a.yml").expect("get gql");
-    assert_eq!((got.name.as_str(), got.url.as_str()), ("Orders", "https://e.example/graphql"));
+    assert_eq!(
+        (got.name.as_str(), got.url.as_str()),
+        ("Orders", "https://e.example/graphql")
+    );
     let got = repo.get_grpc_request("col", "b.yml").expect("get grpc");
-    assert_eq!((got.name.as_str(), got.url.as_str()), ("Say Hello", "localhost:50051"));
+    assert_eq!(
+        (got.name.as_str(), got.url.as_str()),
+        ("Say Hello", "localhost:50051")
+    );
     let got = repo.get_websocket_request("col", "c.yml").expect("get ws");
     assert_eq!((got.name.as_str(), got.url.as_str()), ("Chat", "ws://x"));
 }

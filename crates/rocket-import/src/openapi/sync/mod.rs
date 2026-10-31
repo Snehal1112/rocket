@@ -20,8 +20,8 @@ pub use merge::{
     merge_request, request_is_edited, Choice, FieldChange, FieldOutcome, MergeOutcome,
 };
 pub use plan::{
-    build_sync_plan, fingerprint, item_digest, merge_item, variable_digest, CurrentRequest, SyncInputs, SyncItem,
-    SyncPlan, VariableChange, VariableKind,
+    build_sync_plan, fingerprint, item_digest, merge_item, variable_digest, CurrentRequest,
+    SyncInputs, SyncItem, SyncPlan, VariableChange, VariableKind,
 };
 pub use reset::{reset_spec_owned_fields, restore_spec_owned_fields};
 pub use schema_view::{omitted as omitted_schema, BodyView, SchemaView};

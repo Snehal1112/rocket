@@ -129,14 +129,25 @@ fn full_tree() -> CollectionExportTree {
         }),
     };
     let auths = vec![
-        with_auth("bearer", Auth::Bearer { token: "{{token}}".into() }),
+        with_auth(
+            "bearer",
+            Auth::Bearer {
+                token: "{{token}}".into(),
+            },
+        ),
         with_auth(
             "basic",
-            Auth::Basic { username: "u".into(), password: "literal".into() },
+            Auth::Basic {
+                username: "u".into(),
+                password: "literal".into(),
+            },
         ),
         with_auth(
             "digest",
-            Auth::Digest { username: "u".into(), password: "{{pw}}".into() },
+            Auth::Digest {
+                username: "u".into(),
+                password: "{{pw}}".into(),
+            },
         ),
         with_auth(
             "ntlm",
@@ -187,7 +198,10 @@ fn full_tree() -> CollectionExportTree {
                 credentials: creds("basic_auth_header"),
                 scope: None,
                 state: Some("xyz".into()),
-                pkce: Some(OAuth2PKCE { disabled: None, method: Some("S256".into()) }),
+                pkce: Some(OAuth2PKCE {
+                    disabled: None,
+                    method: Some("S256".into()),
+                }),
                 additional_parameters: None,
                 token_config: None,
                 settings: None,
@@ -208,7 +222,9 @@ fn full_tree() -> CollectionExportTree {
         name: "Full".into(),
         settings: CollectionSettings {
             docs: Some("Collection docs".into()),
-            auth: Some(Auth::Bearer { token: "{{rootToken}}".into() }),
+            auth: Some(Auth::Bearer {
+                token: "{{rootToken}}".into(),
+            }),
             headers: vec![Header::new("X-Root", "1")],
             variables: vec![
                 var("baseUrl", "https://api.example.com", false, true),
@@ -258,8 +274,8 @@ fn full_tree() -> CollectionExportTree {
 
 #[test]
 fn full_collection_matches_golden() {
-    let (doc, _) = postman_collection(&full_tree(), &PostmanOptions::default())
-        .expect("export builds");
+    let (doc, _) =
+        postman_collection(&full_tree(), &PostmanOptions::default()).expect("export builds");
     let mut actual = serde_json::to_string_pretty(&doc).expect("json");
     // _postman_id is random, so the fixture stores a fixed marker.
     actual = actual.replace(doc["info"]["_postman_id"].as_str().expect("id"), "<uuid>");

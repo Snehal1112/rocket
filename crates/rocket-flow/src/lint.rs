@@ -169,7 +169,9 @@ impl<'a> GraphIndex<'a> {
                     .push(edge);
                 auth_sources.insert(edge.source_node_id.as_str());
             }
-            let fields = wired_fields.entry(edge.target_node_id.as_str()).or_default();
+            let fields = wired_fields
+                .entry(edge.target_node_id.as_str())
+                .or_default();
             match edge.target_field.as_str() {
                 "url" => fields.url = true,
                 "body" => fields.body = true,
@@ -400,7 +402,8 @@ fn auth_no_effect_lint(
     };
     // Any wire out of the node uses its value, such as an `auth` wire or a data
     // wire into a header. Only a node with no wire out can be idle.
-    if index.auth_sources.contains(node.id.as_str()) || index.successors.contains_key(node.id.as_str())
+    if index.auth_sources.contains(node.id.as_str())
+        || index.successors.contains_key(node.id.as_str())
     {
         return None;
     }
@@ -1266,7 +1269,10 @@ mod tests {
 
     #[test]
     fn an_applying_auth_node_in_a_flow_without_requests_is_flagged() {
-        let f = flow(vec![auth("a", true), input("in"), output("out")], Vec::new());
+        let f = flow(
+            vec![auth("a", true), input("in"), output("out")],
+            Vec::new(),
+        );
         assert_eq!(only(&lint(&f), AUTH_NO_EFFECT).len(), 1);
     }
 
@@ -1305,7 +1311,12 @@ mod tests {
     #[test]
     fn a_request_taking_another_auth_wire_does_not_use_the_inherited_credential() {
         let f = flow(
-            vec![auth("a1", true), auth("a2", false), inline_req("r"), output("out")],
+            vec![
+                auth("a1", true),
+                auth("a2", false),
+                inline_req("r"),
+                output("out"),
+            ],
             vec![
                 edge("e1", "a2", handle::RESULT, "r", handle::AUTH),
                 edge("e2", "r", handle::RESULT, "out", "value"),
@@ -1334,7 +1345,11 @@ mod tests {
         assert_eq!(found[0].edge_id.as_deref(), Some("e1"));
         assert_eq!(found[0].severity, LintSeverity::Warning);
         assert!(found[0].message.contains("'a'") && found[0].message.contains("'r'"));
-        assert!(found[0].message.contains("replaces"), "{}", found[0].message);
+        assert!(
+            found[0].message.contains("replaces"),
+            "{}",
+            found[0].message
+        );
     }
 
     #[test]
@@ -1411,7 +1426,11 @@ mod tests {
     #[test]
     fn a_saved_request_wired_before_its_wait_is_not_flagged() {
         let f = flow(
-            vec![request("r"), wait_node("w", "Pay wait", "payment"), output("out")],
+            vec![
+                request("r"),
+                wait_node("w", "Pay wait", "payment"),
+                output("out"),
+            ],
             vec![
                 edge("e1", "r", handle::RESULT, "w", handle::TRIGGER),
                 edge("e2", "w", handle::RESULT, "out", "value"),
@@ -1424,7 +1443,11 @@ mod tests {
     #[test]
     fn a_saved_request_with_no_path_to_its_wait_is_one_warning_naming_both_labels() {
         let f = flow(
-            vec![request("r"), wait_node("w", "Pay wait", "payment"), output("out")],
+            vec![
+                request("r"),
+                wait_node("w", "Pay wait", "payment"),
+                output("out"),
+            ],
             vec![edge("e1", "w", handle::RESULT, "out", "value")],
         );
         let lints = lint_with(&f, &sends("r.yml", &["payment"]));
@@ -1440,7 +1463,11 @@ mod tests {
     #[test]
     fn a_request_downstream_of_its_wait_is_flagged() {
         let f = flow(
-            vec![wait_node("w", "Pay wait", "payment"), request("r"), output("out")],
+            vec![
+                wait_node("w", "Pay wait", "payment"),
+                request("r"),
+                output("out"),
+            ],
             vec![
                 edge("e1", "w", handle::RESULT, "r", handle::TRIGGER),
                 edge("e2", "r", handle::RESULT, "out", "value"),
@@ -1453,7 +1480,11 @@ mod tests {
     #[test]
     fn a_request_reaching_its_wait_through_other_nodes_is_not_flagged() {
         let f = flow(
-            vec![request("r1"), request("r2"), wait_node("w", "Pay wait", "payment")],
+            vec![
+                request("r1"),
+                request("r2"),
+                wait_node("w", "Pay wait", "payment"),
+            ],
             vec![
                 edge("e1", "r1", handle::RESULT, "r2", handle::TRIGGER),
                 edge("e2", "r2", handle::RESULT, "w", handle::TRIGGER),
@@ -1491,7 +1522,11 @@ mod tests {
         let lints = lint_with(&f, &sends("r.yml", &["one", "two"]));
         let found = only(&lints, CALLBACK_NOT_WIRED);
         assert_eq!(found.len(), 1);
-        assert!(found[0].message.contains("'Second wait'"), "{}", found[0].message);
+        assert!(
+            found[0].message.contains("'Second wait'"),
+            "{}",
+            found[0].message
+        );
     }
 
     #[test]
@@ -1500,7 +1535,11 @@ mod tests {
             vec![inline_req("r"), wait_node("w", "Pay wait", "payment")],
             Vec::new(),
         );
-        assert!(only(&lint_with(&f, &sends("r", &["payment"])), CALLBACK_NOT_WIRED).is_empty());
+        assert!(only(
+            &lint_with(&f, &sends("r", &["payment"])),
+            CALLBACK_NOT_WIRED
+        )
+        .is_empty());
     }
 
     #[test]
@@ -1521,7 +1560,13 @@ mod tests {
         let f = flow(
             vec![auth("a", false), inline_req("r"), output("out")],
             vec![
-                edge("e1", "a", handle::RESULT, "r", "headers[Authorization].value"),
+                edge(
+                    "e1",
+                    "a",
+                    handle::RESULT,
+                    "r",
+                    "headers[Authorization].value",
+                ),
                 edge("e2", "r", handle::RESULT, "out", "value"),
             ],
         );
@@ -2435,7 +2480,10 @@ mod tests {
 
     #[test]
     fn a_missing_saved_request_is_an_error_naming_the_node() {
-        let f = flow(vec![saved_request("n1", "Log in", "auth/login.yml")], vec![]);
+        let f = flow(
+            vec![saved_request("n1", "Log in", "auth/login.yml")],
+            vec![],
+        );
         let lints = validate_with_warnings(&f, &missing("auth/login.yml"));
         let found = only(&lints, DANGLING_SAVED_REQUEST);
         assert_eq!(found.len(), 1);
@@ -2447,12 +2495,22 @@ mod tests {
             "'Log in' uses a saved request that no longer exists in this collection."
         );
         let hint = found[0].hint.as_deref().expect("a hint");
-        assert!(hint.starts_with("Pick another saved request"), "got: {hint}");
+        assert!(
+            hint.starts_with("Pick another saved request"),
+            "got: {hint}"
+        );
     }
 
     #[test]
     fn the_message_never_quotes_the_path() {
-        let f = flow(vec![saved_request("n1", "Log in", "private/s3cr3t-dir/login.yml")], vec![]);
+        let f = flow(
+            vec![saved_request(
+                "n1",
+                "Log in",
+                "private/s3cr3t-dir/login.yml",
+            )],
+            vec![],
+        );
         let lints = validate_with_warnings(&f, &missing("private/s3cr3t-dir/login.yml"));
         for l in &lints {
             let text = format!("{} {}", l.message, l.hint.as_deref().unwrap_or(""));
@@ -2482,7 +2540,10 @@ mod tests {
 
     #[test]
     fn an_inline_request_is_never_checked() {
-        let f = flow(vec![inline_request("a", "A", "https://x.test", &[], None)], vec![]);
+        let f = flow(
+            vec![inline_request("a", "A", "https://x.test", &[], None)],
+            vec![],
+        );
         let counting = Counting::default();
         let lints = validate_with_warnings(&f, &counting);
         assert!(only(&lints, DANGLING_SAVED_REQUEST).is_empty());
@@ -2563,7 +2624,9 @@ mod tests {
 
     fn unknown_in(f: &Flow) -> Vec<FlowLint> {
         let all = validate_with_warnings(f, &EverythingMissing);
-        all.into_iter().filter(|l| l.code == UNKNOWN_VARIABLE).collect()
+        all.into_iter()
+            .filter(|l| l.code == UNKNOWN_VARIABLE)
+            .collect()
     }
 
     #[test]
@@ -2593,7 +2656,13 @@ mod tests {
     #[test]
     fn one_unknown_name_reads_in_the_singular() {
         let f = flow(
-            vec![inline_request("n1", "Get", "https://x.test/{{id}}/{{id}}", &[], None)],
+            vec![inline_request(
+                "n1",
+                "Get",
+                "https://x.test/{{id}}/{{id}}",
+                &[],
+                None,
+            )],
             vec![],
         );
         assert_eq!(
@@ -2623,7 +2692,13 @@ mod tests {
     #[test]
     fn known_and_unanswered_names_are_skipped() {
         let f = flow(
-            vec![inline_request("n1", "Get", "{{known}}/{{maybe}}/{{gone}}", &[], None)],
+            vec![inline_request(
+                "n1",
+                "Get",
+                "{{known}}/{{maybe}}/{{gone}}",
+                &[],
+                None,
+            )],
             vec![],
         );
         let ctx = FakeContext {
@@ -2669,7 +2744,11 @@ mod tests {
             vec![],
         );
         let found = unknown_in(&f);
-        let text = format!("{} {}", found[0].message, found[0].hint.as_deref().unwrap_or(""));
+        let text = format!(
+            "{} {}",
+            found[0].message,
+            found[0].hint.as_deref().unwrap_or("")
+        );
         for leaked in ["s3cr3t", "secret-host", "https", "Bearer", "password"] {
             assert!(!text.contains(leaked), "{leaked} leaked in: {text}");
         }
@@ -2697,7 +2776,10 @@ mod tests {
         assert!(unknown_in(&f).is_empty());
         // A wire into one field leaves the other fields linted.
         let f = flow(
-            vec![input("in"), inline_request("n1", "Get", "{{urlVar}}", &[], Some("{{bodyVar}}"))],
+            vec![
+                input("in"),
+                inline_request("n1", "Get", "{{urlVar}}", &[], Some("{{bodyVar}}")),
+            ],
             vec![edge("e1", "in", handle::RESULT, "n1", "url")],
         );
         let found = unknown_in(&f);
@@ -2732,7 +2814,13 @@ mod tests {
     #[test]
     fn the_rule_asks_once_per_distinct_name_per_node() {
         let f = flow(
-            vec![inline_request("n1", "Get", "{{a}}{{a}}{{b}}", &[("H", "{{a}}")], Some("{{b}}"))],
+            vec![inline_request(
+                "n1",
+                "Get",
+                "{{a}}{{a}}{{b}}",
+                &[("H", "{{a}}")],
+                Some("{{b}}"),
+            )],
             vec![],
         );
         let counting = Counting::default();
@@ -2744,7 +2832,15 @@ mod tests {
     fn inline_requests(n: usize) -> Flow {
         flow(
             (0..n)
-                .map(|i| inline_request(&format!("n{i}"), &format!("Req {i}"), &format!("{{{{v{i}}}}}"), &[], None))
+                .map(|i| {
+                    inline_request(
+                        &format!("n{i}"),
+                        &format!("Req {i}"),
+                        &format!("{{{{v{i}}}}}"),
+                        &[],
+                        None,
+                    )
+                })
                 .collect(),
             vec![],
         )
