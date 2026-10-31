@@ -153,6 +153,19 @@ Shipped on local main (not pushed). Details in `docs/features/collection-trust.m
 |---|---|---|---|---|
 | R-71 | App command ACL: app commands callable only from the local page in the `main` window (the OAuth 2 window gets none) | done (`ac3caae5`) | `src-tauri/app-commands.txt`, `build.rs`, `capabilities/default.json`, `src-tauri/src/ipc_acl_tests.rs`; `docs/features/ipc-command-acl.md` | Manual checks in the doc are not yet run (need `yarn tauri dev` and `yarn tauri build`). |
 
+## 8f. Settings page, Bruno parity (2026-10-31)
+
+Spec and parity map: `docs/superpowers/specs/2026-10-31-settings-page-shell-design.md`.
+
+| ID | Item | Status | Where | What remains |
+|---|---|---|---|---|
+| R-72 | Settings Shell: global full-page Settings view, section nav, Proxy, Secret Managers and AI Agents dialogs moved in, Support and About | planned | spec above | Plan and build. |
+| R-73 | Settings: Themes (light, dark, system, theme variants) and Display (code font, font size, interface zoom) | open | parity map in the spec | Brainstorm and spec. Frontend only. |
+| R-74 | Settings: General (SSL verify, custom CA, cookies, OAuth2 system browser, auto save, timeout, default location) | open | parity map in the spec | Brainstorm and spec. Needs a global preferences file and Rust executor wiring. |
+| R-75 | Settings: global client certificates per domain, merged with per-environment certificates | open | parity map in the spec | Brainstorm and spec. Rust. |
+| R-76 | Settings: editable Keybindings | open | parity map in the spec | Needs a shortcut registry in place of the hardcoded `useKeyboardShortcuts.ts`. |
+| R-77 | Settings: Cache and Beta | open | parity map in the spec | Decide what Rocket caches and which features are beta. |
+
 ## 9. Probably dropped
 
 Confirm with the user before marking `dropped`.
