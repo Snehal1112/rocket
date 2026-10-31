@@ -48,9 +48,7 @@ export function EnvironmentSidebar({
   };
 
   return (
-    <div
-      className={cn('w-52 shrink-0 border-r border-border/60 flex flex-col bg-card/50', className)}
-    >
+    <div className={cn('w-52 shrink-0 border-r border-border flex flex-col bg-card/50', className)}>
       <div className='px-3 pt-3 pb-1.5'>
         <p className='text-[10px] font-semibold uppercase tracking-[0.06em] text-muted-foreground/70'>
           Environments
@@ -85,7 +83,7 @@ export function EnvironmentSidebar({
           )}
         </div>
       </ScrollArea>
-      <div className='p-2 border-t border-border/60 flex gap-1'>
+      <div className='p-2 border-t border-border flex gap-1'>
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>

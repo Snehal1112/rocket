@@ -287,7 +287,7 @@ export function OAuth2AuthEditor(props: OAuth2AuthEditorProps) {
   return (
     <div className='space-y-0'>
       {/* ── Flow ── */}
-      <div className='pb-4 mb-4 border-b border-border/40'>
+      <div className='pb-4 mb-4 border-b border-border'>
         <div className='flex items-start gap-3'>
           <div className='flex items-center gap-2 pt-1 shrink-0'>
             <Workflow className='h-3.5 w-3.5 text-foreground/60' aria-hidden='true' />
@@ -335,7 +335,7 @@ export function OAuth2AuthEditor(props: OAuth2AuthEditorProps) {
 
       {/* ── Configuration ── */}
       <section aria-labelledby='oauth2-config-heading' className='mb-4'>
-        <div className='flex items-center gap-2 pb-2.5 mb-3 border-b border-border/30'>
+        <div className='flex items-center gap-2 pb-2.5 mb-3 border-b border-border'>
           <OAuth2SectionHeader icon={ShieldCheck} title='Configuration' />
         </div>
         <OAuth2ConfigSection
@@ -347,11 +347,8 @@ export function OAuth2AuthEditor(props: OAuth2AuthEditorProps) {
       </section>
 
       {/* ── Token Handling ── */}
-      <section
-        aria-labelledby='oauth2-token-heading'
-        className='mb-4 pt-4 border-t border-border/40'
-      >
-        <div className='flex items-center gap-2 pb-2.5 mb-3 border-b border-border/30'>
+      <section aria-labelledby='oauth2-token-heading' className='mb-4 pt-4 border-t border-border'>
+        <div className='flex items-center gap-2 pb-2.5 mb-3 border-b border-border'>
           <OAuth2SectionHeader icon={KeyRound} title='Token Handling' />
         </div>
         <OAuth2TokenSection
@@ -364,7 +361,7 @@ export function OAuth2AuthEditor(props: OAuth2AuthEditorProps) {
 
       {/* ── Advanced (collapsible) ── */}
       {o.grantType !== 'implicit' && (
-        <section className='pt-1 border-t border-border/40'>
+        <section className='pt-1 border-t border-border'>
           <button
             type='button'
             className='flex w-full items-center gap-2 py-2.5 px-0.5 text-left rounded focus-visible:outline-2 focus-visible:outline-ring group'
@@ -389,7 +386,7 @@ export function OAuth2AuthEditor(props: OAuth2AuthEditorProps) {
             </span>
           </button>
           {advancedOpen && (
-            <div id={advancedId} className='mt-1 ml-[22px] border-l-2 border-border/40 pl-4 pb-3'>
+            <div id={advancedId} className='mt-1 ml-[22px] border-l-2 border-border pl-4 pb-3'>
               <OAuth2AdvancedSection
                 oauth2={o}
                 patchOAuth2={patchOAuth2}
@@ -402,7 +399,7 @@ export function OAuth2AuthEditor(props: OAuth2AuthEditorProps) {
       )}
 
       {/* ── Additional Parameters (collapsible) ── */}
-      <section className='border-t border-border/40'>
+      <section className='border-t border-border'>
         <button
           type='button'
           className='flex w-full items-center gap-2 py-2.5 px-0.5 text-left rounded focus-visible:outline-2 focus-visible:outline-ring group'
@@ -421,7 +418,7 @@ export function OAuth2AuthEditor(props: OAuth2AuthEditorProps) {
           </span>
         </button>
         {additionalOpen && (
-          <div id={additionalId} className='mt-1 ml-[22px] border-l-2 border-border/40 pl-4 pb-3'>
+          <div id={additionalId} className='mt-1 ml-[22px] border-l-2 border-border pl-4 pb-3'>
             <OAuth2AdditionalParams
               oauth2={o}
               patchOAuth2={patchOAuth2}
@@ -433,7 +430,7 @@ export function OAuth2AuthEditor(props: OAuth2AuthEditorProps) {
       </section>
 
       {/* ── Settings ── */}
-      <section aria-labelledby='oauth2-settings-heading' className='pt-1 border-t border-border/40'>
+      <section aria-labelledby='oauth2-settings-heading' className='pt-1 border-t border-border'>
         <div className='flex items-center gap-2 py-2.5 mb-2'>
           <OAuth2SectionHeader icon={Settings2} title='Settings' />
         </div>
@@ -441,7 +438,7 @@ export function OAuth2AuthEditor(props: OAuth2AuthEditorProps) {
       </section>
 
       {/* ── Action bar ── */}
-      <div className='flex flex-wrap items-center gap-2 pt-4 mt-2 border-t border-border/60'>
+      <div className='flex flex-wrap items-center gap-2 pt-4 mt-2 border-t border-border'>
         <Button
           variant='default'
           size='sm'

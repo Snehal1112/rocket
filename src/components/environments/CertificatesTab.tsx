@@ -119,7 +119,7 @@ export function CertificatesTab({
 
   return (
     <div className='flex-1 flex flex-col min-w-0 min-h-0'>
-      <div className='px-3 pt-3 pb-2 border-b border-border/40 shrink-0 space-y-0.5'>
+      <div className='px-3 pt-3 pb-2 border-b border-border shrink-0 space-y-0.5'>
         <p className='text-[11px] text-muted-foreground'>
           Domain: use * as a wildcard, for example *.example.com, and add :port to match one port.
           The first matching certificate is used, so put specific domains before wildcards.
@@ -191,7 +191,7 @@ export function CertificatesTab({
         </ScrollArea>
       )}
 
-      <div className='px-3 py-2 border-t border-border/40 flex items-center justify-between shrink-0'>
+      <div className='px-3 py-2 border-t border-border flex items-center justify-between shrink-0'>
         <div className='flex items-center gap-1'>
           <Button
             variant='ghost'
@@ -269,7 +269,7 @@ function CertificateRow({
   const n = idx + 1;
 
   return (
-    <div className='space-y-2 pb-3 border-b border-border/20 last:border-0'>
+    <div className='space-y-2 pb-3 border-b border-border last:border-0'>
       <div className='flex items-center gap-1.5 min-w-0'>
         <Badge variant='secondary' className='text-[11px] shrink-0'>
           {TYPE_LABELS[cert.type]}

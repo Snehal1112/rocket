@@ -1352,7 +1352,7 @@ export function RequestPanel({ tab, groupId: _groupId }: RequestPanelProps) {
             />
           ) : (
             <div className='flex flex-col items-center justify-center gap-4 py-10 text-center'>
-              <div className='h-12 w-12 rounded-xl bg-muted/40 border border-border/50 flex items-center justify-center'>
+              <div className='h-12 w-12 rounded-xl bg-muted/40 border border-border flex items-center justify-center'>
                 <Braces className='h-5 w-5 text-muted-foreground/30' />
               </div>
               <div className='space-y-1.5'>

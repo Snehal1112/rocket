@@ -64,7 +64,7 @@ function ConsoleEmptyState() {
         {CONSOLE_SOURCES.map(({ label, Icon }) => (
           <li
             key={label}
-            className='inline-flex items-center gap-1 rounded-full border border-border/70 px-2 py-0.5 text-xs text-muted-foreground'
+            className='inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground'
           >
             <Icon aria-hidden='true' className='h-3 w-3' />
             {label}
@@ -155,7 +155,7 @@ const scriptLevelLabel: Record<ScriptLogEntry['level'], string> = {
 
 function ScriptLogRow({ entry }: { entry: ScriptLogEntry }) {
   return (
-    <div className='flex items-start gap-1.5 px-2 py-1 border-b border-border/30'>
+    <div className='flex items-start gap-1.5 px-2 py-1 border-b border-border'>
       {/* Spacer matching the chevron width used in HTTP rows. */}
       <span className='w-3.5 shrink-0' />
       <span className='text-muted-foreground w-16 shrink-0'>{formatTime(entry.timestamp)}</span>
@@ -177,7 +177,7 @@ function ScriptLogRow({ entry }: { entry: ScriptLogEntry }) {
 
 function TestResultRow({ entry }: { entry: TestResultEntry }) {
   return (
-    <div className='flex items-start gap-1.5 px-2 py-1 border-b border-border/30'>
+    <div className='flex items-start gap-1.5 px-2 py-1 border-b border-border'>
       <span className='w-3.5 shrink-0' />
       <span className='text-muted-foreground w-16 shrink-0'>{formatTime(entry.timestamp)}</span>
       {entry.status === 'passed' ? (
@@ -214,7 +214,7 @@ const logLevelColor: Record<BackendLogLevel, string> = {
 function LogRow({ entry }: { entry: LogConsoleEntry }) {
   const fields = Object.entries({ ...entry.spanFields, ...entry.fields });
   return (
-    <div data-testid='console-log-row' className='px-2 py-1 border-b border-border/30'>
+    <div data-testid='console-log-row' className='px-2 py-1 border-b border-border'>
       <div className='flex items-start gap-1.5'>
         <span className='w-3.5 shrink-0' />
         <span className='text-muted-foreground w-16 shrink-0'>{formatTime(entry.timestamp)}</span>
@@ -323,7 +323,7 @@ export function ConsolePanel({ isOpen, height, onHeightChange }: ConsolePanelPro
       />
 
       {/* Toolbar. */}
-      <div className='flex items-center gap-2 px-2 py-1 border-b border-border/70 shrink-0'>
+      <div className='flex items-center gap-2 px-2 py-1 border-b border-border shrink-0'>
         <span className='text-sm font-medium'>Console</span>
         {visible.length > 0 && (
           <span className='text-2xs px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground'>
@@ -399,7 +399,7 @@ export function ConsolePanel({ isOpen, height, onHeightChange }: ConsolePanelPro
               <div key={entry.id}>
                 <button
                   type='button'
-                  className='flex items-center gap-1.5 px-2 py-1 hover:bg-accent/40 cursor-pointer border-b border-border/30 w-full text-left'
+                  className='flex items-center gap-1.5 px-2 py-1 hover:bg-accent/40 cursor-pointer border-b border-border w-full text-left'
                   onClick={() => toggleExpanded(entry.id)}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {

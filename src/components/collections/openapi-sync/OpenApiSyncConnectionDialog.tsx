@@ -182,7 +182,7 @@ function ConnectionBody({
     <>
       <section
         aria-label='Status'
-        className='flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/70 bg-card px-3 py-2.5'
+        className='flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2.5'
       >
         <p className={cn('flex items-center gap-2 text-sm', failed && 'text-destructive')}>
           <span
@@ -201,12 +201,12 @@ function ConnectionBody({
 
       <section
         aria-label='Spec link'
-        className='flex flex-col gap-3 rounded-lg border border-border/70 bg-muted/30 p-3'
+        className='flex flex-col gap-3 rounded-lg border border-border bg-muted/30 p-3'
       >
         <div className='flex items-center gap-3'>
           <span
             aria-hidden='true'
-            className='flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-border/70 bg-card text-muted-foreground'
+            className='flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-border bg-card text-muted-foreground'
           >
             {fileLocation ? <FileText className='h-5 w-5' /> : <Link2 className='h-5 w-5' />}
           </span>
@@ -234,7 +234,7 @@ function ConnectionBody({
             </Button>
           )}
         </div>
-        <div className='flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-2.5'>
+        <div className='flex flex-wrap items-center justify-between gap-2 border-t border-border pt-2.5'>
           <SyncBadge tone={granted ? 'success' : 'warning'} className='gap-1'>
             {granted ? (
               <ShieldCheck aria-hidden='true' className='h-3 w-3' />
@@ -350,7 +350,7 @@ function ConnectionBody({
         </div>
       </section>
 
-      <section aria-label='Access' className='flex flex-col gap-2 border-t border-border/70 pt-4'>
+      <section aria-label='Access' className='flex flex-col gap-2 border-t border-border pt-4'>
         {github ? (
           <>
             <div className='flex items-center justify-between gap-3'>
@@ -411,10 +411,7 @@ function ConnectionBody({
       </section>
 
       {granted && (
-        <section
-          aria-label='Trust'
-          className='flex flex-col gap-1.5 border-t border-border/70 pt-4'
-        >
+        <section aria-label='Trust' className='flex flex-col gap-1.5 border-t border-border pt-4'>
           <div className='flex items-center justify-between gap-4'>
             <div className='flex min-w-0 flex-col gap-0.5'>
               <p className='text-sm font-medium'>Trust on this machine</p>

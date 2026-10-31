@@ -612,7 +612,7 @@ html.windows.window-inactive #root {
 .dark [data-slot="card"] {
   background-color: hsl(var(--background));
   border-color: hsl(var(--border));
-  box-shadow: 0 0 0 1px hsl(var(--input) / 0.6);
+  box-shadow: none;
 }
 
 /* Nested card — one step deeper: --accent (#252627, L=15%).
@@ -627,7 +627,7 @@ html.windows.window-inactive #root {
 .dark [data-slot="card"] [data-slot="card"] {
   border-radius: calc(var(--radius) - 4px);
   background-color: hsl(var(--accent));
-  border-color: hsl(var(--input));
+  border-color: hsl(var(--border));
   box-shadow: none;
 }
 

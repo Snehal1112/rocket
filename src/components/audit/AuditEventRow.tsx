@@ -49,7 +49,7 @@ function summarize(event: SecurityAuditEvent): string {
 export function AuditEventRow({ event, className }: AuditEventRowProps) {
   const relative = formatRelative(event.occurredAt);
   return (
-    <tr className={cn('border-b border-border/60 last:border-0', className)}>
+    <tr className={cn('border-b border-border last:border-0', className)}>
       <td className='py-2 px-3 text-xs text-muted-foreground whitespace-nowrap'>
         <time dateTime={event.occurredAt} title={event.occurredAt}>
           {relative}

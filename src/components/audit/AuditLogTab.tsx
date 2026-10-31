@@ -42,7 +42,7 @@ export function AuditLogTab() {
   return (
     <div className='h-full flex flex-col bg-card'>
       {/* Header */}
-      <div className='shrink-0 border-b border-border/70 px-6 py-3 flex items-center justify-between'>
+      <div className='shrink-0 border-b border-border px-6 py-3 flex items-center justify-between'>
         <div className='flex items-center gap-2'>
           <ShieldCheck className='h-4 w-4 text-muted-foreground' />
           <h1 className='text-sm font-semibold'>Audit Log</h1>
@@ -74,7 +74,7 @@ export function AuditLogTab() {
       </div>
 
       {/* Filter */}
-      <div className='shrink-0 px-6 py-2 border-b border-border/50'>
+      <div className='shrink-0 px-6 py-2 border-b border-border'>
         <Input
           placeholder='Filter by actor, kind, control ID...'
           value={filter}
@@ -104,7 +104,7 @@ export function AuditLogTab() {
           </div>
         ) : (
           <table className='w-full text-left'>
-            <thead className='text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border/60 sticky top-0 bg-card'>
+            <thead className='text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border sticky top-0 bg-card'>
               <tr>
                 <th scope='col' className='py-2 px-3 font-medium'>
                   When

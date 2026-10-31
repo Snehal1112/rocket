@@ -77,7 +77,7 @@ export function TabItem({
           onSelect();
         }
       }}
-      className={`group flex items-center gap-1.5 px-3 py-2 text-sm border-r border-border/70 cursor-pointer shrink-0 min-w-0 ${isContractTab(tab) ? 'max-w-72' : 'max-w-47.5'} transition-all ${isDragging ? 'opacity-50' : ''} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 ${
+      className={`group flex items-center gap-1.5 px-3 py-2 text-sm border-r border-border cursor-pointer shrink-0 min-w-0 ${isContractTab(tab) ? 'max-w-72' : 'max-w-47.5'} transition-all ${isDragging ? 'opacity-50' : ''} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 ${
         isActive
           ? 'bg-tab-active-bg border-t-2 border-t-tab-active-border-top text-foreground'
           : 'bg-tab-inactive-bg hover:bg-tab-active-bg text-muted-foreground'

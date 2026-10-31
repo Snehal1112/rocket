@@ -196,7 +196,7 @@ function Group({
   const resettable = rows.filter((r) => r.key && isResetEligible(r.fields)).length;
   return (
     <section className='flex flex-col'>
-      <div className='sticky top-0 z-10 mb-1 flex min-h-11 items-center justify-between gap-3 rounded-lg border border-border/70 bg-card px-3 py-2 shadow-sm'>
+      <div className='sticky top-0 z-10 mb-1 flex min-h-11 items-center justify-between gap-3 rounded-lg border border-border bg-card px-3 py-2 shadow-sm'>
         <h3 className='min-w-0 truncate text-sm font-semibold'>
           {filtering
             ? `${GROUP_TITLE[kind]} (${rows.length} of ${total})`
@@ -249,7 +249,7 @@ function BackupGroup({
   if (rows.length === 0) return null;
   return (
     <section className='flex flex-col'>
-      <div className='mb-1 flex min-h-11 items-center rounded-lg border border-border/70 bg-card px-3 py-2 shadow-sm'>
+      <div className='mb-1 flex min-h-11 items-center rounded-lg border border-border bg-card px-3 py-2 shadow-sm'>
         <h3 className='min-w-0 truncate text-sm font-semibold'>{`Reset by you (${rows.length})`}</h3>
       </div>
       <ul className='flex flex-col'>

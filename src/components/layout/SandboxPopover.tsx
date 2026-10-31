@@ -84,7 +84,7 @@ export function SandboxPopover() {
         ) : (
           <>
             {/* Header */}
-            <div className='flex items-center gap-2 px-4 py-2.5 border-b border-border/60'>
+            <div className='flex items-center gap-2 px-4 py-2.5 border-b border-border'>
               <ShieldCheck className={cn('h-3 w-3 shrink-0', statusColorClass)} />
               <p className='text-[11px] font-semibold tracking-wider uppercase text-muted-foreground'>
                 JavaScript Sandbox

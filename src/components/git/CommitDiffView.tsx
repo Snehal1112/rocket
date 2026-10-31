@@ -71,8 +71,8 @@ export function CommitDiffView({ diffs, repositoryId, repositoryLabel }: CommitD
           maxSize silently clamps the panel to that many pixels instead of
           that percent, freezing it far narrower than intended. */}
       <ResizablePanel defaultSize={28} minSize='20%' maxSize='45%'>
-        <div className='h-full border-r border-border/70 flex flex-col'>
-          <div className='px-3 py-2 text-xs font-medium text-muted-foreground border-b border-border/70'>
+        <div className='h-full border-r border-border flex flex-col'>
+          <div className='px-3 py-2 text-xs font-medium text-muted-foreground border-b border-border'>
             {diffs.length} file{diffs.length !== 1 ? 's' : ''} changed
           </div>
           <TooltipProvider>

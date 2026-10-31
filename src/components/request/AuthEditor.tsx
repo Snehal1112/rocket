@@ -323,7 +323,7 @@ export function AuthEditor(props: AuthEditorProps) {
                 onNavigateToSource={onNavigateToSource}
               />
             </div>
-            <div className='flex items-center gap-3 pt-1 border-t border-border/40'>
+            <div className='flex items-center gap-3 pt-1 border-t border-border'>
               <p className='text-xs font-medium text-muted-foreground shrink-0'>Add to</p>
               <Select
                 value={auth.apiKey.addTo}

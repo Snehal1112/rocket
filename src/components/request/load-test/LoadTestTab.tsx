@@ -156,7 +156,7 @@ export function LoadTestTab({ request, tabId }: Props) {
         className='flex shrink-0 flex-col gap-3 overflow-y-auto bg-background p-3'
       >
         {/* Mode toggle */}
-        <div className='flex rounded-md border border-border/60 p-0.5'>
+        <div className='flex rounded-md border border-border p-0.5'>
           <Button
             variant='ghost'
             size='sm'
@@ -231,7 +231,7 @@ export function LoadTestTab({ request, tabId }: Props) {
               <SectionHeader icon={Activity} label='Ramp-up phases' />
 
               {/* Workload type — chooses concurrency or rps for all phases */}
-              <div className='flex rounded-md border border-border/60 p-0.5'>
+              <div className='flex rounded-md border border-border p-0.5'>
                 <Button
                   variant='ghost'
                   size='sm'
@@ -331,7 +331,7 @@ export function LoadTestTab({ request, tabId }: Props) {
 
       {/* Drag handle */}
       <div
-        className='flex w-[5px] shrink-0 cursor-col-resize items-center justify-center border-l border-r border-border/40 bg-transparent transition-colors hover:bg-border/40'
+        className='flex w-[5px] shrink-0 cursor-col-resize items-center justify-center border-l border-r border-border bg-transparent transition-colors hover:bg-border/40'
         onMouseDown={handleResizeStart}
         aria-hidden='true'
       >

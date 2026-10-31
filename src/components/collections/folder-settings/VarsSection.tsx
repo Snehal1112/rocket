@@ -12,7 +12,7 @@ export function VarsSection({ settings, onChange }: FolderSectionProps) {
     <ScrollArea className='h-full'>
       <div className='p-6 max-w-3xl mx-auto'>
         <Card>
-          <CardHeader className='pb-3 pt-4 px-4 border-b border-border/40'>
+          <CardHeader className='pb-3 pt-4 px-4 border-b border-border'>
             <CardTitle className='text-sm font-medium'>Pre Request</CardTitle>
             <p className='text-xs text-muted-foreground'>
               These variables are resolved before each request in this folder and its sub-folders

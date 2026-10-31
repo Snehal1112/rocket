@@ -292,7 +292,7 @@ export function GitStashSection({ onStashClick }: GitStashSectionProps) {
 
                   {/* Expanded file list — full row width, no truncation cap. */}
                   {expandedFilesIndex === stash.index && (
-                    <ul className='mt-1 space-y-0.5 border-t border-border/50 pt-1'>
+                    <ul className='mt-1 space-y-0.5 border-t border-border pt-1'>
                       {stash.changedFiles.map((f) => (
                         <li
                           key={f}
@@ -365,7 +365,7 @@ export function GitStashSection({ onStashClick }: GitStashSectionProps) {
 
       {/* Sticky action bar — visible when 1+ stashes are selected */}
       {isSelecting && (
-        <div className='flex items-center gap-1 px-3 py-1.5 border-t border-border/70 bg-background animate-in slide-in-from-bottom-2 duration-150'>
+        <div className='flex items-center gap-1 px-3 py-1.5 border-t border-border bg-background animate-in slide-in-from-bottom-2 duration-150'>
           <span className='text-[11px] text-muted-foreground flex-1'>
             {selectedIndices.size} selected
           </span>

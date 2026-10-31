@@ -111,7 +111,7 @@ export function ChangeLinkForm({
   const checking = previewMutation.isPending;
 
   return (
-    <div className='flex flex-col gap-3 border-t border-border/70 pt-3'>
+    <div className='flex flex-col gap-3 border-t border-border pt-3'>
       <div className='space-y-1'>
         <Label htmlFor='change-link-input' className='text-xs font-medium'>
           New spec link

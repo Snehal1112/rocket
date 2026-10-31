@@ -127,7 +127,7 @@ export function AuthSection({
   return (
     <div className='p-4 max-w-2xl'>
       <Card>
-        <CardHeader className='pb-3 pt-4 px-4 border-b border-border/40'>
+        <CardHeader className='pb-3 pt-4 px-4 border-b border-border'>
           <div className='flex items-center justify-between'>
             <div className='flex items-center gap-2'>
               <ShieldCheck className='h-4 w-4 text-muted-foreground' />

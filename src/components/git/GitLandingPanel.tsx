@@ -210,9 +210,9 @@ export function GitLandingPanel() {
 
   return (
     <div className='flex flex-col items-center justify-center h-full px-6'>
-      <Card className='w-full max-w-md border-border/40 rounded-md bg-card/80 '>
+      <Card className='w-full max-w-md border-border rounded-md bg-card/80 '>
         {/* Header: branch name + ahead/behind sync counts */}
-        <CardHeader className='px-4 py-3 space-y-1 border-b border-border/70'>
+        <CardHeader className='px-4 py-3 space-y-1 border-b border-border'>
           <div className='flex items-center gap-2'>
             <div className='flex items-center gap-1.5 min-w-0 flex-1'>
               <GitBranch className='h-4 w-4 text-muted-foreground shrink-0' />

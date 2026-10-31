@@ -92,7 +92,7 @@ export function PhaseBuilder({ phases, onChange, disabled, unit }: Props) {
           onDrop={() => handleDrop(i)}
           onDragEnd={handleDragEnd}
           className={`rounded-md border bg-muted/30 p-2 transition-all ${
-            dragOverIndex === i ? 'ring-1 ring-primary' : 'border-border/60'
+            dragOverIndex === i ? 'ring-1 ring-primary' : 'border-border'
           }`}
         >
           {/* Top row: grip + kind selector + delete */}

@@ -189,7 +189,7 @@ const Row = memo(function Row({
         />
       </div>
       {open && (
-        <div className='border-t border-border/60 bg-muted/10 px-4 py-3 md:pl-12'>
+        <div className='border-t border-border bg-muted/10 px-4 py-3 md:pl-12'>
           <OpenApiSyncDetail {...detail} selectedId={row.id} inline />
         </div>
       )}
@@ -216,7 +216,7 @@ function Section({
   return (
     <Collapsible open={open} onOpenChange={setOpen} asChild>
       <section className='flex flex-col'>
-        <div className='sticky top-0 z-10 mb-1 rounded-lg border border-border/70 bg-card shadow-sm'>
+        <div className='sticky top-0 z-10 mb-1 rounded-lg border border-border bg-card shadow-sm'>
           <CollapsibleTrigger asChild>
             <Button
               variant='ghost'

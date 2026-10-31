@@ -9,7 +9,7 @@ const TREE_CONTENT = 'flex w-full items-center gap-1.5 h-7 px-1.5 text-[13px] cu
 const TREE_ICON = 'size-4 shrink-0 text-muted-foreground';
 const TREE_ICON_STROKE = 1.75;
 const TREE_CHILDREN =
-  'ml-[14px] flex flex-col gap-px border-l border-border/50 hover:border-border transition-colors';
+  'ml-[14px] flex flex-col gap-px border-l border-border hover:border-border transition-colors';
 
 // Context shared between Tree and all TreeItem descendants.
 type TreeContextValue = {

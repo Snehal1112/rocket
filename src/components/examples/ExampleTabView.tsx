@@ -221,7 +221,7 @@ export function ExampleTabView({ tab }: { tab: ExampleTab }) {
   return (
     <div className='flex h-full flex-col overflow-hidden'>
       {/* Top bar: example name, method and status. */}
-      <div className='flex items-center gap-2 border-b border-border/70 px-3 py-1.5 shrink-0 bg-card'>
+      <div className='flex items-center gap-2 border-b border-border px-3 py-1.5 shrink-0 bg-card'>
         <FileText aria-hidden='true' className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
         <span className='truncate text-sm font-medium'>{tab.exampleName}</span>
         {method && (
@@ -253,7 +253,7 @@ export function ExampleTabView({ tab }: { tab: ExampleTab }) {
         <section
           aria-label='Request'
           className={cn(
-            'flex min-h-0 min-w-0 flex-col border-border/70',
+            'flex min-h-0 min-w-0 flex-col border-border',
             sideBySide ? 'border-r' : 'border-b',
           )}
         >

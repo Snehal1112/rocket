@@ -188,7 +188,7 @@ export function VariablePopover({
       )}
 
       {/* Footer: scope badge + nav link */}
-      <div className='flex items-center justify-between gap-4 px-2 py-1.5 border-t border-border/50 bg-muted/30'>
+      <div className='flex items-center justify-between gap-4 px-2 py-1.5 border-t border-border bg-muted/30'>
         <div className='flex items-center gap-1.5 text-2xs text-muted-foreground whitespace-nowrap'>
           <span className={badgeClass}>{badgeIcon}</span>
           <span>{scopeLabel}</span>

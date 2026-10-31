@@ -326,7 +326,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
       {/* Collection header — shadow appears when overview left panel is scrolled. */}
       <div
         className={cn(
-          'shrink-0 border-b border-border/70 px-6 pt-5 pb-0 transition-shadow duration-200',
+          'shrink-0 border-b border-border px-6 pt-5 pb-0 transition-shadow duration-200',
           isOverviewScrolled &&
             'shadow-[0_2px_8px_rgba(0,0,0,0.08)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.3)]',
         )}
@@ -481,7 +481,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
           <ScrollArea className='h-full'>
             <div className='p-6 max-w-2xl mx-auto space-y-6'>
               <Card>
-                <CardHeader className='pb-3 pt-4 px-4 border-b border-border/40'>
+                <CardHeader className='pb-3 pt-4 px-4 border-b border-border'>
                   <div className='flex items-center justify-between'>
                     <div className='flex items-center gap-2'>
                       <ShieldCheck className='h-4 w-4 text-muted-foreground' />
@@ -523,7 +523,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
                     environmentName={activeEnvId ?? undefined}
                   />
 
-                  <div className='flex justify-end pt-2 border-t border-border/40'>
+                  <div className='flex justify-end pt-2 border-t border-border'>
                     <Button
                       size='sm'
                       onClick={() => void triggerSave()}

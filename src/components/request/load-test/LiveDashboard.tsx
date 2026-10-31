@@ -119,7 +119,7 @@ export function LiveDashboard() {
       ) : (
         <>
           {/* Progress bar */}
-          <div className='border-b border-border/40 px-3 py-1.5'>
+          <div className='border-b border-border px-3 py-1.5'>
             <div className='mb-1 h-1 w-full overflow-hidden rounded-full bg-muted'>
               <div
                 className='h-full rounded-full bg-chart-4 transition-[width] duration-300'
@@ -137,19 +137,19 @@ export function LiveDashboard() {
 
           {/* 5-chart grid */}
           <div className='grid min-h-0 flex-1 grid-cols-2 grid-rows-[1fr_1fr_1fr] gap-2 p-2 pb-0'>
-            <div className='rounded-md border border-border/40 bg-background p-2'>
+            <div className='rounded-md border border-border bg-background p-2'>
               <LatencyChart />
             </div>
-            <div className='rounded-md border border-border/40 bg-background p-2'>
+            <div className='rounded-md border border-border bg-background p-2'>
               <ThroughputChart />
             </div>
-            <div className='rounded-md border border-border/40 bg-background p-2'>
+            <div className='rounded-md border border-border bg-background p-2'>
               <ErrorRateChart />
             </div>
-            <div className='rounded-md border border-border/40 bg-background p-2'>
+            <div className='rounded-md border border-border bg-background p-2'>
               <HistogramChart />
             </div>
-            <div className='col-span-2 rounded-md border border-border/40 bg-background p-2'>
+            <div className='col-span-2 rounded-md border border-border bg-background p-2'>
               <ConcurrencyChart />
             </div>
           </div>
@@ -157,12 +157,12 @@ export function LiveDashboard() {
           {/* Drag handle + request log */}
           <div
             aria-hidden='true'
-            className='group h-[5px] shrink-0 cursor-row-resize border-t border-border/40 bg-transparent transition-colors hover:bg-border/40'
+            className='group h-[5px] shrink-0 cursor-row-resize border-t border-border bg-transparent transition-colors hover:bg-border/40'
             onMouseDown={handleResizeStart}
           />
           <div
             ref={logRef}
-            className='shrink-0 overflow-hidden border-t border-border/40'
+            className='shrink-0 overflow-hidden border-t border-border'
             style={{ height: logHeight.current }}
           >
             <RequestLogTable />

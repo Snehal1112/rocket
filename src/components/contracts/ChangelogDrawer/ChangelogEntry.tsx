@@ -107,7 +107,7 @@ export function ChangelogEntry({
       {/* Target pill */}
       {hasTarget && (
         <div className='mt-1.5 w-full overflow-x-auto'>
-          <span className='font-mono text-[10px] bg-background/60 border border-border/60 px-1.5 py-0.5 rounded inline-flex gap-1 items-center whitespace-nowrap'>
+          <span className='font-mono text-[10px] bg-background/60 border border-border px-1.5 py-0.5 rounded inline-flex gap-1 items-center whitespace-nowrap'>
             {entry.requestMethod && (
               <span className='text-primary font-bold'>{entry.requestMethod}</span>
             )}

@@ -61,7 +61,7 @@ function BodyBlock({ body, collapsed }: { body: OpenApiBodyView; collapsed: bool
         )}
       </div>
       {open && body.schema && (
-        <div className='rounded-md border border-border/70 bg-background/60 p-3'>
+        <div className='rounded-md border border-border bg-background/60 p-3'>
           <SchemaTree schema={body.schema} />
         </div>
       )}
@@ -73,7 +73,7 @@ function BodyBlock({ body, collapsed }: { body: OpenApiBodyView; collapsed: bool
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className='flex flex-col gap-2'>
-      <h4 className='border-b border-border/70 pb-1 text-sm font-semibold'>{title}</h4>
+      <h4 className='border-b border-border pb-1 text-sm font-semibold'>{title}</h4>
       {children}
     </section>
   );
@@ -155,7 +155,7 @@ function statusTone(status: string): SyncTone {
 
 function OperationDetail({ op }: { op: OpenApiSpecOperation }) {
   return (
-    <div className='mt-1 flex flex-col gap-4 rounded-md border border-border/70 bg-card px-4 py-3 text-xs'>
+    <div className='mt-1 flex flex-col gap-4 rounded-md border border-border bg-card px-4 py-3 text-xs'>
       <Section title='Parameters'>
         {op.parameters.length === 0 ? (
           <p className='text-muted-foreground'>None.</p>
@@ -241,7 +241,7 @@ function TagGroup({
 }) {
   return (
     <section className='flex flex-col gap-1'>
-      <h3 className='border-b border-border/70 pb-1 text-sm font-medium'>{`${group.tag} (${total})`}</h3>
+      <h3 className='border-b border-border pb-1 text-sm font-medium'>{`${group.tag} (${total})`}</h3>
       <ul className='flex flex-col gap-1.5'>
         {shown.map((op) => (
           <OperationRow key={op.key} op={op} onOpen={onOpen} />
@@ -388,7 +388,7 @@ export function OpenApiSpecView({
         : `Server: ${data.servers[0]} +${data.servers.length - 1} more`;
   return (
     <div className='flex min-h-0 flex-1 flex-col overflow-hidden'>
-      <div className='flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border/70 px-4 py-2'>
+      <div className='flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-4 py-2'>
         {back}
         <h2 className='text-sm font-semibold'>{data.title}</h2>
         {data.version && <SyncBadge tone='neutral'>{data.version}</SyncBadge>}

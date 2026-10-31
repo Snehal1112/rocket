@@ -568,7 +568,7 @@ export function EnvironmentDialog({ open, onOpenChange }: EnvironmentDialogProps
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className='max-w-3xl p-0 gap-0 grid-cols-[minmax(0,1fr)]'>
-        <DialogHeader className='px-5 py-4 border-b border-border/60'>
+        <DialogHeader className='px-5 py-4 border-b border-border'>
           <DialogTitle className='text-sm font-semibold'>Manage Environments</DialogTitle>
           <DialogDescription className='sr-only'>
             Create, edit, and manage environment variables for this collection.

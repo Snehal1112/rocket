@@ -150,14 +150,14 @@ function EmptyState({ variant, onActivate }: EmptyStateProps) {
 
         <div className='flex items-center gap-3 text-xs text-muted-foreground/70'>
           <span className='flex items-center gap-1.5'>
-            <kbd className='rounded border border-border/60 bg-muted/80 px-1.5 py-0.5 font-mono text-2xs text-muted-foreground'>
+            <kbd className='rounded border border-border bg-muted/80 px-1.5 py-0.5 font-mono text-2xs text-muted-foreground'>
               ⌘ Enter
             </kbd>
             Send request
           </span>
           <span className='w-px h-3 bg-border/60' />
           <span className='flex items-center gap-1.5'>
-            <kbd className='rounded border border-border/60 bg-muted/80 px-1.5 py-0.5 font-mono text-2xs text-muted-foreground'>
+            <kbd className='rounded border border-border bg-muted/80 px-1.5 py-0.5 font-mono text-2xs text-muted-foreground'>
               ⌘ N
             </kbd>
             New request

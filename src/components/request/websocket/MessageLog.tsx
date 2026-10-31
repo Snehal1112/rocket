@@ -84,7 +84,7 @@ export function MessageLog({
               <li
                 key={entry.id}
                 data-direction={entry.direction}
-                className='flex items-start gap-2 border-b border-border/50 px-3 py-1 font-mono text-xs'
+                className='flex items-start gap-2 border-b border-border px-3 py-1 font-mono text-xs'
               >
                 <span title={DIRECTION_LABEL[entry.direction]}>
                   <DirectionIcon direction={entry.direction} />

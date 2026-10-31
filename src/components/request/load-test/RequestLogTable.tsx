@@ -14,7 +14,7 @@ export function RequestLogTable() {
 
   return (
     <div className='flex h-full flex-col overflow-hidden'>
-      <div className='flex items-baseline gap-2 border-b border-border/40 bg-muted/30 px-3 py-1.5'>
+      <div className='flex items-baseline gap-2 border-b border-border bg-muted/30 px-3 py-1.5'>
         <span className='text-[11px] font-medium text-muted-foreground'>Per-request log</span>
         <span className='text-[10px] font-normal text-muted-foreground'>
           · {requestLog.length} {requestLog.length === 1 ? 'entry' : 'entries'}

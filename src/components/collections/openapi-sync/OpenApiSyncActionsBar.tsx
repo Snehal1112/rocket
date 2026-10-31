@@ -62,7 +62,7 @@ export function OpenApiSyncActionsBar({
   const bulkOff = busy || locked || updateCount === 0;
   const searching = query.trim().length > 0;
   return (
-    <div className='flex flex-col gap-3 border-b border-border/70 px-4 py-3'>
+    <div className='flex flex-col gap-3 border-b border-border px-4 py-3'>
       <div className='flex flex-wrap items-start justify-between gap-3'>
         <div className='min-w-0'>
           <h2 className='text-sm font-semibold'>Review changes</h2>
@@ -174,7 +174,7 @@ export function OpenApiSyncFooter({
 }: OpenApiSyncFooterProps) {
   const left = updateCount - selectedCount;
   return (
-    <div className='flex flex-wrap items-center justify-between gap-3 border-t border-border/70 bg-card px-4 py-3'>
+    <div className='flex flex-wrap items-center justify-between gap-3 border-t border-border bg-card px-4 py-3'>
       <p className='text-sm text-muted-foreground'>
         {selectedCount === 0
           ? 'Nothing is selected, so a sync would change nothing.'

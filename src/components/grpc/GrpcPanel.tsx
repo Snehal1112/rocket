@@ -180,7 +180,7 @@ export function GrpcPanel({ tab, groupId }: GrpcPanelProps) {
 
   return (
     <div className='flex h-full min-h-0 flex-col'>
-      <div className='flex items-center gap-2 border-b border-border/60 px-3 py-2'>
+      <div className='flex items-center gap-2 border-b border-border px-3 py-2'>
         <Badge variant='outline' className='shrink-0 text-teal-500'>
           gRPC
         </Badge>
@@ -223,7 +223,7 @@ export function GrpcPanel({ tab, groupId }: GrpcPanelProps) {
         <SaveRequestButton tab={tab} groupId={groupId} />
       </div>
 
-      <div className='border-b border-border/60 px-3 py-2'>
+      <div className='border-b border-border px-3 py-2'>
         <GrpcMethodPicker
           method={grpc.method}
           methodType={grpc.methodType}
@@ -330,7 +330,7 @@ export function GrpcPanel({ tab, groupId }: GrpcPanelProps) {
             )}
           </TabsContent>
         </Tabs>
-        <div className='min-h-[160px] flex-1 overflow-hidden rounded-md border border-border/60'>
+        <div className='min-h-[160px] flex-1 overflow-hidden rounded-md border border-border'>
           <GrpcResponseView unary={unary} session={session} />
         </div>
       </div>

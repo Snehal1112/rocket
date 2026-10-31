@@ -34,7 +34,7 @@ export function WorkspaceSecurityPopover() {
       </PopoverTrigger>
       <PopoverContent className='w-72 p-0 overflow-hidden' align='end'>
         {/* Header */}
-        <div className='flex items-center gap-2 px-4 py-2.5 border-b border-border/60'>
+        <div className='flex items-center gap-2 px-4 py-2.5 border-b border-border'>
           <Network className='h-3 w-3 shrink-0 text-muted-foreground' />
           <p className='text-[11px] font-semibold tracking-wider uppercase text-muted-foreground'>
             Request Guard

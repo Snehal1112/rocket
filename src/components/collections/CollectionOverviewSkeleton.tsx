@@ -20,7 +20,7 @@ function CardBlock({ title, rows }: { title: string; rows: string[] }) {
 export function CollectionOverviewSkeleton() {
   return (
     <SkeletonRegion label='Loading collection' className='flex h-full flex-col overflow-hidden'>
-      <div className='shrink-0 border-b border-border/70 px-6 pt-5 pb-0'>
+      <div className='shrink-0 border-b border-border px-6 pt-5 pb-0'>
         <div className='flex items-center gap-2.5 mb-1'>
           <Skeleton className='size-5 shrink-0' />
           <Skeleton className='h-6 w-56' />

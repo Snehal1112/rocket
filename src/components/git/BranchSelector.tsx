@@ -224,7 +224,7 @@ export function BranchSelector() {
           {switchError && (
             <div
               role='alert'
-              className='flex items-start gap-1.5 px-2 py-1.5 text-xs text-destructive border-b border-border/70'
+              className='flex items-start gap-1.5 px-2 py-1.5 text-xs text-destructive border-b border-border'
             >
               <AlertCircle className='h-3 w-3 shrink-0 mt-0.5' />
               <span className='wrap-break-word'>{switchError}</span>

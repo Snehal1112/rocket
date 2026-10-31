@@ -34,7 +34,7 @@ export function StatBar() {
 
   if (!src) {
     return (
-      <div className='grid grid-cols-6 gap-2 border-b border-border/40 bg-background px-3 py-2'>
+      <div className='grid grid-cols-6 gap-2 border-b border-border bg-background px-3 py-2'>
         <Stat label='Completed' value='—' />
         <Stat label='Succeeded' value='—' />
         <Stat label='Failed' value='—' />
@@ -55,7 +55,7 @@ export function StatBar() {
   const elapsedMs = isSnapshot ? src.elapsedMs : src.totalDurationMs;
 
   return (
-    <div className='grid grid-cols-6 gap-2 border-b border-border/40 bg-background px-3 py-2'>
+    <div className='grid grid-cols-6 gap-2 border-b border-border bg-background px-3 py-2'>
       <Stat label='Completed' value={String(completed)} />
       <Stat label='Succeeded' value={String(succeeded)} className='text-chart-2' />
       <Stat

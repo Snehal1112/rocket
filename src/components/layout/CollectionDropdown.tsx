@@ -61,7 +61,7 @@ export function CollectionDropdown() {
         align='start'
       >
         {/* Workspace section — clickable to open workspace tabs. */}
-        <div className='border-b border-border/70'>
+        <div className='border-b border-border'>
           <p className='text-[10px] text-muted-foreground uppercase tracking-wider font-medium px-3 pt-2.5 mb-1.5'>
             Workspace
           </p>

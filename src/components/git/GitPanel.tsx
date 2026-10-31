@@ -249,10 +249,10 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
           {/* LEFT PANEL */}
           <div
             style={{ width: `${leftWidth}px` }}
-            className='shrink-0 border-r border-border/70 flex flex-col overflow-hidden'
+            className='shrink-0 border-r border-border flex flex-col overflow-hidden'
           >
             {/* Collection name header with branch selector. */}
-            <div className='flex items-center gap-2 px-3 py-2.5 border-b border-border/70 shrink-0'>
+            <div className='flex items-center gap-2 px-3 py-2.5 border-b border-border shrink-0'>
               <Package className='h-3.5 w-3.5 text-muted-foreground' />
               <span className='text-sm font-medium truncate flex-1'>{repositoryLabel}</span>
               <BranchSelector />
@@ -260,7 +260,7 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
 
             {/* In-merge banner — shown when there are conflicted files. */}
             {hasConflicts && (
-              <div className='px-3 py-2 bg-destructive/10 border-b border-border/70 flex items-center gap-2 shrink-0'>
+              <div className='px-3 py-2 bg-destructive/10 border-b border-border flex items-center gap-2 shrink-0'>
                 <AlertTriangle className='h-3.5 w-3.5 text-destructive shrink-0' />
                 <span className='text-xs text-destructive flex-1'>
                   Merge in progress — {conflictCount} conflicted
@@ -269,7 +269,7 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
             )}
 
             {/* Commit form */}
-            <div className='shrink-0 px-3 pt-2.5 pb-2 border-b border-border/70'>
+            <div className='shrink-0 px-3 pt-2.5 pb-2 border-b border-border'>
               <GitCommitForm />
             </div>
 
@@ -280,7 +280,7 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
             />
 
             {/* Links section */}
-            <div className='shrink-0 border-t border-border/70'>
+            <div className='shrink-0 border-t border-border'>
               <GitLinksSection
                 onNavigate={(view) => setRightPanel({ kind: view })}
                 onOpenRemotes={() => setShowRemotesDialog(true)}
@@ -319,7 +319,7 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
           <div className='flex-1 overflow-hidden flex flex-col'>
             {/* Breadcrumb header — visible when not on landing/overview. */}
             {rightPanel.kind !== 'landing' && (
-              <div className='flex items-center gap-2 px-3 py-2 border-b border-border/70 shrink-0'>
+              <div className='flex items-center gap-2 px-3 py-2 border-b border-border shrink-0'>
                 <Button
                   variant='ghost'
                   size='sm'
@@ -384,7 +384,7 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
                   {commitDiffError && (
                     <div
                       role='alert'
-                      className='px-3 py-2 text-xs text-destructive border-b border-border/70 bg-destructive/10 shrink-0'
+                      className='px-3 py-2 text-xs text-destructive border-b border-border bg-destructive/10 shrink-0'
                     >
                       Failed to load commit diff: {commitDiffError}
                     </div>
@@ -411,7 +411,7 @@ export function GitPanel({ repositoryId, repositoryLabel }: GitPanelProps) {
                   {stashDiffError && (
                     <div
                       role='alert'
-                      className='px-3 py-2 text-xs text-destructive border-b border-border/70 bg-destructive/10 shrink-0'
+                      className='px-3 py-2 text-xs text-destructive border-b border-border bg-destructive/10 shrink-0'
                     >
                       Failed to load stash diff: {stashDiffError}
                     </div>

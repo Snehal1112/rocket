@@ -60,7 +60,7 @@ export function RequestDocsPanel({
             disabled={!hasSource}
           />
         </div>
-        <div className='flex justify-between items-center gap-2 px-3 py-3 border-t border-border/60 bg-muted/20 shrink-0'>
+        <div className='flex justify-between items-center gap-2 px-3 py-3 border-t border-border bg-muted/20 shrink-0'>
           <span className='text-[10px] text-muted-foreground/40 font-mono'>
             Markdown · auto-saves on blur
           </span>
@@ -92,7 +92,7 @@ export function RequestDocsPanel({
       ) : (
         <div className='h-full flex flex-col items-center justify-center gap-4 text-center py-8'>
           <div className='relative'>
-            <div className='h-14 w-14 rounded-xl bg-muted/40 border border-border/50 flex items-center justify-center'>
+            <div className='h-14 w-14 rounded-xl bg-muted/40 border border-border flex items-center justify-center'>
               <FileText className='h-6 w-6 text-muted-foreground/30' />
             </div>
             {hasSource && (

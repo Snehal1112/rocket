@@ -73,7 +73,7 @@ export function GrpcResponseView({ unary, session }: GrpcResponseViewProps) {
             <ScrollArea className='h-full'>
               <ol aria-label='Message log' className='flex flex-col gap-2 p-2'>
                 {session.log.map((entry) => (
-                  <li key={entry.id} className='rounded-md border border-border/60 p-2'>
+                  <li key={entry.id} className='rounded-md border border-border p-2'>
                     <div className='mb-1 flex items-center gap-1.5 text-[10px] uppercase text-muted-foreground'>
                       {entry.direction === 'out' ? (
                         <ArrowUp className='h-3 w-3' aria-label='Sent' />
