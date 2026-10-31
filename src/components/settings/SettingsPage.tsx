@@ -56,7 +56,7 @@ export function SettingsPage() {
       ref={rootRef}
       tabIndex={-1}
       aria-label='Settings'
-      className='flex h-full flex-col bg-editor-bg outline-none'
+      className='flex h-full flex-col bg-elevation-sunken outline-none'
     >
       <header className='flex h-10 shrink-0 items-center justify-between border-b px-4'>
         <h1 className='text-sm font-semibold'>Settings</h1>

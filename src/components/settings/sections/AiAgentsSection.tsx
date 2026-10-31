@@ -308,7 +308,7 @@ export function AiAgentsSection() {
         // Pinned to the bottom of the Settings scroll panel and spans its full width (data-bleed).
         <div
           data-bleed
-          className='sticky bottom-0 z-10 -mx-6 -mb-6 mt-6 flex items-center justify-end gap-2 border-t bg-editor-bg px-6 py-3'
+          className='sticky bottom-0 z-10 -mx-6 -mb-6 mt-6 flex items-center justify-end gap-2 border-t bg-elevation-sunken px-6 py-3'
         >
           {saveHelp && (
             <p id={SAVE_HELP_ID} className='mr-auto text-xs text-muted-foreground'>

@@ -131,7 +131,7 @@ function HttpEntryDetail({ entry, revealed, onToggleReveal }: HttpEntryDetailPro
         {sections.map((s) => (
           <div key={s.label}>
             <div className='font-medium text-muted-foreground mb-1'>{s.label}</div>
-            <pre className='font-mono whitespace-pre-wrap break-all bg-background/60 rounded p-1.5 max-h-32 overflow-auto text-2xs'>
+            <pre className='font-mono whitespace-pre-wrap break-all bg-elevation-sunken rounded p-1.5 max-h-32 overflow-auto text-2xs'>
               {s.content}
             </pre>
           </div>
