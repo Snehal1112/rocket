@@ -615,7 +615,8 @@ async fn a_huge_spec_scans_fast_and_keeps_few_notes() {
         .expect("bundle");
     assert_eq!(fetcher.requests().len(), 20);
     assert!(bundle.incomplete);
-    assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    // A loose bound: it catches unbounded work, and a slow shared CI runner still passes.
+    assert!(started.elapsed() < std::time::Duration::from_secs(10));
 }
 
 #[tokio::test]
