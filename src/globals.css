@@ -211,7 +211,7 @@
   }
   .dark {
     /* VSCode 2026 Dark: sideBar.background #191A1B — shell/sidebar base layer */
-    --background: 210 5% 10%;
+    --background: var(--elevation-surface-bg);
     /* VSCode 2026 Dark: foreground bumped to #D1D1D1 for wider text hierarchy */
     --foreground: 0 0% 82%;
     /* VSCode 2026 Dark: editor.background #121314 — elevated content surface */
@@ -271,7 +271,7 @@
     /* VSCode 2026 Dark: toolbar token */
     --toolbar-hover: rgba(255, 255, 255, 0.094); /* toolbar.hoverBackground #FFFFFF18 */
     /* VSCode 2026 Dark: status bar tokens */
-    --statusbar-bg: 210 5% 10%; /* statusBar.background        #191A1B */
+    --statusbar-bg: var(--elevation-surface-bg); /* statusBar.background, default level */
     --statusbar-border: 210 2% 17%; /* statusBar.border            #2A2B2C — same as --border dark */
     --statusbar-item-hover: 210 3% 15%; /* statusBarItem.hoverBackground #262728 */
     --statusbar-item-active: 210 2% 29.6%; /* statusBarItem.activeBackground #4B4C4D */
@@ -332,7 +332,7 @@
     --list-error-fg: 9 85% 70%; /* list.errorForeground            #f48771 */
     --list-warning-fg: 36 69% 69%; /* list.warningForeground          #e5ba7d */
     /* VSCode 2026 Dark: panel tokens */
-    --panel-bg: 210 5% 10%; /* panel.background                #191A1B */
+    --panel-bg: var(--elevation-surface-bg); /* panel.background, default level */
     --panel-border: 210 2% 17%; /* panel.border                    #2A2B2C */
     --panel-title-active-border: 199 53% 48%; /* panelTitle.activeBorder         #3994BC */
     --panel-title-active-fg: 0 0% 75%; /* panelTitle.activeForeground     #bfbfbf */
@@ -341,7 +341,7 @@
     --sidebar-bg: var(--elevation-raised-bg); /* sideBar.background, raised level */
     --sidebar-border: 210 2% 17%; /* sideBar.border                  #2A2B2C */
     /* VSCode 2026 Dark: title bar tokens */
-    --titlebar-bg: 210 5% 10%; /* titleBar.activeBackground       #191A1B */
+    --titlebar-bg: var(--elevation-surface-bg); /* titleBar.activeBackground, default level */
     --titlebar-fg: 0 0% 55%; /* titleBar.activeForeground       #8C8C8C */
     --titlebar-border: 210 2% 17%; /* titleBar.border                 #2A2B2C */
     /* VSCode 2026 Dark: notification icon tokens */

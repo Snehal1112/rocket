@@ -149,3 +149,15 @@ describe('raised sidebar', () => {
     expect(app).not.toContain('sidebar-elevation');
   });
 });
+
+describe('default surface', () => {
+  it('aliases the dark shell tokens to the default surface', () => {
+    for (const name of ['--background', '--statusbar-bg', '--panel-bg', '--titlebar-bg']) {
+      expect(dark).toMatch(new RegExp(`${name}:\\s*var\\(--elevation-surface-bg\\)`));
+    }
+  });
+
+  it('keeps the same visible default surface value', () => {
+    expect(hslTriple(dark, '--elevation-surface-bg')).toEqual([210, 5, 10]);
+  });
+});
