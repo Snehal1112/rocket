@@ -26,15 +26,28 @@ export function SettingsPage() {
     root.focus();
     // A native listener: Radix popups render in portals outside this subtree, so their Esc stays theirs.
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || e.defaultPrevented) return;
-      if (e.target instanceof Element && e.target.closest(ESC_IGNORED_FROM)) return;
-      e.preventDefault();
-      useSettingsStore.getState().closeSettings();
+      if (e.key === 'Escape' && !e.defaultPrevented) {
+        if (!(e.target instanceof Element && e.target.closest(ESC_IGNORED_FROM))) {
+          e.preventDefault();
+          useSettingsStore.getState().closeSettings();
+        }
+      }
+    };
+    // On body, not the root: React listens at #root, so a stop here keeps React handlers alive
+    // and still hides plain keys from the document and window listeners of the tabs below.
+    // Modified keys pass on, so the global shortcuts keep working.
+    const stopPlainKeys = (e: KeyboardEvent) => {
+      if (!e.ctrlKey && !e.metaKey && !e.altKey) e.stopPropagation();
     };
     root.addEventListener('keydown', onKeyDown);
+    document.body.addEventListener('keydown', stopPlainKeys);
     return () => {
       root.removeEventListener('keydown', onKeyDown);
-      if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
+      document.body.removeEventListener('keydown', stopPlainKeys);
+      // Restore only when focus is still here or nowhere, so a fresh click keeps its focus.
+      const current = document.activeElement;
+      const focusIsFree = !current || current === document.body || root.contains(current);
+      if (focusIsFree && previous instanceof HTMLElement && previous.isConnected) previous.focus();
     };
   }, []);
 
@@ -43,7 +56,7 @@ export function SettingsPage() {
       ref={rootRef}
       tabIndex={-1}
       aria-label='Settings'
-      className='flex h-full flex-col bg-background outline-none'
+      className='flex h-full flex-col bg-editor-bg outline-none'
     >
       <header className='flex h-10 shrink-0 items-center justify-between border-b px-4'>
         <h1 className='text-sm font-semibold'>Settings</h1>
@@ -72,8 +85,9 @@ export function SettingsPage() {
                 disabled={locked && !isActive}
                 onClick={() => setSection(s.id)}
                 className={cn(
-                  'w-full justify-start gap-2 font-normal',
-                  isActive && 'bg-accent text-accent-foreground',
+                  'relative w-full justify-start gap-2 font-normal hover:bg-list-hover-bg',
+                  isActive &&
+                    "bg-list-active-bg text-list-active-fg before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-primary before:content-[''] hover:bg-list-active-bg",
                 )}
               >
                 <Icon className='h-4 w-4' aria-hidden='true' />
@@ -83,7 +97,15 @@ export function SettingsPage() {
           })}
         </nav>
         <div className='min-w-0 flex-1 overflow-y-auto'>
-          <div className={cn('p-6', active.wide ? 'max-w-3xl' : 'max-w-xl')}>
+          {/* The cap applies to each direct child, so a data-bleed bar can span the whole panel. */}
+          <div
+            className={cn(
+              'p-6',
+              active.wide
+                ? '[&>*:not([data-bleed])]:max-w-5xl'
+                : '[&>*:not([data-bleed])]:max-w-xl',
+            )}
+          >
             <ActiveSection key={active.id} />
           </div>
         </div>

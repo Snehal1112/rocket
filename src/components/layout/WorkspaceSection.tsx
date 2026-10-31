@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { useCloseWorkspace, useRenameWorkspace } from '@/lib/queries/workspace-queries';
 import type { Workspace } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
+import { useSettingsStore } from '@/stores/settings-store';
 
 interface WorkspaceSectionProps {
   workspace: Workspace;
@@ -27,10 +28,13 @@ export function WorkspaceSection({ workspace, children, collectionCount }: Works
   const closeMutation = useCloseWorkspace();
 
   const handleOpenWorkspace = () => {
+    // Settings steps aside so the user lands on what they clicked.
+    useSettingsStore.getState().closeSettings();
     usePaneStore.getState().openWorkspaceTabs(workspace.id);
   };
 
   const handleOpenAudit = () => {
+    useSettingsStore.getState().closeSettings();
     usePaneStore.getState().openWorkspaceTabs(workspace.id, 'audit');
   };
 

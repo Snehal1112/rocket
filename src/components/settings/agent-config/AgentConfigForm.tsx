@@ -50,9 +50,9 @@ export function AgentConfigForm({ value, onChange, hasSavedCredential }: AgentCo
   );
 
   return (
-    <div className='space-y-6'>
-      <section aria-labelledby='ac-section-agent' className='space-y-4'>
-        <h3 id='ac-section-agent' className='text-sm font-semibold'>
+    <div className='space-y-8'>
+      <section aria-labelledby='ac-section-agent' className='space-y-5'>
+        <h3 id='ac-section-agent' className='border-b border-border pb-2 text-sm font-semibold'>
           Agent
         </h3>
         <FormField
@@ -128,8 +128,11 @@ export function AgentConfigForm({ value, onChange, hasSavedCredential }: AgentCo
         </FormField>
       </section>
 
-      <section aria-labelledby='ac-section-credential' className='space-y-4'>
-        <h3 id='ac-section-credential' className='text-sm font-semibold'>
+      <section aria-labelledby='ac-section-credential' className='space-y-5'>
+        <h3
+          id='ac-section-credential'
+          className='border-b border-border pb-2 text-sm font-semibold'
+        >
           Credential
         </h3>
         <AgentCredentialSection

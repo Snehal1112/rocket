@@ -4,6 +4,7 @@ import {
   ListTree,
   MessageSquare,
   Play,
+  Settings,
   ShieldCheck,
   Sparkles,
 } from 'lucide-react';
@@ -21,6 +22,7 @@ import { startAssistant } from '@/lib/assistant/assistant-session';
 import { useAgentConfigs } from '@/lib/queries/agent-config-queries';
 import { cn } from '@/lib/utils';
 import { useAssistantStore } from '@/stores/assistant-store';
+import { useSettingsStore } from '@/stores/settings-store';
 
 const CAPABILITIES = [
   { icon: MessageSquare, title: 'Ask', text: 'Questions about your collections and requests.' },
@@ -31,6 +33,7 @@ const CAPABILITIES = [
 /** Agent picker and Start button. Shown before a session and after one ends. */
 export function AssistantStartView() {
   const { data: agentConfigs = [] } = useAgentConfigs();
+  const openSettings = useSettingsStore((s) => s.openSettings);
   const error = useAssistantStore((s) =>
     s.session?.status === 'error' ? s.session.error : undefined,
   );
@@ -106,9 +109,13 @@ export function AssistantStartView() {
         </p>
       )}
       {agentConfigs.length === 0 ? (
-        <p className='text-xs text-muted-foreground'>
-          No agents are configured yet. Add one with the agent button in the title bar.
-        </p>
+        <div className='flex flex-col items-start gap-2'>
+          <p className='text-xs text-muted-foreground'>No agents are configured yet.</p>
+          <Button variant='outline' size='sm' onClick={() => openSettings('ai')}>
+            <Settings className='mr-1.5 h-3.5 w-3.5' aria-hidden='true' />
+            Open AI Agents settings
+          </Button>
+        </div>
       ) : (
         <div className={cn('flex flex-col gap-3', !hasMessages && 'mt-auto')}>
           <div className='flex flex-col gap-1.5'>

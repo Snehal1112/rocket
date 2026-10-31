@@ -49,6 +49,7 @@ import { cn } from '@/lib/utils';
 import { useEnvStore } from '@/stores/env-store';
 import { useFlowAuthStore } from '@/stores/flow-auth-store';
 import { usePaneStore } from '@/stores/pane-store';
+import { useSettingsStore } from '@/stores/settings-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import { isFlowTab } from '@/types/pane-types';
 import { WorkspaceSection } from './WorkspaceSection';
@@ -503,7 +504,11 @@ export function CollectionsSidebar() {
               <Button
                 variant='ghost'
                 className='w-full justify-start h-8 px-2 text-sm font-medium'
-                onClick={() => openWorkspaceTabs(activeWorkspace.id)}
+                onClick={() => {
+                  // Land on the workspace home, so Settings steps aside.
+                  useSettingsStore.getState().closeSettings();
+                  openWorkspaceTabs(activeWorkspace.id);
+                }}
               >
                 <LayoutDashboard className='h-3.5 w-3.5 shrink-0 text-muted-foreground mr-2' />
                 <span className='truncate'>{activeWorkspace.name}</span>

@@ -131,5 +131,5 @@ Plans 4 to 6 in `docs/superpowers/plans/2026-10-12-acp-multi-agent-index.md` cov
 - The agent still has no response history. `get_history` returns briefs only. A live response needs Agent mode, the collection's run switch and the local trust confirmation, or the user attaching the last response with `#`. The instructions now say so.
 - `run_request` returns an 8 KB masked response body at most. Raising it needs a security review of the masking.
 - Claude often sends empty thinking text on recent models, so the Reasoning block can stay empty for Claude. A summarized-thinking option in the adapter `_meta` is untested.
-- Gemini returns its models in the older `models` field and no config options, so the composer shows no model picker for Gemini. The agent dialog's Gemini model field covers it.
+- Gemini returns its models in the older `models` field and no config options, so the composer shows no model picker for Gemini. The Gemini model field in the AI Agents settings section covers it.
 - The model setting for Claude (the composer's Model picker) is still remembered per agent only.

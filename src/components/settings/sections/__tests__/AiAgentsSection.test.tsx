@@ -3,8 +3,9 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { toast } from 'sonner';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { AgentConfigsDialog } from '@/components/settings/AgentConfigsDialog';
 import * as api from '@/lib/tauri-api';
+import { useSettingsStore } from '@/stores/settings-store';
+import { AiAgentsSection } from '../AiAgentsSection';
 
 vi.mock('@/lib/tauri-api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/lib/tauri-api')>()),
@@ -54,13 +55,13 @@ const claude: api.AgentConfig = {
   vaultSecretName: 'anthropic',
 };
 
-function renderDialog(onOpenChange: (open: boolean) => void = vi.fn()) {
+function renderSection() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={client}>
-      <AgentConfigsDialog open onOpenChange={onOpenChange} />
+      <AiAgentsSection />
     </QueryClientProvider>,
   );
 }
@@ -68,14 +69,14 @@ function renderDialog(onOpenChange: (open: boolean) => void = vi.fn()) {
 type User = ReturnType<typeof userEvent.setup>;
 
 async function openEdit(user: User = userEvent.setup()) {
-  renderDialog();
+  renderSection();
   await user.click(await screen.findByRole('button', { name: 'Edit agent' }));
   await screen.findByLabelText('Label');
   return user;
 }
 
 async function openAdd(user: User = userEvent.setup()) {
-  renderDialog();
+  renderSection();
   await user.click(await screen.findByRole('button', { name: /add agent/i }));
   await screen.findByLabelText('Label');
   return user;
@@ -99,8 +100,9 @@ async function addVariable(user: User, name: string, value = '') {
   if (value) await user.type(values[values.length - 1], value);
 }
 
-describe('AgentConfigsDialog', () => {
+describe('AiAgentsSection', () => {
   beforeEach(() => {
+    useSettingsStore.getState().reset();
     vi.resetAllMocks();
     vi.mocked(api.listAgentConfigs).mockResolvedValue([claude]);
     vi.mocked(api.saveAgentConfig).mockResolvedValue(undefined);
@@ -117,26 +119,28 @@ describe('AgentConfigsDialog', () => {
 
   describe('list view', () => {
     it('lists the configured agents', async () => {
-      renderDialog();
+      renderSection();
       expect(await screen.findByText('Claude')).toBeInTheDocument();
       expect(screen.getByText('claude-agent-acp')).toBeInTheDocument();
     });
 
     it('has a title and a description', async () => {
-      renderDialog();
-      expect(await screen.findByRole('dialog', { name: 'AI Agents' })).toBeInTheDocument();
-      expect(screen.getByRole('dialog')).toHaveAccessibleDescription();
+      renderSection();
+      expect(await screen.findByRole('heading', { name: 'AI Agents' })).toBeInTheDocument();
+      expect(
+        screen.getByText('The agents Rocket can start for the workspace assistant.'),
+      ).toBeInTheDocument();
     });
 
-    it('lays the dialog out as a column so the body scrolls and the footer is pinned', async () => {
-      renderDialog();
-      const dialog = await screen.findByRole('dialog', { name: 'AI Agents' });
-      expect(dialog).toHaveClass('flex', 'max-h-[85vh]', 'flex-col');
+    it('pins the footer to the bottom of the scroll panel', async () => {
+      await openEdit();
+      const footer = screen.getByRole('button', { name: 'Save' }).parentElement;
+      expect(footer).toHaveClass('sticky', 'bottom-0');
     });
 
     it('shows an empty state', async () => {
       vi.mocked(api.listAgentConfigs).mockResolvedValue([]);
-      renderDialog();
+      renderSection();
       expect(await screen.findByText('No agents configured.')).toBeInTheDocument();
     });
 
@@ -144,14 +148,14 @@ describe('AgentConfigsDialog', () => {
       vi.mocked(api.listAgentConfigs).mockRejectedValueOnce('boom');
       vi.mocked(api.listAgentConfigs).mockResolvedValue([claude]);
       const user = userEvent.setup();
-      renderDialog();
+      renderSection();
       expect(await screen.findByText(/Failed to load agents/)).toBeInTheDocument();
       await user.click(screen.getByRole('button', { name: 'Retry' }));
       expect(await screen.findByText('Claude')).toBeInTheDocument();
     });
 
     it('runs the test command and toasts success', async () => {
-      renderDialog();
+      renderSection();
       await userEvent.click(await screen.findByRole('button', { name: 'Test' }));
       await waitFor(() => expect(api.testAgentConfig).toHaveBeenCalledWith('agent-1'));
       await waitFor(() => expect(toast.success).toHaveBeenCalledWith('Agent test succeeded.'));
@@ -159,7 +163,7 @@ describe('AgentConfigsDialog', () => {
 
     it('toasts the error when the test fails', async () => {
       vi.mocked(api.testAgentConfig).mockRejectedValue('spawn failed');
-      renderDialog();
+      renderSection();
       await userEvent.click(await screen.findByRole('button', { name: 'Test' }));
       await waitFor(() =>
         expect(toast.error).toHaveBeenCalledWith('Agent test failed: spawn failed'),
@@ -167,7 +171,7 @@ describe('AgentConfigsDialog', () => {
     });
 
     it('asks to confirm and then deletes', async () => {
-      renderDialog();
+      renderSection();
       await userEvent.click(await screen.findByRole('button', { name: 'Delete agent' }));
       expect(api.deleteAgentConfig).not.toHaveBeenCalled();
       await userEvent.click(screen.getByRole('button', { name: 'Remove' }));
@@ -175,7 +179,7 @@ describe('AgentConfigsDialog', () => {
     });
 
     it('keeps the agent when the removal is cancelled', async () => {
-      renderDialog();
+      renderSection();
       await userEvent.click(await screen.findByRole('button', { name: 'Delete agent' }));
       await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
       expect(api.deleteAgentConfig).not.toHaveBeenCalled();
@@ -330,21 +334,34 @@ describe('AgentConfigsDialog', () => {
       expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled();
     });
 
-    it('does not let the dialog close mid-save', async () => {
+    it('locks Settings while saving and unlocks when the save ends', async () => {
       const release = deferSave();
-      const onOpenChange = vi.fn();
+      const user = await openEdit();
+      await clickSave(user);
+      expect(useSettingsStore.getState().locked).toBe(true);
+      release();
+      await screen.findByText('claude-agent-acp');
+      await waitFor(() => expect(useSettingsStore.getState().locked).toBe(false));
+    });
+
+    it('unlocks Settings when the save fails', async () => {
+      vi.mocked(api.saveAgentConfig).mockRejectedValue(new Error('nope'));
+      const user = await openEdit();
+      await clickSave(user);
+      await waitFor(() => expect(toast.error).toHaveBeenCalled());
+      await waitFor(() => expect(useSettingsStore.getState().locked).toBe(false));
+    });
+
+    it('unlocks Settings when the section unmounts mid-save', async () => {
+      deferSave();
       const user = userEvent.setup();
-      renderDialog(onOpenChange);
+      const { unmount } = renderSection();
       await user.click(await screen.findByRole('button', { name: 'Edit agent' }));
       await screen.findByLabelText('Label');
       await clickSave(user);
-      await user.keyboard('{Escape}');
-      expect(onOpenChange).not.toHaveBeenCalled();
-      release();
-      await screen.findByText('claude-agent-acp');
-      await user.click(screen.getByRole('button', { name: 'Edit agent' }));
-      await user.keyboard('{Escape}');
-      expect(onOpenChange).toHaveBeenCalledWith(false);
+      expect(useSettingsStore.getState().locked).toBe(true);
+      unmount();
+      expect(useSettingsStore.getState().locked).toBe(false);
     });
   });
 
@@ -755,7 +772,7 @@ describe('AgentConfigsDialog', () => {
       expect(JSON.stringify(vi.mocked(api.saveAgentConfig).mock.calls)).not.toContain(FAKE);
     });
 
-    it('keeps the dialog open and hides the value when the credential cannot be saved', async () => {
+    it('keeps the form open and hides the value when the credential cannot be saved', async () => {
       vi.mocked(api.listAgentConfigs).mockResolvedValue([]);
       vi.mocked(api.setAgentCredential).mockRejectedValue(
         new Error('the keychain could not be read'),
@@ -768,6 +785,7 @@ describe('AgentConfigsDialog', () => {
       expect(JSON.stringify(vi.mocked(toast.error).mock.calls)).not.toContain(FAKE);
       expect(screen.getByRole('button', { name: 'Save' })).toBeInTheDocument();
       expect(screen.getByLabelText(L.keychainCredential)).toHaveValue('');
+      expect(useSettingsStore.getState().locked).toBe(false);
     });
 
     it('stays disabled while the keychain credential is still being written', async () => {

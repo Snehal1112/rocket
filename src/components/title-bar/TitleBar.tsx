@@ -1,8 +1,6 @@
 import { type as osType } from '@tauri-apps/plugin-os';
-import { Bot, Settings } from 'lucide-react';
-import { useState } from 'react';
+import { Settings } from 'lucide-react';
 import { AssistantToggleButton } from '@/components/assistant/AssistantToggleButton';
-import { AgentConfigsDialog } from '@/components/settings/AgentConfigsDialog';
 import { Button } from '@/components/ui/button';
 import { useSettingsStore } from '@/stores/settings-store';
 import { WindowControls } from './WindowControls';
@@ -11,7 +9,6 @@ import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 export function TitleBar() {
   const isMac = osType() === 'macos';
   const toggleSettings = useSettingsStore((s) => s.toggleSettings);
-  const [showAgentConfigs, setShowAgentConfigs] = useState(false);
 
   return (
     <div
@@ -39,20 +36,9 @@ export function TitleBar() {
         >
           <Settings className='h-4 w-4' aria-hidden='true' />
         </Button>
-        <Button
-          variant='ghost'
-          size='icon'
-          className='h-7 w-7'
-          aria-label='AI Agent configurations'
-          onClick={() => setShowAgentConfigs(true)}
-        >
-          <Bot className='h-4 w-4' aria-hidden='true' />
-        </Button>
         <AssistantToggleButton />
         {!isMac && <WindowControls />}
       </div>
-
-      <AgentConfigsDialog open={showAgentConfigs} onOpenChange={setShowAgentConfigs} />
     </div>
   );
 }

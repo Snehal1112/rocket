@@ -5,7 +5,7 @@ import type {
 } from '@/lib/tauri-api';
 
 // The form fields a provider's connection needs. Each provider's own work adds
-// its entry here, and the connection dialog renders from this list.
+// its entry here, and the Secret Managers settings section renders from this list.
 export type ConnectionField =
   | 'baseUrl'
   | 'tenantId'

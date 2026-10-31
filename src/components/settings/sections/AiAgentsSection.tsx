@@ -14,16 +14,8 @@ import {
   validateAgentForm,
 } from '@/components/settings/agent-config/agent-config-form-state';
 import { isBlankRow } from '@/components/settings/agent-config/agent-config-validation';
+import { SettingsSectionHeader } from '@/components/settings/SettingsSectionHeader';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogBody,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { StateBlock } from '@/components/ui/state-block';
 import {
   useAgentConfigs,
@@ -38,11 +30,7 @@ import {
   hasAgentCredential,
   setAgentCredential,
 } from '@/lib/tauri-api';
-
-interface AgentConfigsDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-}
+import { useSettingsStore } from '@/stores/settings-store';
 
 const NEW_AGENT_KEY = 'new-agent';
 const SAVE_HELP_ID = 'agent-save-help';
@@ -91,7 +79,7 @@ function toAgentConfig(form: AgentFormState, vaultName: string): AgentConfig {
   };
 }
 
-export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogProps) {
+export function AiAgentsSection() {
   const { data: configs = [], isLoading, isError, error, refetch } = useAgentConfigs();
   const { data: connections = [] } = useSecretManagerConnections();
   const saveMutation = useSaveAgentConfig();
@@ -111,14 +99,9 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
   // Id of the agent whose saved-credential check is current. A late answer for another id is dropped.
   const credentialCheckId = useRef<string | null>(null);
 
-  useEffect(() => {
-    if (!open) {
-      setEditing(null);
-      setDeletingId(null);
-      credentialCheckId.current = null;
-      setHasSavedCredential(false);
-    }
-  }, [open]);
+  const setLocked = useSettingsStore((s) => s.setLocked);
+  // The lock must not outlive the section.
+  useEffect(() => () => setLocked(false), [setLocked]);
 
   const startAdd = () => {
     credentialCheckId.current = null;
@@ -169,6 +152,8 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
     if (!editing || !canSave) return;
     const source = editing.credentialSource;
     const config = toAgentConfig(editing, resolveVaultName(editing));
+    // Leaving Settings mid-save would drop the form before the credential is written.
+    setLocked(true);
     setSaving(true);
     try {
       await saveMutation.mutateAsync(config);
@@ -191,6 +176,7 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
       toast.error(saveErrorMessage(e));
     } finally {
       setSaving(false);
+      setLocked(false);
     }
   };
 
@@ -299,58 +285,51 @@ export function AgentConfigsDialog({ open, onOpenChange }: AgentConfigsDialogPro
   };
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        // Closing mid-save would drop the form before the credential is written.
-        if (!next && saving) return;
-        onOpenChange(next);
-      }}
-    >
-      <DialogContent className='flex max-h-[85vh] max-w-3xl flex-col'>
-        <DialogHeader>
-          <DialogTitle>AI Agents</DialogTitle>
-          <DialogDescription>
-            {editing
-              ? 'Set how Rocket starts this agent and where its credential comes from.'
-              : 'The agents Rocket can start for the workspace assistant.'}
-          </DialogDescription>
-        </DialogHeader>
-        <DialogBody>
-          {editing ? (
-            <AgentConfigForm
-              key={formKey}
-              value={editing}
-              onChange={setEditing}
-              hasSavedCredential={hasSavedCredential}
-            />
-          ) : (
-            renderList()
+    <>
+      <SettingsSectionHeader
+        title='AI Agents'
+        description={
+          editing
+            ? 'Set how Rocket starts this agent and where its credential comes from.'
+            : 'The agents Rocket can start for the workspace assistant.'
+        }
+      />
+      {editing ? (
+        <AgentConfigForm
+          key={formKey}
+          value={editing}
+          onChange={setEditing}
+          hasSavedCredential={hasSavedCredential}
+        />
+      ) : (
+        renderList()
+      )}
+      {editing && (
+        // Pinned to the bottom of the Settings scroll panel and spans its full width (data-bleed).
+        <div
+          data-bleed
+          className='sticky bottom-0 z-10 -mx-6 -mb-6 mt-6 flex items-center justify-end gap-2 border-t bg-editor-bg px-6 py-3'
+        >
+          {saveHelp && (
+            <p id={SAVE_HELP_ID} className='mr-auto text-xs text-muted-foreground'>
+              {saveHelp}
+            </p>
           )}
-        </DialogBody>
-        {editing && (
-          <DialogFooter>
-            {saveHelp && (
-              <p id={SAVE_HELP_ID} className='mr-auto text-xs text-muted-foreground'>
-                {saveHelp}
-              </p>
-            )}
-            <Button variant='outline' size='sm' onClick={cancelEdit} disabled={saving}>
-              Cancel
-            </Button>
-            <Button
-              size='sm'
-              onClick={() => void handleSave()}
-              disabled={saving || saveMutation.isPending || !canSave}
-              aria-busy={saving}
-              aria-describedby={saveHelp ? SAVE_HELP_ID : undefined}
-            >
-              {saveMutation.isPending && <Loader2 className='h-3.5 w-3.5 animate-spin' />}
-              Save
-            </Button>
-          </DialogFooter>
-        )}
-      </DialogContent>
-    </Dialog>
+          <Button variant='outline' size='sm' onClick={cancelEdit} disabled={saving}>
+            Cancel
+          </Button>
+          <Button
+            size='sm'
+            onClick={() => void handleSave()}
+            disabled={saving || saveMutation.isPending || !canSave}
+            aria-busy={saving}
+            aria-describedby={saveHelp ? SAVE_HELP_ID : undefined}
+          >
+            {saveMutation.isPending && <Loader2 className='h-3.5 w-3.5 animate-spin' />}
+            Save
+          </Button>
+        </div>
+      )}
+    </>
   );
 }

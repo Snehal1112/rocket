@@ -31,7 +31,7 @@ describe('SettingsPage', () => {
     const labels = within(nav())
       .getAllByRole('button')
       .map((b) => b.textContent);
-    expect(labels).toEqual(['Proxy', 'Secret Managers', 'Support', 'About']);
+    expect(labels).toEqual(['Proxy', 'Secret Managers', 'AI Agents', 'Support', 'About']);
     expect(screen.getByRole('heading', { name: 'Proxy' })).toBeInTheDocument();
     expect(within(nav()).getByRole('button', { name: 'Proxy' })).toHaveAttribute(
       'aria-current',
@@ -39,10 +39,10 @@ describe('SettingsPage', () => {
     );
   });
 
-  it('shows the first section for a section that is not registered', () => {
-    useSettingsStore.getState().setSection('ai');
+  it('opens at the section it was asked for', () => {
+    useSettingsStore.getState().openSettings('about');
     render(<SettingsPage />);
-    expect(screen.getByRole('heading', { name: 'Proxy' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'About' })).toBeInTheDocument();
   });
 
   it('switches the panel when a section is clicked', async () => {
@@ -103,5 +103,62 @@ describe('SettingsPage', () => {
     unmount();
     expect(outside).toHaveFocus();
     outside.remove();
+  });
+  it('keeps keys without a modifier from reaching listeners outside the page', () => {
+    const spy = vi.fn();
+    document.addEventListener('keydown', spy);
+    window.addEventListener('keydown', spy);
+    render(<SettingsPage />);
+    const root = screen.getByRole('region', { name: 'Settings' });
+    fireEvent.keyDown(root, { key: 'Delete' });
+    fireEvent.keyDown(root, { key: 'Backspace' });
+    document.removeEventListener('keydown', spy);
+    window.removeEventListener('keydown', spy);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('still runs React key handlers inside the page', async () => {
+    render(<SettingsPage />);
+    const radios = await screen.findAllByRole('radio');
+    const first = radios.find((r) => r.getAttribute('aria-checked') === 'true') ?? radios[0];
+    first.focus();
+    await userEvent.keyboard('{ArrowDown}');
+    expect(first).not.toHaveFocus();
+    expect(radios).toContain(document.activeElement);
+  });
+
+  it('stops blocking plain keys after it unmounts', () => {
+    const spy = vi.fn();
+    document.addEventListener('keydown', spy);
+    const { unmount } = render(<SettingsPage />);
+    unmount();
+    fireEvent.keyDown(document.body, { key: 'Delete' });
+    document.removeEventListener('keydown', spy);
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets keys with Ctrl, Meta or Alt reach global shortcut listeners', () => {
+    const spy = vi.fn();
+    document.addEventListener('keydown', spy);
+    render(<SettingsPage />);
+    const root = screen.getByRole('region', { name: 'Settings' });
+    fireEvent.keyDown(root, { key: ',', ctrlKey: true });
+    fireEvent.keyDown(root, { key: 'w', metaKey: true });
+    fireEvent.keyDown(root, { key: 'x', altKey: true });
+    document.removeEventListener('keydown', spy);
+    expect(spy).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not steal focus from an element the user clicked outside the page', () => {
+    const before = document.createElement('button');
+    const clicked = document.createElement('button');
+    document.body.append(before, clicked);
+    before.focus();
+    const { unmount } = render(<SettingsPage />);
+    clicked.focus();
+    unmount();
+    expect(clicked).toHaveFocus();
+    before.remove();
+    clicked.remove();
   });
 });

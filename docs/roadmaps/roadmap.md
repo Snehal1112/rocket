@@ -159,7 +159,7 @@ Spec and parity map: `docs/superpowers/specs/2026-10-31-settings-page-shell-desi
 
 | ID | Item | Status | Where | What remains |
 |---|---|---|---|---|
-| R-72 | Settings Shell: global full-page Settings view, section nav, Proxy, Secret Managers and AI Agents dialogs moved in, Support and About | planned | spec above | Plan and build. |
+| R-72 | Settings Shell: global full-page Settings view, section nav, Proxy, Secret Managers and AI Agents dialogs moved in, Support and About | done, manual checks open | spec above; plans docs/superpowers/plans/settings-page-shell/; docs/features/settings-page.md | Manual checks in docs/features/settings-page.md. |
 | R-73 | Settings: Themes (light, dark, system, theme variants) and Display (code font, font size, interface zoom) | open | parity map in the spec | Brainstorm and spec. Frontend only. |
 | R-74 | Settings: General (SSL verify, custom CA, cookies, OAuth2 system browser, auto save, timeout, default location) | open | parity map in the spec | Brainstorm and spec. Needs a global preferences file and Rust executor wiring. |
 | R-75 | Settings: global client certificates per domain, merged with per-environment certificates | open | parity map in the spec | Brainstorm and spec. Rust. |
