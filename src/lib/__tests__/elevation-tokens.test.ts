@@ -61,12 +61,18 @@ describe('elevation tokens', () => {
     }
   });
 
-  it('makes each dark level lighter than the one below by at least 2 points', () => {
+  it('uses VS Code 2026 Dark colours for the four levels and never steps darker going up', () => {
     const lightness = LEVELS.map((level) => hslTriple(dark, `--elevation-${level}-bg`)[2]);
-    expect(lightness).toEqual([7.5, 10, 12.5, 15]);
+    // Sunken is the editor, default and raised are the sidebar colour, overlay is editorWidget.
+    expect(lightness).toEqual([7.5, 10, 10, 13]);
     for (let i = 1; i < lightness.length; i++) {
-      expect(lightness[i] - lightness[i - 1]).toBeGreaterThanOrEqual(2);
+      expect(lightness[i]).toBeGreaterThanOrEqual(lightness[i - 1]);
     }
+  });
+
+  it('keeps the raised level on the sidebar colour in both themes', () => {
+    expect(hslTriple(dark, '--elevation-raised-bg')).toEqual([210, 5, 10]);
+    expect(hslTriple(light, '--elevation-raised-bg')).toEqual([240, 50, 99]);
   });
 
   it("keeps light surfaces on today's values", () => {
