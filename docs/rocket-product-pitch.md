@@ -35,7 +35,8 @@ Rocket ships roughly 14 to 17 times smaller than either Electron competitor and 
 **Collections and workspaces**
 - File-based OpenCollection YAML collections; multiple workspaces with embedded and external collections.
 - Folder settings (headers, auth, variables, docs, scripts) in `folder.yml`, inherited by everything beneath the folder.
-- Import from Postman, Bruno and WSDL: collections, environments and zipped exports, format auto-detected, optionally into a new workspace.
+- Import from Postman, Bruno, WSDL and OpenAPI (3.0, 3.1, Swagger 2.0; JSON or YAML, from a file or a link including GitHub links). Optionally create a new workspace, and group imported folders by tag or path. Private-repo tokens are kept in the system keychain, never in the collection.
+- OpenAPI sync: link a collection to a spec, check it every 5 minutes while the app is open, see how many endpoints are in sync and which you changed, and review spec updates and your own changes in separate tabs. Each link is approved per machine and can be untrusted at any time.
 - Collection trust gate: shows which capabilities a collection requests (such as `{{process.env}}`) and which you have allowed.
 
 **Protocols and requests**
@@ -46,6 +47,8 @@ Rocket ships roughly 14 to 17 times smaller than either Electron competitor and 
 **Environments and secrets**
 - `{{variable}}` environments with secret masking.
 - External secret managers: RocketVault and Azure Key Vault.
+- Environments can inherit from another environment and load a `.env` file.
+- Client certificates per environment (PEM, PKCS12 or RocketVault), matched to hosts by domain with wildcards.
 
 **Authentication and transport**
 - Basic, Bearer, API Key, Digest, NTLM and WSSE.
@@ -54,6 +57,7 @@ Rocket ships roughly 14 to 17 times smaller than either Electron competitor and 
 
 **Scripting and testing**
 - Pre-request, post-response and test scripts with TypeScript IntelliSense for the `rok.*` API, a snippet sidebar, and shared `.js` files via a local `require()`.
+- Scripts run in a sandbox: Safe Mode (default, no filesystem or system access) or Developer Mode (full access) as an explicit opt-in.
 - Visual no-code assertions builder.
 - Collection Runner with live progress and a results summary.
 - Load testing: phase-based or fixed concurrency/RPS, live dashboard with latency, throughput, error-rate and concurrency charts and percentile stats, export to HTML, CSV, JSON and PDF.
@@ -91,7 +95,8 @@ Rocket is MIT licensed. Build it with `yarn install` then `yarn tauri dev`, or `
 
 ## Gaps to fill before launch
 
-- Real screenshots or clips: the git panel (deck slide 14 still has a placeholder), Flow canvas, AI Assistant proposal card, load-test dashboard and Contract Lock.
+- Still missing screenshots or clips: AI Assistant proposal card, load-test dashboard, Contract Lock and a clean audit log (the current audit capture shows repeated "undefined" events and a console error, so it was left out).
+- Re-measure the benchmark. The figures are for Rocket 0.9.2, and the app in the latest screenshots is v2.1.4.
+- Captures used in the deck have local paths, tokens and one environment name blurred. Retaking them in a neutral demo workspace is safer for a public launch.
 - A download or releases link for the closing call to action.
-- Retake the workspace and collection captures with a neutral demo workspace (the current ones show internal names and a home path).
 - Source for the benchmark figures is the README benchmark section; the feature list comes from the team's feature summary.
