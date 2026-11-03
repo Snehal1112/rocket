@@ -95,7 +95,7 @@ Rocket is MIT licensed. Build it with `yarn install` then `yarn tauri dev`, or `
 
 ## Gaps to fill before launch
 
-- Still missing screenshots or clips: AI Assistant proposal card, load-test dashboard, Contract Lock and a clean audit log (the current audit capture shows repeated "undefined" events and a console error, so it was left out).
+- Still missing screenshots or clips: an AI Assistant proposal card being accepted, the load-test dashboard and a clean audit log (the current audit capture shows repeated "undefined" events and a console error, so it was left out).
 - Re-measure the benchmark. The figures are for Rocket 0.9.2, and the app in the latest screenshots is v2.1.4.
 - Captures used in the deck have local paths, tokens and one environment name blurred. Retaking them in a neutral demo workspace is safer for a public launch.
 - A download or releases link for the closing call to action.
