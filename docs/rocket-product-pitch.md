@@ -19,16 +19,18 @@ Four ideas:
 
 ## Proof: measured, not estimated
 
-Rocket 0.9.2 (release build) against Bruno 4.2.0 and Postman 11.71.7, on the same machine:
+Rocket 2.1.1 against Bruno 4.2.0 and Postman 11.71.7, on the same Linux machine, 2026-10-21:
 
-| | Rocket | Bruno | Postman |
+| | Rocket 2.1.1 | Bruno 4.2.0 | Postman 11.71.7 |
 |---|---|---|---|
-| Install size | **38.9 MB** | 527 MB | 653 MB |
-| Startup to window | 6.38 s | 7.86 s | **0.99 s** |
-| Idle memory (PSS) | ~332 MB | **169.6 MB** | 507.7 MB |
-| Processes | 3 | 6 | 8 |
+| Install size on disk | **146 MB** | 527 MB | 653 MB |
+| Download size | **48.4 MB** (.deb) | not measured | 174 MB (snap) |
+| Idle memory (PSS) | **~262 MB** (3 processes) | ~566 MB (7 processes) | ~516 MB (7 processes) |
+| Idle CPU | ~1% | **~0%** | ~7% |
+| Startup to window | 0.43 s (blank) | ~3.5 s | **~1.0 s** |
+| Startup to UI drawn | ~10.4 s | ~4.2 s | **~2.2 s** |
 
-Rocket ships roughly 14 to 17 times smaller than either Electron competitor and starts faster than Bruno. Postman starts faster than Rocket, and Bruno idles at lower memory. The README documents the method and its caveats; we show the full table because it makes the size claim more credible.
+Rocket uses about half the memory of either Electron app and takes roughly 3.6 to 4.5 times less disk space once installed. Startup is its weak spot: the UI is drawn after about 10.4 s, against about 4.2 s for Bruno and 2.2 s for Postman. Postman was signed in during the run, which likely explains its higher idle CPU. The README documents the method; we show the full table because it makes the memory and size claims more credible.
 
 ## What you can do today
 
@@ -84,19 +86,19 @@ The static script scanner for the trust gate, parts of the `rok.*` Bruno-parity 
 
 ## Call to action
 
-Rocket is MIT licensed. Build it with `yarn install` then `yarn tauri dev`, or `yarn tauri build` for a release build. Source: github.com/snehal1112/rocket
+Rocket is MIT licensed. Build it with `bun install` then `bun run tauri dev`, or `bun run tauri build` for a release build. Source: github.com/snehal1112/rocket
 
 ## Suggested one-liners
 
 - Short: "The API client that lives on your machine. Small, fast, git-native, no account."
-- Technical: "HTTP, GraphQL, gRPC and WebSocket in a 39 MB native app, with collections you can commit."
+- Technical: "HTTP, GraphQL, gRPC and WebSocket in a native app under 50 MB to download, with collections you can commit."
 - Trust: "An AI assistant that proposes changes and never writes until you accept."
-- Honest: "Smallest install of the three, faster to start than Bruno, and every number published."
+- Honest: "Smallest install and about half the memory of the Electron apps, with every number published, including our slow startup."
 
 ## Gaps to fill before launch
 
 - Still missing screenshots or clips: an AI Assistant proposal card being accepted, the load-test dashboard and a clean audit log (the current audit capture shows repeated "undefined" events and a console error, so it was left out).
-- Re-measure the benchmark. The figures are for Rocket 0.9.2, and the app in the latest screenshots is v2.1.4.
+- The benchmark is for Rocket 2.1.1 and the latest screenshots show v2.1.4, so re-measure if the numbers matter for the launch.
 - Captures used in the deck have local paths, tokens and one environment name blurred. Retaking them in a neutral demo workspace is safer for a public launch.
 - A download or releases link for the closing call to action.
 - Source for the benchmark figures is the README benchmark section; the feature list comes from the team's feature summary.
