@@ -7,6 +7,7 @@ pub mod folder;
 pub mod folder_settings;
 pub mod graphql_request;
 pub mod grpc_request;
+pub mod names;
 pub mod openapi_backup;
 pub mod openapi_baseline;
 pub mod openapi_consent;
@@ -30,6 +31,7 @@ pub use collection::Collection;
 pub use duplicate::{
     duplicate_candidate, duplicate_of, DuplicateCandidate, MAX_DUPLICATE_ATTEMPTS,
 };
+pub use names::CollectionName;
 pub use file_tx::{validate_rel_path, CollectionFileTx, CollectionFileTxFactory, RecoveryOutcome};
 pub use folder::{CollectionItem, Folder, OpaqueProtocolItem};
 pub use folder_settings::{
