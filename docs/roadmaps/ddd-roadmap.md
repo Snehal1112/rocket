@@ -56,7 +56,7 @@ Cheap, and it stops agents and people from trusting claims the code breaks. Do t
 | D-20 | `rocket-http` says "no I/O implementations". It has a live HTTP POST (`acquire_token`) and a `reqwest::Client` in trait signatures. Correct the text now, restore it when D-31 ships. | `crates/rocket-http/CLAUDE.md:7` | done (2026-11-04, text restored when its fix item ships) |
 | D-21 | `rocket-git` says "pure domain crate, no I/O". `Git2Service` does filesystem, process and network work. Say "port plus libgit2 adapter". | `crates/rocket-git/CLAUDE.md:23` | done (2026-11-04, text restored when its fix item ships) |
 | D-22 | `rocket-import` says it delegates all disk writes to `rocket-infra`. It writes with `std::fs` itself and `rocket-infra` is a dev-dependency only. | `crates/rocket-import/CLAUDE.md:7` | done (2026-11-04, text restored when its fix item ships) |
-| D-23 | `rocket-app` says it never touches the filesystem or I/O. Document the exceptions until D-40 to D-44 ship, and that the crate is large. | `crates/rocket-app/CLAUDE.md` | done (2026-11-04, text restored when its fix item ships) |
+| D-23 | `rocket-app` says it never touches the filesystem or I/O. Document the exceptions until D-40 to D-44 ship, and that the crate is large. | `crates/rocket-app/CLAUDE.md` | done (2026-11-04, exceptions list removed when D-45 shipped, the crate has no direct I/O) |
 | D-24 | `rocket-collection` doc says "no filesystem access" but `openapi_consent.rs:49` calls `canonicalize`. Fix after D-34. | `crates/rocket-collection/CLAUDE.md` | done (2026-11-04, text restored when its fix item ships) |
 
 ## Phase 3: command layer back to thin
@@ -88,15 +88,15 @@ Each item replaces a direct `std::fs` or `reqwest` call with an existing or new 
 | D-40 | Contract attachments: `create_dir_all`, `metadata`, `copy`, `exists`, `read_dir`, `remove_file` (six sites). Add an attachment store port and an `rocket-infra` adapter. | `rocket-app/src/contract_service.rs:54,74,88,262,263,271` | done (2026-11-04) |
 | D-41 | Workspace directory checks and `remove_dir_all`. Move behind the existing `WorkspaceRepository` or a new method on it. | `rocket-app/src/workspace_service.rs:267,329,378-379` | done (2026-11-04) |
 | D-42 | `fs::canonicalize` for the per-collection lock key. Resolve the key in an infra helper or accept a pre-resolved path. | `rocket-app/src/collection_lock.rs:84` | done (2026-11-04) |
-| D-43 | `fs::metadata` of the proto file for the cache key. Move to the `ProtoLoader` port. | `rocket-app/src/grpc_service.rs:475` | open |
-| D-44 | `reqwest` client build (fallback) and token POST inside `OAuth2Service`. Require a `TokenClientProvider` and remove the fallback; move the POST behind the port. | `rocket-app/src/oauth2_service.rs:226-242,420-431` | open |
-| D-45 | Environment reads: process env snapshot, `USER`/`USERNAME`, `current_exe`. Inject an `EnvReader` (the agent config service already does). | `execution_service.rs:1413,2674`, `contract_service.rs:349-350`, `acp_session_service.rs:707` | open |
+| D-43 | `fs::metadata` of the proto file for the cache key. Move to the `ProtoLoader` port. | `rocket-app/src/grpc_service.rs:475` | done (2026-11-04) |
+| D-44 | `reqwest` client build (fallback) and token POST inside `OAuth2Service`. Require a `TokenClientProvider` and remove the fallback; move the POST behind the port. | `rocket-app/src/oauth2_service.rs:226-242,420-431` | done (2026-11-04) |
+| D-45 | Environment reads: process env snapshot, `USER`/`USERNAME`, `current_exe`. Inject an `EnvReader` (the agent config service already does). | `execution_service.rs:1413,2674`, `contract_service.rs:349-350`, `acp_session_service.rs:707` | done (2026-11-04) |
 
 ## Phase 5: domain crates back to pure
 
 | ID | Item | Where | Status |
 |---|---|---|---|
-| D-50 | `acquire_token` makes a live HTTP POST from a domain crate, and `reqwest::Client` appears in the `TokenClientProvider` trait signature. Move the POST into `rocket-infra` behind a port that takes and returns plain types. Keep the OAuth config and token types in the domain. | `rocket-http/src/oauth2.rs:93-134`, `token_client.rs:18` | open |
+| D-50 | `acquire_token` makes a live HTTP POST from a domain crate, and `reqwest::Client` appears in the `TokenClientProvider` trait signature. Move the POST into `rocket-infra` behind a port that takes and returns plain types. Keep the OAuth config and token types in the domain. | `rocket-http/src/oauth2.rs:93-134`, `token_client.rs:18` and its provided `post_form` | open |
 | D-51 | `rocket-import` reads and writes the disk itself (`fs::copy`, `fs::write`, `create_dir_all`, `read_dir`, zip extraction to a tempdir, about 28 sites). Introduce a small file port (read, write, copy, list, temp dir) implemented in `rocket-infra`, as `rocket-collection` already does for `CollectionFileSource`. Start with the three writers: `copy_collection_files`, `merge_root_defaults`, `copy_support_file`. | `rocket-import/src/importer.rs:1112-1250`, `zip_extractor.rs:16-53` | open |
 | D-52 | `fs::canonicalize` in a domain function. Take the resolved path from the caller. | `rocket-collection/src/openapi_consent.rs:49` | open |
 | D-53 | `dirs::home_dir` in the shared crate. Accept the home path as a parameter or move `expand_tilde` to `rocket-infra`. | `rocket-shared/src/paths.rs:5,27` | open |

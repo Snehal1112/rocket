@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `rocket-http` defines HTTP request/response types, auth utilities, cookie management, and a load-testing harness. The concrete `ReqwestExecutor` and `FsCookieRepository` live in `rocket-infra`.
 
-Known I/O leaks until D-50 ships (see `docs/roadmaps/ddd-roadmap.md`): `acquire_token` in `oauth2.rs` makes a live HTTP POST, and the `TokenClientProvider` trait in `token_client.rs` exposes `reqwest::Client`. `spec_fetch.rs` is a port (`SpecFetcher`) but uses `reqwest::Url` in its helpers. Keep new code free of I/O.
+Known I/O leaks until D-50 ships (see `docs/roadmaps/ddd-roadmap.md`): `acquire_token` in `oauth2.rs` makes a live HTTP POST, the `TokenClientProvider` trait in `token_client.rs` exposes `reqwest::Client`, and its provided `post_form` method makes the token POST (moved here from `rocket-app` in D-44; D-50 moves it to `rocket-infra`). `spec_fetch.rs` is a port (`SpecFetcher`) but uses `reqwest::Url` in its helpers. Keep new code free of I/O.
 
 ## Commands
 
@@ -34,7 +34,7 @@ cargo test -p rocket-http <test_name>
 | `oauth1_sig` | `sign()` → `oauth_*` params, `authorization_header()` — OAuth 1.0 (RFC 5849) signing for HMAC-SHA1/256/512 and PLAINTEXT. RSA-* returns an error. |
 | `client_cert` | `find_certificate()` picks the environment client certificate whose `domain` matches a URL (host, optional scheme and port, `*` wildcard; an empty domain never matches). `certificate_covers()` checks one certificate against a URL, for redirect targets. |
 | `resolved_certificate` | `ResolvedClientCertificate { domain, material }`, the runtime form of a client certificate. `CertificateMaterial` is `Pem`, `Pkcs12`, `Unavailable { reason }` or `Deferred` (a RocketVault certificate chosen by name, with a `VaultCertificateBinding`, not yet fetched; `rocket-app` replaces the selected one before the send, and the executor and token client reject it). Each piece is a `CertificateSource`: `File(path)` or `Inline(Zeroizing<Vec<u8>>)` (bytes from a RocketVault secret). Passphrases are `Zeroizing<String>`. Not `Serialize`. `Debug` prints the domain, the piece kinds, `file <path>` or `inline <n> bytes`, and `<redacted>` for a passphrase. | 
-| `token_client` | `TokenClientProvider` trait: builds the client for an OAuth2 token request, presenting the matching environment certificate. Implemented by `ReqwestTokenClientProvider` in `rocket-infra`. |
+| `token_client` | `TokenClientProvider` trait: builds the client for an OAuth2 token request, presenting the matching environment certificate, and `post_form` (provided) sends the token POST and parses the `OAuthToken`. Implemented by `ReqwestTokenClientProvider` in `rocket-infra`. |
 | `websocket` | `WebSocketClient` port, connect request, frame, event and command types. `Debug` prints header names only. Implemented by `TungsteniteWebSocketClient` in `rocket-infra`. |
 | `digest_sig` | `select_challenge()` parses `WWW-Authenticate`, `authorize()` builds the Digest `Authorization` value (RFC 7616: MD5, SHA-256, SHA-512-256 and `-sess`, qop auth/auth-int, legacy no-qop form). |
 | `proxy` | `ProxySettings`, `ResolvedProxy`, `SharedProxy`, `ProxySettingsRepository`. |
