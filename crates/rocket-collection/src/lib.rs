@@ -1,6 +1,7 @@
 pub mod collection;
 pub mod contract;
 pub mod discovery;
+pub mod duplicate;
 pub mod file_tx;
 pub mod folder;
 pub mod folder_settings;
@@ -26,6 +27,9 @@ pub mod websocket;
 
 // Re-export key types at crate root for convenience
 pub use collection::Collection;
+pub use duplicate::{
+    duplicate_candidate, duplicate_of, DuplicateCandidate, MAX_DUPLICATE_ATTEMPTS,
+};
 pub use file_tx::{validate_rel_path, CollectionFileTx, CollectionFileTxFactory, RecoveryOutcome};
 pub use folder::{CollectionItem, Folder, OpaqueProtocolItem};
 pub use folder_settings::{
