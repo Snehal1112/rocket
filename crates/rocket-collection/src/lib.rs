@@ -32,8 +32,6 @@ pub use collection::Collection;
 pub use duplicate::{
     duplicate_candidate, duplicate_of, DuplicateCandidate, MAX_DUPLICATE_ATTEMPTS,
 };
-pub use names::CollectionName;
-pub use rel_path::RelPath;
 pub use file_tx::{validate_rel_path, CollectionFileTx, CollectionFileTxFactory, RecoveryOutcome};
 pub use folder::{CollectionItem, Folder, OpaqueProtocolItem};
 pub use folder_settings::{
@@ -42,6 +40,7 @@ pub use folder_settings::{
 };
 pub use graphql_request::{GraphQlBody, GraphQlBodyVariant, GraphQlRequest};
 pub use grpc_request::{GrpcMessage, GrpcMetadataEntry, GrpcMethodType, GrpcRequest, GrpcScript};
+pub use names::CollectionName;
 pub use openapi_backup::{
     BackupEntry, OpenApiBackupRepository, OpenApiBackups, BACKUP_FILE_VERSION,
 };
@@ -56,6 +55,7 @@ pub use openapi_local::{OpenApiLocalRepository, OpenApiLocalState, LOCAL_STATE_F
 pub use openapi_schedule::{
     backoff_secs, clamp_retry_after, jitter_secs, next_check_at, SchedulePlan,
 };
+pub use rel_path::RelPath;
 pub use repository::{CollectionRepository, RequestScriptPhase};
 pub use request::{
     candidate_filename, fold_name, request_filename_for, Request, MAX_FILENAME_COLLISION_RETRIES,
