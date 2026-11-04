@@ -362,4 +362,4 @@ Key source locations:
 - Frontend validation: `src/lib/certificate-validation.ts`
 - Matching: `crates/rocket-http/src/client_cert.rs`
 - Identity loading and error strings: `crates/rocket-http/src/reqwest_executor.rs`, `crates/rocket-infra/src/pem_key.rs`
-- Persistence model: `crates/rocket-shared/src/certificate.rs`
+- Persistence model: `crates/rocket-environment/src/certificate.rs`
