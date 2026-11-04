@@ -4,7 +4,7 @@
 
 **Goal:** The contract scope match, the patch-version bump and the duplicate-request naming scheme live in `rocket-collection`, so the two services only call them.
 
-**Architecture:** Add `ContractScope::covers` and `next_patch_version` to `rocket-collection/src/contract/`, and a new `rocket-collection/src/duplicate.rs` with the pure naming and copy rules. `ContractService` and `CollectionService` call them and delete their private copies. The retry loop (exists check, exclusive create, `AlreadyExists` retry, give up after 1000) stays in `CollectionService`. Tests go into the domain crate first.
+**Architecture:** Add `ContractScope::covers` and `bump_patch_version` to `rocket-collection/src/contract/`, and a new `rocket-collection/src/duplicate.rs` with the pure naming and copy rules. `ContractService` and `CollectionService` call them and delete their private copies. The retry loop (exists check, exclusive create, `AlreadyExists` retry, give up after 1000) stays in `CollectionService`. Tests go into the domain crate first.
 
 **Tech Stack:** Rust, `rocket-collection`, `rocket-app`.
 
@@ -31,7 +31,7 @@
 ### Task 1: Contract rules (D-65)
 
 **Files:**
-- Modify: `crates/rocket-collection/src/contract/types.rs` (`impl ContractScope`), `crates/rocket-collection/src/contract/mod.rs`, `crates/rocket-collection/src/lib.rs` (re-export)
+- Modify: `crates/rocket-collection/src/contract/types.rs` (`impl ContractScope`), `crates/rocket-collection/src/contract/mod.rs`
 - Create: `crates/rocket-collection/src/contract/version.rs`
 - Modify: `crates/rocket-app/src/contract_service.rs` (delete `covers` and `bump_patch_version`, move their tests)
 
