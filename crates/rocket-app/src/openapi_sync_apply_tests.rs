@@ -87,6 +87,7 @@ fn import_service(ws: &Path) -> ImportService {
             ws.join("collections"),
         )),
         Box::new(EnvFactory(ws.to_path_buf())),
+        std::sync::Arc::new(rocket_infra::FsImportFiles),
     )
 }
 

@@ -51,6 +51,7 @@ impl ImportServiceFactory {
             base.clone(),
             Box::new(FsCollectionRepo::new_standalone(base.join("collections"))),
             Box::new(FsEnvFactory(base)),
+            std::sync::Arc::new(rocket_infra::FsImportFiles),
         )
     }
 

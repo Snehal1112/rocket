@@ -33,6 +33,7 @@ fn service(workspace: &Path) -> ImportService {
         path.clone(),
         Box::new(FsCollectionRepo::new_standalone(path.join("collections"))),
         Box::new(FsEnvFactory(path)),
+        std::sync::Arc::new(rocket_infra::FsImportFiles),
     )
 }
 

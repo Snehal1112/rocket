@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use rocket_collection::CollectionRepository;
 use rocket_environment::EnvironmentRepository;
@@ -7,6 +8,7 @@ use rocket_environment::EnvironmentRepository;
 use crate::bru;
 use crate::converter::{environment as env_converter, request as req_converter};
 use crate::error::{ImportError, ImportResult};
+use crate::files::{EntryKind, ImportFiles};
 use crate::report::{ImportReport, SkipReason, SkippedItem};
 
 /// Which generation of Bruno format a directory uses.
@@ -66,6 +68,7 @@ pub struct ImportService {
     workspace_path: PathBuf,
     collection_repo: Box<dyn CollectionRepository>,
     env_factory: Box<dyn EnvironmentRepositoryFactory>,
+    files: Arc<dyn ImportFiles>,
 }
 
 impl ImportService {
@@ -73,11 +76,13 @@ impl ImportService {
         workspace_path: PathBuf,
         collection_repo: Box<dyn CollectionRepository>,
         env_factory: Box<dyn EnvironmentRepositoryFactory>,
+        files: Arc<dyn ImportFiles>,
     ) -> Self {
         Self {
             workspace_path,
             collection_repo,
             env_factory,
+            files,
         }
     }
 
@@ -107,6 +112,7 @@ impl ImportService {
             workspace_path,
             collection_repo,
             env_factory,
+            files: Arc::new(test_files::StdFiles),
         }
     }
 
@@ -365,7 +371,7 @@ impl ImportService {
                     .join("collections")
                     .join(collection_name)
                     .join(rel);
-                copy_support_file(&p, &dest, rel, label, report);
+                copy_support_file(self.files.as_ref(), &p, &dest, rel, label, report);
                 continue;
             }
             if !matches!(ext, "bru" | "yml" | "yaml") {
@@ -1098,18 +1104,17 @@ impl ImportService {
         dest_root: &Path,
         report: &mut ImportReport,
     ) -> ImportResult<()> {
-        for entry in std::fs::read_dir(src_dir)? {
-            let entry = entry?;
-            let src_path = entry.path();
+        for entry in self.files.list_dir(src_dir)? {
+            let src_path = entry.path;
             let rel = src_path.strip_prefix(src_root).unwrap_or(&src_path);
             let dest_path = dest_root.join(rel);
 
-            if src_path.is_dir() {
+            if entry.kind == EntryKind::Dir {
                 // Never import dependency trees.
                 if src_path.file_name().is_some_and(|n| n == "node_modules") {
                     continue;
                 }
-                std::fs::create_dir_all(&dest_path)?;
+                self.files.create_dir_all(&dest_path)?;
                 self.copy_collection_files(src_root, &src_path, dest_root, report)?;
                 continue;
             }
@@ -1119,7 +1124,14 @@ impl ImportService {
             // `.js` files, so copy both as well. They are not requests and are not counted.
             if ext == "proto" || ext == "js" {
                 let label = if ext == "js" { ".js" } else { ".proto" };
-                copy_support_file(&src_path, &dest_path, rel, label, report);
+                copy_support_file(
+                    self.files.as_ref(),
+                    &src_path,
+                    &dest_path,
+                    rel,
+                    label,
+                    report,
+                );
                 continue;
             }
             if !matches!(ext, "yml" | "yaml") {
@@ -1131,7 +1143,7 @@ impl ImportService {
             // The root file was written by repo.create(), which owns the identity keys. The
             // collection-level defaults and docs of the source are merged into it.
             if src_path == src_root.join("opencollection.yml") {
-                merge_root_defaults(&src_path, &dest_path, report);
+                merge_root_defaults(self.files.as_ref(), &src_path, &dest_path, report);
                 continue;
             }
             if name == "workspace.yml" || name == "_order.yml" {
@@ -1139,9 +1151,9 @@ impl ImportService {
             }
 
             if let Some(parent) = dest_path.parent() {
-                std::fs::create_dir_all(parent)?;
+                self.files.create_dir_all(parent)?;
             }
-            std::fs::copy(&src_path, &dest_path)?;
+            self.files.copy(&src_path, &dest_path)?;
 
             // Count only request files (not environment entries).
             let in_environments = rel.components().any(|c| c.as_os_str() == "environments");
@@ -1184,7 +1196,12 @@ const ROOT_CONTENT_KEYS: [&str; 5] = ["request", "docs", "config", "bundled", "e
 /// Copies the collection-level headers, auth, variables, scripts, docs and config of a source
 /// root file into the new root file. A file that cannot be read or parsed is reported and the
 /// import goes on without it.
-fn merge_root_defaults(src: &Path, dest: &Path, report: &mut ImportReport) {
+fn merge_root_defaults(
+    files: &dyn ImportFiles,
+    src: &Path,
+    dest: &Path,
+    report: &mut ImportReport,
+) {
     let mut skip = |why: String| {
         report.skipped.push(SkippedItem {
             path: "opencollection.yml".to_string(),
@@ -1192,7 +1209,7 @@ fn merge_root_defaults(src: &Path, dest: &Path, report: &mut ImportReport) {
         });
     };
     let parse = |path: &Path| -> Result<serde_yaml::Value, String> {
-        let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
+        let text = files.read_to_string(path).map_err(|e| e.to_string())?;
         serde_yaml::from_str(&text).map_err(|e| e.to_string())
     };
     let source = match parse(src) {
@@ -1218,7 +1235,7 @@ fn merge_root_defaults(src: &Path, dest: &Path, report: &mut ImportReport) {
     }
     match serde_yaml::to_string(&target) {
         Ok(text) => {
-            if let Err(e) = std::fs::write(dest, text) {
+            if let Err(e) = files.write(dest, &text) {
                 skip(format!("collection-level settings were not imported: {e}"));
             }
         }
@@ -1229,25 +1246,32 @@ fn merge_root_defaults(src: &Path, dest: &Path, report: &mut ImportReport) {
 /// Copies a support file (`.proto` or `.js`, named by `label`) next to the requests. A
 /// symlink is never followed, because a cloned collection could point one at a private
 /// file, and a copy that fails is reported instead of aborting the whole import.
-fn copy_support_file(src: &Path, dest: &Path, rel: &Path, label: &str, report: &mut ImportReport) {
+fn copy_support_file(
+    files: &dyn ImportFiles,
+    src: &Path,
+    dest: &Path,
+    rel: &Path,
+    label: &str,
+    report: &mut ImportReport,
+) {
     let mut skip = |why: String| {
         report.skipped.push(SkippedItem {
             path: rel.to_string_lossy().to_string(),
             reason: SkipReason::ParseError(why),
         });
     };
-    match std::fs::symlink_metadata(src) {
-        Ok(meta) if meta.file_type().is_symlink() => {
+    match files.kind(src) {
+        Ok(EntryKind::Symlink) => {
             skip(format!("a symlinked {label} file is not copied"));
         }
-        Ok(meta) if meta.is_file() => {
+        Ok(EntryKind::File) => {
             if let Some(parent) = dest.parent() {
-                if let Err(e) = std::fs::create_dir_all(parent) {
+                if let Err(e) = files.create_dir_all(parent) {
                     skip(format!("could not copy the {label} file: {e}"));
                     return;
                 }
             }
-            if let Err(e) = std::fs::copy(src, dest) {
+            if let Err(e) = files.copy(src, dest) {
                 skip(format!("could not copy the {label} file: {e}"));
             }
         }
@@ -2457,5 +2481,234 @@ mod open_check_tests {
     fn requests_that_open_add_nothing_to_the_report() {
         let report = import(&[("good.yml", GOOD)]);
         assert!(report.skipped.is_empty(), "{:?}", report.skipped);
+    }
+}
+
+/// A `std::fs` backed port for the unit tests. `rocket-infra` cannot be used here, because it
+/// implements the port of the non-test build of this crate.
+#[cfg(test)]
+mod test_files {
+    use crate::files::{DirEntryInfo, EntryKind, ImportFiles};
+    use std::io;
+    use std::path::Path;
+
+    pub(super) struct StdFiles;
+
+    impl ImportFiles for StdFiles {
+        fn list_dir(&self, dir: &Path) -> io::Result<Vec<DirEntryInfo>> {
+            let mut out = Vec::new();
+            for entry in std::fs::read_dir(dir)? {
+                let entry = entry?;
+                out.push(DirEntryInfo {
+                    path: entry.path(),
+                    kind: self.kind(&entry.path())?,
+                });
+            }
+            Ok(out)
+        }
+        fn kind(&self, path: &Path) -> io::Result<EntryKind> {
+            let t = std::fs::symlink_metadata(path)?.file_type();
+            Ok(if t.is_symlink() {
+                EntryKind::Symlink
+            } else if t.is_dir() {
+                EntryKind::Dir
+            } else if t.is_file() {
+                EntryKind::File
+            } else {
+                EntryKind::Other
+            })
+        }
+        fn create_dir_all(&self, dir: &Path) -> io::Result<()> {
+            std::fs::create_dir_all(dir)
+        }
+        fn copy(&self, src: &Path, dest: &Path) -> io::Result<()> {
+            std::fs::copy(src, dest).map(|_| ())
+        }
+        fn read_to_string(&self, path: &Path) -> io::Result<String> {
+            std::fs::read_to_string(path)
+        }
+        fn write(&self, path: &Path, text: &str) -> io::Result<()> {
+            std::fs::write(path, text)
+        }
+    }
+}
+
+#[cfg(test)]
+mod port_tests {
+    use super::*;
+    use crate::files::DirEntryInfo;
+    use std::io;
+    use std::sync::Mutex;
+
+    /// Scripted port: a kind per path, a text per path, and switches for failures.
+    #[derive(Default)]
+    struct FakeFiles {
+        kinds: Vec<(PathBuf, EntryKind)>,
+        texts: Vec<(PathBuf, String)>,
+        fail_copy: bool,
+        fail_list: bool,
+        written: Mutex<Vec<PathBuf>>,
+    }
+
+    impl ImportFiles for FakeFiles {
+        fn list_dir(&self, _dir: &Path) -> io::Result<Vec<DirEntryInfo>> {
+            if self.fail_list {
+                return Err(io::Error::other("cannot list"));
+            }
+            Ok(Vec::new())
+        }
+        fn kind(&self, path: &Path) -> io::Result<EntryKind> {
+            self.kinds
+                .iter()
+                .find(|(p, _)| p == path)
+                .map(|(_, k)| *k)
+                .ok_or_else(|| io::Error::other("no such path"))
+        }
+        fn create_dir_all(&self, _dir: &Path) -> io::Result<()> {
+            Ok(())
+        }
+        fn copy(&self, _src: &Path, _dest: &Path) -> io::Result<()> {
+            if self.fail_copy {
+                return Err(io::Error::other("disk full"));
+            }
+            Ok(())
+        }
+        fn read_to_string(&self, path: &Path) -> io::Result<String> {
+            self.texts
+                .iter()
+                .find(|(p, _)| p == path)
+                .map(|(_, t)| t.clone())
+                .ok_or_else(|| io::Error::other("unreadable"))
+        }
+        fn write(&self, path: &Path, _text: &str) -> io::Result<()> {
+            self.written.lock().expect("lock").push(path.to_path_buf());
+            Ok(())
+        }
+    }
+
+    fn reasons(report: &ImportReport) -> Vec<String> {
+        report
+            .skipped
+            .iter()
+            .map(|s| match &s.reason {
+                SkipReason::ParseError(m) => m.clone(),
+                other => format!("{other:?}"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_support_file_that_cannot_be_copied_is_reported() {
+        let files = FakeFiles {
+            kinds: vec![(PathBuf::from("s/a.proto"), EntryKind::File)],
+            fail_copy: true,
+            ..Default::default()
+        };
+        let mut report = ImportReport::default();
+
+        copy_support_file(
+            &files,
+            Path::new("s/a.proto"),
+            Path::new("d/a.proto"),
+            Path::new("a.proto"),
+            ".proto",
+            &mut report,
+        );
+
+        assert_eq!(
+            reasons(&report),
+            vec!["could not copy the .proto file: disk full".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_symlinked_proto_is_reported_not_copied() {
+        let files = FakeFiles {
+            kinds: vec![(PathBuf::from("s/a.proto"), EntryKind::Symlink)],
+            fail_copy: true,
+            ..Default::default()
+        };
+        let mut report = ImportReport::default();
+
+        copy_support_file(
+            &files,
+            Path::new("s/a.proto"),
+            Path::new("d/a.proto"),
+            Path::new("a.proto"),
+            ".proto",
+            &mut report,
+        );
+
+        assert_eq!(
+            reasons(&report),
+            vec!["a symlinked .proto file is not copied".to_string()]
+        );
+    }
+
+    #[test]
+    fn an_unparseable_root_file_is_reported_and_nothing_is_written() {
+        let files = FakeFiles {
+            texts: vec![
+                (PathBuf::from("s/oc.yml"), "a: [".to_string()),
+                (PathBuf::from("d/oc.yml"), "info: {}".to_string()),
+            ],
+            ..Default::default()
+        };
+        let mut report = ImportReport::default();
+
+        merge_root_defaults(
+            &files,
+            Path::new("s/oc.yml"),
+            Path::new("d/oc.yml"),
+            &mut report,
+        );
+
+        assert_eq!(report.skipped.len(), 1);
+        assert!(files.written.lock().expect("lock").is_empty());
+    }
+
+    #[test]
+    fn a_root_file_with_content_is_written_to_the_destination() {
+        let files = FakeFiles {
+            texts: vec![
+                (PathBuf::from("s/oc.yml"), "docs: hello".to_string()),
+                (PathBuf::from("d/oc.yml"), "info: {}".to_string()),
+            ],
+            ..Default::default()
+        };
+        let mut report = ImportReport::default();
+
+        merge_root_defaults(
+            &files,
+            Path::new("s/oc.yml"),
+            Path::new("d/oc.yml"),
+            &mut report,
+        );
+
+        assert!(report.skipped.is_empty());
+        assert_eq!(
+            *files.written.lock().expect("lock"),
+            vec![PathBuf::from("d/oc.yml")]
+        );
+    }
+
+    #[test]
+    fn an_unlistable_source_dir_aborts_the_import() {
+        let tmp = tempfile::TempDir::new().expect("tmp");
+        let mut service = ImportService::new_with_workspace_path(tmp.path());
+        service.files = Arc::new(FakeFiles {
+            fail_list: true,
+            ..Default::default()
+        });
+        let mut report = ImportReport::default();
+
+        let result = service.copy_collection_files(
+            Path::new("s"),
+            Path::new("s"),
+            Path::new("d"),
+            &mut report,
+        );
+
+        assert!(result.is_err());
     }
 }
