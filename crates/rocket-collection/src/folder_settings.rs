@@ -79,6 +79,24 @@ pub fn resolve_folder_auth(folders: &[FolderSettings]) -> Option<Auth> {
     })
 }
 
+/// The auth a request is sent with. An explicit request auth wins. A request set to `None` or
+/// `Inherit` (inherit is not sent on the wire) takes the innermost folder auth, then the
+/// collection auth, then `Auth::None`.
+///
+/// `folders` is ordered outermost first.
+pub fn effective_auth(
+    request_auth: Auth,
+    folders: &[FolderSettings],
+    collection_auth: Option<Auth>,
+) -> Auth {
+    match request_auth {
+        Auth::None | Auth::Inherit => resolve_folder_auth(folders)
+            .or(collection_auth)
+            .unwrap_or(Auth::None),
+        explicit => explicit,
+    }
+}
+
 /// Scripts for one phase in run order, including the request's own script.
 ///
 /// `folders` is ordered outermost first. Sandwich runs pre-request scripts outer
@@ -339,6 +357,48 @@ mod tests {
         };
         let folders = vec![with_auth(Some(basic.clone())), with_auth(None)];
         assert_eq!(resolve_folder_auth(&folders), Some(basic));
+    }
+
+    // effective_auth
+
+    #[test]
+    fn effective_auth_request_auth_wins_over_folders_and_collection() {
+        let folders = vec![with_auth(Some(bearer("folder")))];
+        let got = effective_auth(bearer("request"), &folders, Some(bearer("collection")));
+        assert_eq!(got, bearer("request"));
+    }
+
+    #[test]
+    fn effective_auth_none_or_inherit_takes_the_innermost_folder() {
+        let folders = vec![
+            with_auth(Some(bearer("outer"))),
+            with_auth(Some(bearer("inner"))),
+        ];
+        for request_auth in [Auth::None, Auth::Inherit] {
+            let got = effective_auth(request_auth, &folders, Some(bearer("collection")));
+            assert_eq!(got, bearer("inner"));
+        }
+    }
+
+    #[test]
+    fn effective_auth_falls_back_to_the_collection_when_no_folder_sets_auth() {
+        let folders = vec![with_auth(Some(Auth::Inherit)), with_auth(None)];
+        let got = effective_auth(Auth::Inherit, &folders, Some(bearer("collection")));
+        assert_eq!(got, bearer("collection"));
+    }
+
+    #[test]
+    fn effective_auth_without_any_source_is_none() {
+        assert_eq!(effective_auth(Auth::Inherit, &[], None), Auth::None);
+        assert_eq!(effective_auth(Auth::None, &[], None), Auth::None);
+    }
+
+    #[test]
+    fn effective_auth_with_no_folders_uses_the_collection_for_none_and_inherit() {
+        for request_auth in [Auth::None, Auth::Inherit] {
+            let got = effective_auth(request_auth, &[], Some(bearer("collection")));
+            assert_eq!(got, bearer("collection"));
+        }
     }
 
     // chain_scripts

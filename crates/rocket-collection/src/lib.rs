@@ -29,7 +29,8 @@ pub use collection::Collection;
 pub use file_tx::{validate_rel_path, CollectionFileTx, CollectionFileTxFactory, RecoveryOutcome};
 pub use folder::{CollectionItem, Folder, OpaqueProtocolItem};
 pub use folder_settings::{
-    chain_scripts, inherited_headers, resolve_folder_auth, FolderSettings, ScriptFlow, ScriptPhase,
+    chain_scripts, effective_auth, inherited_headers, resolve_folder_auth, FolderSettings,
+    ScriptFlow, ScriptPhase,
 };
 pub use graphql_request::{GraphQlBody, GraphQlBodyVariant, GraphQlRequest};
 pub use grpc_request::{GrpcMessage, GrpcMetadataEntry, GrpcMethodType, GrpcRequest, GrpcScript};
