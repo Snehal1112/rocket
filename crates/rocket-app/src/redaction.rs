@@ -7,7 +7,7 @@ use std::collections::HashSet;
 pub(crate) const REDACTED: &str = "••••••";
 
 /// Secrets shorter than this are left alone, matching the script engine.
-pub(crate) const MIN_REDACTION_LEN: usize = 6;
+pub(crate) const MIN_REDACTION_LEN: usize = rocket_environment::MIN_SECRET_VALUE_LEN;
 
 /// Replaces every secret value in `text` with `REDACTED`.
 ///

@@ -1,16 +1,15 @@
 use crate::env_audit;
-use crate::redaction::MIN_REDACTION_LEN;
 use rocket_audit::{
     actor::AuditActor,
     event::AuditEventKind,
     publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher},
 };
 use rocket_collection::{
-    inherited_headers, resolve_folder_auth, settings::SandboxMode as CollectionSandboxMode,
+    effective_auth, inherited_headers, settings::SandboxMode as CollectionSandboxMode,
     CollectionRepository, CollectionSettings, FolderSettings, ScriptFlow,
 };
 use rocket_environment::{
-    resolve, Environment, EnvironmentRepository, EnvironmentRepositoryFactory,
+    resolve, Environment, EnvironmentRepository, EnvironmentRepositoryFactory, Scope, ScopeEntry,
     SecretManagerRepository, SecretStore, VariableContext, VaultSecretFetcher,
 };
 use rocket_history::{HistoryEntry, HistoryRepository};
@@ -267,6 +266,30 @@ impl std::fmt::Debug for ExecuteRequestOutput {
             .field("sent_request", &self.sent_request.is_some())
             .finish()
     }
+}
+
+/// The variables of a flattened environment as `add_scope` entries.
+fn env_entries(flat: &rocket_environment::Flattened) -> impl Iterator<Item = ScopeEntry<'_>> {
+    flat.variables.iter().map(|f| ScopeEntry {
+        key: &f.variable.key,
+        value: &f.variable.value,
+        initial_value: None,
+        enabled: f.variable.enabled,
+        secret: f.variable.secret,
+    })
+}
+
+/// Collection, folder or request variables as `add_scope` entries.
+fn declared_entries(
+    vars: &[rocket_collection::CollectionVariable],
+) -> impl Iterator<Item = ScopeEntry<'_>> {
+    vars.iter().map(|v| ScopeEntry {
+        key: &v.key,
+        value: &v.value,
+        initial_value: Some(&v.initial_value),
+        enabled: v.enabled,
+        secret: v.secret,
+    })
 }
 
 /// The credentials a resolved request carries: Basic login forms, a bearer
@@ -1160,70 +1183,21 @@ impl RequestExecutionService {
             let repo = self.global_env_repo();
             if let Some(global_env) = read_scope(strict, repo.get(name))? {
                 let flat = flatten_scope(&global_env, repo.as_ref())?;
-                for var in flat
-                    .variables
-                    .iter()
-                    .map(|f| &f.variable)
-                    .filter(|v| v.enabled)
-                {
-                    ctx.global_env.insert(var.key.clone(), var.value.clone());
-                    if var.secret {
-                        ctx.secret_keys.insert(var.key.clone());
-                    }
-                    if var.secret && var.value.len() >= MIN_REDACTION_LEN {
-                        ctx.secret_values.insert(var.value.clone());
-                    }
-                }
+                ctx.add_scope(Scope::GlobalEnv, env_entries(&flat));
             }
         }
-
-        // Like the frontend `varsToMap`: a variable with no key or no value (and no initial
-        // value) is skipped, so it does not hide the same name in a lower scope.
-        let effective_val = |cv: &rocket_collection::CollectionVariable| -> Option<String> {
-            let val = if cv.value.is_empty() {
-                &cv.initial_value
-            } else {
-                &cv.value
-            };
-            (!cv.key.is_empty() && !val.is_empty()).then(|| val.clone())
-        };
 
         if let Some(col) = collection {
             let settings = read_scope(strict, self.send_collection_repo().get_settings(col))?
                 .unwrap_or_default();
-            for cv in settings.variables.iter().filter(|v| v.enabled) {
-                // An empty secret variable still marks its name secret.
-                if cv.secret && !cv.key.is_empty() {
-                    ctx.secret_keys.insert(cv.key.clone());
-                }
-                let Some(val) = effective_val(cv) else {
-                    continue;
-                };
-                ctx.collection.insert(cv.key.clone(), val.clone());
-                if cv.secret && val.len() >= MIN_REDACTION_LEN {
-                    ctx.secret_values.insert(val);
-                }
-            }
+            ctx.add_scope(Scope::Collection, declared_entries(&settings.variables));
         }
 
         if let Some(name) = environment_name {
             let repo = self.regular_env_repo(collection);
             if let Some(env) = read_scope(strict, repo.get(name))? {
                 let flat = flatten_scope(&env, repo.as_ref())?;
-                for var in flat
-                    .variables
-                    .iter()
-                    .map(|f| &f.variable)
-                    .filter(|v| v.enabled)
-                {
-                    ctx.env.insert(var.key.clone(), var.value.clone());
-                    if var.secret {
-                        ctx.secret_keys.insert(var.key.clone());
-                    }
-                    if var.secret && var.value.len() >= MIN_REDACTION_LEN {
-                        ctx.secret_values.insert(var.value.clone());
-                    }
-                }
+                ctx.add_scope(Scope::Env, env_entries(&flat));
             }
         }
 
@@ -1236,19 +1210,7 @@ impl RequestExecutionService {
                     .get_folder_chain_variables(col, path)
             };
             if let Some(folder_vars) = read_scope(strict, folder_read)? {
-                for cv in folder_vars.iter().filter(|v| v.enabled) {
-                    // An empty secret variable still marks its name secret.
-                    if cv.secret && !cv.key.is_empty() {
-                        ctx.secret_keys.insert(cv.key.clone());
-                    }
-                    let Some(val) = effective_val(cv) else {
-                        continue;
-                    };
-                    ctx.folder.insert(cv.key.clone(), val.clone());
-                    if cv.secret && val.len() >= MIN_REDACTION_LEN {
-                        ctx.secret_values.insert(val);
-                    }
-                }
+                ctx.add_scope(Scope::Folder, declared_entries(&folder_vars));
             }
         }
 
@@ -1257,19 +1219,7 @@ impl RequestExecutionService {
                 strict,
                 self.send_collection_repo().get_request_variables(col, path),
             )? {
-                for cv in request_vars.iter().filter(|v| v.enabled) {
-                    // An empty secret variable still marks its name secret.
-                    if cv.secret && !cv.key.is_empty() {
-                        ctx.secret_keys.insert(cv.key.clone());
-                    }
-                    let Some(val) = effective_val(cv) else {
-                        continue;
-                    };
-                    ctx.request.insert(cv.key.clone(), val.clone());
-                    if cv.secret && val.len() >= MIN_REDACTION_LEN {
-                        ctx.secret_values.insert(val);
-                    }
-                }
+                ctx.add_scope(Scope::Request, declared_entries(&request_vars));
             }
         }
 
@@ -4331,15 +4281,6 @@ fn body_mode_from_content_type(headers: &[Header]) -> rocket_shared::types::Body
     }
 }
 
-/// Use the collection auth when the request carries no auth of its own.
-/// A request set to inherit also takes the collection auth, since inherit is not sent on the wire.
-fn merge_auth(request_auth: Auth, collection_auth: Option<Auth>) -> Auth {
-    match request_auth {
-        Auth::None | Auth::Inherit => collection_auth.unwrap_or(Auth::None),
-        explicit => explicit,
-    }
-}
-
 /// Resolves `{{placeholders}}` in the credential fields of an auth value.
 /// The Request tab resolves auth on the frontend, but the backend-only paths
 /// (Flow, collection runner) receive the raw collection auth, so it is done here.
@@ -4552,7 +4493,7 @@ fn apply_inherited_defaults(
             request_headers,
         )
     };
-    let auth = merge_auth(request_auth, resolve_folder_auth(folders).or(settings.auth));
+    let auth = effective_auth(request_auth, folders, settings.auth);
     (auth, headers)
 }
 
@@ -7619,7 +7560,7 @@ mod tests {
 
                 assert_eq!(
                     resolve(&svc, &input).auth,
-                    merge_auth(request_auth, settings.auth.clone())
+                    effective_auth(request_auth, &[], settings.auth.clone())
                 );
             }
         }
@@ -7780,63 +7721,6 @@ mod tests {
         let merged = merge_headers(&[], &req);
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].key, "Authorization");
-    }
-
-    // -------------------------------------------------------------------------
-    // merge_auth unit tests
-    // -------------------------------------------------------------------------
-
-    #[test]
-    fn merge_auth_uses_collection_when_request_is_none() {
-        let collection_auth = Some(Auth::Bearer {
-            token: "col_tok".into(),
-        });
-        let result = merge_auth(Auth::None, collection_auth);
-        assert_eq!(
-            result,
-            Auth::Bearer {
-                token: "col_tok".into()
-            }
-        );
-    }
-
-    #[test]
-    fn merge_auth_request_takes_precedence_over_collection() {
-        let collection_auth = Some(Auth::Bearer {
-            token: "col_tok".into(),
-        });
-        let request_auth = Auth::Basic {
-            username: "user".into(),
-            password: "pass".into(),
-        };
-        let result = merge_auth(request_auth.clone(), collection_auth);
-        assert_eq!(result, request_auth);
-    }
-
-    #[test]
-    fn merge_auth_none_collection_returns_none() {
-        let result = merge_auth(Auth::None, None);
-        assert_eq!(result, Auth::None);
-    }
-
-    #[test]
-    fn merge_auth_uses_collection_when_request_is_inherit() {
-        let collection_auth = Some(Auth::Bearer {
-            token: "col_tok".into(),
-        });
-        let result = merge_auth(Auth::Inherit, collection_auth);
-        assert_eq!(
-            result,
-            Auth::Bearer {
-                token: "col_tok".into()
-            }
-        );
-    }
-
-    #[test]
-    fn merge_auth_inherit_without_collection_auth_returns_none() {
-        let result = merge_auth(Auth::Inherit, None);
-        assert_eq!(result, Auth::None);
     }
 
     fn cv(key: &str, value: &str) -> CollectionVariable {
