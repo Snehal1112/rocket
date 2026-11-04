@@ -86,6 +86,10 @@ All structs use `#[serde(rename_all = "camelCase")]` for JSON serialization. Opt
 - `chain_scripts` orders one phase's scripts for a `ScriptFlow`, request script included, blanks skipped.
 - `CollectionRepository::{get_folder_settings, save_folder_settings, get_folder_chain_settings}` have defaults so test doubles keep compiling.
 
+## Duplicate rules (`duplicate.rs`)
+
+`duplicate_candidate(source_path, source_name, n)` gives the path and name of the nth copy (`Login copy`, then `Login copy 2`). The path keeps the folder and file stem and always ends in `.yml`; the name keeps the source name. `duplicate_of(source, name)` clones a request with a new uid, no `seq` and no `file_name`. `CollectionService` owns the retry loop (`MAX_DUPLICATE_ATTEMPTS` = 1000, then `Conflict`).
+
 ## Discovery (`discovery.rs`)
 
 `CollectionDiscovery` finds collections and workspaces inside a folder for the open-folder and git-clone flows. `DirectoryProbe` (`is_dir`, `has_file`, `child_dirs`) is the port; `FsDirectoryProbe` in `rocket-infra` implements it. `scan(dir)` lists the direct subfolders that hold `opencollection.yml` (no dot folders, sorted by lowercase name, a missing folder gives an empty list). `detect(dir)` decides in this order: `workspace.yml` (workspace, with its collections), `opencollection.yml` at the root (one collection), a `collections/` folder with collections, then direct children; otherwise unknown. An unreadable folder is an error.
@@ -107,6 +111,10 @@ The trait is **synchronous** (no `async`). Despite `async-trait` being in `Cargo
 ### State machine (`state_machine.rs`)
 - `transition(current: &ContractStatus, event: &StatusEvent) -> Result<ContractStatus, InvalidTransition>`
 - Pure function — no I/O. Call from `ContractService` (in `rocket-app`) when handling lifecycle commands.
+
+### Scope and version rules
+- `ContractScope::covers(request_path)`: a folder scope covers whole path components only (`auth` does not cover `authz/x.yml`), a request scope covers its own path, a collection scope covers every path.
+- `bump_patch_version` turns `1.2.3` into `1.2.4`; any other shape (including a `u32::MAX` patch) gives `<version>-copy`.
 
 ### Backward compatibility rules
 - Old YAML `provider: "string"` → `ContractParty::from_name(string)`
