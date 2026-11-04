@@ -223,9 +223,8 @@ impl ImportService {
             path.to_path_buf()
         };
 
-        for entry in std::fs::read_dir(&scan_root)? {
-            let entry = entry?;
-            let p = entry.path();
+        for entry in self.files.list_dir(&scan_root)? {
+            let p = entry.path;
             if p.is_dir() && detect_collection(&p).is_some() {
                 let id = target_workspace_id.unwrap_or("default");
                 match self.import_collection(&p, id) {
@@ -338,9 +337,8 @@ impl ImportService {
         report: &mut ImportReport,
         used: &mut HashSet<String>,
     ) -> ImportResult<()> {
-        for entry in std::fs::read_dir(dir)? {
-            let entry = entry?;
-            let p = entry.path();
+        for entry in self.files.list_dir(dir)? {
+            let p = entry.path;
 
             if p.is_dir() {
                 // Skip environments — handled separately.
@@ -392,7 +390,7 @@ impl ImportService {
             let rel_path = p.strip_prefix(root).unwrap_or(&p);
             let rel_str = rel_path.to_string_lossy().to_string();
 
-            match bru::parse_file(&p) {
+            match bru::parse_file(self.files.as_ref(), &p) {
                 Err(e) => {
                     report.skipped.push(SkippedItem {
                         path: rel_str,
@@ -465,9 +463,8 @@ impl ImportService {
         report: &mut ImportReport,
     ) -> ImportResult<()> {
         let env_repo = self.env_factory.make(collection_name);
-        for entry in std::fs::read_dir(env_dir)? {
-            let entry = entry?;
-            let p = entry.path();
+        for entry in self.files.list_dir(env_dir)? {
+            let p = entry.path;
             let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
             if !matches!(ext, "bru" | "yml" | "yaml") {
                 continue;
@@ -478,7 +475,7 @@ impl ImportService {
                 .map(|s| s.to_string_lossy().to_string())
                 .unwrap_or_else(|| "env".into());
 
-            match bru::parse_env_file(&p) {
+            match bru::parse_env_file(self.files.as_ref(), &p) {
                 Err(e) => {
                     report.skipped.push(SkippedItem {
                         path: p.to_string_lossy().to_string(),
@@ -590,7 +587,7 @@ impl ImportService {
             failures.push(("environments".into(), e.to_string()));
         }
         let mut files = Vec::new();
-        collect_yml_files(dest_root, dest_root, &mut files);
+        collect_yml_files(self.files.as_ref(), dest_root, dest_root, &mut files);
         files.sort();
         for rel in files {
             let in_environments = rel.starts_with("environments/");
@@ -642,7 +639,7 @@ impl ImportService {
             ..Default::default()
         };
 
-        let collection = parse_postman_json(json_path)?;
+        let collection = parse_postman_json(self.files.as_ref(), json_path)?;
         let col_name = self.resolve_collection_name(&collection.info.name)?;
 
         self.collection_repo
@@ -1072,7 +1069,7 @@ impl ImportService {
             ..Default::default()
         };
 
-        let postman_env = parse_postman_environment(json_path)?;
+        let postman_env = parse_postman_environment(self.files.as_ref(), json_path)?;
 
         let repo = self.env_factory.make(collection_name);
         let safe_name = unique_env_name(repo.as_ref(), &postman_env.name);
@@ -1166,14 +1163,14 @@ impl ImportService {
 }
 
 /// Collects the `.yml` and `.yaml` files under `dir` as `/`-separated paths relative to `root`.
-fn collect_yml_files(root: &Path, dir: &Path, out: &mut Vec<String>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
+fn collect_yml_files(files: &dyn ImportFiles, root: &Path, dir: &Path, out: &mut Vec<String>) {
+    let Ok(entries) = files.list_dir(dir) else {
         return;
     };
-    for entry in entries.flatten() {
-        let path = entry.path();
+    for entry in entries {
+        let path = entry.path;
         if path.is_dir() {
-            collect_yml_files(root, &path, out);
+            collect_yml_files(files, root, &path, out);
             continue;
         }
         if !matches!(
@@ -2487,12 +2484,12 @@ mod open_check_tests {
 /// A `std::fs` backed port for the unit tests. `rocket-infra` cannot be used here, because it
 /// implements the port of the non-test build of this crate.
 #[cfg(test)]
-mod test_files {
+pub(crate) mod test_files {
     use crate::files::{DirEntryInfo, EntryKind, ImportFiles};
     use std::io;
     use std::path::Path;
 
-    pub(super) struct StdFiles;
+    pub(crate) struct StdFiles;
 
     impl ImportFiles for StdFiles {
         fn list_dir(&self, dir: &Path) -> io::Result<Vec<DirEntryInfo>> {
@@ -2710,5 +2707,38 @@ mod port_tests {
         );
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn an_unlistable_environments_dir_aborts_the_environment_import() {
+        let tmp = tempfile::TempDir::new().expect("tmp");
+        let mut service = ImportService::new_with_workspace_path(tmp.path());
+        service.files = Arc::new(FakeFiles {
+            fail_list: true,
+            ..Default::default()
+        });
+        let mut report = ImportReport::default();
+
+        let result = service.import_environments(Path::new("e"), "demo", &mut report);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn an_unreadable_postman_file_is_an_io_error() {
+        let files = FakeFiles::default();
+
+        let result = crate::postman::parse_postman_json(&files, Path::new("missing.json"));
+
+        assert!(matches!(result, Err(ImportError::IoError(_))));
+    }
+
+    #[test]
+    fn an_unreadable_bru_file_is_an_io_error() {
+        let files = FakeFiles::default();
+
+        let result = crate::bru::parse_file(&files, Path::new("missing.bru"));
+
+        assert!(matches!(result, Err(ImportError::IoError(_))));
     }
 }

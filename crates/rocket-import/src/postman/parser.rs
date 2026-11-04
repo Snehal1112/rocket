@@ -1,12 +1,16 @@
 use crate::error::{ImportError, ImportResult};
+use crate::files::ImportFiles;
 use crate::postman::ast::PostmanCollection;
 use std::path::Path;
 
 /// Read a Postman Collection JSON file and return the parsed AST.
 /// Returns `ImportError::NotAPostmanCollection` if `info.schema` does not
 /// contain `schema.getpostman.com`.
-pub(crate) fn parse_postman_json(path: &Path) -> ImportResult<PostmanCollection> {
-    let content = std::fs::read_to_string(path).map_err(ImportError::IoError)?;
+pub(crate) fn parse_postman_json(
+    files: &dyn ImportFiles,
+    path: &Path,
+) -> ImportResult<PostmanCollection> {
+    let content = files.read_to_string(path).map_err(ImportError::IoError)?;
 
     let col: PostmanCollection =
         serde_json::from_str(&content).map_err(|e| ImportError::JsonParseError {
@@ -24,6 +28,7 @@ pub(crate) fn parse_postman_json(path: &Path) -> ImportResult<PostmanCollection>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::importer::test_files::StdFiles;
     use std::path::PathBuf;
 
     fn fixture(name: &str) -> PathBuf {
@@ -34,14 +39,14 @@ mod tests {
 
     #[test]
     fn parses_minimal_collection_from_disk() {
-        let col = parse_postman_json(&fixture("minimal-collection.json")).unwrap();
+        let col = parse_postman_json(&StdFiles, &fixture("minimal-collection.json")).unwrap();
         assert_eq!(col.info.name, "Minimal API");
         assert_eq!(col.item.len(), 2);
     }
 
     #[test]
     fn parses_full_collection_from_disk() {
-        let col = parse_postman_json(&fixture("full-collection.json")).unwrap();
+        let col = parse_postman_json(&StdFiles, &fixture("full-collection.json")).unwrap();
         assert_eq!(col.info.name, "Full API");
         assert!(!col.item.is_empty());
         assert!(!col.variable.is_empty());
@@ -53,7 +58,7 @@ mod tests {
 
     #[test]
     fn parses_v2_0_collection_from_disk() {
-        let col = parse_postman_json(&fixture("v2.0-collection.json")).unwrap();
+        let col = parse_postman_json(&StdFiles, &fixture("v2.0-collection.json")).unwrap();
         assert_eq!(col.info.name, "Legacy API");
     }
 
@@ -67,7 +72,7 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            parse_postman_json(&path),
+            parse_postman_json(&StdFiles, &path),
             Err(ImportError::NotAPostmanCollection(_))
         ));
     }
@@ -78,7 +83,7 @@ mod tests {
         let path = dir.path().join("bad.json");
         std::fs::write(&path, "not json").unwrap();
         assert!(matches!(
-            parse_postman_json(&path),
+            parse_postman_json(&StdFiles, &path),
             Err(ImportError::JsonParseError { .. })
         ));
     }
