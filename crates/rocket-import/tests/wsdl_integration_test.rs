@@ -1,12 +1,13 @@
 use rocket_environment::EnvironmentRepository;
-use rocket_import::{EnvironmentRepositoryFactory, ImportService};
+use rocket_environment::EnvironmentRepositoryFactory;
+use rocket_import::ImportService;
 use rocket_infra::{FsCollectionRepo, FsEnvironmentRepo};
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
 struct FsEnvFactory(PathBuf);
 impl EnvironmentRepositoryFactory for FsEnvFactory {
-    fn make(&self, collection_name: &str) -> Box<dyn EnvironmentRepository> {
+    fn for_collection(&self, collection_name: &str) -> Box<dyn EnvironmentRepository> {
         Box::new(FsEnvironmentRepo::new(
             self.0
                 .join("collections")

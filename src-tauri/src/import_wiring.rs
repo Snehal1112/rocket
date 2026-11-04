@@ -6,14 +6,15 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use rocket_environment::EnvironmentRepository;
-use rocket_import::{EnvironmentRepositoryFactory, ImportService};
+use rocket_environment::EnvironmentRepositoryFactory;
+use rocket_import::ImportService;
 use rocket_infra::{FsCollectionRepo, FsEnvironmentRepo};
 
 /// Makes the environment repository of one collection under a workspace.
 pub struct FsEnvFactory(PathBuf);
 
 impl EnvironmentRepositoryFactory for FsEnvFactory {
-    fn make(&self, collection_name: &str) -> Box<dyn EnvironmentRepository> {
+    fn for_collection(&self, collection_name: &str) -> Box<dyn EnvironmentRepository> {
         Box::new(FsEnvironmentRepo::with_secret_store(
             self.0
                 .join("collections")
@@ -104,7 +105,7 @@ mod tests {
     fn env_factory_points_at_the_collection_environments_folder() {
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let factory = FsEnvFactory(tmp.path().to_path_buf());
-        let repo = factory.make("My API");
+        let repo = factory.for_collection("My API");
         // A new, empty collection has no environments yet.
         assert!(repo.list().expect("list").is_empty());
     }

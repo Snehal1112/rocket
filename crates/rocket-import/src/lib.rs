@@ -11,9 +11,7 @@ pub(crate) mod wsdl;
 pub use converter::openapi::{baseline_hash, CONVERTER_VERSION};
 pub use error::{ImportError, ImportResult};
 pub use files::{DirEntryInfo, EntryKind, ImportFiles, ReadSeek, WorkDir};
-pub use importer::{
-    EnvironmentRepositoryFactory, ImportService, ImportedOperation, OpenApiImportOutcome,
-};
+pub use importer::{ImportService, ImportedOperation, OpenApiImportOutcome};
 pub use openapi::{
     build_apply, build_sync_plan, bundle_spec, check_spec_text, fetch_failure_message,
     fetch_target, fetch_target_fresh, find_remote_refs, fingerprint, inline_refs, item_digest,

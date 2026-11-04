@@ -7,8 +7,9 @@
 
 use rocket_collection::CollectionRepository;
 use rocket_environment::EnvironmentRepository;
+use rocket_environment::EnvironmentRepositoryFactory;
 use rocket_export::{bruno_zip, CollectionFileSource};
-use rocket_import::{EnvironmentRepositoryFactory, ImportReport, ImportService, SkipReason};
+use rocket_import::{ImportReport, ImportService, SkipReason};
 use rocket_infra::{FsCollectionFileSource, FsCollectionRepo, FsEnvironmentRepo};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -17,7 +18,7 @@ use tempfile::TempDir;
 
 struct FsEnvFactory(PathBuf);
 impl EnvironmentRepositoryFactory for FsEnvFactory {
-    fn make(&self, collection_name: &str) -> Box<dyn EnvironmentRepository> {
+    fn for_collection(&self, collection_name: &str) -> Box<dyn EnvironmentRepository> {
         Box::new(FsEnvironmentRepo::new(
             self.0
                 .join("collections")

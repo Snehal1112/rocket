@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use rocket_collection::CollectionRepository;
-use rocket_environment::EnvironmentRepository;
+use rocket_environment::{EnvironmentRepository, EnvironmentRepositoryFactory};
 
 use crate::bru;
 use crate::converter::{environment as env_converter, request as req_converter};
@@ -59,11 +59,6 @@ fn unique_env_name(repo: &dyn EnvironmentRepository, raw: &str) -> String {
 }
 
 /// Orchestrates the full Bruno import pipeline.
-/// Creates an `EnvironmentRepository` scoped to a single collection's `environments/` dir.
-pub trait EnvironmentRepositoryFactory: Send + Sync {
-    fn make(&self, collection_name: &str) -> Box<dyn EnvironmentRepository>;
-}
-
 pub struct ImportService {
     workspace_path: PathBuf,
     collection_repo: Box<dyn CollectionRepository>,
@@ -93,7 +88,7 @@ impl ImportService {
 
         struct FsFactory(PathBuf);
         impl EnvironmentRepositoryFactory for FsFactory {
-            fn make(&self, collection_name: &str) -> Box<dyn EnvironmentRepository> {
+            fn for_collection(&self, collection_name: &str) -> Box<dyn EnvironmentRepository> {
                 Box::new(FsEnvironmentRepo::new(
                     self.0
                         .join("collections")
@@ -463,7 +458,7 @@ impl ImportService {
         collection_name: &str,
         report: &mut ImportReport,
     ) -> ImportResult<()> {
-        let env_repo = self.env_factory.make(collection_name);
+        let env_repo = self.env_factory.for_collection(collection_name);
         for entry in self.files.list_dir(env_dir)? {
             let p = entry.path;
             let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -584,7 +579,7 @@ impl ImportService {
         if let Err(e) = self.collection_repo.get_settings(collection) {
             failures.push(("opencollection.yml".into(), e.to_string()));
         }
-        if let Err(e) = self.env_factory.make(collection).list_strict() {
+        if let Err(e) = self.env_factory.for_collection(collection).list_strict() {
             failures.push(("environments".into(), e.to_string()));
         }
         let mut files = Vec::new();
@@ -673,7 +668,7 @@ impl ImportService {
         }
 
         for postman_env in &collection.environment {
-            let repo = self.env_factory.make(&col_name);
+            let repo = self.env_factory.for_collection(&col_name);
             let safe_name = unique_env_name(repo.as_ref(), &postman_env.name);
             let mut env = rocket_environment::Environment::new(&safe_name);
             for v in &postman_env.values {
@@ -1072,7 +1067,7 @@ impl ImportService {
 
         let postman_env = parse_postman_environment(self.files.as_ref(), json_path)?;
 
-        let repo = self.env_factory.make(collection_name);
+        let repo = self.env_factory.for_collection(collection_name);
         let safe_name = unique_env_name(repo.as_ref(), &postman_env.name);
         let mut env = Environment::new(&safe_name);
         for v in &postman_env.values {

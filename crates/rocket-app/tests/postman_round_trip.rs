@@ -6,7 +6,8 @@
 use rocket_app::collection_export_service::{CollectionExportService, PostmanExportOptions};
 use rocket_collection::CollectionRepository;
 use rocket_environment::EnvironmentRepository;
-use rocket_import::{EnvironmentRepositoryFactory, ImportReport, ImportService, SkipReason};
+use rocket_environment::EnvironmentRepositoryFactory;
+use rocket_import::{ImportReport, ImportService, SkipReason};
 use rocket_infra::{FsCollectionFileSource, FsCollectionRepo, FsEnvironmentRepo};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -14,7 +15,7 @@ use tempfile::TempDir;
 
 struct FsEnvFactory(PathBuf);
 impl EnvironmentRepositoryFactory for FsEnvFactory {
-    fn make(&self, collection_name: &str) -> Box<dyn EnvironmentRepository> {
+    fn for_collection(&self, collection_name: &str) -> Box<dyn EnvironmentRepository> {
         Box::new(FsEnvironmentRepo::new(
             self.0
                 .join("collections")

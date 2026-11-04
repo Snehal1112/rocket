@@ -72,8 +72,8 @@ fn v3() -> String {
 
 struct EnvFactory(PathBuf);
 
-impl rocket_import::EnvironmentRepositoryFactory for EnvFactory {
-    fn make(&self, name: &str) -> Box<dyn rocket_environment::EnvironmentRepository> {
+impl rocket_environment::EnvironmentRepositoryFactory for EnvFactory {
+    fn for_collection(&self, name: &str) -> Box<dyn rocket_environment::EnvironmentRepository> {
         Box::new(rocket_infra::FsEnvironmentRepo::new(
             self.0.join("collections").join(name).join("environments"),
         ))
