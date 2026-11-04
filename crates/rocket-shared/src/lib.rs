@@ -10,7 +10,6 @@ pub mod host_env;
 pub mod load_test;
 pub mod oauth2;
 pub mod paths;
-pub mod proxy;
 pub mod run_source;
 pub mod types;
 pub mod update_settings;
