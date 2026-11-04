@@ -97,7 +97,7 @@ pub use acp_session_service::{
     AcpSessionService, McpHttpServerCredentials, NoopSessionCleanup, SessionCleanup,
     StreamSecretSource,
 };
-pub use agent_config_service::{process_env_reader, AgentConfigService, EnvReader};
+pub use agent_config_service::{env_reader_from, AgentConfigService, EnvReader};
 pub use agent_isolation::{
     isolation_meta, SessionIsolation, ISOLATION_ENV_CONFIG_DIR, ROCKET_ASSISTANT_SYSTEM_PROMPT,
 };

@@ -1116,17 +1116,20 @@ mod tests {
         // Bound as `Arc<dyn HttpExecutor>` at the binding: `Arc::clone`'s
         // generic `Self` does not coerce to a `dyn` target at the call site.
         let executor: Arc<dyn rocket_http::HttpExecutor> = RecordingExecutor::new();
-        let exec_svc = Arc::new(RequestExecutionService::new(
-            Box::new(NullEnvRepo),
-            Arc::clone(&executor),
-            Box::new(SharedHistoryRepo(Arc::clone(&history))),
-            Box::new(SharedCollectionRepo(Arc::clone(&collection_repo))),
-            Box::new(NullCookieRepo),
-            Box::new(SharedPublisher(Arc::clone(&publisher))),
-            Box::new(EmptySecretManagerRepo),
-            Arc::new(rocket_environment::NullSecretStore),
-            Arc::new(rocket_environment::NullVaultSecretFetcher),
-        ));
+        let exec_svc = Arc::new(
+            RequestExecutionService::new(
+                Box::new(NullEnvRepo),
+                Arc::clone(&executor),
+                Box::new(SharedHistoryRepo(Arc::clone(&history))),
+                Box::new(SharedCollectionRepo(Arc::clone(&collection_repo))),
+                Box::new(NullCookieRepo),
+                Box::new(SharedPublisher(Arc::clone(&publisher))),
+                Box::new(EmptySecretManagerRepo),
+                Arc::new(rocket_environment::NullSecretStore),
+                Arc::new(rocket_environment::NullVaultSecretFetcher),
+            )
+            .with_host_env(Arc::new(rocket_infra::ProcessHostEnv)),
+        );
         let svc = McpToolService::new(
             collection_repo,
             env_factory,
@@ -1619,17 +1622,20 @@ mod tests {
         // this coercion for `Arc` either).
         let executor: Arc<dyn rocket_http::HttpExecutor> = RecordingExecutor::new();
         let history = InMemoryHistoryRepo::new();
-        let exec_svc = Arc::new(RequestExecutionService::new(
-            Box::new(NullEnvRepo),
-            Arc::clone(&executor),
-            Box::new(SharedHistoryRepo(Arc::clone(&history))),
-            Box::new(SharedCollectionRepo(Arc::clone(&repo))),
-            Box::new(NullCookieRepo),
-            Box::new(SharedPublisher(Arc::clone(&publisher))),
-            Box::new(EmptySecretManagerRepo),
-            Arc::new(rocket_environment::NullSecretStore),
-            Arc::new(rocket_environment::NullVaultSecretFetcher),
-        ));
+        let exec_svc = Arc::new(
+            RequestExecutionService::new(
+                Box::new(NullEnvRepo),
+                Arc::clone(&executor),
+                Box::new(SharedHistoryRepo(Arc::clone(&history))),
+                Box::new(SharedCollectionRepo(Arc::clone(&repo))),
+                Box::new(NullCookieRepo),
+                Box::new(SharedPublisher(Arc::clone(&publisher))),
+                Box::new(EmptySecretManagerRepo),
+                Arc::new(rocket_environment::NullSecretStore),
+                Arc::new(rocket_environment::NullVaultSecretFetcher),
+            )
+            .with_host_env(Arc::new(rocket_infra::ProcessHostEnv)),
+        );
         // `repo`/`publisher` stay bound to their concrete types above (this
         // test still calls concrete-only methods on them, e.g. `.events()`
         // below), so the `dyn` coercion for `McpToolService::new` is done
@@ -1707,17 +1713,20 @@ mod tests {
         let executor_dyn: Arc<dyn rocket_http::HttpExecutor> =
             Arc::new(SharedExecutor(Arc::clone(&executor)));
         let history = InMemoryHistoryRepo::new();
-        let exec_svc = Arc::new(RequestExecutionService::new(
-            Box::new(NullEnvRepo),
-            Arc::clone(&executor_dyn),
-            Box::new(SharedHistoryRepo(Arc::clone(&history))),
-            Box::new(SharedCollectionRepo(Arc::clone(&repo))),
-            Box::new(NullCookieRepo),
-            Box::new(SharedPublisher(Arc::clone(&publisher))),
-            Box::new(EmptySecretManagerRepo),
-            Arc::new(rocket_environment::NullSecretStore),
-            Arc::new(rocket_environment::NullVaultSecretFetcher),
-        ));
+        let exec_svc = Arc::new(
+            RequestExecutionService::new(
+                Box::new(NullEnvRepo),
+                Arc::clone(&executor_dyn),
+                Box::new(SharedHistoryRepo(Arc::clone(&history))),
+                Box::new(SharedCollectionRepo(Arc::clone(&repo))),
+                Box::new(NullCookieRepo),
+                Box::new(SharedPublisher(Arc::clone(&publisher))),
+                Box::new(EmptySecretManagerRepo),
+                Arc::new(rocket_environment::NullSecretStore),
+                Arc::new(rocket_environment::NullVaultSecretFetcher),
+            )
+            .with_host_env(Arc::new(rocket_infra::ProcessHostEnv)),
+        );
         let repo_dyn: Arc<dyn CollectionRepository> = repo.clone();
         let publisher_dyn: Arc<dyn EventPublisher> = publisher.clone();
         let svc = McpToolService::new(
@@ -1772,17 +1781,20 @@ mod tests {
         let executor_dyn: Arc<dyn rocket_http::HttpExecutor> =
             Arc::new(SharedExecutor(Arc::clone(&executor)));
         let history = InMemoryHistoryRepo::new();
-        let exec_svc = Arc::new(RequestExecutionService::new(
-            Box::new(NullEnvRepo),
-            Arc::clone(&executor_dyn),
-            Box::new(SharedHistoryRepo(Arc::clone(&history))),
-            Box::new(SharedCollectionRepo(Arc::clone(&repo))),
-            Box::new(NullCookieRepo),
-            Box::new(SharedPublisher(Arc::clone(&publisher))),
-            Box::new(EmptySecretManagerRepo),
-            Arc::new(rocket_environment::NullSecretStore),
-            Arc::new(rocket_environment::NullVaultSecretFetcher),
-        ));
+        let exec_svc = Arc::new(
+            RequestExecutionService::new(
+                Box::new(NullEnvRepo),
+                Arc::clone(&executor_dyn),
+                Box::new(SharedHistoryRepo(Arc::clone(&history))),
+                Box::new(SharedCollectionRepo(Arc::clone(&repo))),
+                Box::new(NullCookieRepo),
+                Box::new(SharedPublisher(Arc::clone(&publisher))),
+                Box::new(EmptySecretManagerRepo),
+                Arc::new(rocket_environment::NullSecretStore),
+                Arc::new(rocket_environment::NullVaultSecretFetcher),
+            )
+            .with_host_env(Arc::new(rocket_infra::ProcessHostEnv)),
+        );
         let repo_dyn: Arc<dyn CollectionRepository> = repo.clone();
         let publisher_dyn: Arc<dyn EventPublisher> = publisher.clone();
         let svc = McpToolService::new(
@@ -2164,6 +2176,7 @@ mod tests {
                 Arc::new(rocket_environment::NullSecretStore),
                 Arc::new(rocket_environment::NullVaultSecretFetcher),
             )
+            .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
             .with_script_engine(Box::new(crate::test_doubles::SharedEngine(engine))),
         );
         let repo_dyn: Arc<dyn CollectionRepository> = repo.clone();
@@ -2238,6 +2251,7 @@ mod tests {
                 Arc::new(rocket_environment::NullSecretStore),
                 Arc::new(rocket_environment::NullVaultSecretFetcher),
             )
+            .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
             .with_script_engine(Box::new(crate::test_doubles::SharedEngine(engine))),
         );
         let repo_dyn: Arc<dyn CollectionRepository> = repo.clone();
@@ -2321,17 +2335,20 @@ mod tests {
         let executor_dyn: Arc<dyn rocket_http::HttpExecutor> =
             Arc::new(SharedExecutor(Arc::clone(&executor)));
         let history = InMemoryHistoryRepo::new();
-        let exec_svc = Arc::new(RequestExecutionService::new(
-            Box::new(NullEnvRepo),
-            Arc::clone(&executor_dyn),
-            Box::new(SharedHistoryRepo(Arc::clone(&history))),
-            Box::new(SharedCollectionRepo(Arc::clone(&repo))),
-            Box::new(NullCookieRepo),
-            Box::new(SharedPublisher(Arc::clone(&publisher))),
-            Box::new(EmptySecretManagerRepo),
-            Arc::new(rocket_environment::NullSecretStore),
-            Arc::new(rocket_environment::NullVaultSecretFetcher),
-        ));
+        let exec_svc = Arc::new(
+            RequestExecutionService::new(
+                Box::new(NullEnvRepo),
+                Arc::clone(&executor_dyn),
+                Box::new(SharedHistoryRepo(Arc::clone(&history))),
+                Box::new(SharedCollectionRepo(Arc::clone(&repo))),
+                Box::new(NullCookieRepo),
+                Box::new(SharedPublisher(Arc::clone(&publisher))),
+                Box::new(EmptySecretManagerRepo),
+                Arc::new(rocket_environment::NullSecretStore),
+                Arc::new(rocket_environment::NullVaultSecretFetcher),
+            )
+            .with_host_env(Arc::new(rocket_infra::ProcessHostEnv)),
+        );
         let repo_dyn: Arc<dyn CollectionRepository> = repo.clone();
         let publisher_dyn: Arc<dyn EventPublisher> = publisher.clone();
         let svc = McpToolService::new(
@@ -2366,17 +2383,20 @@ mod tests {
         let executor_dyn: Arc<dyn rocket_http::HttpExecutor> =
             Arc::new(SharedExecutor(Arc::clone(&executor)));
         let history = InMemoryHistoryRepo::new();
-        let exec_svc = Arc::new(RequestExecutionService::new(
-            Box::new(NullEnvRepo),
-            Arc::clone(&executor_dyn),
-            Box::new(SharedHistoryRepo(Arc::clone(&history))),
-            Box::new(SharedCollectionRepo(Arc::clone(&repo))),
-            Box::new(NullCookieRepo),
-            Box::new(SharedPublisher(Arc::clone(&publisher))),
-            Box::new(EmptySecretManagerRepo),
-            Arc::new(rocket_environment::NullSecretStore),
-            Arc::new(rocket_environment::NullVaultSecretFetcher),
-        ));
+        let exec_svc = Arc::new(
+            RequestExecutionService::new(
+                Box::new(NullEnvRepo),
+                Arc::clone(&executor_dyn),
+                Box::new(SharedHistoryRepo(Arc::clone(&history))),
+                Box::new(SharedCollectionRepo(Arc::clone(&repo))),
+                Box::new(NullCookieRepo),
+                Box::new(SharedPublisher(Arc::clone(&publisher))),
+                Box::new(EmptySecretManagerRepo),
+                Arc::new(rocket_environment::NullSecretStore),
+                Arc::new(rocket_environment::NullVaultSecretFetcher),
+            )
+            .with_host_env(Arc::new(rocket_infra::ProcessHostEnv)),
+        );
         let repo_dyn: Arc<dyn CollectionRepository> = repo.clone();
         let publisher_dyn: Arc<dyn EventPublisher> = publisher.clone();
         let svc = McpToolService::new(
@@ -2526,6 +2546,7 @@ mod tests {
                 Arc::new(rocket_environment::NullSecretStore),
                 Arc::new(rocket_environment::NullVaultSecretFetcher),
             )
+            .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
             .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all())
             .with_collection_env_repo_factory(Box::new(SharedEnvFactory(Arc::clone(&env_factory))))
             .with_dot_env_loader(Box::new(loader)),
@@ -3679,6 +3700,7 @@ mod tests {
                 secret_store,
                 fetcher,
             )
+            .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
             .with_collection_env_repo_factory(Box::new(SharedEnvFactory(Arc::clone(&env_factory))))
             .with_trust_store(trust.clone()),
         );

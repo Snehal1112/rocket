@@ -271,6 +271,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
     }
 
     fn service_with_folders(
@@ -293,6 +294,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
     }
 
     fn dev_env() -> Environment {

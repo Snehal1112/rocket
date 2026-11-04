@@ -12,10 +12,10 @@ use crate::secret_manager_service::SecretManagerService;
 /// service holds no process state and tests need no real environment.
 pub type EnvReader = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
-/// The reader used in production. A variable that is not valid Unicode counts
-/// as not set.
-pub fn process_env_reader() -> EnvReader {
-    Arc::new(|name| std::env::var(name).ok())
+/// A reader over `env`. In production `env` is the process environment, where a
+/// variable that is not valid Unicode counts as not set.
+pub fn env_reader_from(env: Arc<dyn rocket_shared::host_env::HostEnv>) -> EnvReader {
+    Arc::new(move |name| env.var(name))
 }
 
 /// The keychain scope that holds agent credentials, keyed by config id.
@@ -486,6 +486,16 @@ mod tests {
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
         Arc::new(move |name| map.get(name).cloned())
+    }
+
+    #[test]
+    fn env_reader_from_forwards_to_var() {
+        let host = crate::test_doubles::FixedHostEnv::with_vars(&[("TOKEN", "abc")]);
+
+        let read = env_reader_from(host);
+
+        assert_eq!(read("TOKEN").as_deref(), Some("abc"));
+        assert_eq!(read("OTHER"), None);
     }
 
     fn local_service(store: Arc<MapStore>, env: EnvReader) -> AgentConfigService {

@@ -3064,6 +3064,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(engine)
     }
 
@@ -4010,6 +4011,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(Box::new(FixedJsonqEngine {
             value: serde_json::json!("ok"),
         }))
@@ -4027,6 +4029,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(Box::new(FixedJsonqEngine {
             value: serde_json::json!("ok"),
         }))
@@ -4452,6 +4455,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
     }
 
     /// A flow of one Auth node (Bearer, `apply_to_inherit` as given) and one
@@ -4698,7 +4702,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let flow = Flow {
             name: "global-env-flow".to_string(),
@@ -4762,6 +4767,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(scripted(vec![
             (
                 "!!(",
@@ -4914,6 +4920,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(engine)
     }
 
@@ -5808,6 +5815,7 @@ mod tests {
             Arc::new(FakeSecretStore("client-secret".to_string())),
             Arc::clone(&fetcher) as Arc<dyn rocket_environment::VaultSecretFetcher>,
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(fixed_wire("x"))
         .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
 
@@ -7323,6 +7331,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(Box::new(rocket_infra::scripting::DenoScriptEngine::new()));
         let mut edge = wire("e1", "in", "out");
         edge.expression = "console.log(response.body);\nreturn response.body;".to_string();
@@ -7430,7 +7439,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
         let flow = Flow {
             name: "dbg".to_string(),
             nodes: vec![debug_request_node(debug)],
@@ -7817,6 +7827,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(engine)
     }
 
@@ -8382,6 +8393,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(scripted(vec![
             ("// pre", Scripted::Throw("pre-request boom")),
             ("!!(", Scripted::FromResponse(is_200)),
@@ -10324,7 +10336,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let summary = service
             .run(&exec, run_input("auth-req"))
@@ -10513,6 +10526,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
     }
 
     fn dev_input() -> RunFlowInput {
@@ -10607,6 +10621,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all())
         .with_collection_env_repo_factory(Box::new(DirEnvFactory(shared_env)))
         .with_dot_env_loader(Box::new(FixedDotEnv(vec![(
@@ -10710,6 +10725,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_trust_store(trust)
         .with_collection_env_repo_factory(Box::new(DirEnvFactory(shared_env)))
         .with_script_engine(Box::new(rocket_infra::scripting::DenoScriptEngine::new()))
@@ -10785,6 +10801,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_trust_store(trust)
         .with_collection_env_repo_factory(Box::new(DirEnvFactory(Arc::new(std::sync::Mutex::new(
             env,
@@ -11250,6 +11267,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
         let service = template_auth_service(
             Auth::Bearer {
@@ -11314,6 +11332,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all())
         .with_script_engine(Box::new(rocket_infra::scripting::DenoScriptEngine::new()))
     }
@@ -11784,6 +11803,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all())
         .with_script_engine(Box::new(rocket_infra::scripting::DenoScriptEngine::new()))
     }
@@ -12383,6 +12403,7 @@ mod tests {
             Arc::new(FakeSecretStore("client-secret".to_string())),
             Arc::clone(&fetcher) as Arc<dyn rocket_environment::VaultSecretFetcher>,
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(Box::new(rocket_infra::scripting::DenoScriptEngine::new()))
         .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
         let flow = Flow {
@@ -13202,6 +13223,7 @@ mod tests {
             Arc::new(FakeSecretStore("client-secret".to_string())),
             Arc::clone(&fetcher) as Arc<dyn rocket_environment::VaultSecretFetcher>,
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
         let service = template_auth_service(
             Auth::Bearer {
@@ -13276,6 +13298,7 @@ mod tests {
             Arc::new(FakeSecretStore("client-secret".to_string())),
             Arc::clone(&fetcher) as Arc<dyn rocket_environment::VaultSecretFetcher>,
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_trust_store(trust);
 
         let mut flow = auth_and_request_flow(true, Vec::new());

@@ -559,7 +559,7 @@ pub fn run() {
 
             let agent_credential_store: Arc<dyn rocket_environment::secret_store::SecretStore> =
                 Arc::new(rocket_infra::KeyringSecretStore::new_agent_credentials());
-            let agent_env_reader = rocket_app::process_env_reader();
+            let agent_env_reader = rocket_app::env_reader_from(Arc::new(rocket_infra::ProcessHostEnv));
 
             let agent_config_svc = rocket_app::AgentConfigService::new(
                 Box::new(rocket_infra::FsAgentConfigRepo::new(
@@ -634,6 +634,7 @@ pub fn run() {
                 Arc::clone(&vault_fetcher),
             )
             .with_audit_actor(AuditActor::User)
+            .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
             .with_cookie_lock(cookie_lock.clone())
             .with_script_engine(Box::new(DenoScriptEngine::new()))
             .with_trust_store(Arc::clone(&trust_store))
@@ -718,6 +719,7 @@ pub fn run() {
                     Arc::clone(&vault_fetcher),
                 )
                 .with_audit_actor(AuditActor::Agent)
+                .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
                 .with_cookie_lock(cookie_lock.clone())
                 .with_script_engine(Box::new(DenoScriptEngine::new()))
                 .with_trust_store(Arc::clone(&trust_store))
@@ -855,7 +857,8 @@ pub fn run() {
                 Arc::new(rocket_infra::FsAttachmentStore),
                 audit_publisher.clone(),
             )
-            .with_audit_actor(AuditActor::User);
+            .with_audit_actor(AuditActor::User)
+            .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
             // gRPC calls. The workspace path is shared with the collection repo, so relative
             // proto paths follow a workspace switch.
@@ -898,6 +901,7 @@ pub fn run() {
                 )),
                 acp_agent_config_svc,
             )
+            .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
             // Live agent text is masked with the same workspace secrets as
             // saved conversations.
             .with_stream_secrets(Arc::clone(&conversation_svc)

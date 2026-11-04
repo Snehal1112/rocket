@@ -175,6 +175,8 @@ pub struct ContractService {
     attachments: Arc<dyn AttachmentStore>,
     audit: Arc<dyn SecurityAuditPublisher>,
     audit_actor: AuditActor,
+    /// Names the user in changelog entries. The default has no user.
+    host_env: Arc<dyn rocket_shared::host_env::HostEnv>,
 }
 
 /// Summary returned by `recompute_drift_for_collection` for each processed contract.
@@ -209,6 +211,7 @@ impl ContractService {
             attachments,
             audit: Arc::new(NullSecurityAuditPublisher),
             audit_actor: AuditActor::System,
+            host_env: Arc::new(rocket_shared::host_env::EmptyHostEnv),
         }
     }
 
@@ -224,7 +227,14 @@ impl ContractService {
             attachments,
             audit,
             audit_actor: AuditActor::System,
+            host_env: Arc::new(rocket_shared::host_env::EmptyHostEnv),
         }
+    }
+
+    /// Sets the host environment that names the author of changelog entries.
+    pub fn with_host_env(mut self, env: Arc<dyn rocket_shared::host_env::HostEnv>) -> Self {
+        self.host_env = env;
+        self
     }
 
     /// Sets who the audit rows of this service name as the actor.
@@ -484,9 +494,7 @@ impl ContractService {
                 .load_tracking_snapshot(collection_root, contract.id)?;
 
             if let Some(old_snap) = snapshot.get(&new_snap.request_path) {
-                let author = std::env::var("USER")
-                    .or_else(|_| std::env::var("USERNAME"))
-                    .ok();
+                let author = self.host_env.user_name();
                 let changes = diff_signature(
                     old_snap,
                     &new_snap,
@@ -1608,6 +1616,39 @@ mod tests {
         let log = svc.get_changelog(root(), contract.id).unwrap();
         assert_eq!(log.entries.len(), 1);
         assert_eq!(log.entries[0].field, "method");
+    }
+
+    #[test]
+    fn the_changelog_author_comes_from_the_host_env() {
+        let svc =
+            make_service().with_host_env(crate::test_doubles::FixedHostEnv::with_user("alice"));
+        let snap = make_snap("requests/test.yml");
+        let contract = svc
+            .attach_contract(root(), make_contract(), vec![snap.clone()], vec![])
+            .unwrap();
+        let mut changed = snap;
+        changed.method = "POST".into();
+
+        svc.on_request_saved(root(), changed).unwrap();
+
+        let log = svc.get_changelog(root(), contract.id).unwrap();
+        assert_eq!(log.entries[0].author.as_deref(), Some("alice"));
+    }
+
+    #[test]
+    fn the_changelog_author_is_none_without_a_user() {
+        let svc = make_service();
+        let snap = make_snap("requests/test.yml");
+        let contract = svc
+            .attach_contract(root(), make_contract(), vec![snap.clone()], vec![])
+            .unwrap();
+        let mut changed = snap;
+        changed.method = "POST".into();
+
+        svc.on_request_saved(root(), changed).unwrap();
+
+        let log = svc.get_changelog(root(), contract.id).unwrap();
+        assert_eq!(log.entries[0].author, None);
     }
 
     #[test]

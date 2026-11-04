@@ -158,7 +158,7 @@ fn agent_config_service_for(kind: rocket_acp::AgentKind) -> Arc<rocket_app::Agen
         Box::new(FakeAgentConfigRepo(config)),
         secret_manager,
         Arc::new(rocket_environment::NullSecretStore),
-        rocket_app::process_env_reader(),
+        rocket_app::env_reader_from(Arc::new(rocket_infra::ProcessHostEnv)),
     ))
 }
 
@@ -301,7 +301,8 @@ fn build_fixture_for(client: FakeSessionClient, kind: rocket_acp::AgentKind) -> 
         Box::new(NullEventPublisher),
         Arc::new(rocket_app::NoopSessionCleanup),
         agent_config_service_for(kind),
-    );
+    )
+    .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
     let conversation_svc = ConversationService::new(
         Arc::new(SharedPathConversationRepo::new(Arc::clone(&ws_path))),

@@ -2295,3 +2295,52 @@ mod null_collection_repo_tests {
         assert_eq!(*saved.lock().expect("lock saved"), vec!["a/b".to_string()]);
     }
 }
+
+/// A `HostEnv` with fixed values, so a test needs no real process environment.
+#[derive(Default)]
+pub struct FixedHostEnv {
+    pub vars: HashMap<String, String>,
+    pub user: Option<String>,
+    pub exe: Option<std::path::PathBuf>,
+}
+
+impl FixedHostEnv {
+    pub fn with_vars(pairs: &[(&str, &str)]) -> Arc<Self> {
+        Arc::new(Self {
+            vars: pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+            ..Self::default()
+        })
+    }
+
+    pub fn with_user(user: &str) -> Arc<Self> {
+        Arc::new(Self {
+            user: Some(user.to_string()),
+            ..Self::default()
+        })
+    }
+
+    pub fn with_exe(exe: &str) -> Arc<Self> {
+        Arc::new(Self {
+            exe: Some(std::path::PathBuf::from(exe)),
+            ..Self::default()
+        })
+    }
+}
+
+impl rocket_shared::host_env::HostEnv for FixedHostEnv {
+    fn vars(&self) -> HashMap<String, String> {
+        self.vars.clone()
+    }
+    fn var(&self, name: &str) -> Option<String> {
+        self.vars.get(name).cloned()
+    }
+    fn user_name(&self) -> Option<String> {
+        self.user.clone()
+    }
+    fn current_exe(&self) -> Option<std::path::PathBuf> {
+        self.exe.clone()
+    }
+}

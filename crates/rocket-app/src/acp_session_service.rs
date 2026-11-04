@@ -68,6 +68,9 @@ pub struct AcpSessionService {
     /// Workspace secrets for masking the live text. `None` masks only the
     /// session's own values.
     stream_secrets: Option<Arc<dyn StreamSecretSource>>,
+    /// Gives the path of this executable, for the stdio MCP bridge. The default has none,
+    /// so a session start fails until a real one is set.
+    host_env: Arc<dyn rocket_shared::host_env::HostEnv>,
 }
 
 /// Longest time one permission request may stay open. The idle clock is
@@ -133,7 +136,14 @@ impl AcpSessionService {
             session_idle: Mutex::new(HashMap::new()),
             session_secrets: Mutex::new(HashMap::new()),
             stream_secrets: None,
+            host_env: Arc::new(rocket_shared::host_env::EmptyHostEnv),
         }
+    }
+
+    /// Sets the host environment that names this executable for the stdio MCP bridge.
+    pub fn with_host_env(mut self, env: Arc<dyn rocket_shared::host_env::HostEnv>) -> Self {
+        self.host_env = env;
+        self
     }
 
     /// Test seam. Changes how long a permission request may stay unanswered.
@@ -268,7 +278,7 @@ impl AcpSessionService {
             .into_iter()
             .collect();
         let env = session_env(&config, credential, &plan.env);
-        let mcp_servers = mcp_server_specs(mcp_http)?;
+        let mcp_servers = mcp_server_specs(self.host_env.as_ref(), mcp_http)?;
         let mut args = config.args.clone();
         args.extend(plan.args.iter().cloned());
         let info = self
@@ -702,10 +712,12 @@ impl AcpSessionService {
 /// the same server through the hidden `--acp-mcp-stdio-bridge` mode. The
 /// token travels only in the stdio spec's environment, never in argv.
 fn mcp_server_specs(
+    host: &dyn rocket_shared::host_env::HostEnv,
     creds: McpHttpServerCredentials,
 ) -> DomainResult<Vec<rocket_acp::McpServerSpec>> {
-    let exe = std::env::current_exe()
-        .map_err(|e| DomainError::Internal(format!("could not resolve current executable: {e}")))?;
+    let exe = host
+        .current_exe()
+        .ok_or_else(|| DomainError::Internal("could not resolve current executable".into()))?;
     Ok(vec![
         rocket_acp::McpServerSpec::Http {
             name: ROCKET_MCP_SERVER_NAME.to_string(),
@@ -885,14 +897,15 @@ mod tests {
             Box::new(FakeAgentConfigRepo(Mutex::new(vec![bad]))),
             secret_manager,
             Arc::new(rocket_environment::secret_store::NullSecretStore),
-            crate::process_env_reader(),
+            crate::env_reader_from(Arc::new(rocket_infra::ProcessHostEnv)),
         ));
         let service = AcpSessionService::new(
             Box::new(FakeSessionClient::default()),
             Box::new(SharedEventPublisher(Arc::new(FakeEventPublisher::new()))),
             noop_cleanup(),
             cfg_service,
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
         let err = service
             .start_workspace_session("agent-1", "/tmp", test_creds(), test_isolation())
             .await
@@ -919,14 +932,15 @@ mod tests {
             Box::new(FakeAgentConfigRepo(Mutex::new(vec![bad]))),
             secret_manager,
             Arc::new(rocket_environment::secret_store::NullSecretStore),
-            crate::process_env_reader(),
+            crate::env_reader_from(Arc::new(rocket_infra::ProcessHostEnv)),
         ));
         let service = AcpSessionService::new(
             Box::new(FakeSessionClient::default()),
             Box::new(SharedEventPublisher(Arc::new(FakeEventPublisher::new()))),
             noop_cleanup(),
             cfg_service,
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
         let err = service
             .start_workspace_session("agent-1", "/tmp", test_creds(), test_isolation())
             .await
@@ -1136,7 +1150,7 @@ mod tests {
             Box::new(repo),
             secret_manager,
             Arc::new(rocket_environment::secret_store::NullSecretStore),
-            crate::process_env_reader(),
+            crate::env_reader_from(Arc::new(rocket_infra::ProcessHostEnv)),
         ))
     }
 
@@ -1318,6 +1332,29 @@ mod tests {
         }
     }
 
+    #[test]
+    fn mcp_server_specs_use_the_host_env_executable() {
+        let env = crate::test_doubles::FixedHostEnv::with_exe("/opt/rocket/rocket");
+
+        let specs = mcp_server_specs(env.as_ref(), test_creds()).expect("specs");
+
+        let command = specs.iter().find_map(|s| match s {
+            rocket_acp::McpServerSpec::Stdio { command, .. } => Some(command.clone()),
+            _ => None,
+        });
+        assert_eq!(command.as_deref(), Some("/opt/rocket/rocket"));
+    }
+
+    #[test]
+    fn mcp_server_specs_fail_without_an_executable() {
+        let err = mcp_server_specs(&rocket_shared::host_env::EmptyHostEnv, test_creds())
+            .expect_err("no exe");
+
+        assert!(err
+            .to_string()
+            .contains("could not resolve current executable"));
+    }
+
     fn test_creds() -> McpHttpServerCredentials {
         McpHttpServerCredentials {
             port: 4321,
@@ -1351,6 +1388,7 @@ mod tests {
             cleanup,
             agent_config_service(),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
     }
 
     /// Starts a session and tracks it, as the command layer does once its
@@ -1377,7 +1415,8 @@ mod tests {
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             noop_cleanup(),
             agent_config_service(),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let session_id = service
             .start_workspace_session("agent-1", "/tmp", test_creds(), test_isolation())
@@ -1398,7 +1437,8 @@ mod tests {
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             noop_cleanup(),
             agent_config_service(),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         service
             .start_workspace_session("agent-1", "/tmp", test_creds(), test_isolation())
@@ -1433,7 +1473,8 @@ mod tests {
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             noop_cleanup(),
             agent_config_service(),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let stop_reason = service
             .send_prompt("session-1", hi())
@@ -1472,7 +1513,8 @@ mod tests {
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             noop_cleanup(),
             agent_config_service(),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         service
             .end_session("session-1")
@@ -1489,7 +1531,8 @@ mod tests {
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             noop_cleanup(),
             agent_config_service(),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let err = service
             .start_workspace_session("no-such-agent", "/tmp", test_creds(), test_isolation())
@@ -1514,7 +1557,8 @@ mod tests {
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             noop_cleanup(),
             agent_config_service(),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let err = service
             .start_workspace_session("agent-1", "/tmp", test_creds(), test_isolation())
@@ -1537,7 +1581,8 @@ mod tests {
             agent_config_service_with(FakeVaultFetcher {
                 secret_value_result: Ok(None),
             }),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let err = service
             .start_workspace_session("agent-1", "/tmp", test_creds(), test_isolation())
@@ -1562,7 +1607,8 @@ mod tests {
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             noop_cleanup(),
             agent_config_service(),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let err = service
             .send_prompt("session-1", hi())
@@ -1594,7 +1640,8 @@ mod tests {
             noop_cleanup(),
             agent_config_service(),
             Duration::from_millis(20),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let err = service
             .send_prompt("session-1", hi())
@@ -1628,7 +1675,8 @@ mod tests {
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             noop_cleanup(),
             agent_config_service(),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         service
             .end_all_sessions()
@@ -1709,7 +1757,8 @@ mod tests {
             Box::new(SharedEventPublisher(Arc::new(FakeEventPublisher::new()))),
             noop_cleanup(),
             agent_config_service(),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
         let plan = crate::session_plan::SessionPlan {
             args: vec!["-e".to_string(), "none".to_string()],
             env: vec![("X_HOME".to_string(), "/home/x".to_string())],
@@ -1741,7 +1790,8 @@ mod tests {
             Box::new(SharedEventPublisher(Arc::new(FakeEventPublisher::new()))),
             noop_cleanup(),
             agent_config_service(),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
         let config = service.agent_config("agent-1").expect("known id");
         assert_eq!(config.kind, rocket_acp::AgentKind::Claude);
         assert!(service.agent_config("no-such-agent").is_err());
@@ -1761,7 +1811,8 @@ mod tests {
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             noop_cleanup(),
             agent_config_service(),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         service
             .start_workspace_session(
@@ -1827,6 +1878,7 @@ mod tests {
             agent_config_service(),
             idle,
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
     }
 
     fn permission_request(id: &str) -> AcpUpdate {
@@ -2192,7 +2244,7 @@ mod tests {
             Box::new(FakeAgentConfigRepo(Mutex::new(vec![config]))),
             secret_manager,
             Arc::new(rocket_environment::secret_store::NullSecretStore),
-            crate::process_env_reader(),
+            crate::env_reader_from(Arc::new(rocket_infra::ProcessHostEnv)),
         ));
         AcpSessionService::with_prompt_idle_timeout(
             Box::new(FakeSessionClient::default()),
@@ -2201,6 +2253,7 @@ mod tests {
             cfg_service,
             idle,
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
     }
 
     #[tokio::test]
@@ -2751,7 +2804,8 @@ mod tests {
             cleanup.clone(),
             agent_config_service(),
             Duration::from_millis(50),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
         start(&service).await;
 
         let stop_reason = send_hi(&service, "session-1")
@@ -2885,7 +2939,8 @@ mod tests {
             cleanup.clone(),
             agent_config_service(),
             Duration::from_millis(20),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
         start(&service).await;
 
         send_hi(&service, "session-1")
@@ -2951,7 +3006,8 @@ mod tests {
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             noop_cleanup(),
             agent_config_service(),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let err = service
             .send_prompt("session-1", hi())
@@ -3198,7 +3254,8 @@ mod tests {
             Box::new(SharedEventPublisher(Arc::clone(&publisher))),
             cleanup.clone(),
             agent_config_service(),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
         let isolation = crate::session_plan::session_plan(&crate::session_plan::PlanInput {
             kind: rocket_acp::AgentKind::Claude,
             config_args: &[],

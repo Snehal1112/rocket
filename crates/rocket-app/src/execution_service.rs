@@ -727,6 +727,9 @@ pub struct RequestExecutionService {
     trust_store: Arc<dyn rocket_collection::CollectionTrustStore>,
     /// The lock every writer of the cookie jars takes.
     cookie_lock: rocket_http::CookieJarLock,
+    /// The host process environment. The default has nothing in it, so an unwired service
+    /// resolves no `process.env` value from the OS.
+    host_env: Arc<dyn rocket_shared::host_env::HostEnv>,
 }
 
 impl RequestExecutionService {
@@ -759,6 +762,7 @@ impl RequestExecutionService {
             vault_fetcher,
             trust_store: Arc::new(rocket_collection::DenyAllTrustStore),
             cookie_lock: rocket_http::CookieJarLock::default(),
+            host_env: Arc::new(rocket_shared::host_env::EmptyHostEnv),
         }
     }
 
@@ -792,6 +796,7 @@ impl RequestExecutionService {
             vault_fetcher,
             trust_store: Arc::new(rocket_collection::DenyAllTrustStore),
             cookie_lock: rocket_http::CookieJarLock::default(),
+            host_env: Arc::new(rocket_shared::host_env::EmptyHostEnv),
         }
     }
 
@@ -859,6 +864,12 @@ impl RequestExecutionService {
             Some(repo) => repo,
             None => self.global_env_repo(),
         }
+    }
+
+    /// Attach the host environment that `process.env` and `rok.getProcessEnv` read.
+    pub fn with_host_env(mut self, env: Arc<dyn rocket_shared::host_env::HostEnv>) -> Self {
+        self.host_env = env;
+        self
     }
 
     /// Attach the loader that reads `dotEnvFilePath` files. Without one no `.env` file is read.
@@ -1544,7 +1555,7 @@ impl RequestExecutionService {
                 file_values.extend(collected.values);
             }
         }
-        let os: std::collections::HashMap<String, String> = std::env::vars().collect();
+        let os: std::collections::HashMap<String, String> = self.host_env.vars();
         let mut dot_env_keys: Vec<String> = file_values
             .keys()
             .filter(|k| !os.contains_key(*k))
@@ -2828,7 +2839,7 @@ impl RequestExecutionService {
                 // Scripts read the host environment through rok.getProcessEnv. Only a
                 // Developer-mode script gets it.
                 if mode == SandboxMode::Developer {
-                    var_ctx.process_env = std::env::vars().collect();
+                    var_ctx.process_env = self.host_env.vars();
                 }
                 // A collection whose directory cannot be resolved just gets no scope.
                 let scope = self
@@ -5157,6 +5168,7 @@ mod tests {
             Arc::new(FakeSecretStore),
             fetcher,
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
     }
 
     fn svc_with_vault_envs(
@@ -5177,6 +5189,7 @@ mod tests {
             Arc::new(FakeSecretStore),
             fetcher,
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
     }
 
     #[tokio::test]
@@ -5445,7 +5458,8 @@ mod tests {
             ))),
             Arc::new(FakeSecretStore),
             fetcher,
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let out = svc
             .execute(sample_input(
@@ -5499,6 +5513,7 @@ mod tests {
             Arc::new(FakeSecretStore),
             fetcher,
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_collection_env_repo_factory(Box::new(SingleCollectionEnvRepoFactory { env }))
         .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
 
@@ -5562,6 +5577,7 @@ mod tests {
             Arc::new(FakeSecretStore),
             Arc::clone(&fetcher) as Arc<dyn rocket_environment::VaultSecretFetcher>,
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_collection_env_repo_factory(Box::new(SingleCollectionEnvRepoFactory { env }))
         .with_trust_store(trust);
         (svc, executor, fetcher)
@@ -5728,7 +5744,8 @@ mod tests {
             ))),
             Arc::new(FakeSecretStore),
             fetcher,
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let result = svc
             .execute(sample_input(
@@ -5776,7 +5793,8 @@ mod tests {
             ))),
             Arc::new(FakeSecretStore),
             fetcher,
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let result = svc
             .execute(sample_input("https://api.example.com/health", Some("prod")))
@@ -5813,7 +5831,8 @@ mod tests {
                 ))),
                 Arc::new(FakeSecretStore),
                 fetcher,
-            );
+            )
+            .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
             (svc, counter)
         };
 
@@ -5857,7 +5876,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(FakeSecretStore),
             fetcher,
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let result = svc
             .resolve_external_secrets(None, Some("prod"))
@@ -5905,7 +5925,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(FakeSecretStore),
             fetcher,
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let out = svc
             .execute(sample_input("https://api.example.com/status", Some("prod")))
@@ -5949,7 +5970,8 @@ mod tests {
             ))),
             Arc::new(FakeSecretStore),
             fetcher,
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         svc.execute(sample_input(
             "https://api.example.com/{{payments.apiKey}}",
@@ -6007,7 +6029,8 @@ mod tests {
             ))),
             Arc::new(FakeSecretStore),
             fetcher,
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         svc.execute(sample_input(
             "https://api.example.com/{{payments.apiKey}}?token={{payments.apiKey}}",
@@ -6059,7 +6082,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         svc.execute(sample_input("https://example.com/items?page=2", None))
             .await
@@ -6091,7 +6115,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let mut input = sample_input("https://api.example.com/ping", None);
         input.run_source = rocket_shared::RunSource::Agent;
@@ -6129,7 +6154,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let mut input = sample_input("{{oidc-baseurl}}/api/data", Some("staging"));
         input.collection = None;
@@ -6191,7 +6217,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
         let config = rocket_http::LoadTestConfig {
             concurrency: 1,
             total_requests: 2,
@@ -6224,7 +6251,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let input = sample_input("{{oidc-baseurl}}/api/v1/users", Some("dev"));
         let resolved = svc
@@ -6247,7 +6275,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
         let mut input = sample_input("https://api.example.com/items", Some("dev"));
         input.query_params = vec![
             QueryParam {
@@ -6294,7 +6323,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
         let secrets =
             std::collections::HashMap::from([("vault.secret".to_string(), "s3cr3t".to_string())]);
         (svc, secrets)
@@ -6392,7 +6422,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
         let mut input = sample_input(
             "https://api.example.com/users/:id/orders/:id/{kind}",
             Some("dev"),
@@ -6430,7 +6461,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
         let mut input = sample_input("https://api.example.com/users/:id", None);
         input.path_params = vec![rocket_shared::types::PathParam {
             name: "id".into(),
@@ -6465,7 +6497,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         // Certificates sent by the caller are ignored: the environment is the only source.
         let mut input = sample_input("https://api.example.com/x", Some("dev"));
@@ -6551,7 +6584,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
         match factory {
             Some(f) => svc.with_collection_env_repo_factory(Box::new(f)),
             None => svc,
@@ -6693,7 +6727,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
         let input = sample_input("https://api.example.com/x", None);
         let resolved = svc
             .resolve_request(&input, &std::collections::HashMap::new())
@@ -7173,7 +7208,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let mut input = sample_input("https://api.example.com/vaults", Some("local"));
         input.collection = Some("my-api".into());
@@ -7201,7 +7237,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let mut external_secrets = std::collections::HashMap::new();
         external_secrets.insert("payments.apiKey".to_string(), "sk-live-key".to_string());
@@ -7236,6 +7273,7 @@ mod tests {
                 Arc::new(rocket_environment::NullSecretStore),
                 Arc::new(rocket_environment::NullVaultSecretFetcher),
             )
+            .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         }
 
         fn chain(folders: Vec<FolderSettings>) -> StubCollectionRepo {
@@ -7602,7 +7640,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let out = svc
             .execute(sample_input("{{BASE_URL}}/users", Some("prod")))
@@ -7650,7 +7689,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         svc.execute(sample_input("https://example.com", None))
             .await
@@ -7685,7 +7725,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         svc.execute(sample_input("https://example.com/items", None))
             .await
@@ -7837,7 +7878,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let mut input = sample_input("https://{{HOST}}/api", None);
         input.collection = Some("my-api".into());
@@ -7874,7 +7916,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let mut input = sample_input("https://api.example.com/{{TOKEN}}", None);
         input.collection = Some("my-api".into());
@@ -7915,7 +7958,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
         let mut input = sample_input("https://api.example.com/Bearer-{{token}}", Some("prod"));
         input.collection = Some("my-api".into());
         input.request_path = Some("items/get.yml".into());
@@ -7995,7 +8039,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let mut input = sample_input("https://api.example.com/{{V}}", Some("prod"));
         input.collection = Some("my-api".into());
@@ -8070,7 +8115,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let mut input = sample_input("https://api.example.com", None);
         input.collection = Some("my-api".into());
@@ -8124,7 +8170,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
         let entries: Vec<ConsoleEntry> = (0..crate::event_caps::MAX_CONSOLE_ENTRIES + 10)
             .map(|i| ConsoleEntry {
                 level: ConsoleLevel::Log,
@@ -8166,7 +8213,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let mut input = sample_input("https://api.example.com/users", None);
         input.auth = Auth::Bearer {
@@ -8204,6 +8252,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_audit_actor(AuditActor::Agent);
         let mut input = sample_input("https://api.example.com/users", None);
         input.auth = Auth::Bearer {
@@ -8242,6 +8291,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_audit_actor(AuditActor::User)
         .with_script_engine(Box::new(MockScriptEngine::returning_post_response(result)));
         let mut input = sample_input("https://example.com", Some("prod"));
@@ -8269,7 +8319,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         // Auth::None by default in sample_input.
         svc.execute(sample_input("https://api.example.com/public", None))
@@ -8756,6 +8807,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(engine)
         .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all())
     }
@@ -8951,6 +9003,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(Box::new(SharedCapture(Arc::clone(&capture))));
 
         let mut input = sample_input("https://example.com", Some("dev"));
@@ -9115,6 +9168,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_trust_store(if allow {
             crate::test_doubles::InMemoryTrustStore::allow_all()
         } else {
@@ -9258,6 +9312,52 @@ mod tests {
         assert_eq!(pe.vars.get("ROCKET_DOT_A").map(String::as_str), Some("1"));
         let calls = fake.calls.lock().expect("calls");
         assert_eq!(calls[0].1, Some(std::path::PathBuf::from("/work/api")));
+    }
+
+    #[test]
+    fn process_env_for_reads_the_injected_host_env() {
+        let svc = dot_env_svc(Box::new(MockEnvRepo::empty()), None, None, true).with_host_env(
+            crate::test_doubles::FixedHostEnv::with_vars(&[("ROCKET_INJECTED", "yes")]),
+        );
+
+        let pe = svc.process_env_for(Some("api"), None, None);
+
+        assert!(pe.allowed);
+        assert_eq!(
+            pe.vars.get("ROCKET_INJECTED").map(String::as_str),
+            Some("yes")
+        );
+    }
+
+    #[test]
+    fn a_service_without_with_host_env_has_no_os_values() {
+        let svc = RequestExecutionService::new(
+            Box::new(MockEnvRepo::empty()),
+            Arc::new(MockExecutor::new(200)),
+            Box::new(MockHistoryRepo::new()),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(NullCookieRepo),
+            Box::new(NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        )
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
+
+        let pe = svc.process_env_for(Some("api"), None, None);
+
+        assert!(!pe.vars.contains_key("PATH"));
+    }
+
+    #[test]
+    fn process_env_for_with_an_empty_host_env_has_no_os_values() {
+        let svc = dot_env_svc(Box::new(MockEnvRepo::empty()), None, None, true)
+            .with_host_env(Arc::new(rocket_shared::host_env::EmptyHostEnv));
+
+        let pe = svc.process_env_for(Some("api"), None, None);
+
+        assert!(pe.allowed);
+        assert!(!pe.vars.contains_key("PATH"));
     }
 
     #[test]
@@ -9779,6 +9879,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(Box::new(MockScriptEngine::returning_post_response(result)));
 
         let mut input = sample_input("https://example.com", Some("prod"));
@@ -9890,6 +9991,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(Box::new(MockScriptEngine::returning_post_response(result)));
 
         let mut input = sample_input("https://example.com", Some("prod"));
@@ -9955,6 +10057,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(Box::new(MockScriptEngine::returning_post_response(result)));
 
         let mut input = sample_input("https://example.com", Some("prod"));
@@ -10057,6 +10160,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(Box::new(MockScriptEngine::returning_post_response(result)));
 
         let mut input = sample_input("https://example.com", None);
@@ -10231,6 +10335,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(Box::new(MockScriptEngine::returning_post_response(result)))
         .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all())
         .with_collection_env_repo_factory(Box::new(
@@ -10309,6 +10414,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(Box::new(MockScriptEngine::returning_post_response(result)))
         .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
 
@@ -10748,6 +10854,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
 
         let mut input = sample_input("https://example.com", None);
@@ -10793,6 +10900,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
 
         let mut input = sample_input("https://example.com", Some("dev"));
@@ -10827,6 +10935,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
 
         let mut input = sample_input("https://example.com", None);
@@ -10863,6 +10972,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
 
         let mut input = sample_input("https://example.com", None);
@@ -10899,6 +11009,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
 
         let mut input = sample_input("https://example.com", None);
@@ -10938,6 +11049,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
 
         let mut input = sample_input("https://example.com", None);
@@ -10970,7 +11082,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let mut input = sample_input("http://localhost:8080/", None);
         input.request_guard_policy = RequestGuardPolicy {
@@ -11010,6 +11123,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
 
         let mut input = sample_input("https://example.com", None);
@@ -11053,6 +11167,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
 
         let mut input = sample_input("https://example.com", None);
@@ -11102,7 +11217,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let err = svc
             .execute(sample_input("https://example.com/{{cs}}", Some("dev")))
@@ -11247,6 +11363,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(engine)
     }
 
@@ -11265,7 +11382,8 @@ mod tests {
             ))),
             Arc::new(FakeSecretStore),
             Arc::new(FakeVaultFetcher::new(vec![])),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
         (svc, saved)
     }
 
@@ -11389,6 +11507,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
 
         let mut input = sample_input("https://example.com", None);
@@ -11429,7 +11548,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let mut input = sample_input("https://example.com/login", None);
         input.collection = Some("my-api".into());
@@ -11477,7 +11597,8 @@ mod tests {
             ))),
             Arc::new(FakeSecretStore),
             fetcher,
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let mut input = sample_input("https://example.com/login", Some("prod"));
         input.body = Some(Body {
@@ -11517,7 +11638,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let mut input = sample_input("https://example.com/upload", None);
         input.collection = Some("my-api".into());
@@ -11561,7 +11683,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let mut input = sample_input("https://example.com", None);
         input.body = Some(Body {
@@ -11592,7 +11715,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
         let policy = RequestGuardPolicy::default();
         let result = svc.check_request_guard(
             "https://example.com/",
@@ -11615,7 +11739,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
         let policy = RequestGuardPolicy {
             block_script_redirects_to_internal_hosts: true,
             also_block_private_ranges: false,
@@ -11646,7 +11771,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
         let policy = RequestGuardPolicy {
             block_script_redirects_to_internal_hosts: true,
             also_block_private_ranges: false,
@@ -11669,7 +11795,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
         let policy = RequestGuardPolicy {
             block_script_redirects_to_internal_hosts: true,
             also_block_private_ranges: true,
@@ -11695,7 +11822,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
         let policy = RequestGuardPolicy {
             block_script_redirects_to_internal_hosts: true,
             also_block_private_ranges: true,
@@ -11718,7 +11846,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
         let policy = RequestGuardPolicy {
             block_script_redirects_to_internal_hosts: true,
             also_block_private_ranges: false,
@@ -11745,7 +11874,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
         let policy = RequestGuardPolicy {
             block_script_redirects_to_internal_hosts: true,
             also_block_private_ranges: false,
@@ -11772,7 +11902,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
         let policy = RequestGuardPolicy {
             block_script_redirects_to_internal_hosts: true,
             also_block_private_ranges: false,
@@ -11806,7 +11937,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
         let policy = RequestGuardPolicy {
             block_script_redirects_to_internal_hosts: true,
             also_block_private_ranges: false,
@@ -11831,7 +11963,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
         let policy = RequestGuardPolicy {
             block_script_redirects_to_internal_hosts: true,
             also_block_private_ranges: false,
@@ -11891,7 +12024,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let mut input = sample_input("https://example.com", None);
         // One passing and one failing assertion.
@@ -11927,7 +12061,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
         (svc, publisher)
     }
 
@@ -12007,6 +12142,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(Box::new(MockBeforeRequestEngine::returning(result)));
 
         let mut input = sample_input("https://example.com", None);
@@ -12582,6 +12718,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(Box::new(SharedCapturingEngine(engine)));
 
         let mut input = sample_input("https://example.com", Some("dev"));
@@ -12636,7 +12773,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
         let mut input = sample_input("https://example.com/{{ORG_ID}}", None);
         input.global_env_name = Some("shared-global".into());
@@ -12695,7 +12833,8 @@ mod tests {
             Box::new(EmptySecretManagerRepo),
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
-        );
+        )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
         let mut input = sample_input(
             "https://api.example.com/register?cb={{callback.payment}}",
             None,
@@ -12777,6 +12916,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(Box::new(SharedEngine(Arc::clone(&engine))));
         let mut input = sample_input("https://api.example.com", None);
         input.pre_request_script = Some("console.log(1)".to_string());
@@ -12841,6 +12981,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(Box::new(SharedCapturingEngineSecrets(engine)));
 
         let mut input = sample_input("https://example.com", Some("dev"));
@@ -12906,6 +13047,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(Box::new(SharedCapturingEngineShort(engine)));
 
         let mut input = sample_input("https://example.com", Some("dev"));
@@ -12958,6 +13100,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(Box::new(SharedCapturingEngineExact(engine)));
 
         let mut input = sample_input("https://example.com", Some("dev"));
@@ -12995,6 +13138,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
     }
 
     #[test]
@@ -13088,6 +13232,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(Box::new(SharedCapturingEngineGlobal(engine)));
 
         let mut input = sample_input("https://example.com", Some("dev"));
@@ -13156,6 +13301,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(Box::new(FailingEngine));
 
         let mut input = sample_input("https://example.com", None);
@@ -13216,6 +13362,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(Box::new(LeakyErrorEngine { as_err }));
         let mut input = sample_input("https://example.com", Some("dev"));
         input.pre_request_script = Some("throw new Error('x')".into());
@@ -13693,6 +13840,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_script_engine(engine);
         (svc, executor, saved)
     }
@@ -14264,6 +14412,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_trust_store(if allow {
             crate::test_doubles::InMemoryTrustStore::allow_all()
         } else {
@@ -14409,6 +14558,7 @@ mod tests {
             Arc::new(rocket_environment::NullSecretStore),
             Arc::new(rocket_environment::NullVaultSecretFetcher),
         )
+        .with_host_env(Arc::new(rocket_infra::ProcessHostEnv))
         .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all())
         .with_collection_env_repo_factory(Box::new(DirEnvRepoFactory {
             env: env_with_dot_env("dev", ".env"),
