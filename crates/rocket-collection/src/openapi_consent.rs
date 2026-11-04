@@ -44,12 +44,11 @@ pub fn location_key(location: &SpecLocation) -> String {
     serde_json::to_string(location).unwrap_or_default()
 }
 
-/// The key of a collection folder: canonical when it exists, else as given.
+/// The key of a collection folder, as given. A store that sits on a disk resolves the path
+/// first (canonical when it exists) and passes the result here, so two spellings of one folder
+/// share a key.
 pub fn consent_root_key(root: &Path) -> String {
-    std::fs::canonicalize(root)
-        .unwrap_or_else(|_| root.to_path_buf())
-        .to_string_lossy()
-        .into_owned()
+    root.to_string_lossy().into_owned()
 }
 
 /// A store that keeps approvals in memory only. Used by tests and as a stand-in.
@@ -88,5 +87,18 @@ impl OpenApiConsentStore for InMemoryConsentStore {
         let mut map = self.records.lock().unwrap_or_else(|e| e.into_inner());
         map.remove(&key);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_root_key_is_the_path_as_given() {
+        assert_eq!(
+            consent_root_key(Path::new("/a/b/../c")),
+            "/a/b/../c".to_string()
+        );
     }
 }

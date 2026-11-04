@@ -9,6 +9,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use rocket_collection::{consent_root_key, OpenApiConsent, OpenApiConsentStore};
+
+/// The key of a collection folder: canonical when it exists, else as given.
+fn disk_root_key(root: &Path) -> String {
+    consent_root_key(&std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf()))
+}
 use rocket_shared::error::{DomainError, DomainResult};
 use serde::{Deserialize, Serialize};
 
@@ -97,7 +102,7 @@ impl FsOpenApiConsentRepo {
 
 impl OpenApiConsentStore for FsOpenApiConsentRepo {
     fn get(&self, root: &Path, source_id: &str) -> DomainResult<Option<OpenApiConsent>> {
-        let key = consent_root_key(root);
+        let key = disk_root_key(root);
         Ok(match self.load() {
             Loaded::Ok(file) => file
                 .sources
@@ -115,7 +120,7 @@ impl OpenApiConsentStore for FsOpenApiConsentRepo {
     }
 
     fn grant(&self, root: &Path, source_id: &str, location: &str) -> DomainResult<()> {
-        let key = consent_root_key(root);
+        let key = disk_root_key(root);
         self.update(|file| {
             file.sources
                 .retain(|r| !(r.root == key && r.source_id == source_id));
@@ -129,7 +134,7 @@ impl OpenApiConsentStore for FsOpenApiConsentRepo {
     }
 
     fn revoke(&self, root: &Path, source_id: &str) -> DomainResult<()> {
-        let key = consent_root_key(root);
+        let key = disk_root_key(root);
         // The file is read inside the lock, so a grant in between is not lost.
         let _guard = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
         let mut file = match self.load() {
@@ -188,7 +193,7 @@ mod openapi_consent_tests {
     fn an_old_record_without_a_location_key_reads_as_missing() {
         let dir = TempDir::new().expect("dir");
         let root = TempDir::new().expect("root");
-        let key = consent_root_key(root.path());
+        let key = disk_root_key(root.path());
         let text = format!(
             "version: 1\nsources:\n- root: {key}\n  source_id: s1\n  location: https://github.com/o/r/blob/main/a.json\n  granted_at: x\n"
         );
@@ -205,6 +210,20 @@ mod openapi_consent_tests {
                 .location,
             "key"
         );
+    }
+
+    #[test]
+    fn two_spellings_of_one_folder_share_a_record() {
+        let dir = TempDir::new().expect("dir");
+        let root = TempDir::new().expect("root");
+        let sub = root.path().join("sub");
+        fs::create_dir(&sub).expect("sub");
+        let store = repo(&dir);
+        store.grant(&sub, "s1", "one").expect("grant");
+
+        let other_spelling = sub.join("..").join("sub");
+
+        assert!(store.get(&other_spelling, "s1").expect("get").is_some());
     }
 
     #[test]
