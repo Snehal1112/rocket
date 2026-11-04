@@ -1,23 +1,24 @@
 use std::path::Path;
 
 use crate::error::ImportResult;
+use crate::files::{ImportFiles, WorkDir};
 
 /// Extract a Bruno ZIP to a temp directory.
 ///
 /// Bruno ZIPs always contain exactly one top-level directory (e.g. `my-workspace/`).
-/// Returns `(TempDir, inner_path)`. The caller must keep `TempDir` alive for the
+/// Returns `(WorkDir, inner_path)`. The caller must keep the `WorkDir` alive for the
 /// duration of the import — dropping it deletes the extracted files.
 pub(crate) fn extract_to_temp(
+    files: &dyn ImportFiles,
     zip_path: &Path,
-) -> ImportResult<(tempfile::TempDir, std::path::PathBuf)> {
+) -> ImportResult<(Box<dyn WorkDir>, std::path::PathBuf)> {
     use crate::error::ImportError;
-    use std::fs;
 
-    let file = fs::File::open(zip_path)?;
+    let file = files.open_read(zip_path)?;
     let mut archive =
         zip::ZipArchive::new(file).map_err(|e| ImportError::ZipExtractionFailed(e.to_string()))?;
 
-    let temp_dir = tempfile::TempDir::new()?;
+    let temp_dir = files.temp_dir()?;
 
     for i in 0..archive.len() {
         let mut entry = archive
@@ -30,13 +31,12 @@ pub(crate) fn extract_to_temp(
         };
 
         if entry.is_dir() {
-            fs::create_dir_all(&out_path)?;
+            files.create_dir_all(&out_path)?;
         } else {
             if let Some(parent) = out_path.parent() {
-                fs::create_dir_all(parent)?;
+                files.create_dir_all(parent)?;
             }
-            let mut out_file = fs::File::create(&out_path)?;
-            std::io::copy(&mut entry, &mut out_file)?;
+            files.write_stream(&out_path, &mut entry)?;
         }
     }
 
@@ -50,10 +50,11 @@ pub(crate) fn extract_to_temp(
     }
 
     // Standard case: Bruno ZIPs extract to a single top-level folder.
-    let inner = fs::read_dir(temp_dir.path())?
-        .filter_map(|e| e.ok())
-        .find(|e| e.path().is_dir())
-        .map(|e| e.path())
+    let inner = files
+        .list_dir(temp_dir.path())?
+        .into_iter()
+        .find(|e| e.path.is_dir())
+        .map(|e| e.path)
         .ok_or(ImportError::EmptyZip)?;
 
     Ok((temp_dir, inner))
@@ -67,6 +68,7 @@ mod tests {
     use zip::write::SimpleFileOptions;
 
     use super::*;
+    use crate::importer::test_files::StdFiles;
     use std::fs;
 
     /// Build a minimal ZIP in memory with the given entries and return the TempDir holding it.
@@ -96,7 +98,7 @@ mod tests {
         ]);
         let zip_path = tmp.path().join("test.zip");
 
-        let (_dir, inner) = extract_to_temp(&zip_path).unwrap();
+        let (_dir, inner) = extract_to_temp(&StdFiles, &zip_path).unwrap();
         assert!(inner.is_dir());
         assert_eq!(inner.file_name().unwrap(), "my-workspace");
         assert!(inner.join("workspace.yml").exists());
@@ -114,7 +116,7 @@ mod tests {
         ]);
         let zip_path = tmp.path().join("test.zip");
 
-        let (_dir, inner) = extract_to_temp(&zip_path).unwrap();
+        let (_dir, inner) = extract_to_temp(&StdFiles, &zip_path).unwrap();
         assert!(inner.join("workspace.yml").exists(), "should return root");
     }
 
@@ -123,7 +125,7 @@ mod tests {
         let tmp = make_test_zip(&[("readme.txt", "hello")]);
         let zip_path = tmp.path().join("test.zip");
 
-        let result = extract_to_temp(&zip_path);
+        let result = extract_to_temp(&StdFiles, &zip_path);
         assert!(
             matches!(result, Err(crate::error::ImportError::EmptyZip)),
             "expected EmptyZip, got: {:?}",

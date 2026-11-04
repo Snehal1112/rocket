@@ -10,7 +10,7 @@ pub(crate) mod wsdl;
 
 pub use converter::openapi::{baseline_hash, CONVERTER_VERSION};
 pub use error::{ImportError, ImportResult};
-pub use files::{DirEntryInfo, EntryKind, ImportFiles};
+pub use files::{DirEntryInfo, EntryKind, ImportFiles, ReadSeek, WorkDir};
 pub use importer::{
     EnvironmentRepositoryFactory, ImportService, ImportedOperation, OpenApiImportOutcome,
 };

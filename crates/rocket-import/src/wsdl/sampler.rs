@@ -240,6 +240,7 @@ impl<'a> Sampler<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::importer::test_files::StdFiles;
     use crate::wsdl::parse_wsdl_str;
     use std::path::Path;
 
@@ -250,14 +251,14 @@ mod tests {
                <types><xsd:schema targetNamespace="urn:t" elementFormDefault="qualified">{xsd}</xsd:schema></types>
              </definitions>"#
         );
-        parse_wsdl_str(&wsdl, Path::new("inline.wsdl")).expect("parses")
+        parse_wsdl_str(&StdFiles, &wsdl, Path::new("inline.wsdl")).expect("parses")
     }
 
     #[test]
     fn samples_nested_types_with_enum_and_builtins() {
         let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("tests/fixtures/wsdl/calc.wsdl");
-        let model = crate::wsdl::parse_wsdl_file(&path).expect("fixture parses");
+        let model = crate::wsdl::parse_wsdl_file(&StdFiles, &path).expect("fixture parses");
         let mut s = Sampler::new(&model.schemas);
         let xml = s.element(&QName::new("http://example.com/calc", "Add"));
         assert_eq!(

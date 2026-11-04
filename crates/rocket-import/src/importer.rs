@@ -68,7 +68,7 @@ pub struct ImportService {
     workspace_path: PathBuf,
     collection_repo: Box<dyn CollectionRepository>,
     env_factory: Box<dyn EnvironmentRepositoryFactory>,
-    files: Arc<dyn ImportFiles>,
+    pub(crate) files: Arc<dyn ImportFiles>,
 }
 
 impl ImportService {
@@ -308,7 +308,8 @@ impl ImportService {
         workspace_id: &str,
         create_new_workspace: bool,
     ) -> ImportResult<ImportReport> {
-        let (_temp, inner) = crate::bru::zip_extractor::extract_to_temp(zip_path)?;
+        let (_temp, inner) =
+            crate::bru::zip_extractor::extract_to_temp(self.files.as_ref(), zip_path)?;
 
         // Use ZIP file stem as name hint (e.g. "Lockstep-Inbox.zip" -> "Lockstep-Inbox").
         let zip_name = zip_path
@@ -758,7 +759,7 @@ impl ImportService {
     ) -> ImportResult<ImportReport> {
         use crate::converter::wsdl as wc;
 
-        let model = crate::wsdl::parse_wsdl_file(path)?;
+        let model = crate::wsdl::parse_wsdl_file(self.files.as_ref(), path)?;
         let file_label = path
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
@@ -2527,6 +2528,38 @@ pub(crate) mod test_files {
         fn write(&self, path: &Path, text: &str) -> io::Result<()> {
             std::fs::write(path, text)
         }
+        fn regular_file_len(&self, path: &Path) -> io::Result<Option<u64>> {
+            let meta = std::fs::metadata(path)?;
+            Ok(meta.is_file().then_some(meta.len()))
+        }
+        fn read_up_to(&self, path: &Path, max_bytes: u64) -> io::Result<Vec<u8>> {
+            use std::io::Read;
+            let mut buf = Vec::new();
+            std::fs::File::open(path)?
+                .take(max_bytes)
+                .read_to_end(&mut buf)?;
+            Ok(buf)
+        }
+        fn canonicalize(&self, path: &Path) -> io::Result<std::path::PathBuf> {
+            std::fs::canonicalize(path)
+        }
+        fn open_read(&self, path: &Path) -> io::Result<Box<dyn crate::files::ReadSeek>> {
+            Ok(Box::new(std::fs::File::open(path)?))
+        }
+        fn temp_dir(&self) -> io::Result<Box<dyn crate::files::WorkDir>> {
+            #[derive(Debug)]
+            struct Dir(tempfile::TempDir);
+            impl crate::files::WorkDir for Dir {
+                fn path(&self) -> &Path {
+                    self.0.path()
+                }
+            }
+            Ok(Box::new(Dir(tempfile::TempDir::new()?)))
+        }
+        fn write_stream(&self, path: &Path, from: &mut dyn std::io::Read) -> io::Result<u64> {
+            let mut out = std::fs::File::create(path)?;
+            io::copy(from, &mut out)
+        }
     }
 }
 
@@ -2580,6 +2613,24 @@ mod port_tests {
         fn write(&self, path: &Path, _text: &str) -> io::Result<()> {
             self.written.lock().expect("lock").push(path.to_path_buf());
             Ok(())
+        }
+        fn regular_file_len(&self, _path: &Path) -> io::Result<Option<u64>> {
+            Err(io::Error::other("unsupported"))
+        }
+        fn read_up_to(&self, _path: &Path, _max: u64) -> io::Result<Vec<u8>> {
+            Err(io::Error::other("unsupported"))
+        }
+        fn canonicalize(&self, _path: &Path) -> io::Result<PathBuf> {
+            Err(io::Error::other("unsupported"))
+        }
+        fn open_read(&self, _path: &Path) -> io::Result<Box<dyn crate::files::ReadSeek>> {
+            Err(io::Error::other("unsupported"))
+        }
+        fn temp_dir(&self) -> io::Result<Box<dyn crate::files::WorkDir>> {
+            Err(io::Error::other("unsupported"))
+        }
+        fn write_stream(&self, _path: &Path, _from: &mut dyn std::io::Read) -> io::Result<u64> {
+            Err(io::Error::other("unsupported"))
         }
     }
 

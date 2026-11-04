@@ -2,6 +2,7 @@
 
 use crate::converter::openapi::CONVERTER_VERSION;
 use crate::error::{ImportError, ImportResult};
+use crate::files::ImportFiles;
 use crate::importer::ImportService;
 use crate::openapi::{
     bundle_spec, fetch_target, parse_spec_target, parse_spec_url, source_record, Bundle, GroupBy,
@@ -15,7 +16,6 @@ use rocket_http::spec_fetch::{
     LocalReadFailure, LocalSpecReader, SpecFetchFailure, SpecFetchOutcome, SpecFetchRequest,
     SpecFetcher, DEFAULT_MAX_SPEC_BYTES,
 };
-use std::io::Read;
 use std::path::Path;
 
 /// What an OpenAPI import from a file or a link gives back.
@@ -92,18 +92,6 @@ fn commit_ref(location: &SpecLocation) -> Option<CommitRef> {
         }
         _ => None,
     }
-}
-
-/// Reads at most `cap` bytes. One byte more than the cap means the source is too large.
-fn read_capped(reader: impl Read, cap: u64) -> ImportResult<Vec<u8>> {
-    let mut bytes = Vec::new();
-    reader.take(cap + 1).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > cap {
-        return Err(ImportError::SpecUnavailable(
-            "The file is larger than the 25 MB limit.".to_string(),
-        ));
-    }
-    Ok(bytes)
 }
 
 /// The last path segment of a link, without its query. Used to name the collection.
@@ -244,20 +232,24 @@ struct SpecValidators {
 
 /// Reads a spec file from disk as text, with the size cap. A path that is not a regular file is
 /// refused.
-fn read_spec_file_text(path: &Path) -> ImportResult<String> {
-    let file = std::fs::File::open(path)?;
-    let meta = file.metadata()?;
-    if !meta.is_file() {
+fn read_spec_file_text(files: &dyn ImportFiles, path: &Path) -> ImportResult<String> {
+    let Some(len) = files.regular_file_len(path)? else {
         return Err(ImportError::SpecUnavailable(
             "That path is not a regular file.".to_string(),
         ));
-    }
-    if meta.len() > DEFAULT_MAX_SPEC_BYTES as u64 {
+    };
+    let cap = DEFAULT_MAX_SPEC_BYTES as u64;
+    if len > cap {
         return Err(ImportError::SpecUnavailable(
             "The file is larger than the 25 MB limit.".to_string(),
         ));
     }
-    let bytes = read_capped(file, DEFAULT_MAX_SPEC_BYTES as u64)?;
+    let bytes = files.read_up_to(path, cap + 1)?;
+    if bytes.len() as u64 > cap {
+        return Err(ImportError::SpecUnavailable(
+            "The file is larger than the 25 MB limit.".to_string(),
+        ));
+    }
     String::from_utf8(bytes)
         .map_err(|_| ImportError::NotAnOpenApiSpec("the file is not text".to_string()))
 }
@@ -334,7 +326,7 @@ impl ImportService {
         group_by: GroupBy,
         workspace_id: &str,
     ) -> ImportResult<OpenApiImportResult> {
-        let text = read_spec_file_text(path)?;
+        let text = read_spec_file_text(self.files.as_ref(), path)?;
         let label = file_label_of(path);
         let outcome = self.import_openapi_text(&text, &label, group_by, workspace_id)?;
         Ok(OpenApiImportResult {
@@ -365,7 +357,7 @@ impl ImportService {
                 "Choose the file with its full path.".to_string(),
             ));
         };
-        let text = read_spec_file_text(path)?;
+        let text = read_spec_file_text(self.files.as_ref(), path)?;
         let imported =
             self.import_openapi_text(&text, &file_label_of(path), group_by, workspace_id)?;
         let root = self.collections_root().join(&imported.collection);
@@ -1464,10 +1456,16 @@ parameters:
     }
 
     #[test]
-    fn read_capped_rejects_more_than_the_cap() {
-        let exact = read_capped(std::io::Cursor::new(vec![b'a'; 10]), 10).expect("at the cap");
-        assert_eq!(exact.len(), 10);
-        let err = read_capped(std::io::Cursor::new(vec![b'a'; 11]), 10).expect_err("over");
+    fn a_spec_file_over_the_cap_is_refused() {
+        use crate::importer::test_files::StdFiles;
+        let ws = TempDir::new().expect("tempdir");
+        let path = ws.path().join("big.yaml");
+        let file = std::fs::File::create(&path).expect("create");
+        file.set_len(DEFAULT_MAX_SPEC_BYTES as u64 + 1)
+            .expect("sparse file");
+
+        let err = read_spec_file_text(&StdFiles, &path).expect_err("over the cap");
+
         assert!(matches!(err, ImportError::SpecUnavailable(_)), "{err:?}");
     }
 

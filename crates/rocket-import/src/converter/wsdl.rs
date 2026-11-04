@@ -101,13 +101,14 @@ pub(crate) fn convert_operation(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::importer::test_files::StdFiles;
     use crate::wsdl::{parse_wsdl_file, parse_wsdl_str, BindingStyle, SoapVersion};
     use rocket_shared::types::{BodyMode, HttpMethod};
     use std::path::{Path, PathBuf};
 
     fn calc() -> crate::wsdl::WsdlModel {
         let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/wsdl/calc.wsdl");
-        parse_wsdl_file(&path).expect("fixture parses")
+        parse_wsdl_file(&StdFiles, &path).expect("fixture parses")
     }
 
     fn header<'a>(req: &'a rocket_collection::Request, key: &str) -> Option<&'a str> {
@@ -207,7 +208,7 @@ mod tests {
               <input><soap:body use="literal" namespace="urn:echo-rpc"/></input></operation></binding>
           <service name="S"><port name="Pt" binding="tns:B"><soap:address location="http://h/e"/></port></service>
         </definitions>"#;
-        let model = parse_wsdl_str(wsdl, Path::new("rpc.wsdl")).expect("parses");
+        let model = parse_wsdl_str(&StdFiles, wsdl, Path::new("rpc.wsdl")).expect("parses");
         let op = &model.services[0].ports[0].operations[0];
         assert_eq!(op.style, BindingStyle::Rpc);
         let env = build_envelope(SoapVersion::V11, op, &model.schemas);
