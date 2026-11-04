@@ -11,6 +11,7 @@ pub(crate) mod conversions;
 mod cookie_store;
 pub mod file_watcher;
 pub mod fs_agent_config_repo;
+pub mod fs_attachment_store;
 pub mod fs_audit_log_repo;
 pub mod fs_collection;
 pub mod fs_collection_file_source;
@@ -74,6 +75,7 @@ pub use clone_destination_capabilities::{
 pub use cookie_store::RepoCookieStore;
 pub use file_watcher::{NotifyFileWatcher, RecentWrites};
 pub use fs_agent_config_repo::FsAgentConfigRepo;
+pub use fs_attachment_store::FsAttachmentStore;
 pub use fs_audit_log_repo::FsAuditLogRepo;
 pub use fs_collection::FsCollectionRepo;
 pub use fs_collection_file_source::FsCollectionFileSource;

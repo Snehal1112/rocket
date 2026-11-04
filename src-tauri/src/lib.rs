@@ -851,6 +851,7 @@ pub fn run() {
                 Arc::new(SharedPathCollectionRepo::new(Arc::clone(
                     &active_workspace_path,
                 ))),
+                Arc::new(rocket_infra::FsAttachmentStore),
                 audit_publisher.clone(),
             )
             .with_audit_actor(AuditActor::User);

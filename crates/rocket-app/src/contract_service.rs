@@ -5,6 +5,7 @@ use rocket_audit::{
 };
 use rocket_collection::{
     contract::{
+        attachments::AttachmentStore,
         changelog::{ChangelogEntry, ContractChangelog},
         diff::diff_signature,
         repository::{ContractError, ContractRepository, ContractResult},
@@ -29,33 +30,17 @@ const MAX_ATTACHMENT_BYTES: u64 = 2 * 1024 * 1024;
 /// File extensions accepted as contract attachments.
 const ALLOWED_EXTENSIONS: &[&str] = &["pdf", "doc", "docx", "txt", "md", "png", "jpg", "jpeg"];
 
-/// Returns the directory where attachment files for a contract are stored.
-/// Mirrors the convention in `FsContractRepo::attachments_dir`.
-fn attachments_dir(collection_root: &Path, contract_id: Ulid) -> PathBuf {
-    collection_root
-        .join(".rocket")
-        .join("contracts")
-        .join("attachments")
-        .join(contract_id.to_string())
-}
-
 /// Validate and copy a list of absolute source paths into the contract's
 /// attachments directory. Returns the relative paths stored in the contract.
 ///
 /// Relative paths are relative to `collection_root`, so they are stable
 /// across machines when the collection is shared via git.
 fn copy_attachments(
+    store: &dyn AttachmentStore,
     collection_root: &Path,
     contract_id: Ulid,
     absolute_paths: &[PathBuf],
 ) -> ContractResult<Vec<PathBuf>> {
-    if absolute_paths.is_empty() {
-        return Ok(vec![]);
-    }
-
-    let dest_dir = attachments_dir(collection_root, contract_id);
-    std::fs::create_dir_all(&dest_dir)?;
-
     let mut relative_paths = Vec::with_capacity(absolute_paths.len());
 
     for src in absolute_paths {
@@ -74,7 +59,7 @@ fn copy_attachments(
         }
 
         // Validate size.
-        let size = std::fs::metadata(src)?.len();
+        let size = store.file_size(src)?;
         if size > MAX_ATTACHMENT_BYTES {
             let mb = size as f64 / (1024.0 * 1024.0);
             return Err(ContractError::Internal(format!(
@@ -84,17 +69,7 @@ fn copy_attachments(
             )));
         }
 
-        let file_name = src
-            .file_name()
-            .ok_or_else(|| ContractError::Internal("Attachment has no filename.".into()))?;
-        let dest = dest_dir.join(file_name);
-        std::fs::copy(src, &dest)?;
-
-        // Store relative path so it is portable across machines.
-        let rel = dest.strip_prefix(collection_root).map_err(|_| {
-            ContractError::Internal("Attachment dest is outside collection root.".into())
-        })?;
-        relative_paths.push(rel.to_path_buf());
+        relative_paths.push(store.store(collection_root, contract_id, src)?);
     }
 
     Ok(relative_paths)
@@ -197,6 +172,7 @@ impl ContractEdit {
 pub struct ContractService {
     repo: Arc<dyn ContractRepository>,
     collection_repo: Arc<dyn CollectionRepository>,
+    attachments: Arc<dyn AttachmentStore>,
     audit: Arc<dyn SecurityAuditPublisher>,
     audit_actor: AuditActor,
 }
@@ -225,10 +201,12 @@ impl ContractService {
     pub fn new(
         repo: Arc<dyn ContractRepository>,
         collection_repo: Arc<dyn CollectionRepository>,
+        attachments: Arc<dyn AttachmentStore>,
     ) -> Self {
         Self {
             repo,
             collection_repo,
+            attachments,
             audit: Arc::new(NullSecurityAuditPublisher),
             audit_actor: AuditActor::System,
         }
@@ -237,11 +215,13 @@ impl ContractService {
     pub fn new_with_audit(
         repo: Arc<dyn ContractRepository>,
         collection_repo: Arc<dyn CollectionRepository>,
+        attachments: Arc<dyn AttachmentStore>,
         audit: Arc<dyn SecurityAuditPublisher>,
     ) -> Self {
         Self {
             repo,
             collection_repo,
+            attachments,
             audit,
             audit_actor: AuditActor::System,
         }
@@ -311,8 +291,12 @@ impl ContractService {
         // Copy attachments into the collection before writing the contract YAML
         // so the relative paths are ready. If copy fails, no contract file is
         // written and no orphan is left behind.
-        contract.document_paths =
-            copy_attachments(collection_root, contract.id, &attachment_sources)?;
+        contract.document_paths = copy_attachments(
+            self.attachments.as_ref(),
+            collection_root,
+            contract.id,
+            &attachment_sources,
+        )?;
 
         // Only now write the contract, its baseline, and the empty changelog.
         self.repo.save_contract(collection_root, &contract)?;
@@ -419,23 +403,16 @@ impl ContractService {
         self.repo.load_contract(collection_root, contract.id)?;
 
         // Remove attachment files the user explicitly de-listed.
-        let attach_dir = attachments_dir(collection_root, contract.id);
-        if attach_dir.exists() {
-            for entry in std::fs::read_dir(&attach_dir)? {
-                let entry = entry?;
-                let rel = entry
-                    .path()
-                    .strip_prefix(collection_root)
-                    .map(|p| p.to_path_buf())
-                    .unwrap_or_else(|_| entry.path());
-                if !kept_paths.contains(&rel) {
-                    let _ = std::fs::remove_file(entry.path());
-                }
-            }
-        }
+        self.attachments
+            .retain_only(collection_root, contract.id, &kept_paths)?;
 
         // Copy newly added attachments.
-        let mut new_relative = copy_attachments(collection_root, contract.id, &attachment_sources)?;
+        let mut new_relative = copy_attachments(
+            self.attachments.as_ref(),
+            collection_root,
+            contract.id,
+            &attachment_sources,
+        )?;
 
         // Merge: kept existing paths + newly copied paths.
         let mut merged = kept_paths;
@@ -1350,6 +1327,7 @@ mod tests {
         ContractService::new(
             Arc::new(MockContractRepo::default()),
             Arc::new(MockCollectionRepo::with_collection(empty)),
+            Arc::new(FakeAttachmentStore::default()),
         )
     }
 
@@ -1357,7 +1335,170 @@ mod tests {
         ContractService::new(
             Arc::new(MockContractRepo::default()),
             Arc::new(MockCollectionRepo::with_collection(collection)),
+            Arc::new(FakeAttachmentStore::default()),
         )
+    }
+
+    /// An in-memory attachment store that records what the service asks of it.
+    #[derive(Default)]
+    struct FakeAttachmentStore {
+        sizes: Mutex<HashMap<PathBuf, u64>>,
+        stored: Mutex<Vec<PathBuf>>,
+        retained: Mutex<Option<Vec<PathBuf>>>,
+    }
+
+    impl AttachmentStore for FakeAttachmentStore {
+        fn file_size(&self, src: &Path) -> ContractResult<u64> {
+            self.sizes
+                .lock()
+                .expect("lock")
+                .get(src)
+                .copied()
+                .ok_or_else(|| {
+                    ContractError::Io(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "source file is missing",
+                    ))
+                })
+        }
+
+        fn store(
+            &self,
+            _collection_root: &Path,
+            contract_id: Ulid,
+            src: &Path,
+        ) -> ContractResult<PathBuf> {
+            self.stored.lock().expect("lock").push(src.to_path_buf());
+            Ok(PathBuf::from(".rocket/contracts/attachments")
+                .join(contract_id.to_string())
+                .join(src.file_name().unwrap_or_default()))
+        }
+
+        fn retain_only(
+            &self,
+            _collection_root: &Path,
+            _contract_id: Ulid,
+            kept: &[PathBuf],
+        ) -> ContractResult<()> {
+            *self.retained.lock().expect("lock") = Some(kept.to_vec());
+            Ok(())
+        }
+    }
+
+    fn make_service_with_store(store: Arc<FakeAttachmentStore>) -> ContractService {
+        let mut empty = Collection::new(COLLECTION_NAME);
+        empty.root.dir_name = Some(COLLECTION_NAME.into());
+        ContractService::new(
+            Arc::new(MockContractRepo::default()),
+            Arc::new(MockCollectionRepo::with_collection(empty)),
+            store,
+        )
+    }
+
+    fn store_with_size(path: &str, size: u64) -> Arc<FakeAttachmentStore> {
+        let store = Arc::new(FakeAttachmentStore::default());
+        store
+            .sizes
+            .lock()
+            .expect("lock")
+            .insert(PathBuf::from(path), size);
+        store
+    }
+
+    #[test]
+    fn attach_rejects_unsupported_extension_without_storing() {
+        let store = store_with_size("/x/evil.exe", 10);
+        let svc = make_service_with_store(Arc::clone(&store));
+
+        let result = svc.attach_contract(
+            root(),
+            make_contract(),
+            vec![],
+            vec![PathBuf::from("/x/evil.exe")],
+        );
+
+        assert!(matches!(result, Err(ContractError::Internal(_))));
+        assert!(store.stored.lock().expect("lock").is_empty());
+    }
+
+    #[test]
+    fn attach_rejects_file_without_extension() {
+        let store = store_with_size("/x/README", 10);
+        let svc = make_service_with_store(Arc::clone(&store));
+
+        let result = svc.attach_contract(
+            root(),
+            make_contract(),
+            vec![],
+            vec![PathBuf::from("/x/README")],
+        );
+
+        assert!(matches!(result, Err(ContractError::Internal(_))));
+        assert!(store.stored.lock().expect("lock").is_empty());
+    }
+
+    #[test]
+    fn attach_rejects_file_over_2_mb() {
+        let store = store_with_size("/x/big.pdf", 3 * 1024 * 1024);
+        let svc = make_service_with_store(Arc::clone(&store));
+
+        let result = svc.attach_contract(
+            root(),
+            make_contract(),
+            vec![],
+            vec![PathBuf::from("/x/big.pdf")],
+        );
+
+        assert!(matches!(result, Err(ContractError::Internal(_))));
+        assert!(store.stored.lock().expect("lock").is_empty());
+    }
+
+    #[test]
+    fn attach_accepts_uppercase_extension() {
+        let store = store_with_size("/x/Doc.PDF", 10);
+        let svc = make_service_with_store(Arc::clone(&store));
+
+        let contract = svc
+            .attach_contract(
+                root(),
+                make_contract(),
+                vec![],
+                vec![PathBuf::from("/x/Doc.PDF")],
+            )
+            .expect("attach");
+
+        assert_eq!(contract.document_paths.len(), 1);
+        assert_eq!(store.stored.lock().expect("lock").len(), 1);
+    }
+
+    #[test]
+    fn attach_missing_source_errors_and_stores_nothing() {
+        let store = Arc::new(FakeAttachmentStore::default());
+        let svc = make_service_with_store(Arc::clone(&store));
+
+        let result = svc.attach_contract(
+            root(),
+            make_contract(),
+            vec![],
+            vec![PathBuf::from("/x/missing.pdf")],
+        );
+
+        assert!(matches!(result, Err(ContractError::Io(_))));
+        assert!(store.stored.lock().expect("lock").is_empty());
+    }
+
+    #[test]
+    fn update_with_empty_kept_paths_retains_nothing() {
+        let store = Arc::new(FakeAttachmentStore::default());
+        let svc = make_service_with_store(Arc::clone(&store));
+        let contract = svc
+            .attach_contract(root(), make_contract(), vec![], vec![])
+            .expect("attach");
+
+        svc.update_contract(root(), contract, vec![], vec![])
+            .expect("update");
+
+        assert_eq!(*store.retained.lock().expect("lock"), Some(vec![]));
     }
 
     fn root() -> &'static Path {
@@ -1650,6 +1791,7 @@ mod tests {
         let svc = ContractService::new(
             Arc::clone(&contract_repo) as Arc<dyn ContractRepository>,
             Arc::new(MockCollectionRepo::failing()),
+            Arc::new(FakeAttachmentStore::default()),
         );
 
         let result = svc.attach_contract(root(), make_contract(), vec![], vec![]);
@@ -1686,6 +1828,7 @@ mod tests {
         let svc = ContractService::new_with_audit(
             Arc::new(MockContractRepo::default()),
             Arc::new(MockCollectionRepo::with_collection(empty)),
+            Arc::new(FakeAttachmentStore::default()),
             publisher.clone(),
         );
 
@@ -1711,6 +1854,7 @@ mod tests {
         let svc = ContractService::new_with_audit(
             Arc::new(MockContractRepo::default()),
             Arc::new(MockCollectionRepo::with_collection(empty)),
+            Arc::new(FakeAttachmentStore::default()),
             publisher.clone(),
         )
         .with_audit_actor(AuditActor::User);
