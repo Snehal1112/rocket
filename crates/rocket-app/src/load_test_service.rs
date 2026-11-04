@@ -1,10 +1,26 @@
 use std::sync::Arc;
 
-use rocket_http::{run_load_test_v2, HttpExecutor, LoadTestConfigV2, LoadTestResult};
+use rocket_http::{
+    run_load_test_v2, HttpExecutor, LoadTestConfigV2, LoadTestProgress, LoadTestProgressEvent,
+    LoadTestResult,
+};
 use rocket_shared::error::{DomainError, DomainResult};
-use rocket_shared::events::EventPublisher;
+use rocket_shared::events::{DomainEvent, EventPublisher};
 
 use crate::execution_service::{ExecuteRequestInput, RequestExecutionService};
+
+/// Publishes load test progress as domain events.
+struct EventProgress(Arc<dyn EventPublisher>);
+
+impl LoadTestProgress for EventProgress {
+    fn progress(&self, event: LoadTestProgressEvent) {
+        self.0.publish(DomainEvent::LoadTestProgress(event));
+    }
+
+    fn complete(&self, result: LoadTestResult) {
+        self.0.publish(DomainEvent::LoadTestComplete(result));
+    }
+}
 
 /// Orchestrates phase-based load testing with full variable resolution.
 /// Reuses `RequestExecutionService::resolve_request` so collection / env / folder /
@@ -37,7 +53,8 @@ impl LoadTestService {
         );
         // Concurrent load must not read every jar file per request or rewrite one per response.
         resolved.options.use_cookie_jar = false;
-        let result = run_load_test_v2(executor, &resolved, &config, publisher).await;
+        let progress = publisher.map(|p| Arc::new(EventProgress(p)) as Arc<dyn LoadTestProgress>);
+        let result = run_load_test_v2(executor, &resolved, &config, progress).await;
         Ok(result)
     }
 }
@@ -429,5 +446,44 @@ mod tests {
             max_requests: None,
         };
         assert!(!mixed.has_uniform_target_unit());
+    }
+    #[test]
+    fn event_progress_publishes_the_matching_domain_events() {
+        use rocket_http::LoadTestProgress;
+        let recorder = crate::test_doubles::RecordingPublisher::new();
+        let adapter = EventProgress(recorder.clone());
+        let event = rocket_http::LoadTestProgressEvent {
+            elapsed_ms: 250,
+            completed: 1,
+            active_concurrent: 1,
+            succeeded: 1,
+            failed_status: 0,
+            failed_transport: 0,
+            requests_per_second: 4.0,
+            p50_ms: 1.0,
+            p95_ms: 1.0,
+            p99_ms: 1.0,
+            current_phase_index: 0,
+            recent_log: vec![],
+        };
+        let result: LoadTestResult = serde_json::from_str(
+            r#"{"totalRequests":1,"succeeded":1,"failed":0,"failedTransport":0,
+            "failedStatus":0,"minLatencyMs":1.0,"avgLatencyMs":1.0,"p50LatencyMs":1.0,
+            "p95LatencyMs":1.0,"p99LatencyMs":1.0,"maxLatencyMs":1.0,
+            "requestsPerSecond":1.0,"totalDurationMs":1.0}"#,
+        )
+        .expect("result");
+        adapter.progress(event);
+        adapter.complete(result);
+        let events = recorder.events();
+        assert_eq!(events.len(), 2);
+        assert!(matches!(
+            events[0],
+            rocket_shared::events::DomainEvent::LoadTestProgress(_)
+        ));
+        assert!(matches!(
+            events[1],
+            rocket_shared::events::DomainEvent::LoadTestComplete(_)
+        ));
     }
 }
