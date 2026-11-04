@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `rocket-http` defines HTTP request/response types, auth utilities, cookie management, and a load-testing harness. The concrete `ReqwestExecutor` and `FsCookieRepository` live in `rocket-infra`.
 
-Known I/O leaks until D-50 ships (see `docs/roadmaps/ddd-roadmap.md`): `acquire_token` in `oauth2.rs` makes a live HTTP POST, the `TokenClientProvider` trait in `token_client.rs` exposes `reqwest::Client`, and its provided `post_form` method makes the token POST (moved here from `rocket-app` in D-44; D-50 moves it to `rocket-infra`). `spec_fetch.rs` is a port (`SpecFetcher`) but uses `reqwest::Url` in its helpers. Keep new code free of I/O.
+No known I/O leaks remain in this crate (D-50 shipped on 2026-11-04). The token POST lives in `rocket-infra` (`ReqwestTokenClientProvider::post_form`). `spec_fetch.rs` is a port (`SpecFetcher`) but uses `reqwest::Url` in its helpers, which is parsing only. Keep new code free of I/O.
 
 ## Commands
 
@@ -28,13 +28,13 @@ cargo test -p rocket-http <test_name>
 | `executor` | `HttpExecutor` async trait — single method `execute(&HttpRequest) -> DomainResult<HttpResponse>` |
 | `request` | `HttpRequest` (fully-resolved, ready-to-send) and `RequestOptions` (timeout, SSL, redirect flags) |
 | `response` | `HttpResponse` with status helpers (`is_success`, `is_redirect`, etc.) and case-insensitive `header_value()`. `body_from_bytes` splits a body into text or a base64 payload. |
-| `oauth2` | `OAuthConfig`, `OAuthToken`, and `acquire_token()` — supports `client_credentials`, `password`, `authorization_code` grants |
+| `oauth2` | `OAuthConfig`, `OAuthToken` and the form helpers (`apply_params_to_url`, `apply_params_to_body`, `AdditionalParam`) |
 | `path_params` | `substitute_path_params()` replaces `:name` (segment start only, so a port is never a param) and `{name}` (never inside `{{var}}`) in the URL path with percent-encoded, already-resolved values. Called by `rocket-app` `resolve_request`; `applyPathParams` in `src/lib/url-params.ts` is its display-only mirror. |
 | `pkce` | `generate_pkce()` → `PkcePair` (verifier + challenge per RFC 7636) |
 | `oauth1_sig` | `sign()` → `oauth_*` params, `authorization_header()` — OAuth 1.0 (RFC 5849) signing for HMAC-SHA1/256/512 and PLAINTEXT. RSA-* returns an error. |
 | `client_cert` | `find_certificate()` picks the environment client certificate whose `domain` matches a URL (host, optional scheme and port, `*` wildcard; an empty domain never matches). `certificate_covers()` checks one certificate against a URL, for redirect targets. |
 | `resolved_certificate` | `ResolvedClientCertificate { domain, material }`, the runtime form of a client certificate. `CertificateMaterial` is `Pem`, `Pkcs12`, `Unavailable { reason }` or `Deferred` (a RocketVault certificate chosen by name, with a `VaultCertificateBinding`, not yet fetched; `rocket-app` replaces the selected one before the send, and the executor and token client reject it). Each piece is a `CertificateSource`: `File(path)` or `Inline(Zeroizing<Vec<u8>>)` (bytes from a RocketVault secret). Passphrases are `Zeroizing<String>`. Not `Serialize`. `Debug` prints the domain, the piece kinds, `file <path>` or `inline <n> bytes`, and `<redacted>` for a passphrase. | 
-| `token_client` | `TokenClientProvider` trait: builds the client for an OAuth2 token request, presenting the matching environment certificate, and `post_form` (provided) sends the token POST and parses the `OAuthToken`. Implemented by `ReqwestTokenClientProvider` in `rocket-infra`. |
+| `token_client` | `TokenClientProvider` port with one method, `post_form(token_url, verify_ssl, certificates, form, extra_headers) -> OAuthToken`. It takes and returns plain types. Implemented by `ReqwestTokenClientProvider` in `rocket-infra`, which builds the client (presenting the matching environment certificate) and sends the POST. |
 | `websocket` | `WebSocketClient` port, connect request, frame, event and command types. `Debug` prints header names only. Implemented by `TungsteniteWebSocketClient` in `rocket-infra`. |
 | `digest_sig` | `select_challenge()` parses `WWW-Authenticate`, `authorize()` builds the Digest `Authorization` value (RFC 7616: MD5, SHA-256, SHA-512-256 and `-sess`, qop auth/auth-int, legacy no-qop form). |
 | `proxy` | `ProxySettings`, `ResolvedProxy`, `SharedProxy`, `ProxySettingsRepository`. |
@@ -51,7 +51,7 @@ cargo test -p rocket-http <test_name>
 - `HttpRequest` is the **resolved** request (variables already substituted). `rocket-app` resolves it before the pre-request scripts, then renders each field again from the first pass's template with the runtime variables the scripts set (one level: a value is never read for placeholders again), so the request the executor gets carries them. An unknown name stays as `{{name}}`. It is distinct from `rocket-collection`'s `Request`, which is a saved template.
 - `RequestOptions` defaults: `follow_redirects = true`, `timeout_ms = 30_000`, `verify_ssl = true`. These are applied via `#[serde(default)]`, so missing fields in JSON deserialise correctly.
 - `RequestOptions.client_certificates` is `Vec<ResolvedClientCertificate>` with `#[serde(skip)]`: it is never serialized and never read from IPC input. The selected environment is its only source (`rocket-app` fills it). Because it can hold key bytes, nothing may log or persist an `HttpRequest` or `RequestOptions` through another type. The tests in `request.rs` (`certificate_leaks`) pin `Debug` and `serde_json` output.
-- Auth is **stateless and functional**: `acquire_token`, `sign_request`, and `generate_pkce` are standalone functions. The service layer (`rocket-app`) calls them during request preparation — nothing here holds token state.
+- Auth is **stateless and functional**: `sign_request` and `generate_pkce` are standalone functions. The service layer (`rocket-app`) calls them during request preparation — nothing here holds token state.
 - `AwsCredentials` and `SignedHeaders` do **not** derive `serde` (they are transient signing artefacts, never serialised for IPC).
 - All other public types derive `serde::{Serialize, Deserialize}` with `#[serde(rename_all = "camelCase")]` for Tauri IPC compatibility.
 - `CookieJar::add` silently replaces a cookie with the same name and path — upsert semantics.

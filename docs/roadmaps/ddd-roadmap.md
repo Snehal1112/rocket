@@ -53,7 +53,7 @@ Cheap, and it stops agents and people from trusting claims the code breaks. Do t
 
 | ID | Item | Where | Status |
 |---|---|---|---|
-| D-20 | `rocket-http` says "no I/O implementations". It has a live HTTP POST (`acquire_token`) and a `reqwest::Client` in trait signatures. Correct the text now, restore it when D-31 ships. | `crates/rocket-http/CLAUDE.md:7` | done (2026-11-04, text restored when its fix item ships) |
+| D-20 | `rocket-http` said "no I/O implementations" while it had a live HTTP POST and a `reqwest::Client` in trait signatures. Text corrected; D-50 removed both. | `crates/rocket-http/CLAUDE.md:7` | done (2026-11-04) |
 | D-21 | `rocket-git` says "pure domain crate, no I/O". `Git2Service` does filesystem, process and network work. Say "port plus libgit2 adapter". | `crates/rocket-git/CLAUDE.md:23` | done (2026-11-04, text restored when its fix item ships) |
 | D-22 | `rocket-import` says it delegates all disk writes to `rocket-infra`. It writes with `std::fs` itself and `rocket-infra` is a dev-dependency only. | `crates/rocket-import/CLAUDE.md:7` | done (2026-11-04, text restored when its fix item ships) |
 | D-23 | `rocket-app` says it never touches the filesystem or I/O. Document the exceptions until D-40 to D-44 ship, and that the crate is large. | `crates/rocket-app/CLAUDE.md` | done (2026-11-04, exceptions list removed when D-45 shipped, the crate has no direct I/O) |
@@ -96,7 +96,7 @@ Each item replaces a direct `std::fs` or `reqwest` call with an existing or new 
 
 | ID | Item | Where | Status |
 |---|---|---|---|
-| D-50 | `acquire_token` makes a live HTTP POST from a domain crate, and `reqwest::Client` appears in the `TokenClientProvider` trait signature. Move the POST into `rocket-infra` behind a port that takes and returns plain types. Keep the OAuth config and token types in the domain. | `rocket-http/src/oauth2.rs:93-134`, `token_client.rs:18` and its provided `post_form` | open |
+| D-50 | `acquire_token` made a live HTTP POST from a domain crate, and `reqwest::Client` appeared in the `TokenClientProvider` trait signature. Done on 2026-11-04: `TokenClientProvider` has one method, `post_form`, with plain types; the POST and the client build moved into `ReqwestTokenClientProvider` in `rocket-infra`; the unused `acquire_token` was deleted. The OAuth config and token types stay in the domain. | `rocket-http/src/token_client.rs`, `rocket-infra/src/reqwest_executor.rs` | done |
 | D-51 | `rocket-import` reads and writes the disk itself. Introduce a small file port implemented in `rocket-infra`, as `rocket-export` does for `CollectionFileSource`. Done on 2026-11-04: the `ImportFiles` port (`rocket-import/src/files.rs`) and `FsImportFiles`, with the writers, scanners, Bruno, Postman, WSDL and OpenAPI readers and the zip extractor all behind it. Left: the `exists()` and `is_dir()` path predicates, which also touch the disk and follow symlinks. | `rocket-import/src/` | done, predicates left |
 | D-52 | `fs::canonicalize` in a domain function. Take the resolved path from the caller. | `rocket-collection/src/openapi_consent.rs:49` | open |
 | D-53 | `dirs::home_dir` in the shared crate. Accept the home path as a parameter or move `expand_tilde` to `rocket-infra`. | `rocket-shared/src/paths.rs:5,27` | open |
