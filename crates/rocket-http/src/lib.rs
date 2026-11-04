@@ -31,7 +31,7 @@ pub use executor::HttpExecutor;
 pub use jwt::{decode_jwt, JwtClaims};
 pub use load_test::{
     run_load_test, run_load_test_v2, LoadTestConfig, LoadTestConfigV2, LoadTestPhase,
-    LoadTestProgressEvent, LoadTestResult, PhaseKind, PhaseMarker, PhaseTarget, RequestLogEntry,
+    LoadTestProgress, LoadTestProgressEvent, LoadTestResult, PhaseKind, PhaseMarker, PhaseTarget, RequestLogEntry,
     SuccessRule, TargetUnit, TimeSeriesPoint,
 };
 pub use oauth2::{

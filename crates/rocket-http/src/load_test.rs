@@ -6,10 +6,17 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Notify, Semaphore};
 
-use rocket_shared::events::{DomainEvent, EventPublisher};
 pub use rocket_shared::load_test::{
     LoadTestProgressEvent, LoadTestResult, PhaseMarker, RequestLogEntry, TimeSeriesPoint,
 };
+
+/// Where a running load test reports to. `rocket-app` adapts it to the domain events.
+pub trait LoadTestProgress: Send + Sync {
+    /// Called about every 250 ms while the run is going.
+    fn progress(&self, event: LoadTestProgressEvent);
+    /// Called once, after the last `progress`, with the final result.
+    fn complete(&self, result: LoadTestResult);
+}
 
 /// Fixed-capacity circular buffer. When full, the oldest entry is overwritten.
 pub struct RingBuffer<T> {
@@ -454,7 +461,7 @@ impl RunAccumulator {
     }
 }
 
-/// Phase-aware load test runner with optional domain event publishing.
+/// Phase-aware load test runner with optional progress reporting.
 ///
 /// Drives either a `PhaseScheduler`-backed semaphore (for Concurrency phases)
 /// or a `RateDriver` token bucket (for RPS phases). The unit is determined by
@@ -466,7 +473,7 @@ pub async fn run_load_test_v2(
     executor: Arc<dyn HttpExecutor>,
     request: &HttpRequest,
     config: &LoadTestConfigV2,
-    publisher: Option<Arc<dyn EventPublisher>>,
+    progress: Option<Arc<dyn LoadTestProgress>>,
 ) -> LoadTestResult {
     use tokio::time::interval;
 
@@ -591,7 +598,7 @@ pub async fn run_load_test_v2(
     let acc_snap = Arc::clone(&accumulator);
     let active_snap = Arc::clone(&active_concurrent);
     let scheduler_snap = Arc::clone(&scheduler);
-    let publisher_clone = publisher.clone();
+    let progress_clone = progress.clone();
 
     let snapshot_handle = tokio::spawn(async move {
         let mut ticker = interval(Duration::from_millis(250));
@@ -661,8 +668,8 @@ pub async fn run_load_test_v2(
 
             drop(acc);
 
-            if let Some(ref publisher) = publisher_clone {
-                publisher.publish(DomainEvent::LoadTestProgress(event));
+            if let Some(ref progress) = progress_clone {
+                progress.progress(event);
             }
         }
     });
@@ -869,8 +876,8 @@ pub async fn run_load_test_v2(
         time_series: acc.time_series.clone(),
     };
 
-    if let Some(publisher) = publisher {
-        publisher.publish(DomainEvent::LoadTestComplete(result.clone()));
+    if let Some(progress) = progress {
+        progress.complete(result.clone());
     }
 
     result
@@ -1621,6 +1628,50 @@ mod tests {
         assert!(result.phase_timeline.is_empty());
         assert!(result.request_log.is_empty());
         assert!(result.time_series.is_empty());
+    }
+
+    struct RecordingProgress {
+        calls: std::sync::Mutex<Vec<&'static str>>,
+        results: std::sync::Mutex<Vec<LoadTestResult>>,
+    }
+
+    impl LoadTestProgress for RecordingProgress {
+        fn progress(&self, _event: LoadTestProgressEvent) {
+            self.calls.lock().expect("lock").push("progress");
+        }
+        fn complete(&self, result: LoadTestResult) {
+            self.calls.lock().expect("lock").push("complete");
+            self.results.lock().expect("lock").push(result);
+        }
+    }
+
+    #[tokio::test]
+    async fn run_load_test_v2_reports_progress_then_one_complete() {
+        let executor: Arc<dyn HttpExecutor> = Arc::new(MockExecutor);
+        let config = LoadTestConfigV2 {
+            phases: vec![LoadTestPhase {
+                kind: PhaseKind::Hold,
+                duration_secs: 1,
+                target: PhaseTarget::Concurrency(3),
+            }],
+            success_rule: SuccessRule::default(),
+            ring_buffer_size: 1000,
+            max_requests: None,
+        };
+        let sink = Arc::new(RecordingProgress {
+            calls: std::sync::Mutex::new(Vec::new()),
+            results: std::sync::Mutex::new(Vec::new()),
+        });
+        let progress: Arc<dyn LoadTestProgress> = sink.clone();
+        let result = run_load_test_v2(executor, &test_request(), &config, Some(progress)).await;
+
+        let calls = sink.calls.lock().expect("lock").clone();
+        assert!(calls.contains(&"progress"), "expected progress calls");
+        assert_eq!(calls.iter().filter(|c| **c == "complete").count(), 1);
+        assert_eq!(calls.last(), Some(&"complete"), "complete must be last");
+        let results = sink.results.lock().expect("lock");
+        assert_eq!(results[0].total_requests, result.total_requests);
+        assert_eq!(results[0].succeeded, result.succeeded);
     }
 
     #[tokio::test]
