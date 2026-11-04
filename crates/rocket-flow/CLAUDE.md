@@ -29,10 +29,12 @@ cargo test -p rocket-flow -j4
 |---|---|
 | `handle.rs` | Exit/input handle names (`result`, `true`, `false`, `default`, `input`, `trigger`, `auth`, `case:<id>`) |
 | `node.rs` | `FlowNodeKind` (Request/Input/Output/If/Switch/WaitForCallback/Transform/Auth), `SwitchCase`, `RepeatUntil`, `RequestSource`, `InlineRequestData`, `InlineHeader`, `NodePosition` |
-| `flow.rs` | `FlowNode`, `FlowEdge`, `Flow` aggregate, `FlowRepository` trait. `list_entries` returns corrupt files as entries with an `error`; its default wraps `list`. |
+| `flow.rs` | `FlowNode`, `FlowEdge`, `Flow` aggregate with `ensure_valid` (graph rules, canvas error text) and `checked_rename` (trim, refuse blank or unchanged), `FlowRepository` trait. A service saves and renames through these (D-62). `list_entries` returns corrupt files as entries with an `error`; its default wraps `list`. |
 | `graph.rs` | `topological_sort`, `reachable_from`, `FlowGraphError` |
 | `validate.rs` | `validate` — `topological_sort` plus structural rules V1–V17 (spec §7, listed in the file header), and `is_request_wire_field` |
 | `lint.rs` | Non-blocking lint tier: `validate_with_warnings(flow, ctx)`, `graph_error_lints`, `FlowLint`, `LintSeverity`, `LintContext` |
+| `routing.rs` | Run-time routing rules (spec §6.2–6.3): `NodeOutcome`, `NodeFate`, `is_live` and `decide_fate`. Pure; `rocket-app` flow execution calls them (D-61). |
+| `save_error.rs` | The save-error text of an invalid flow (`graph_errors_message`, private to the crate). Reached through `Flow::ensure_valid`. |
 | `request_refs.rs` | Rewrites Saved request paths in a flow after a move (whole path segments, folder prefix) and finds flows that use a path |
 
 ### Key Design Points
