@@ -136,9 +136,9 @@ pub struct OAuth2Service {
     /// Picks a collection's own environments, which is where client certificates live.
     /// Without it, `env_repo` is used for every collection.
     collection_env_repo_factory: Option<Box<dyn EnvironmentRepositoryFactory>>,
-    /// Builds the client for token requests. Without it, a plain client is used and client
-    /// certificates are not presented.
-    token_client_provider: Option<Arc<dyn TokenClientProvider>>,
+    /// Builds the client for token requests and sends them. Production wires one that applies
+    /// the app proxy and presents client certificates.
+    token_clients: Arc<dyn TokenClientProvider>,
     /// Lets a token request fetch a RocketVault certificate selected for the token URL.
     /// Without it, such a certificate fails the token request.
     vault_access: Option<OAuth2VaultAccess>,
@@ -155,12 +155,13 @@ impl OAuth2Service {
     pub fn new(
         env_repo: Box<dyn EnvironmentRepository>,
         collection_repo: Box<dyn CollectionRepository>,
+        token_clients: Arc<dyn TokenClientProvider>,
     ) -> Self {
         Self {
             env_repo,
             collection_repo,
             collection_env_repo_factory: None,
-            token_client_provider: None,
+            token_clients,
             vault_access: None,
         }
     }
@@ -170,11 +171,6 @@ impl OAuth2Service {
         factory: Box<dyn EnvironmentRepositoryFactory>,
     ) -> Self {
         self.collection_env_repo_factory = Some(factory);
-        self
-    }
-
-    pub fn with_token_client_provider(mut self, provider: Arc<dyn TokenClientProvider>) -> Self {
-        self.token_client_provider = Some(provider);
         self
     }
 
@@ -222,31 +218,6 @@ impl OAuth2Service {
                 vars,
                 external_secrets,
             ),
-        }
-    }
-
-    /// The client for a token request to `url` that sends no client certificate.
-    /// Used by the legacy authorization-code command, so it honors the app proxy setting.
-    pub fn plain_token_client(&self, url: &str, verify_ssl: bool) -> DomainResult<reqwest::Client> {
-        self.token_client(url, verify_ssl, &[])
-    }
-
-    /// The client for a token request to `url`.
-    ///
-    /// Production always wires a provider (which applies the app proxy). The fallback below is
-    /// only for tests and callers that never set one, and it ignores the proxy setting.
-    fn token_client(
-        &self,
-        url: &str,
-        verify_ssl: bool,
-        certificates: &[ResolvedClientCertificate],
-    ) -> DomainResult<reqwest::Client> {
-        match &self.token_client_provider {
-            Some(provider) => provider.client_for(url, verify_ssl, certificates),
-            None => reqwest::ClientBuilder::new()
-                .danger_accept_invalid_certs(!verify_ssl)
-                .build()
-                .map_err(|e| DomainError::Internal(format!("Failed to build HTTP client: {e}"))),
         }
     }
 
@@ -424,37 +395,6 @@ impl OAuth2Service {
         (form, headers)
     }
 
-    /// Shared HTTP dispatch for all OAuth2 token endpoint POSTs.
-    /// Builds the reqwest client, posts the form, and parses the OAuthToken response.
-    async fn post_token_request(
-        client: &reqwest::Client,
-        url: &str,
-        form: &[(String, String)],
-        extra_headers: &[(String, String)],
-    ) -> DomainResult<OAuthToken> {
-        let mut request = client.post(url).form(form);
-        for (key, value) in extra_headers {
-            request = request.header(key, value);
-        }
-
-        let resp = request
-            .send()
-            .await
-            .map_err(|e| DomainError::Internal(format!("Token request failed: {e}")))?;
-
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(DomainError::Internal(format!(
-                "Token endpoint returned {status}: {body}"
-            )));
-        }
-
-        resp.json::<OAuthToken>()
-            .await
-            .map_err(|e| DomainError::Internal(format!("Failed to parse token response: {e}")))
-    }
-
     /// Executes client_credentials or password grant against the token endpoint.
     pub async fn get_token_direct(
         &self,
@@ -474,8 +414,15 @@ impl OAuth2Service {
                 config.allow_vault_certificates,
             )
             .await;
-        let client = self.token_client(&url, config.verify_ssl, &certificates)?;
-        Self::post_token_request(&client, &url, &form, &extra_headers).await
+        self.token_clients
+            .post_form(
+                &url,
+                config.verify_ssl,
+                &certificates,
+                &form,
+                &extra_headers,
+            )
+            .await
     }
 
     /// `get_token_direct` with `.env` values of `process_env` masked in its error.
@@ -595,8 +542,9 @@ impl OAuth2Service {
         let certificates = self
             .certificates_for(&url, &environment_certificates, allow_vault_certificates)
             .await;
-        let client = self.token_client(&url, verify_ssl, &certificates)?;
-        Self::post_token_request(&client, &url, &form, &extra_headers).await
+        self.token_clients
+            .post_form(&url, verify_ssl, &certificates, &form, &extra_headers)
+            .await
     }
 
     /// Builds the form body for exchanging an authorization code for a token.
@@ -665,8 +613,15 @@ impl OAuth2Service {
                 config.allow_vault_certificates,
             )
             .await;
-        let client = self.token_client(&url, config.verify_ssl, &certificates)?;
-        Self::post_token_request(&client, &url, &form, &extra_headers).await
+        self.token_clients
+            .post_form(
+                &url,
+                config.verify_ssl,
+                &certificates,
+                &form,
+                &extra_headers,
+            )
+            .await
     }
 
     /// `exchange_code_for_token` with `.env` values of `process_env` masked in its error.
@@ -863,6 +818,7 @@ pub(crate) mod tests {
         OAuth2Service::new(
             Box::new(StubEnvRepo::empty()),
             Box::new(NullCollectionRepo::new()),
+            Arc::new(rocket_infra::ReqwestTokenClientProvider::new()),
         )
     }
 
@@ -870,6 +826,7 @@ pub(crate) mod tests {
         OAuth2Service::new(
             Box::new(StubEnvRepo::with_vars(vars)),
             Box::new(NullCollectionRepo::new()),
+            Arc::new(rocket_infra::ReqwestTokenClientProvider::new()),
         )
     }
 
@@ -905,6 +862,7 @@ pub(crate) mod tests {
         let svc = OAuth2Service::new(
             Box::new(ChainEnvRepo(vec![base, child])),
             Box::new(NullCollectionRepo::new()),
+            Arc::new(rocket_infra::ReqwestTokenClientProvider::new()),
         );
         let vars =
             svc.build_variable_context(None, Some("child"), None, &HashMap::new(), &HashMap::new());
@@ -1354,8 +1312,8 @@ pub(crate) mod tests {
                 env: Some(env_with_certificates(certs)),
             }),
             Box::new(NullCollectionRepo::new()),
+            provider.clone(),
         )
-        .with_token_client_provider(provider.clone())
     }
 
     fn get_token_request() -> OAuth2GetTokenRequest {
@@ -1386,21 +1344,6 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn the_plain_token_client_comes_from_the_provider_so_it_honors_the_proxy() {
-        let provider = CapturingProvider::new();
-        let svc = service_with_certificates(vec![], &provider);
-        let err = svc
-            .plain_token_client("https://idp.example.com/token", false)
-            .unwrap_err();
-        assert!(err.to_string().contains("certificate cannot be loaded"));
-        let seen = provider.seen.lock().unwrap();
-        assert_eq!(seen.len(), 1);
-        assert_eq!(seen[0].0, "https://idp.example.com/token");
-        assert!(!seen[0].1);
-        assert!(seen[0].2.is_empty());
-    }
-
-    #[test]
     fn resolving_a_get_token_request_carries_the_environment_certificates() {
         let provider = CapturingProvider::new();
         let svc = service_with_certificates(
@@ -1423,6 +1366,69 @@ pub(crate) mod tests {
             .resolve_get_token_request(&req)
             .client_certificates
             .is_empty());
+    }
+
+    type RecordedPost = (String, Vec<(String, String)>);
+
+    /// Answers every POST with a fixed token and records the form it was given.
+    struct PostingProvider {
+        posts: std::sync::Mutex<Vec<RecordedPost>>,
+    }
+
+    #[async_trait::async_trait]
+    impl TokenClientProvider for PostingProvider {
+        fn client_for(
+            &self,
+            _token_url: &str,
+            _verify_ssl: bool,
+            _certificates: &[ResolvedClientCertificate],
+        ) -> DomainResult<reqwest::Client> {
+            Err(DomainError::Internal(
+                "the POST must not build a client".into(),
+            ))
+        }
+
+        async fn post_form(
+            &self,
+            token_url: &str,
+            _verify_ssl: bool,
+            _certificates: &[ResolvedClientCertificate],
+            form: &[(String, String)],
+            _extra_headers: &[(String, String)],
+        ) -> DomainResult<OAuthToken> {
+            self.posts
+                .lock()
+                .unwrap()
+                .push((token_url.to_string(), form.to_vec()));
+            Ok(OAuthToken {
+                access_token: "from-provider".into(),
+                token_type: "Bearer".into(),
+                expires_in: None,
+                refresh_token: None,
+                scope: None,
+                id_token: None,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn a_service_gets_its_token_over_the_provider_it_was_built_with() {
+        let provider = Arc::new(PostingProvider {
+            posts: std::sync::Mutex::new(Vec::new()),
+        });
+        let svc = OAuth2Service::new(
+            Box::new(StubEnvRepo::empty()),
+            Box::new(NullCollectionRepo::new()),
+            provider.clone(),
+        );
+        let config = svc.resolve_get_token_request(&get_token_request());
+
+        let token = svc.get_token_direct(&config).await.expect("token");
+
+        assert_eq!(token.access_token, "from-provider");
+        let posts = provider.posts.lock().unwrap();
+        assert_eq!(posts.len(), 1);
+        assert!(posts[0].1.iter().any(|(k, _)| k == "grant_type"));
     }
 
     #[tokio::test]
@@ -1732,8 +1738,8 @@ pub(crate) mod tests {
         let svc = OAuth2Service::new(
             Box::new(StubEnvRepo::empty()),
             Box::new(NullCollectionRepo::new()),
+            provider,
         )
-        .with_token_client_provider(provider)
         .with_collection_env_repo_factory(Box::new(DirFactory {
             env: env_with_certificates(vec![pkcs12("idp.example.com", "certs/client.p12")]),
         }));
@@ -1760,6 +1766,7 @@ pub(crate) mod tests {
             Box::new(rocket_infra::SharedPathCollectionRepo::new(Arc::clone(
                 &path,
             ))),
+            Arc::new(rocket_infra::ReqwestTokenClientProvider::new()),
         );
         // Each workspace has a collection "api" and a global environment "g".
         for (dir, value) in [(a.path(), "a"), (b.path(), "b")] {

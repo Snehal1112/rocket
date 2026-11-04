@@ -954,8 +954,8 @@ mod wiring_tests {
             Box::new(SharedCollectionRepo(InMemoryCollectionRepo::new(
                 Collection::new("c"),
             ))),
+            provider,
         )
-        .with_token_client_provider(provider)
     }
 
     fn token_request() -> OAuth2GetTokenRequest {

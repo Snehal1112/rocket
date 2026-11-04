@@ -31,7 +31,6 @@ sha2.workspace = true
 base64.workspace = true
 zeroize = "1"
 regex = "1"
-reqwest.workspace = true
 url = "2"
 semver = "1"
 percent-encoding = "2"
@@ -39,6 +38,7 @@ which = "6"
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 
 [dev-dependencies]
+reqwest.workspace = true
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 tempfile = "3"

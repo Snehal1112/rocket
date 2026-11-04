@@ -653,16 +653,17 @@ pub fn run() {
                         env_secret_store(),
                     )),
                     Box::new(SharedPathCollectionRepo::new(Arc::clone(&active_workspace_path))),
+                    // Applies the app proxy and presents the matching client certificate.
+                    Arc::new(
+                        rocket_infra::ReqwestTokenClientProvider::new()
+                            .with_proxy(Arc::clone(&shared_proxy)),
+                    ),
                 )
                 // Client certificates live on a collection's own environment, and a token
                 // endpoint that needs mutual TLS gets the matching one.
                 .with_collection_env_repo_factory(Box::new(SharedCollectionEnvironmentRepo::new(
                     Arc::clone(&active_workspace_path),
                 )))
-                .with_token_client_provider(Arc::new(
-                    rocket_infra::ReqwestTokenClientProvider::new()
-                        .with_proxy(Arc::clone(&shared_proxy)),
-                ))
                 // A RocketVault certificate selected for a token URL is fetched at send time. It
                 // reads the same connection file and shares the fetcher (and so the token and id
                 // caches) above.
