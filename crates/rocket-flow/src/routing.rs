@@ -4,12 +4,12 @@
 
 use std::collections::HashMap;
 
-use rocket_flow::{handle, FlowEdge};
+use crate::{handle, FlowEdge};
 use rocket_shared::events::FlowSkipReason;
 
 /// What happened to a node earlier in the run.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum NodeOutcome {
+pub enum NodeOutcome {
     /// The node ran successfully and left through `chosen_exit`
     /// (`handle::RESULT` for plain nodes).
     Succeeded {
@@ -26,7 +26,7 @@ pub(crate) enum NodeOutcome {
 
 /// What a node should do at its turn.
 #[derive(Debug, PartialEq)]
-pub(crate) enum NodeFate<'a> {
+pub enum NodeFate<'a> {
     /// Run it, feeding only these live, non-trigger edges.
     Run {
         data_edges: Vec<&'a FlowEdge>,
@@ -40,7 +40,7 @@ pub(crate) enum NodeFate<'a> {
 /// edge is attached to, or when it carries a failed Request's captured
 /// response into an If/Switch `input` (spec §6.3.1). `target_is_routing`
 /// says whether the edge's target node is an If/Switch.
-pub(crate) fn is_live(
+pub fn is_live(
     edge: &FlowEdge,
     outcomes: &HashMap<String, NodeOutcome>,
     target_is_routing: bool,
@@ -57,7 +57,7 @@ pub(crate) fn is_live(
 /// Applies spec §6.3 rules 2–5 (rule 1, cancellation, stays in the caller).
 /// Several edges into the same `target_field` are alternatives: one live
 /// edge is enough. Different fields are all required.
-pub(crate) fn decide_fate<'a>(
+pub fn decide_fate<'a>(
     incoming: &[&'a FlowEdge],
     outcomes: &HashMap<String, NodeOutcome>,
     target_is_routing: bool,
@@ -128,7 +128,7 @@ pub(crate) fn decide_fate<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rocket_flow::handle;
+    use crate::handle;
     use rocket_shared::events::FlowSkipReason;
     use std::collections::HashMap;
 

@@ -53,6 +53,37 @@ pub struct Flow {
     pub callback_host: Option<String>,
 }
 
+impl Flow {
+    /// Checks the graph rules. The error carries the save-error text the canvas parses to mark
+    /// the nodes and wires, so a caller cannot persist a broken graph by skipping `validate`.
+    pub fn ensure_valid(&self) -> DomainResult<()> {
+        let report = crate::validate::validate_report(self);
+        if report.errors.is_empty() {
+            return Ok(());
+        }
+        Err(DomainError::InvalidInput(
+            crate::save_error::graph_errors_message(self, &report),
+        ))
+    }
+
+    /// The rename rules: the new name is trimmed, and a blank or unchanged name is refused.
+    /// Returns the trimmed name.
+    pub fn checked_rename(old_name: &str, new_name: &str) -> DomainResult<String> {
+        let new_name = new_name.trim();
+        if new_name.is_empty() {
+            return Err(DomainError::InvalidInput(
+                "Flow name must not be empty".to_string(),
+            ));
+        }
+        if new_name == old_name {
+            return Err(DomainError::InvalidInput(
+                "The new flow name is the same as the current one".to_string(),
+            ));
+        }
+        Ok(new_name.to_string())
+    }
+}
+
 /// One row of a collection's flow list. A file that cannot be parsed is listed
 /// too, with `error` set, so the user can see and delete it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -488,5 +519,81 @@ mod tests {
             err,
             rocket_shared::error::DomainError::NotFound(_)
         ));
+    }
+}
+
+#[cfg(test)]
+mod guard_tests {
+    use super::*;
+    use crate::node::{FlowNodeKind, NodePosition};
+
+    fn node(id: &str) -> FlowNode {
+        FlowNode {
+            id: id.to_string(),
+            kind: FlowNodeKind::Output {
+                label: id.to_string(),
+            },
+            position: NodePosition { x: 0.0, y: 0.0 },
+        }
+    }
+
+    fn flow(nodes: Vec<FlowNode>) -> Flow {
+        Flow {
+            name: "f".to_string(),
+            nodes,
+            edges: Vec::new(),
+            callback_host: None,
+        }
+    }
+
+    #[test]
+    fn ensure_valid_accepts_a_valid_flow() {
+        let input = FlowNode {
+            id: "in".to_string(),
+            kind: FlowNodeKind::Input {
+                label: "Seed".to_string(),
+                value: rocket_shared::VariableValue::simple("x"),
+            },
+            position: NodePosition { x: 0.0, y: 0.0 },
+        };
+        let mut valid = flow(vec![input, node("out")]);
+        valid.edges.push(FlowEdge {
+            id: "e0".to_string(),
+            source_node_id: "in".to_string(),
+            target_node_id: "out".to_string(),
+            target_field: "value".to_string(),
+            expression: "response.body".to_string(),
+            source_handle: crate::handle::RESULT.to_string(),
+        });
+
+        assert!(valid.ensure_valid().is_ok());
+    }
+
+    #[test]
+    fn ensure_valid_refuses_a_duplicate_node_with_the_canvas_text() {
+        let err = flow(vec![node("a"), node("a")])
+            .ensure_valid()
+            .expect_err("duplicate");
+        assert!(matches!(err, DomainError::InvalidInput(_)), "{err}");
+        assert!(err.to_string().contains("more than one node"), "{err}");
+    }
+
+    #[test]
+    fn checked_rename_trims_the_new_name() {
+        assert_eq!(Flow::checked_rename("old", "  new  ").expect("ok"), "new");
+    }
+
+    #[test]
+    fn checked_rename_refuses_a_blank_name() {
+        let err = Flow::checked_rename("old", "   ").expect_err("blank");
+        assert!(err.to_string().contains("Flow name must not be empty"));
+    }
+
+    #[test]
+    fn checked_rename_refuses_the_same_name() {
+        let err = Flow::checked_rename("old", " old ").expect_err("same");
+        assert!(err
+            .to_string()
+            .contains("The new flow name is the same as the current one"));
     }
 }

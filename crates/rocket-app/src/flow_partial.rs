@@ -13,7 +13,7 @@ use rocket_flow::{handle, Flow, FlowEdge, FlowNode, FlowNodeKind, RequestSource}
 use rocket_shared::error::DomainError;
 use rocket_shared::events::{FlowPartialMode, FlowSkipReason};
 
-use crate::flow_routing::{decide_fate, is_live, NodeFate, NodeOutcome};
+use rocket_flow::routing::{decide_fate, is_live, NodeFate, NodeOutcome};
 
 /// A request to re-run part of a flow on top of an earlier run.
 #[derive(Debug, Clone, PartialEq, Eq)]

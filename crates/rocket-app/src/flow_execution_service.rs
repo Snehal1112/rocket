@@ -20,11 +20,11 @@ use crate::flow_callbacks::FlowRunCallback;
 use crate::flow_cancel::{cancel_pair, CancelHandle, CancelSignal};
 use crate::flow_debug::{build_debug_request, cap_exchange, sent_masks};
 use crate::flow_partial::{PartialPlan, PartialRun};
-use crate::flow_routing::{decide_fate, NodeFate, NodeOutcome};
 use crate::flow_run_cache::{CachedRun, FlowRunCache, RunResults};
 use crate::process_env::ProcessEnv;
 use crate::redaction::{mask_forms, MIN_REDACTION_LEN};
 use crate::runner_sequence::{build_step_input, RunItem};
+use rocket_flow::routing::{decide_fate, NodeFate, NodeOutcome};
 
 #[cfg(test)]
 thread_local! {
@@ -1146,7 +1146,7 @@ impl FlowExecutionService {
 
     /// Runs every node of `input.flow_name` in dependency order. Each node's
     /// fate is decided at its turn from its predecessors' outcomes
-    /// (`flow_routing::decide_fate`): it runs, is skipped (`upstream_failed`
+    /// (`rocket_flow::routing::decide_fate`): it runs, is skipped (`upstream_failed`
     /// or `branch_not_taken`), or fails on ambiguous inputs. Cancellation is
     /// checked before each node and after it, so a cancelled run records the
     /// node that was running and nothing after it.

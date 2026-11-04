@@ -15,7 +15,7 @@ use rocket_shared::VariableValue;
 
 use crate::flow_execution_service::{CapturedOutput, RunFlowInput};
 use crate::flow_partial::{is_free_node, label_in, PartialRefusal, SeedView};
-use crate::flow_routing::NodeOutcome;
+use rocket_flow::routing::NodeOutcome;
 
 /// How many runs the cache keeps.
 pub(crate) const MAX_CACHED_RUNS: usize = 8;
