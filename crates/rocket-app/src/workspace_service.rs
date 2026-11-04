@@ -99,17 +99,15 @@ impl WorkspaceService {
 
     pub fn create(&self, name: &str, path: PathBuf) -> DomainResult<Workspace> {
         Workspace::validate_name(name)?;
-        // Check the name first so a duplicate leaves no files on disk.
+        // Check the name and path first so a duplicate leaves no files on disk.
         let mut registry = self.repo.load()?;
-        if registry.name_exists(name, None) {
-            return Err(DomainError::AlreadyExists(name.into()));
-        }
+        registry.ensure_can_add(name, &path)?;
         self.repo.ensure_workspace_dirs(&path)?;
         // Write workspace.yml inside the workspace directory.
         let config = WorkspaceConfig::new(name);
         self.config_repo.save(&path, &config)?;
         let workspace = Workspace::new(name, path.clone());
-        registry.workspaces.push(workspace.clone());
+        registry.add(workspace.clone())?;
         self.repo.save(&registry)?;
         self.publisher.publish(DomainEvent::WorkspaceCreated {
             id: workspace.id.clone(),
@@ -153,16 +151,8 @@ impl WorkspaceService {
     }
 
     pub fn rename(&self, id: &str, new_name: &str) -> DomainResult<()> {
-        Workspace::validate_name(new_name)?;
         let mut registry = self.repo.load()?;
-        if registry.name_exists(new_name, Some(id)) {
-            return Err(DomainError::AlreadyExists(new_name.into()));
-        }
-        let workspace = registry
-            .find_by_id_mut(id)
-            .ok_or_else(|| DomainError::NotFound(id.into()))?;
-        let old_name = workspace.name.clone();
-        workspace.name = new_name.to_string();
+        let old_name = registry.rename(id, new_name)?;
         self.repo.save(&registry)?;
         self.publisher.publish(DomainEvent::WorkspaceRenamed {
             id: id.to_string(),
@@ -273,20 +263,12 @@ impl WorkspaceService {
         let config = self.config_repo.load(&path)?;
         let mut registry = self.repo.load()?;
 
-        if registry.workspaces.iter().any(|w| w.path == path) {
-            return Err(DomainError::AlreadyExists(
-                "This workspace is already open".into(),
-            ));
-        }
-
-        if registry.name_exists(&config.name, None) {
-            return Err(DomainError::AlreadyExists(config.name.clone()));
-        }
+        registry.ensure_can_add(&config.name, &path)?;
 
         let mut workspace = Workspace::new(&config.name, path.clone());
         workspace.description = config.description;
 
-        registry.workspaces.push(workspace.clone());
+        registry.add(workspace.clone())?;
         self.repo.save(&registry)?;
         self.publisher.publish(DomainEvent::WorkspaceCreated {
             id: workspace.id.clone(),
@@ -738,6 +720,53 @@ mod tests {
 
         assert!(matches!(result, Err(DomainError::AlreadyExists(_))));
         assert_eq!(svc.list().expect("list").len(), before + 1);
+    }
+
+    #[test]
+    fn create_refuses_a_path_that_is_already_registered() {
+        let tmp = TempDir::new().expect("tempdir");
+        let svc = make_service(&tmp);
+        svc.create("First", tmp.path().join("ws1")).expect("create");
+        let yml_path = tmp.path().join("ws1").join("workspace.yml");
+        let before_yml = std::fs::read_to_string(&yml_path).expect("read yml");
+        let before = svc.list().expect("list").len();
+
+        let result = svc.create("Second", tmp.path().join("ws1"));
+
+        assert!(matches!(result, Err(DomainError::AlreadyExists(_))));
+        assert_eq!(svc.list().expect("list").len(), before);
+        assert_eq!(
+            std::fs::read_to_string(&yml_path).expect("read yml"),
+            before_yml
+        );
+    }
+
+    #[test]
+    fn open_workspace_reports_the_path_before_the_name() {
+        let tmp = TempDir::new().expect("tempdir");
+        let svc = make_service(&tmp);
+        let path = tmp.path().join("c");
+        MockWorkspaceConfigRepo
+            .save(&path, &WorkspaceConfig::new("Opened"))
+            .expect("write workspace.yml");
+        svc.open_workspace(path.clone()).expect("first open");
+
+        let err = svc.open_workspace(path).expect_err("already open");
+
+        assert_eq!(
+            err.to_string(),
+            DomainError::AlreadyExists("This workspace is already open".into()).to_string()
+        );
+    }
+
+    #[test]
+    fn rename_of_a_missing_workspace_is_not_found() {
+        let tmp = TempDir::new().expect("tempdir");
+        let svc = make_service(&tmp);
+
+        let result = svc.rename("nope", "Fresh");
+
+        assert!(matches!(result, Err(DomainError::NotFound(_))));
     }
 
     #[test]
