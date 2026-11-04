@@ -16,9 +16,8 @@ use std::sync::{
 
 #[cfg(test)]
 use rocket_collection::file_tx::OWNED_STATE_FILES;
-use rocket_collection::file_tx::{
-    validate_rel_path, CollectionFileTx, CollectionFileTxFactory, RecoveryOutcome,
-};
+use rocket_collection::file_tx::{CollectionFileTx, CollectionFileTxFactory, RecoveryOutcome};
+use rocket_collection::RelPath;
 use rocket_shared::error::{DomainError, DomainResult};
 use serde::{Deserialize, Serialize};
 
@@ -483,7 +482,8 @@ impl FsFileTx {
     }
 
     fn check_new_path(&self, rel: &str) -> DomainResult<()> {
-        validate_rel_path(rel)?;
+        let rel = RelPath::parse(rel)?;
+        let rel = rel.as_str();
         guard(&self.root, ".rocket/staging")?;
         guard(&self.root, rel)?;
         let folded = rel.to_ascii_lowercase();

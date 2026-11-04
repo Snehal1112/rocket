@@ -3,7 +3,7 @@
 
 use crate::error::{ImportError, ImportResult};
 use crate::importer::{unique_segment, PORT_RESERVED, REQUEST_RESERVED, SERVICE_RESERVED};
-use rocket_collection::{fold_name, request_filename_for, validate_rel_path};
+use rocket_collection::{fold_name, request_filename_for, RelPath};
 use rocket_shared::error::DomainError;
 use std::collections::{HashMap, HashSet};
 
@@ -144,7 +144,9 @@ pub(super) fn segment_or_default(
 
 /// Checks a path with the same rules the file transaction uses.
 pub(super) fn check(rel: &str) -> ImportResult<()> {
-    validate_rel_path(rel).map_err(ImportError::DomainError)
+    RelPath::parse(rel)
+        .map(|_| ())
+        .map_err(ImportError::DomainError)
 }
 
 /// The error for a path that could not be made safe.
