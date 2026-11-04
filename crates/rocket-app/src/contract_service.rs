@@ -285,7 +285,7 @@ impl ContractService {
         let mut built = Vec::new();
         walk_folder(&collection.root, Path::new(""), &mut built);
         for (rel_path, request) in built {
-            if !covers(&contract.scope, &rel_path) {
+            if !contract.scope.covers(&rel_path) {
                 continue;
             }
             snapshot.upsert(RequestSignatureSnapshot::from_request(&rel_path, request));
@@ -485,7 +485,7 @@ impl ContractService {
         let contracts = self.repo.list_contracts(collection_root)?;
 
         for contract in contracts {
-            if !covers(&contract.scope, &new_snap.request_path) {
+            if !contract.scope.covers(&new_snap.request_path) {
                 continue;
             }
 
@@ -628,7 +628,7 @@ impl ContractService {
         let mut walked = Vec::new();
         walk_folder(&collection.root, Path::new(""), &mut walked);
         for (rel_path, request) in walked {
-            if !covers(&contract.scope, &rel_path) {
+            if !contract.scope.covers(&rel_path) {
                 continue;
             }
             new_snapshot.upsert(RequestSignatureSnapshot::from_request(&rel_path, request));
@@ -819,7 +819,7 @@ impl ContractService {
     /// patch version and a `" (copy)"` title suffix.
     pub fn duplicate_contract(&self, collection_root: &Path, id: Ulid) -> ContractResult<Contract> {
         let source = self.repo.load_contract(collection_root, id)?;
-        let new_version = bump_patch_version(&source.version);
+        let new_version = rocket_collection::contract::bump_patch_version(&source.version);
         let now = chrono::Utc::now();
         let duplicate = Contract {
             id: Ulid::new(),
@@ -1093,27 +1093,6 @@ fn apply_transition(
     transition_status(status, event).map_err(|e| {
         ContractError::Internal(format!("invalid transition: {:?} on {}", e.from, e.event))
     })
-}
-
-/// Increments the patch segment of a semver-like version string.
-/// E.g. `"1.2.3"` → `"1.2.4"`. Falls back to `"{v}-copy"` for non-standard strings.
-fn bump_patch_version(v: &str) -> String {
-    let parts: Vec<&str> = v.split('.').collect();
-    if parts.len() == 3 {
-        if let Ok(patch) = parts[2].parse::<u32>() {
-            return format!("{}.{}.{}", parts[0], parts[1], patch + 1);
-        }
-    }
-    format!("{v}-copy")
-}
-
-/// Returns true if the contract scope covers the given request path.
-fn covers(scope: &ContractScope, request_path: &Path) -> bool {
-    match scope {
-        ContractScope::Collection => true,
-        ContractScope::Folder { rel_path } => request_path.starts_with(rel_path),
-        ContractScope::Request { rel_path } => request_path == rel_path,
-    }
 }
 
 /// Recursively collect every request in the folder tree along with its
@@ -1947,17 +1926,6 @@ mod tests {
         let result = svc.recompute_drift_for_collection(root());
         assert!(result.is_ok());
         assert!(result.unwrap().is_empty());
-    }
-
-    #[test]
-    fn bump_patch_version_handles_edge_cases() {
-        // Standard semver — happy path
-        assert_eq!(super::bump_patch_version("1.2.3"), "1.2.4");
-        assert_eq!(super::bump_patch_version("0.0.0"), "0.0.1");
-        // Non-semver — fallback branch
-        assert_eq!(super::bump_patch_version("v2"), "v2-copy");
-        assert_eq!(super::bump_patch_version("1.0"), "1.0-copy");
-        assert_eq!(super::bump_patch_version(""), "-copy");
     }
 
     // -----------------------------------------------------------------------
