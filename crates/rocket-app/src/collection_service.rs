@@ -631,25 +631,9 @@ impl CollectionService {
             ));
         }
         let source = self.repo.get_request(collection, path)?;
-        let (dir, file) = match path.rsplit_once('/') {
-            Some((dir, file)) => (Some(dir), file),
-            None => (None, path),
-        };
-        let stem = [".yml", ".yaml", ".json"]
-            .iter()
-            .find_map(|ext| file.strip_suffix(ext))
-            .unwrap_or(file);
-        for n in 1..=1000u32 {
-            let suffix = if n == 1 {
-                " copy".to_string()
-            } else {
-                format!(" copy {n}")
-            };
-            let file_name = format!("{stem}{suffix}.yml");
-            let candidate = match dir {
-                Some(dir) => format!("{dir}/{file_name}"),
-                None => file_name,
-            };
+        for n in 1..=rocket_collection::MAX_DUPLICATE_ATTEMPTS {
+            let next = rocket_collection::duplicate_candidate(path, &source.name, n);
+            let candidate = next.path;
             if self
                 .repo
                 .path_exists(collection, &candidate)
@@ -657,11 +641,7 @@ impl CollectionService {
             {
                 continue;
             }
-            let mut copy = source.clone();
-            copy.uid = rocket_collection::generate_uid();
-            copy.name = format!("{}{suffix}", source.name);
-            copy.seq = None;
-            copy.file_name = None;
+            let copy = rocket_collection::duplicate_of(&source, &next.name);
             match self.create_request_exclusive_unlocked(collection, &candidate, &copy) {
                 Ok(saved) => return Ok(saved),
                 Err(DomainError::AlreadyExists(_)) => continue,
