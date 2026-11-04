@@ -1,5 +1,5 @@
 use chrono::NaiveDate;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use ulid::Ulid;
 
 /// A party (provider or consumer) in a contract.
@@ -134,4 +134,46 @@ pub enum ContractScope {
     Collection,
     Folder { rel_path: PathBuf },
     Request { rel_path: PathBuf },
+}
+
+impl ContractScope {
+    /// Returns true if this scope covers the given collection-relative request path.
+    pub fn covers(&self, request_path: &Path) -> bool {
+        match self {
+            ContractScope::Collection => true,
+            ContractScope::Folder { rel_path } => request_path.starts_with(rel_path),
+            ContractScope::Request { rel_path } => request_path == rel_path,
+        }
+    }
+}
+
+#[cfg(test)]
+mod scope_tests {
+    use super::*;
+
+    #[test]
+    fn folder_scope_covers_whole_components_only() {
+        let scope = ContractScope::Folder {
+            rel_path: PathBuf::from("auth"),
+        };
+        assert!(scope.covers(Path::new("auth/login.yml")));
+        assert!(scope.covers(Path::new("auth")));
+        assert!(!scope.covers(Path::new("authz/login.yml")));
+    }
+
+    #[test]
+    fn request_scope_covers_only_its_own_path() {
+        let scope = ContractScope::Request {
+            rel_path: PathBuf::from("auth/login.yml"),
+        };
+        assert!(scope.covers(Path::new("auth/login.yml")));
+        assert!(!scope.covers(Path::new("auth/logout.yml")));
+        assert!(!scope.covers(Path::new("auth")));
+    }
+
+    #[test]
+    fn collection_scope_covers_every_path() {
+        assert!(ContractScope::Collection.covers(Path::new("a/b.yml")));
+        assert!(ContractScope::Collection.covers(Path::new("")));
+    }
 }

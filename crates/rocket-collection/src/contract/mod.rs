@@ -5,6 +5,7 @@ pub mod repository;
 pub mod snapshot;
 pub mod state_machine;
 pub mod types;
+pub mod version;
 
 pub use attachments::AttachmentStore;
 pub use changelog::{ChangeType, ChangelogEntry, ContractChangelog};
@@ -16,3 +17,4 @@ pub use types::{
     BreakingChangePolicy, Contract, ContractEnforcementMode, ContractParty, ContractPolicy,
     ContractScope, ContractStatus, PartyKind,
 };
+pub use version::bump_patch_version;
