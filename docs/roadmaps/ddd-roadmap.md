@@ -109,7 +109,7 @@ Move rules to the aggregate that owns them, so callers cannot skip them. Each it
 
 | ID | Item | Where (from, to) | Status |
 |---|---|---|---|
-| D-60 | `WorkspaceRegistry::add`, `rename` and a path-already-open check returning `AlreadyExists`. Replace the direct `registry.workspaces.push` and `workspace.name = ..` in the service. | `rocket-app/src/workspace_service.rs:108,158,282` to `rocket-workspace/src/workspace.rs` | open |
+| D-60 | `WorkspaceRegistry::add`, `rename` and a path-already-open check returning `AlreadyExists`. Done on 2026-11-04 (`ensure_can_add`, `add`, `rename`); `create`, `open_workspace` and `rename` in the service use them. `create` now also refuses a path that is already registered. `close`, `delete` and `switch` still edit the registry directly. | `rocket-workspace/src/workspace.rs`, `rocket-app/src/workspace_service.rs` | done |
 | D-61 | Flow node fate and edge liveness (`is_live`, `decide_fate`, `NodeOutcome`, `NodeFate`). Pure rules about the graph. | `rocket-app/src/flow_routing.rs:8-60` to `rocket-flow` | open |
 | D-62 | Flow rename rules; make `Flow` guard its own validity (a `validate` call before persist is easy to skip). | `rocket-app/src/flow_service.rs:56-80` to `rocket-flow` | open |
 | D-63 | One `effective_auth(request, folders, collection)` in `rocket-collection`, next to `resolve_folder_auth`. Today the folder part is in the domain and the collection fallback in `merge_auth`. | `rocket-app/src/execution_service.rs:4144,~4345` to `rocket-collection/src/folder_settings.rs` | open |

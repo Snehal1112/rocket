@@ -27,6 +27,11 @@ The single persisted document for all workspaces. Holds a `Vec<Workspace>`, an `
 | `find_by_id(id)` | Immutable lookup by id. |
 | `find_by_id_mut(id)` | Mutable lookup by id. |
 | `name_exists(name, exclude_id)` | Case-insensitive uniqueness check, with optional self-exclusion for renames. |
+| `ensure_can_add(name, path)` | Refuses a path that is already registered (`AlreadyExists("This workspace is already open")`, checked first) and a taken name. Callers run it before writing any file. |
+| `add(workspace)` | `ensure_can_add`, then push. A refusal leaves the registry unchanged. |
+| `rename(id, new_name)` | Validates the name, refuses a name used by another workspace, returns the old name. `NotFound` for a missing id (checked after the duplicate rule). |
+
+A service adds and renames through these methods and does not push to `workspaces` or set `name` itself (D-60).
 
 ### `WorkspaceRepository` (trait)
 ```rust
