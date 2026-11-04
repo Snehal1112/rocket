@@ -1,9 +1,9 @@
 //! Reads the raw files of a collection for export.
 
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use rocket_collection::Collection;
+use rocket_collection::CollectionName;
 use rocket_export::{CollectionFileSource, SourceFile};
 use rocket_shared::error::{DomainError, DomainResult};
 
@@ -17,20 +17,11 @@ impl FsCollectionFileSource {
     }
 }
 
-/// The collection name must follow the domain rule and be one plain path component. A
-/// component check (not a character list) also refuses a Windows drive prefix such as
-/// `C:x`, which makes `Path::join` drop the workspace path.
+/// Every bad collection name gets the same answer.
 fn validate_name(name: &str) -> DomainResult<()> {
-    let invalid = || DomainError::InvalidInput("Invalid collection name".to_string());
-    if name.contains('\0') || name == "." || name == ".." {
-        return Err(invalid());
-    }
-    Collection::validate_name(name).map_err(|_| invalid())?;
-    let mut components = Path::new(name).components();
-    match (components.next(), components.next()) {
-        (Some(Component::Normal(_)), None) => Ok(()),
-        _ => Err(invalid()),
-    }
+    CollectionName::parse(name)
+        .map(|_| ())
+        .map_err(|_| DomainError::InvalidInput("Invalid collection name".to_string()))
 }
 
 /// Only these files go into an export, so nothing else is read into memory.
