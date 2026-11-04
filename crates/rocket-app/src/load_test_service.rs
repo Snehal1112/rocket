@@ -478,12 +478,12 @@ mod tests {
         let events = recorder.events();
         assert_eq!(events.len(), 2);
         assert!(matches!(
-            events[0],
-            rocket_shared::events::DomainEvent::LoadTestProgress(_)
+            &events[0],
+            rocket_shared::events::DomainEvent::LoadTestProgress(e) if e.elapsed_ms == 250
         ));
         assert!(matches!(
-            events[1],
-            rocket_shared::events::DomainEvent::LoadTestComplete(_)
+            &events[1],
+            rocket_shared::events::DomainEvent::LoadTestComplete(r) if r.total_requests == 1
         ));
     }
 }

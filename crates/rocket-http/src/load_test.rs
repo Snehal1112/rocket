@@ -14,7 +14,8 @@ pub use rocket_shared::load_test::{
 pub trait LoadTestProgress: Send + Sync {
     /// Called about every 250 ms while the run is going.
     fn progress(&self, event: LoadTestProgressEvent);
-    /// Called once, after the last `progress`, with the final result.
+    /// Called once at the end of the run with the final result. A last `progress` from the
+    /// snapshot task can still arrive just after it.
     fn complete(&self, result: LoadTestResult);
 }
 
