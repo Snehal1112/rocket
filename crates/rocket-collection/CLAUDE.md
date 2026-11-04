@@ -90,6 +90,10 @@ All structs use `#[serde(rename_all = "camelCase")]` for JSON serialization. Opt
 
 `duplicate_candidate(source_path, source_name, n)` gives the path and name of the nth copy (`Login copy`, then `Login copy 2`). The path keeps the folder and file stem and always ends in `.yml`; the name keeps the source name. `duplicate_of(source, name)` clones a request with a new uid, no `seq` and no `file_name`. `CollectionService` owns the retry loop (`MAX_DUPLICATE_ATTEMPTS` = 1000, then `Conflict`).
 
+## Validating types (`names.rs`, `rel_path.rs`)
+
+`CollectionName::parse` is `Collection::validate_name` plus: no NUL byte, not `.` or `..`, exactly one normal path component (so `C:x` is refused on Windows). Use it where a name is joined onto a path. `RelPath::parse` holds the rules of `validate_rel_path` (no empty, absolute, `.` or `..` part, no backslash, NUL or colon, no Windows device name, only owned files in `.rocket`). Both give `as_str()`. They are not stored in `Collection` or `Request`, so the serde shape is unchanged.
+
 ## Discovery (`discovery.rs`)
 
 `CollectionDiscovery` finds collections and workspaces inside a folder for the open-folder and git-clone flows. `DirectoryProbe` (`is_dir`, `has_file`, `child_dirs`) is the port; `FsDirectoryProbe` in `rocket-infra` implements it. `scan(dir)` lists the direct subfolders that hold `opencollection.yml` (no dot folders, sorted by lowercase name, a missing folder gives an empty list). `detect(dir)` decides in this order: `workspace.yml` (workspace, with its collections), `opencollection.yml` at the root (one collection), a `collections/` folder with collections, then direct children; otherwise unknown. An unreadable folder is an error.
