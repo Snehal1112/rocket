@@ -55,8 +55,7 @@ cargo check -p rocket-shared
 - `OAuth2Flow` — tagged enum (`flow` field, snake_case) covering `client_credentials`, `resource_owner_password_credentials`, `authorization_code`, `implicit`. Each variant carries its own credential and token configuration structs.
 
 ### Certificates and proxies
-- `ClientCertificate` — tagged enum (`type` field): `pem` or `pkcs12`.
-- `Proxy` / `ProxyConnectionConfig` / `ProxyAuth` — proxy settings; `auth` serializes as `false` when absent (matching the OpenCollection wire format).
+The client certificate model lives in `rocket-environment` (`certificate.rs`) and the proxy types in `rocket-http` (`proxy.rs`). This crate has neither.
 
 ### DomainEvent wire format (pinned)
 - The `type` tag is camelCase (`collectionCreated`). Variant fields are deliberately snake_case (`session_id`). Nested helper DTOs (for example `FlowCallbackInfo`, `LoadTestProgressEvent`) are camelCase.
@@ -66,9 +65,9 @@ cargo check -p rocket-shared
 
 ## Patterns and Conventions
 
-- **Custom serde visitors** are used wherever the JSON wire format is polymorphic (plain string vs. object). See `Description`, `VariableValue`, and `ProxyAuth`. This is intentional to stay compatible with the OpenCollection format.
+- **Custom serde visitors** are used wherever the JSON wire format is polymorphic (plain string vs. object). See `Description` and `VariableValue`. This is intentional to stay compatible with the OpenCollection format.
 - **`skip_serializing_if = "Option::is_none"`** is applied on all optional fields to keep serialized output minimal.
-- **Tagged enums** use `#[serde(tag = "...")]` consistently: `DomainEvent` uses `type`/`camelCase`, `Auth` uses `authType`/`kebab-case`, `OAuth2Flow` uses `flow`/`snake_case`, `ClientCertificate` uses `type` with literal strings.
+- **Tagged enums** use `#[serde(tag = "...")]` consistently: `DomainEvent` uses `type`/`camelCase`, `Auth` uses `authType`/`kebab-case`, `OAuth2Flow` uses `flow`/`snake_case`.
 - All types derive `Debug`, `Clone`, and `Serialize`/`Deserialize`. Most derive `PartialEq` to support test assertions.
 - This crate has no dependencies on other workspace crates and no I/O. It is safe to use in unit tests without any setup.
 - **`Auth::OAuth2` wire name is `"o-auth2"`** — kebab-case of `OAuth2` produces `o-auth2`, not `oauth2`. This is load-bearing for OpenCollection compatibility.

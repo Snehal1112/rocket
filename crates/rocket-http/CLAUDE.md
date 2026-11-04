@@ -63,5 +63,6 @@ cargo test -p rocket-http <test_name>
 ## Relationships
 
 - Depends on `rocket-shared` for `DomainResult`, `DomainError`, and shared types (`Auth`, `Body`, `Header`, `HttpMethod`, `QueryParam`).
+- Depends on `rocket-environment` only for `VaultCertificateFormat` (`resolved_certificate.rs`). `rocket-environment` depends only on `rocket-shared`, so there is no cycle.
 - `rocket-infra` provides the concrete `ReqwestExecutor` (implements `HttpExecutor`) and `FsCookieRepository` (implements `CookieRepository`).
 - `rocket-app`'s `RequestExecutionService` receives `Box<dyn HttpExecutor>` via constructor injection.
