@@ -14,6 +14,7 @@ pub mod openapi_consent;
 pub mod openapi_local;
 pub mod openapi_schedule;
 pub mod openapi_source;
+pub mod rel_path;
 pub mod repository;
 pub mod request;
 pub mod request_kind;
@@ -32,6 +33,7 @@ pub use duplicate::{
     duplicate_candidate, duplicate_of, DuplicateCandidate, MAX_DUPLICATE_ATTEMPTS,
 };
 pub use names::CollectionName;
+pub use rel_path::RelPath;
 pub use file_tx::{validate_rel_path, CollectionFileTx, CollectionFileTxFactory, RecoveryOutcome};
 pub use folder::{CollectionItem, Folder, OpaqueProtocolItem};
 pub use folder_settings::{
