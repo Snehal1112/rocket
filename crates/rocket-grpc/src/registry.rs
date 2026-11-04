@@ -18,6 +18,11 @@ pub trait ProtoFileReader: Send + Sync {
 
 /// Loads a registry from a `.proto` file on disk. Implemented in `rocket-infra`.
 pub trait ProtoLoader: Send + Sync {
+    /// A value that changes when `proto_file` is edited: its last modification time in
+    /// nanoseconds since the Unix epoch. `None` when it cannot be read, which means the
+    /// compiled registry is not cached.
+    fn source_stamp(&self, proto_file: &Path) -> Option<u128>;
+
     /// `proto_file` is an absolute path. `extra_include_dirs` are searched for
     /// imports after the directory that holds `proto_file`.
     fn load(

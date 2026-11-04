@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use std::time::Instant;
-use std::time::{Duration, SystemTime};
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
@@ -472,11 +472,7 @@ impl GrpcService {
         let resolved = resolve_text(raw, &input.variables, "the proto file path")?;
         let (path, include_dirs) =
             self.resolve_proto_path(input.collection.as_deref(), &resolved)?;
-        let modified = std::fs::metadata(&path)
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
-            .map(|d| d.as_nanos());
+        let modified = self.proto_loader.source_stamp(&path);
         let key = modified.map(|nanos| format!("proto:{}:{nanos}", path.display()));
         if let (Some(key), false) = (&key, refresh) {
             if let Some(hit) = lock(&self.registries).get(key) {
@@ -720,7 +716,6 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
-    use std::time::SystemTime;
 
     use async_trait::async_trait;
     use rocket_collection::{Collection, GrpcMessage, GrpcMetadataEntry};
@@ -757,9 +752,24 @@ message Rep { string message = 1; }
     #[derive(Default)]
     struct FakeLoader {
         loads: Mutex<Vec<(PathBuf, Vec<PathBuf>)>>,
+        /// Stamps by path. A path without an entry has the stamp `Some(1)`.
+        stamps: Mutex<HashMap<PathBuf, Option<u128>>>,
+    }
+
+    impl FakeLoader {
+        fn set_stamp(&self, path: &Path, stamp: Option<u128>) {
+            lock(&self.stamps).insert(path.to_path_buf(), stamp);
+        }
     }
 
     impl ProtoLoader for FakeLoader {
+        fn source_stamp(&self, proto_file: &Path) -> Option<u128> {
+            lock(&self.stamps)
+                .get(proto_file)
+                .copied()
+                .unwrap_or(Some(1))
+        }
+
         fn load(&self, proto_file: &Path, extra: &[PathBuf]) -> DomainResult<ProtoRegistry> {
             lock(&self.loads).push((proto_file.to_path_buf(), extra.to_vec()));
             Ok(registry())
@@ -1643,13 +1653,7 @@ message Rep { string message = 1; }
         );
 
         let file = h.dir.path().join("collections/api/protos/greeter.proto");
-        let handle = std::fs::OpenOptions::new()
-            .write(true)
-            .open(&file)
-            .expect("open");
-        handle
-            .set_modified(SystemTime::now() + Duration::from_secs(60))
-            .expect("touch");
+        h.loader.set_stamp(&file, Some(2));
         h.svc
             .call_unary(input(request(SAY_HELLO)))
             .await
@@ -1669,5 +1673,21 @@ message Rep { string message = 1; }
             3,
             "refresh always compiles again"
         );
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_stamp_is_never_cached() {
+        let h = harness(None);
+        let file = h.dir.path().join("collections/api/protos/greeter.proto");
+        h.loader.set_stamp(&file, None);
+
+        for _ in 0..2 {
+            h.svc
+                .call_unary(input(request(SAY_HELLO)))
+                .await
+                .expect("call");
+        }
+
+        assert_eq!(lock(&h.loader.loads).len(), 2, "no stamp, no cache key");
     }
 }

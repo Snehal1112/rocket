@@ -51,6 +51,14 @@ impl ProtoFileReader for FsProtoFileReader {
 pub struct FsProtoLoader;
 
 impl ProtoLoader for FsProtoLoader {
+    fn source_stamp(&self, proto_file: &Path) -> Option<u128> {
+        fs::metadata(proto_file)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::SystemTime::UNIX_EPOCH).ok())
+            .map(|d| d.as_nanos())
+    }
+
     fn load(
         &self,
         proto_file: &Path,
@@ -194,5 +202,49 @@ mod tests {
 
         assert!(registry.pool().get_message_by_name("real.pkg.M").is_some());
         assert!(registry.pool().get_message_by_name("other.pkg.M").is_none());
+    }
+
+    fn stamp_file(tmp: &TempDir) -> PathBuf {
+        let path = tmp.path().join("a.proto");
+        std::fs::write(&path, "syntax = \"proto3\";\n").expect("write");
+        path
+    }
+
+    #[test]
+    fn source_stamp_is_none_for_a_missing_file() {
+        let tmp = TempDir::new().expect("tmp");
+
+        assert!(FsProtoLoader
+            .source_stamp(&tmp.path().join("nope.proto"))
+            .is_none());
+    }
+
+    #[test]
+    fn source_stamp_is_equal_for_an_untouched_file() {
+        let tmp = TempDir::new().expect("tmp");
+        let path = stamp_file(&tmp);
+
+        let first = FsProtoLoader.source_stamp(&path);
+
+        assert!(first.is_some());
+        assert_eq!(first, FsProtoLoader.source_stamp(&path));
+    }
+
+    #[test]
+    fn source_stamp_changes_when_the_file_is_touched() {
+        let tmp = TempDir::new().expect("tmp");
+        let path = stamp_file(&tmp);
+        let before = FsProtoLoader.source_stamp(&path);
+
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .expect("open")
+            .set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(60))
+            .expect("touch");
+
+        let after = FsProtoLoader.source_stamp(&path);
+        assert!(after.is_some());
+        assert_ne!(before, after);
     }
 }
