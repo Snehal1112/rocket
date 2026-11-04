@@ -7,10 +7,8 @@ not touch the filesystem or any I/O directly — those concerns live in
 `rocket-infra`.
 
 Known exceptions in production code until Phase 4 of `docs/roadmaps/ddd-roadmap.md`
-ships: contract attachment file work (D-40), workspace directory checks and
-delete (D-41), the `canonicalize` for the collection lock key (D-42), the proto
-file `metadata` call (D-43), the `reqwest` client and token POST in
-`OAuth2Service` (D-44), and process env, user name and `current_exe` reads
+ships: the proto file `metadata` call (D-43), the `reqwest` client and token POST
+in `OAuth2Service` (D-44), and process env, user name and `current_exe` reads
 (D-45). Do not add new ones. The crate is also large (about 33k non-test lines);
 D-80 to D-82 plan its split by context.
 
@@ -52,7 +50,7 @@ D-80 to D-82 plan its split by context.
 - `reorder_items` — reorders items within a folder by supplying the new name order.
 - `list_request_examples` / `add_request_example` / `rename_request_example` / `delete_request_example` — saved examples of one HTTP request, stored in the request file's `examples` list. Add, rename and delete publish `RequestSaved` only after the repo call succeeds; list publishes nothing. Names are trimmed, 1 to 120 characters, no control characters, unique case-insensitively (`InvalidInput`, `AlreadyExists`). One example is at most 1 MiB as YAML. Non-HTTP files are `InvalidInput`.
 - `get_settings` / `save_settings` — read and write per-collection settings (auth, headers, variables).
-- Every method that writes collection files holds `collection_lock(root)` (`collection_lock.rs`, shared with the OpenAPI sync apply) for its whole load-modify-write, taken once per public method (the fair FIFO ticket lock is not reentrant; inner calls use `*_unlocked` helpers). Lock order: collection lock first, then the sync transaction guard. The sync apply never calls `CollectionService`. Read paths and `create` (no root yet) take no lock.
+- Every method that writes collection files holds `collection_lock(repo, root)` (the key is `CollectionRepository::lock_key`, so two spellings of one folder share a lock) (`collection_lock.rs`, shared with the OpenAPI sync apply) for its whole load-modify-write, taken once per public method (the fair FIFO ticket lock is not reentrant; inner calls use `*_unlocked` helpers). Lock order: collection lock first, then the sync transaction guard. The sync apply never calls `CollectionService`. Read paths and `create` (no root yet) take no lock.
 
 ### WorkspaceService
 Constructor takes **two** repos: `WorkspaceRepository` (registry) and `WorkspaceConfigRepository` (`workspace.yml` files).
@@ -61,7 +59,7 @@ Constructor takes **two** repos: `WorkspaceRepository` (registry) and `Workspace
 |---|---|
 | `create` | Creates the directory, `collections/`, `environments/` subdirs, and writes `workspace.yml`. |
 | `switch` | Updates `active_workspace_id` in registry and mutates `Arc<Mutex<PathBuf>>`. |
-| `delete` | Removes the workspace directory from disk via `fs::remove_dir_all`. Cannot delete `"default"` or the last workspace. |
+| `delete` | Removes the workspace directory through `WorkspaceRepository::remove_workspace_dir` (a missing directory is fine). Cannot delete `"default"` or the last workspace. |
 | `close` | Removes from registry only (no disk deletion). Cannot close the last workspace. |
 | `pin` / `unpin` | Toggles `workspace.pinned` in the registry. |
 | `update_description` | Sets `workspace.description`; pass `None` to clear. |

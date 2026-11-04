@@ -85,9 +85,9 @@ Each item replaces a direct `std::fs` or `reqwest` call with an existing or new 
 
 | ID | Item | Where | Status |
 |---|---|---|---|
-| D-40 | Contract attachments: `create_dir_all`, `metadata`, `copy`, `exists`, `read_dir`, `remove_file` (six sites). Add an attachment store port and an `rocket-infra` adapter. | `rocket-app/src/contract_service.rs:54,74,88,262,263,271` | open |
-| D-41 | Workspace directory checks and `remove_dir_all`. Move behind the existing `WorkspaceRepository` or a new method on it. | `rocket-app/src/workspace_service.rs:267,329,378-379` | open |
-| D-42 | `fs::canonicalize` for the per-collection lock key. Resolve the key in an infra helper or accept a pre-resolved path. | `rocket-app/src/collection_lock.rs:84` | open |
+| D-40 | Contract attachments: `create_dir_all`, `metadata`, `copy`, `exists`, `read_dir`, `remove_file` (six sites). Add an attachment store port and an `rocket-infra` adapter. | `rocket-app/src/contract_service.rs:54,74,88,262,263,271` | done (2026-11-04) |
+| D-41 | Workspace directory checks and `remove_dir_all`. Move behind the existing `WorkspaceRepository` or a new method on it. | `rocket-app/src/workspace_service.rs:267,329,378-379` | done (2026-11-04) |
+| D-42 | `fs::canonicalize` for the per-collection lock key. Resolve the key in an infra helper or accept a pre-resolved path. | `rocket-app/src/collection_lock.rs:84` | done (2026-11-04) |
 | D-43 | `fs::metadata` of the proto file for the cache key. Move to the `ProtoLoader` port. | `rocket-app/src/grpc_service.rs:475` | open |
 | D-44 | `reqwest` client build (fallback) and token POST inside `OAuth2Service`. Require a `TokenClientProvider` and remove the fallback; move the POST behind the port. | `rocket-app/src/oauth2_service.rs:226-242,420-431` | open |
 | D-45 | Environment reads: process env snapshot, `USER`/`USERNAME`, `current_exe`. Inject an `EnvReader` (the agent config service already does). | `execution_service.rs:1413,2674`, `contract_service.rs:349-350`, `acp_session_service.rs:707` | open |
