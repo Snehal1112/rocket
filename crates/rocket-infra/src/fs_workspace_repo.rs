@@ -59,6 +59,22 @@ impl WorkspaceRepository for FsWorkspaceRepo {
         }
         Ok(())
     }
+
+    fn workspace_config_exists(&self, path: &std::path::Path) -> bool {
+        path.join("workspace.yml").exists()
+    }
+
+    fn collection_manifest_exists(&self, path: &std::path::Path) -> bool {
+        path.join("opencollection.yml").exists()
+    }
+
+    fn remove_workspace_dir(&self, path: &std::path::Path) -> DomainResult<()> {
+        if !path.exists() {
+            return Ok(());
+        }
+        fs::remove_dir_all(path)
+            .map_err(|e| DomainError::Io(format!("Failed to delete workspace directory: {e}")))
+    }
 }
 
 #[cfg(test)]
@@ -106,5 +122,32 @@ mod tests {
                               // Second load must read the file, not recreate it.
         let registry = repo.load().unwrap();
         assert_eq!(registry.workspaces.len(), 1);
+    }
+
+    #[test]
+    fn config_and_manifest_checks_look_for_their_files() {
+        let tmp = TempDir::new().expect("tmp");
+        let repo = make_repo(&tmp);
+        assert!(!repo.workspace_config_exists(tmp.path()));
+        assert!(!repo.collection_manifest_exists(tmp.path()));
+
+        std::fs::write(tmp.path().join("workspace.yml"), "name: x\n").expect("write");
+        std::fs::write(tmp.path().join("opencollection.yml"), "name: x\n").expect("write");
+
+        assert!(repo.workspace_config_exists(tmp.path()));
+        assert!(repo.collection_manifest_exists(tmp.path()));
+    }
+
+    #[test]
+    fn remove_workspace_dir_deletes_the_tree_and_accepts_a_missing_dir() {
+        let tmp = TempDir::new().expect("tmp");
+        let repo = make_repo(&tmp);
+        let dir = tmp.path().join("ws");
+        std::fs::create_dir_all(dir.join("collections")).expect("mkdir");
+
+        repo.remove_workspace_dir(&dir).expect("remove");
+        assert!(!dir.exists());
+
+        repo.remove_workspace_dir(&dir).expect("missing dir is ok");
     }
 }

@@ -1,4 +1,3 @@
-use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -265,7 +264,7 @@ impl WorkspaceService {
 
     /// Open an existing workspace from disk. The directory must contain `workspace.yml`.
     pub fn open_workspace(&self, path: PathBuf) -> DomainResult<Workspace> {
-        if !path.join("workspace.yml").exists() {
+        if !self.repo.workspace_config_exists(&path) {
             return Err(DomainError::NotFound(
                 "workspace.yml not found in the selected directory".into(),
             ));
@@ -327,7 +326,7 @@ impl WorkspaceService {
         workspace_id: &str,
         collection_path: PathBuf,
     ) -> DomainResult<()> {
-        if !collection_path.join("opencollection.yml").exists() {
+        if !self.repo.collection_manifest_exists(&collection_path) {
             return Err(DomainError::NotFound(
                 "opencollection.yml not found in the selected directory".into(),
             ));
@@ -376,11 +375,7 @@ impl WorkspaceService {
             .find_by_id(id)
             .cloned()
             .ok_or_else(|| DomainError::NotFound(id.into()))?;
-        if workspace.path.exists() {
-            fs::remove_dir_all(&workspace.path).map_err(|e| {
-                DomainError::Io(format!("Failed to delete workspace directory: {e}"))
-            })?;
-        }
+        self.repo.remove_workspace_dir(&workspace.path)?;
         registry.workspaces.retain(|w| w.id != id);
         let new_active = self.repoint_if_active(&mut registry, id)?;
         self.repo.save(&registry)?;
@@ -442,12 +437,14 @@ mod tests {
 
     struct MockWorkspaceRepo {
         registry: Mutex<WorkspaceRegistry>,
+        removed: Arc<Mutex<Vec<PathBuf>>>,
     }
 
     impl MockWorkspaceRepo {
         fn new(default_path: PathBuf) -> Self {
             Self {
                 registry: Mutex::new(WorkspaceRegistry::new_with_default(default_path)),
+                removed: Arc::new(Mutex::new(Vec::new())),
             }
         }
     }
@@ -463,6 +460,19 @@ mod tests {
         fn ensure_workspace_dirs(&self, path: &Path) -> DomainResult<()> {
             for subdir in [path, &path.join("collections"), &path.join("environments")] {
                 std::fs::create_dir_all(subdir).map_err(|e| DomainError::Io(e.to_string()))?;
+            }
+            Ok(())
+        }
+        fn workspace_config_exists(&self, path: &Path) -> bool {
+            path.join("workspace.yml").exists()
+        }
+        fn collection_manifest_exists(&self, path: &Path) -> bool {
+            path.join("opencollection.yml").exists()
+        }
+        fn remove_workspace_dir(&self, path: &Path) -> DomainResult<()> {
+            self.removed.lock().expect("lock").push(path.to_path_buf());
+            if path.exists() {
+                std::fs::remove_dir_all(path).map_err(|e| DomainError::Io(e.to_string()))?;
             }
             Ok(())
         }
@@ -1003,6 +1013,65 @@ mod tests {
         let ws = svc.create("ToDelete", path.clone()).unwrap();
         svc.delete(&ws.id).unwrap();
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn delete_workspace_calls_the_repo_to_remove_the_directory() {
+        let tmp = TempDir::new().expect("tmp");
+        let default_path = tmp.path().join("default");
+        std::fs::create_dir_all(&default_path).expect("mkdir");
+        let repo = MockWorkspaceRepo::new(default_path.clone());
+        let removed = Arc::clone(&repo.removed);
+        let svc = WorkspaceService::new(
+            Box::new(repo),
+            Box::new(MockWorkspaceConfigRepo),
+            Box::new(NullEventPublisher),
+            Arc::new(Mutex::new(default_path)),
+        );
+        let path = tmp.path().join("to-delete");
+        let ws = svc.create("ToDelete", path.clone()).expect("create");
+
+        svc.delete(&ws.id).expect("delete");
+
+        assert_eq!(*removed.lock().expect("lock"), vec![path]);
+    }
+
+    #[test]
+    fn delete_workspace_with_missing_directory_still_updates_registry() {
+        let tmp = TempDir::new().expect("tmp");
+        let svc = make_service(&tmp);
+        let path = tmp.path().join("gone");
+        let ws = svc.create("Gone", path.clone()).expect("create");
+        std::fs::remove_dir_all(&path).expect("remove");
+
+        svc.delete(&ws.id).expect("delete");
+
+        let list = svc.list().expect("list");
+        assert!(list.iter().all(|w| w.id != ws.id));
+    }
+
+    #[test]
+    fn open_workspace_without_config_file_is_not_found() {
+        let tmp = TempDir::new().expect("tmp");
+        let svc = make_service(&tmp);
+        let ws_path = tmp.path().join("no-cfg-nf");
+        std::fs::create_dir_all(&ws_path).expect("mkdir");
+
+        let result = svc.open_workspace(ws_path);
+
+        assert!(matches!(result, Err(DomainError::NotFound(_))));
+    }
+
+    #[test]
+    fn link_external_collection_without_manifest_is_not_found() {
+        let tmp = TempDir::new().expect("tmp");
+        let svc = make_service(&tmp);
+        let dir = tmp.path().join("ext-empty");
+        std::fs::create_dir_all(&dir).expect("mkdir");
+
+        let result = svc.link_external_collection("default", dir);
+
+        assert!(matches!(result, Err(DomainError::NotFound(_))));
     }
 
     #[test]
