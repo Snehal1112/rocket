@@ -1527,7 +1527,7 @@ fn request_examples_survive_oc_roundtrip() {
 
 #[test]
 fn environment_client_certificates_survive_oc_roundtrip() {
-    use rocket_shared::certificate::ClientCertificate;
+    use rocket_environment::certificate::ClientCertificate;
 
     let mut env = Environment::new("prod");
     env.client_certificates = vec![ClientCertificate::Pem {

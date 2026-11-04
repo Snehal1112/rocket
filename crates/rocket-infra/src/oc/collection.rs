@@ -1,6 +1,6 @@
 //! Collection top-level structs for the OpenCollection YAML format.
 
-use rocket_shared::certificate::ClientCertificate as OcClientCertificate;
+use rocket_environment::certificate::ClientCertificate as OcClientCertificate;
 use serde::{Deserialize, Serialize};
 
 use super::auth::OcProxy;

@@ -6,7 +6,7 @@
 
 use std::fmt;
 
-use rocket_shared::certificate::VaultCertificateFormat;
+use rocket_environment::certificate::VaultCertificateFormat;
 use zeroize::Zeroizing;
 
 /// The RocketVault connection and vault behind an External Secrets binding, copied from the

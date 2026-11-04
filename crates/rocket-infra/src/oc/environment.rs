@@ -1,6 +1,6 @@
 //! Environment struct for the OpenCollection YAML format.
 
-use rocket_shared::certificate::ClientCertificate as OcClientCertificate;
+use rocket_environment::certificate::ClientCertificate as OcClientCertificate;
 use rocket_shared::description::Description as OcDescription;
 use serde::{Deserialize, Serialize};
 

@@ -2953,8 +2953,8 @@ mod mtls_tests {
 
     mod deferred_certificates {
         use super::*;
+        use rocket_environment::certificate::VaultCertificateFormat;
         use rocket_http::{ResolvedClientCertificate, VaultCertificateBinding};
-        use rocket_shared::certificate::VaultCertificateFormat;
 
         fn deferred(domain: &str) -> ResolvedClientCertificate {
             ResolvedClientCertificate::deferred(

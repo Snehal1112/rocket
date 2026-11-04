@@ -4,11 +4,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use rocket_environment::certificate::VaultCertificateFormat;
 use rocket_environment::{
     ExternalSecretRef, ProviderCapabilities, SecretManagerConnection, SecretProviderKind,
     VaultCertificateMaterial, VaultCertificateSummary, VaultSecretFetcher,
 };
-use rocket_shared::certificate::VaultCertificateFormat;
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::azurekeyvault::AzureKeyVaultFetcher;

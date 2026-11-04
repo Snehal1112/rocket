@@ -2,10 +2,10 @@
 //! name-to-id cache and the export. Only ids are cached. Material never is.
 
 use rand::{distributions::Alphanumeric, rngs::OsRng, Rng};
+use rocket_environment::certificate::VaultCertificateFormat;
 use rocket_environment::{
     SecretManagerConnection, VaultCertificateMaterial, VaultCertificateSummary,
 };
-use rocket_shared::certificate::VaultCertificateFormat;
 use rocket_shared::error::{DomainError, DomainResult};
 use zeroize::Zeroizing;
 
@@ -289,11 +289,11 @@ mod tests {
         LIST_PAGE_SIZE, MAX_EXPORT_BYTES, MAX_LIST_PAGES, PKCS12_PASSWORD_LEN,
     };
     use super::super::ReqwestVaultSecretFetcher;
+    use rocket_environment::certificate::VaultCertificateFormat;
     use rocket_environment::{
         SecretManagerConnection, VaultCertificateMaterial, VaultCertificateSummary,
         VaultSecretFetcher,
     };
-    use rocket_shared::certificate::VaultCertificateFormat;
     use rocket_shared::error::DomainError;
     use serde_json::json;
     use wiremock::matchers::{header, method, path, query_param};

@@ -6,10 +6,10 @@
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use reqwest::StatusCode;
+use rocket_environment::certificate::VaultCertificateFormat;
 use rocket_environment::{
     SecretManagerConnection, VaultCertificateMaterial, VaultCertificateSummary,
 };
-use rocket_shared::certificate::VaultCertificateFormat;
 use rocket_shared::error::{DomainError, DomainResult};
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;

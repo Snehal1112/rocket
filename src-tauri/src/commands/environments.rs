@@ -1,6 +1,6 @@
 use rocket_app::{EnvironmentServices, RequestExecutionService, WorkspaceService};
+use rocket_environment::certificate::ClientCertificate;
 use rocket_environment::Environment;
-use rocket_shared::certificate::ClientCertificate;
 use rocket_shared::error::DomainError;
 use std::sync::Mutex;
 use tauri::State;

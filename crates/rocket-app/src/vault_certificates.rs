@@ -13,6 +13,7 @@
 //! with "Cannot load PKCS12 client certificate (inline, for <domain>): ...". Picking the PEM
 //! format for the entry avoids it.
 
+use rocket_environment::certificate::VaultCertificateFormat;
 use rocket_environment::{
     SecretManagerRepository, SecretStore, VaultCertificateMaterial, VaultSecretFetcher,
 };
@@ -21,7 +22,6 @@ use rocket_http::{
     CertificateMaterial, CertificateSource, HttpRequest, ResolvedClientCertificate,
     VaultCertificateBinding,
 };
-use rocket_shared::certificate::VaultCertificateFormat;
 use rocket_shared::error::DomainError;
 use rocket_shared::oauth2::OAuth2Flow;
 use rocket_shared::types::Auth;
@@ -657,9 +657,9 @@ mod wiring_tests {
     };
     use async_trait::async_trait;
     use rocket_collection::Collection;
+    use rocket_environment::certificate::ClientCertificate;
     use rocket_environment::{Environment, ExternalSecretBinding, SecretManagerConnection};
     use rocket_http::{HttpExecutor, HttpResponse, RequestOptions, TokenClientProvider};
-    use rocket_shared::certificate::ClientCertificate;
     use rocket_shared::error::DomainResult;
     use rocket_shared::events::NullEventPublisher;
     use rocket_shared::types::HttpMethod;

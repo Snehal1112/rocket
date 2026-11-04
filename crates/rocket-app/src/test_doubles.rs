@@ -15,6 +15,7 @@ use rocket_collection::{
     FolderSettings, GraphQlRequest, GrpcRequest, Request as CollectionRequest, RequestKind,
     RequestScriptPhase, WebSocketRequest,
 };
+use rocket_environment::certificate::VaultCertificateFormat;
 use rocket_environment::{
     Environment, EnvironmentRepository, EnvironmentRepositoryFactory, ExternalSecretRef,
     SecretManagerConnection, SecretManagerRepository, SecretStore, VaultCertificateMaterial,
@@ -23,7 +24,6 @@ use rocket_environment::{
 use rocket_history::{HistoryEntry, HistoryFilter, HistoryRepository};
 use rocket_http::{CookieJar, CookieRepository, HttpExecutor, HttpRequest, HttpResponse};
 use rocket_scripting::{ScriptContext, ScriptEngine, ScriptResult};
-use rocket_shared::certificate::VaultCertificateFormat;
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{DomainEvent, EventPublisher};
 use zeroize::Zeroizing;

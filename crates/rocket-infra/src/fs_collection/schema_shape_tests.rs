@@ -925,8 +925,8 @@ fn oauth1_request_file_loads_instead_of_vanishing() {
 
 #[test]
 fn environment_client_certificates_use_schema_keys_plus_rocket_extensions() {
+    use rocket_environment::certificate::ClientCertificate;
     use rocket_environment::{Environment, EnvironmentRepository};
-    use rocket_shared::certificate::ClientCertificate;
 
     let dir = TempDir::new().expect("tempdir");
     let repo = crate::fs_environment_repo::FsEnvironmentRepo::new(dir.path().to_path_buf());
@@ -964,7 +964,7 @@ fn environment_client_certificates_use_schema_keys_plus_rocket_extensions() {
             domain: "e.example.com".into(),
             binding: "vault".into(),
             certificate: "client-e".into(),
-            format: rocket_shared::certificate::VaultCertificateFormat::Pem,
+            format: rocket_environment::certificate::VaultCertificateFormat::Pem,
         },
     ];
     repo.save(&env).expect("save environment");

@@ -123,9 +123,9 @@ impl EnvironmentService {
 mod tests {
     use super::*;
     use rocket_audit::event::AuditEventKind;
+    use rocket_environment::certificate::{ClientCertificate, VaultCertificateFormat};
     use rocket_environment::Variable;
     use rocket_environment::{ExternalSecretBinding, ExternalSecretRef};
-    use rocket_shared::certificate::{ClientCertificate, VaultCertificateFormat};
     use rocket_shared::error::{DomainError, DomainResult};
     use rocket_shared::events::NullEventPublisher;
     use std::sync::Mutex;

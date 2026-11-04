@@ -7,9 +7,9 @@ use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use rocket_environment::certificate::ClientCertificate;
 use rocket_environment::{resolve, EnvironmentRepository, ExternalSecretBinding};
 use rocket_http::{CertificateSource, ResolvedClientCertificate, VaultCertificateBinding};
-use rocket_shared::certificate::ClientCertificate;
 use zeroize::Zeroizing;
 
 /// The largest vault secret accepted as certificate material. A PKCS12 bundle as base64 is tens
@@ -377,8 +377,8 @@ pub(crate) fn describe_all(certs: &[ResolvedClientCertificate]) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::test_doubles::{MapEnvRepo, StaticEnvRepo};
+    use rocket_environment::certificate::VaultCertificateFormat;
     use rocket_environment::Environment;
-    use rocket_shared::certificate::VaultCertificateFormat;
 
     fn binding(alias: &str) -> ExternalSecretBinding {
         ExternalSecretBinding {

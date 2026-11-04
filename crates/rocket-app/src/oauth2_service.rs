@@ -772,8 +772,8 @@ pub(crate) mod tests {
     use crate::client_certificates::describe_all;
     use crate::test_doubles::NullCollectionRepo;
     use rocket_collection::{CollectionRepository, CollectionSettings, CollectionVariable};
+    use rocket_environment::certificate::ClientCertificate;
     use rocket_environment::{Environment, EnvironmentRepository, Variable};
-    use rocket_shared::certificate::ClientCertificate;
     use rocket_shared::error::{DomainError, DomainResult};
 
     // ─── Stub repos ──────────────────────────────────────

@@ -1232,11 +1232,11 @@ fn value_vault_service_with(
     });
     // A RocketVault certificate for one domain, which only the certificate tests send to.
     env.client_certificates
-        .push(rocket_shared::certificate::ClientCertificate::Vault {
+        .push(rocket_environment::certificate::ClientCertificate::Vault {
             domain: "cert.test".to_string(),
             binding: "vault".to_string(),
             certificate: "client-a".to_string(),
-            format: rocket_shared::certificate::VaultCertificateFormat::Pem,
+            format: rocket_environment::certificate::VaultCertificateFormat::Pem,
         });
     let connection = SecretManagerConnection {
         id: "conn-1".to_string(),

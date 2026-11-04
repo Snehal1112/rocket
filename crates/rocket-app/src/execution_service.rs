@@ -4541,10 +4541,10 @@ mod tests {
         Collection, CollectionRepository, CollectionSettings, CollectionSummary,
         CollectionVariable, FolderSettings, Request as CollectionRequest,
     };
+    use rocket_environment::certificate::ClientCertificate;
     use rocket_environment::{Environment, Variable};
     use rocket_http::{CertificateMaterial, CertificateSource};
     use rocket_http::{CookieJar, HttpResponse};
-    use rocket_shared::certificate::ClientCertificate;
     use rocket_shared::error::{DomainError, DomainResult};
     use rocket_shared::events::NullEventPublisher;
     use rocket_shared::types::HttpMethod;

@@ -270,9 +270,9 @@ impl EnvironmentRepository for FsEnvironmentRepo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rocket_environment::certificate::{ClientCertificate, VaultCertificateFormat};
     use rocket_environment::secret_store::SecretStore;
     use rocket_environment::Variable;
-    use rocket_shared::certificate::{ClientCertificate, VaultCertificateFormat};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Mutex;
