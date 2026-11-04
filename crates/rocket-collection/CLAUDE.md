@@ -82,7 +82,7 @@ All structs use `#[serde(rename_all = "camelCase")]` for JSON serialization. Opt
 `folder_settings.rs` holds `FolderSettings` (headers, auth, variables, three phase scripts, docs), `ScriptFlow` (`sandwich` default, `sequential`) and `ScriptPhase`. It has no serde derives: `rocket-infra` owns the `folder.yml` shape and `src-tauri` owns the IPC DTO.
 
 - `inherited_headers` merges collection then folder headers (outermost first). Inner replaces outer by exact key. Disabled headers never shadow and are dropped.
-- `resolve_folder_auth` returns the innermost folder auth that is not `None` or `Inherit`.
+- `resolve_folder_auth` returns the innermost folder auth that is not `None` or `Inherit`. `effective_auth(request_auth, folders, collection_auth)` is the full chain used at send time: an explicit request auth, else the innermost folder auth, else the collection auth, else `None` (a request set to `None` or `Inherit` takes the chain).
 - `chain_scripts` orders one phase's scripts for a `ScriptFlow`, request script included, blanks skipped.
 - `CollectionRepository::{get_folder_settings, save_folder_settings, get_folder_chain_settings}` have defaults so test doubles keep compiling.
 
