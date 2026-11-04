@@ -5,10 +5,9 @@ Application-layer orchestration crate. It wires together the domain crates
 `rocket-http`, `rocket-workspace`) into concrete use-case services. It should
 not touch the filesystem or any I/O directly — those concerns live in
 `rocket-infra`. Phase 4 of `docs/roadmaps/ddd-roadmap.md` moved files, the token
-POST and the host environment (`HostEnv`) behind traits. Two reads are left: the
+POST and the host environment (`HostEnv`) behind traits. One read is left: the
 `which::which` command lookup in `agent_config_service.rs` (reads `PATH` and the file
-system, no roadmap item yet) and `rocket_shared::paths::home_dir()` in `grpc_service.rs`
-(D-53). Do not add new ones. The crate is also
+system, no roadmap item yet). The home directory comes from `HostEnv::home_dir()` (D-53). Do not add new reads. The crate is also
 large (about 33k non-test lines); D-80 to D-82 plan its split by context.
 
 ## Public Types
