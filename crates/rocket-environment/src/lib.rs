@@ -19,7 +19,7 @@ pub mod vault_secret_fetcher;
 pub use client_certificate_validation::{
     validate_client_certificates, validate_vault_certificate_providers,
 };
-pub use context::VariableContext;
+pub use context::{Scope, ScopeEntry, VariableContext, MIN_SECRET_VALUE_LEN};
 pub use dot_env::{
     collect_default_dot_env, collect_dot_env, nearest_dot_env_path, DotEnvFileInfo, DotEnvLoader,
     DotEnvValues,

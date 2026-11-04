@@ -1,5 +1,34 @@
 use std::collections::{HashMap, HashSet};
 
+/// A secret value shorter than this is not added to `secret_values`, because masking a very
+/// short text would hide ordinary output. Its name is still marked secret.
+pub const MIN_SECRET_VALUE_LEN: usize = 6;
+
+/// The scopes `VariableContext::add_scope` fills. The other maps (runtime, external secrets,
+/// process env) have their own sources.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    GlobalEnv,
+    Collection,
+    Env,
+    Folder,
+    Request,
+}
+
+/// One variable offered to `add_scope`.
+#[derive(Debug, Clone, Copy)]
+pub struct ScopeEntry<'a> {
+    pub key: &'a str,
+    pub value: &'a str,
+    /// `Some` for a declared variable (collection, folder or request variables): an empty
+    /// `value` falls back to it, and an entry with no key or no value at all is skipped so it
+    /// does not hide the same name in a lower scope. `None` for an environment variable, whose
+    /// value is kept as it is.
+    pub initial_value: Option<&'a str>,
+    pub enabled: bool,
+    pub secret: bool,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct VariableContext {
     pub runtime: HashMap<String, String>,
@@ -28,6 +57,50 @@ pub struct VariableContext {
 }
 
 impl VariableContext {
+    /// Adds the enabled entries to one scope, in order, so a later entry overwrites an earlier
+    /// one. A secret entry marks its name in `secret_keys` (even when it has no value) and, when
+    /// the value has `MIN_SECRET_VALUE_LEN` or more bytes, adds the value to `secret_values`.
+    pub fn add_scope<'a>(
+        &mut self,
+        scope: Scope,
+        entries: impl IntoIterator<Item = ScopeEntry<'a>>,
+    ) {
+        for entry in entries.into_iter().filter(|e| e.enabled) {
+            let value = match entry.initial_value {
+                None => entry.value,
+                Some(initial) => {
+                    // An empty secret variable still marks its name secret.
+                    if entry.secret && !entry.key.is_empty() {
+                        self.secret_keys.insert(entry.key.to_string());
+                    }
+                    let chosen = if entry.value.is_empty() {
+                        initial
+                    } else {
+                        entry.value
+                    };
+                    if entry.key.is_empty() || chosen.is_empty() {
+                        continue;
+                    }
+                    chosen
+                }
+            };
+            if entry.secret {
+                self.secret_keys.insert(entry.key.to_string());
+                if value.len() >= MIN_SECRET_VALUE_LEN {
+                    self.secret_values.insert(value.to_string());
+                }
+            }
+            let map = match scope {
+                Scope::GlobalEnv => &mut self.global_env,
+                Scope::Collection => &mut self.collection,
+                Scope::Env => &mut self.env,
+                Scope::Folder => &mut self.folder,
+                Scope::Request => &mut self.request,
+            };
+            map.insert(entry.key.to_string(), value.to_string());
+        }
+    }
+
     /// The scope maps in precedence order, lowest first. This is the only place the order is written.
     /// Later layers overwrite earlier ones on key collision. `process_env` is not a layer here:
     /// `flatten_with_process_env` adds it below all of these.
@@ -340,5 +413,126 @@ mod tests {
             ctx.flatten_with_process_env().get("process.env.k").unwrap(),
             "process"
         );
+    }
+
+    // add_scope
+
+    fn entry<'a>(key: &'a str, value: &'a str, secret: bool) -> ScopeEntry<'a> {
+        ScopeEntry {
+            key,
+            value,
+            initial_value: None,
+            enabled: true,
+            secret,
+        }
+    }
+
+    fn declared<'a>(
+        key: &'a str,
+        value: &'a str,
+        initial: &'a str,
+        secret: bool,
+    ) -> ScopeEntry<'a> {
+        ScopeEntry {
+            initial_value: Some(initial),
+            ..entry(key, value, secret)
+        }
+    }
+
+    #[test]
+    fn add_scope_skips_disabled_entries() {
+        let mut ctx = VariableContext::default();
+        let off = ScopeEntry {
+            enabled: false,
+            ..entry("a", "1", true)
+        };
+        ctx.add_scope(Scope::Env, [off, entry("b", "2", false)]);
+        assert_eq!(ctx.env, m(&[("b", "2")]));
+        assert!(ctx.secret_keys.is_empty());
+    }
+
+    #[test]
+    fn add_scope_writes_each_scope_to_its_own_map() {
+        let mut ctx = VariableContext::default();
+        for scope in [
+            Scope::GlobalEnv,
+            Scope::Collection,
+            Scope::Env,
+            Scope::Folder,
+            Scope::Request,
+        ] {
+            ctx.add_scope(scope, [entry("k", "v", false)]);
+        }
+        for map in [
+            &ctx.global_env,
+            &ctx.collection,
+            &ctx.env,
+            &ctx.folder,
+            &ctx.request,
+        ] {
+            assert_eq!(map, &m(&[("k", "v")]));
+        }
+        assert!(ctx.runtime.is_empty());
+    }
+
+    #[test]
+    fn add_scope_marks_a_secret_name_and_masks_a_long_value() {
+        let mut ctx = VariableContext::default();
+        ctx.add_scope(Scope::Env, [entry("tok", "abcdef", true)]);
+        assert!(ctx.secret_keys.contains("tok"));
+        assert!(ctx.secret_values.contains("abcdef"));
+    }
+
+    #[test]
+    fn add_scope_does_not_mask_a_value_shorter_than_the_minimum() {
+        let mut ctx = VariableContext::default();
+        ctx.add_scope(Scope::Env, [entry("tok", "abcde", true)]);
+        assert!(ctx.secret_keys.contains("tok"));
+        assert!(ctx.secret_values.is_empty());
+    }
+
+    #[test]
+    fn add_scope_keeps_an_empty_value_without_an_initial_value() {
+        let mut ctx = VariableContext::default();
+        ctx.add_scope(Scope::Env, [entry("empty", "", false)]);
+        assert_eq!(ctx.env, m(&[("empty", "")]));
+    }
+
+    #[test]
+    fn add_scope_falls_back_to_the_initial_value() {
+        let mut ctx = VariableContext::default();
+        ctx.add_scope(Scope::Collection, [declared("k", "", "init", false)]);
+        assert_eq!(ctx.collection, m(&[("k", "init")]));
+    }
+
+    #[test]
+    fn add_scope_skips_a_declared_entry_with_no_value_but_marks_a_secret_name() {
+        let mut ctx = VariableContext::default();
+        ctx.add_scope(
+            Scope::Folder,
+            [declared("a", "", "", false), declared("s", "", "", true)],
+        );
+        assert!(ctx.folder.is_empty());
+        assert!(ctx.secret_keys.contains("s"));
+        assert!(!ctx.secret_keys.contains("a"));
+    }
+
+    #[test]
+    fn add_scope_skips_a_declared_entry_with_no_key() {
+        let mut ctx = VariableContext::default();
+        ctx.add_scope(Scope::Request, [declared("", "v", "", true)]);
+        assert!(ctx.request.is_empty());
+        assert!(ctx.secret_keys.is_empty());
+        assert!(ctx.secret_values.is_empty());
+    }
+
+    #[test]
+    fn add_scope_later_entries_overwrite_earlier_ones() {
+        let mut ctx = VariableContext::default();
+        ctx.add_scope(
+            Scope::Env,
+            [entry("k", "one", false), entry("k", "two", false)],
+        );
+        assert_eq!(ctx.env, m(&[("k", "two")]));
     }
 }
