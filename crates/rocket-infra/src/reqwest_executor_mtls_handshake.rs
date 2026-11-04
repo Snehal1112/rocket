@@ -223,7 +223,6 @@ async fn send_with_token_client(
     port: u16,
     certificates: &[ResolvedClientCertificate],
 ) -> Result<u16, String> {
-    use rocket_http::TokenClientProvider;
     let url = format!("https://127.0.0.1:{port}/token");
     // The server certificate is self-signed, so verification is off.
     let client = ReqwestTokenClientProvider::new()

@@ -1269,13 +1269,16 @@ pub(crate) mod tests {
         }
     }
 
+    #[async_trait::async_trait]
     impl TokenClientProvider for CapturingProvider {
-        fn client_for(
+        async fn post_form(
             &self,
             token_url: &str,
             verify_ssl: bool,
             certificates: &[ResolvedClientCertificate],
-        ) -> DomainResult<reqwest::Client> {
+            _form: &[(String, String)],
+            _extra_headers: &[(String, String)],
+        ) -> DomainResult<OAuthToken> {
             self.seen.lock().unwrap().push((
                 token_url.to_string(),
                 verify_ssl,
@@ -1377,17 +1380,6 @@ pub(crate) mod tests {
 
     #[async_trait::async_trait]
     impl TokenClientProvider for PostingProvider {
-        fn client_for(
-            &self,
-            _token_url: &str,
-            _verify_ssl: bool,
-            _certificates: &[ResolvedClientCertificate],
-        ) -> DomainResult<reqwest::Client> {
-            Err(DomainError::Internal(
-                "the POST must not build a client".into(),
-            ))
-        }
-
         async fn post_form(
             &self,
             token_url: &str,

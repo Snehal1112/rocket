@@ -5806,7 +5806,6 @@ dependencies = [
  "tokio",
  "url",
  "urlencoding",
- "wiremock",
  "zeroize",
 ]
 

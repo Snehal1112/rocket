@@ -704,13 +704,16 @@ mod wiring_tests {
         seen: Mutex<Vec<Vec<String>>>,
     }
 
+    #[async_trait::async_trait]
     impl TokenClientProvider for RecordingTokenClientProvider {
-        fn client_for(
+        async fn post_form(
             &self,
             _token_url: &str,
             _verify_ssl: bool,
             certificates: &[ResolvedClientCertificate],
-        ) -> DomainResult<reqwest::Client> {
+            _form: &[(String, String)],
+            _extra_headers: &[(String, String)],
+        ) -> DomainResult<rocket_http::OAuthToken> {
             self.seen
                 .lock()
                 .expect("lock")

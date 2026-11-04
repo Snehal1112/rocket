@@ -759,8 +759,10 @@ impl ReqwestTokenClientProvider {
     }
 }
 
-impl rocket_http::TokenClientProvider for ReqwestTokenClientProvider {
-    fn client_for(
+impl ReqwestTokenClientProvider {
+    /// Builds the client for a token request. With a client certificate whose domain matches
+    /// `token_url` the client presents it for mutual TLS.
+    pub fn client_for(
         &self,
         token_url: &str,
         verify_ssl: bool,
@@ -771,6 +773,43 @@ impl rocket_http::TokenClientProvider for ReqwestTokenClientProvider {
         spec.identity = identity;
         spec.proxy = read_proxy(self.proxy.as_ref());
         build_client(spec)
+    }
+}
+
+#[async_trait]
+impl rocket_http::TokenClientProvider for ReqwestTokenClientProvider {
+    /// The client comes from `client_for`, so a certificate that cannot be loaded stops the
+    /// request before anything is sent.
+    async fn post_form(
+        &self,
+        token_url: &str,
+        verify_ssl: bool,
+        certificates: &[ResolvedClientCertificate],
+        form: &[(String, String)],
+        extra_headers: &[(String, String)],
+    ) -> DomainResult<rocket_http::OAuthToken> {
+        let client = self.client_for(token_url, verify_ssl, certificates)?;
+        let mut request = client.post(token_url).form(form);
+        for (key, value) in extra_headers {
+            request = request.header(key, value);
+        }
+
+        let resp = request
+            .send()
+            .await
+            .map_err(|e| DomainError::Internal(format!("Token request failed: {e}")))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(DomainError::Internal(format!(
+                "Token endpoint returned {status}: {body}"
+            )));
+        }
+
+        resp.json::<rocket_http::OAuthToken>()
+            .await
+            .map_err(|e| DomainError::Internal(format!("Failed to parse token response: {e}")))
     }
 }
 
@@ -2667,7 +2706,6 @@ mod mtls_tests {
 
     #[test]
     fn the_token_client_provider_presents_inline_material() {
-        use rocket_http::TokenClientProvider;
         let provider = ReqwestTokenClientProvider::new();
         let certs = [
             ResolvedClientCertificate::pkcs12(
@@ -2822,7 +2860,6 @@ mod mtls_tests {
 
     #[test]
     fn the_token_client_provider_builds_a_client_and_fails_on_a_bad_matching_certificate() {
-        use rocket_http::TokenClientProvider;
         let provider = ReqwestTokenClientProvider::new();
         assert!(provider
             .client_for("https://idp.example.com/token", true, &[])
@@ -2846,7 +2883,7 @@ mod mtls_tests {
 
     mod unavailable_certificates {
         use super::*;
-        use rocket_http::{CertificateSource, ResolvedClientCertificate, TokenClientProvider};
+        use rocket_http::{CertificateSource, ResolvedClientCertificate};
 
         const MISSING: &str = "Client certificate secret vault.missing was not found. \
                                Check the External Secrets binding and fetch the secret names.";
@@ -2916,9 +2953,7 @@ mod mtls_tests {
 
     mod deferred_certificates {
         use super::*;
-        use rocket_http::{
-            ResolvedClientCertificate, TokenClientProvider, VaultCertificateBinding,
-        };
+        use rocket_http::{ResolvedClientCertificate, VaultCertificateBinding};
         use rocket_shared::certificate::VaultCertificateFormat;
 
         fn deferred(domain: &str) -> ResolvedClientCertificate {
@@ -3949,7 +3984,6 @@ mod proxy_tests {
 
     #[tokio::test]
     async fn a_token_client_sends_the_request_through_a_custom_proxy() {
-        use rocket_http::TokenClientProvider;
         let (uri, seen) = recording_proxy().await;
         let provider = ReqwestTokenClientProvider::new().with_proxy(shared(custom(&uri), None));
         let client = provider
@@ -3965,7 +3999,6 @@ mod proxy_tests {
 
     #[tokio::test]
     async fn a_token_client_in_none_mode_connects_directly() {
-        use rocket_http::TokenClientProvider;
         let (uri, seen) = recording_proxy().await;
         let mut settings = custom(&uri);
         settings.mode = ProxyMode::None;
@@ -3987,7 +4020,6 @@ mod proxy_tests {
 
     #[tokio::test]
     async fn a_token_provider_without_a_proxy_keeps_the_default_client() {
-        use rocket_http::TokenClientProvider;
         let server = token_endpoint().await;
         let url = format!("{}/token", server.uri());
         let client = ReqwestTokenClientProvider::new()
@@ -3999,7 +4031,6 @@ mod proxy_tests {
 
     #[tokio::test]
     async fn a_saved_proxy_change_reaches_the_next_token_client() {
-        use rocket_http::TokenClientProvider;
         let handle = shared(ProxySettings::default(), None);
         let provider = ReqwestTokenClientProvider::new().with_proxy(Arc::clone(&handle));
         let url = "http://idp.invalid/token";
@@ -4558,5 +4589,111 @@ mod ntlm_tests {
             .expect_err("must fail");
         assert!(err.to_string().contains("NTLM"), "{err}");
         assert!(!err.to_string().contains("pass"), "{err}");
+    }
+}
+
+#[cfg(test)]
+mod token_post_tests {
+    use super::*;
+    use rocket_http::TokenClientProvider;
+    use wiremock::matchers::{body_string_contains, header, method};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    const TOKEN_BODY: &str = r#"{"access_token":"abc","token_type":"Bearer"}"#;
+
+    fn form() -> Vec<(String, String)> {
+        vec![("grant_type".into(), "client_credentials".into())]
+    }
+
+    async fn post(
+        server: &MockServer,
+        certificates: &[ResolvedClientCertificate],
+        headers: &[(String, String)],
+    ) -> DomainResult<rocket_http::OAuthToken> {
+        ReqwestTokenClientProvider::new()
+            .post_form(&server.uri(), true, certificates, &form(), headers)
+            .await
+    }
+
+    #[tokio::test]
+    async fn post_form_returns_the_parsed_token_on_200() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(TOKEN_BODY))
+            .mount(&server)
+            .await;
+
+        let token = post(&server, &[], &[]).await.expect("token");
+
+        assert_eq!(token.access_token, "abc");
+    }
+
+    #[tokio::test]
+    async fn post_form_reports_a_non_2xx_status_and_body() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(400).set_body_string("bad"))
+            .mount(&server)
+            .await;
+
+        let err = post(&server, &[], &[]).await.expect_err("error");
+
+        assert_eq!(
+            err.to_string(),
+            DomainError::Internal("Token endpoint returned 400 Bad Request: bad".into())
+                .to_string()
+        );
+    }
+
+    #[tokio::test]
+    async fn post_form_reports_an_unparseable_body() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("not json"))
+            .mount(&server)
+            .await;
+
+        let err = post(&server, &[], &[]).await.expect_err("error");
+
+        assert!(err.to_string().contains("Failed to parse token response:"));
+    }
+
+    #[tokio::test]
+    async fn post_form_sends_the_form_and_headers() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(header("Authorization", "Basic xyz"))
+            .and(body_string_contains("grant_type=client_credentials"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(TOKEN_BODY))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let headers = vec![("Authorization".to_string(), "Basic xyz".to_string())];
+
+        post(&server, &[], &headers).await.expect("token");
+    }
+
+    #[tokio::test]
+    async fn post_form_sends_nothing_when_the_certificate_cannot_be_loaded() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+        let host = reqwest::Url::parse(&server.uri())
+            .expect("url")
+            .host_str()
+            .expect("host")
+            .to_string();
+        let bad = [ResolvedClientCertificate::pkcs12(
+            &host,
+            rocket_http::CertificateSource::File("/no/such/file.p12".into()),
+            None,
+        )];
+
+        let err = post(&server, &bad, &[]).await.expect_err("error");
+
+        assert!(!err.to_string().is_empty());
     }
 }

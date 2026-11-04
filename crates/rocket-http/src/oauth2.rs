@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use rocket_shared::error::{DomainError, DomainResult};
 
 /// Configuration for an OAuth 2.0 token request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,64 +84,6 @@ pub fn apply_params_to_body(form: &mut Vec<(String, String)>, params: &[Addition
     for p in params.iter().filter(|p| p.enabled && p.send_in == "body") {
         form.push((p.key.clone(), p.value.clone()));
     }
-}
-
-/// Acquire an OAuth 2.0 token by posting to the token endpoint.
-pub async fn acquire_token(
-    config: &OAuthConfig,
-    client: &reqwest::Client,
-) -> DomainResult<OAuthToken> {
-    let mut params = vec![
-        ("grant_type", config.grant_type.as_str()),
-        ("client_id", config.client_id.as_str()),
-        ("client_secret", config.client_secret.as_str()),
-    ];
-
-    if let Some(scope) = &config.scope {
-        params.push(("scope", scope.as_str()));
-    }
-
-    match config.grant_type.as_str() {
-        "client_credentials" => {} // No extra params needed.
-        "password" => {
-            if let (Some(u), Some(p)) = (&config.username, &config.password) {
-                params.push(("username", u.as_str()));
-                params.push(("password", p.as_str()));
-            }
-        }
-        "authorization_code" => {
-            if let Some(code) = &config.code {
-                params.push(("code", code.as_str()));
-            }
-            if let Some(uri) = &config.redirect_uri {
-                params.push(("redirect_uri", uri.as_str()));
-            }
-            if let Some(verifier) = &config.code_verifier {
-                params.push(("code_verifier", verifier.as_str()));
-            }
-        }
-        other => {
-            return Err(DomainError::InvalidInput(format!(
-                "Unsupported grant type: {other}"
-            )));
-        }
-    }
-
-    let resp = client
-        .post(&config.token_url)
-        .form(&params)
-        .send()
-        .await
-        .map_err(|e| DomainError::Internal(format!("OAuth token request failed: {e}")))?;
-
-    if !resp.status().is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        return Err(DomainError::Internal(format!("OAuth token error: {body}")));
-    }
-
-    resp.json::<OAuthToken>()
-        .await
-        .map_err(|e| DomainError::Internal(format!("Failed to parse OAuth token: {e}")))
 }
 
 #[cfg(test)]
