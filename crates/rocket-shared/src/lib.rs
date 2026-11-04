@@ -1,7 +1,6 @@
 pub mod acp;
 pub mod action;
 pub mod assertion;
-pub mod certificate;
 pub mod description;
 pub mod error;
 pub mod events;

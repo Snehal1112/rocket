@@ -1,5 +1,6 @@
 // The async_trait macro triggers this lint on newer toolchains.
 #![allow(clippy::double_must_use)]
+pub mod certificate;
 pub mod client_certificate_validation;
 pub mod context;
 pub mod dot_env;
@@ -16,6 +17,7 @@ pub mod secret_store;
 pub mod variable;
 pub mod vault_secret_fetcher;
 
+pub use certificate::{ClientCertificate, VaultCertificateFormat};
 pub use client_certificate_validation::{
     validate_client_certificates, validate_vault_certificate_providers,
 };

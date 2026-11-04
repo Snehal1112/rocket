@@ -1,8 +1,8 @@
 use std::fmt;
 
+use crate::certificate::VaultCertificateFormat;
 use crate::external_secret::ExternalSecretRef;
 use crate::secret_manager::SecretManagerConnection;
-use rocket_shared::certificate::VaultCertificateFormat;
 use rocket_shared::error::{DomainError, DomainResult};
 use zeroize::Zeroizing;
 

@@ -1,8 +1,8 @@
 //! Flattening of an environment with its `extends` parent chain.
 
+use crate::certificate::ClientCertificate;
 use crate::invalid::invalid;
 use crate::{Environment, EnvironmentRepository, ExternalSecretBinding, Variable};
-use rocket_shared::certificate::ClientCertificate;
 use rocket_shared::error::DomainResult;
 use std::collections::HashSet;
 

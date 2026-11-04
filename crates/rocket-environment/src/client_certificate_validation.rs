@@ -5,7 +5,7 @@
 //! environment file or in git. A `vault` entry must name one of the environment's External
 //! Secrets aliases and a certificate, and none of its fields may hold key text either.
 
-use rocket_shared::certificate::ClientCertificate;
+use crate::certificate::ClientCertificate;
 use rocket_shared::error::DomainResult;
 
 use crate::external_secret::ExternalSecretBinding;
@@ -266,7 +266,7 @@ mod tests {
             domain: domain.to_string(),
             binding: binding.to_string(),
             certificate: certificate.to_string(),
-            format: rocket_shared::certificate::VaultCertificateFormat::Pem,
+            format: crate::certificate::VaultCertificateFormat::Pem,
         }
     }
 

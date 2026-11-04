@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::certificate::ClientCertificate;
 use crate::variable::Variable;
-use rocket_shared::certificate::ClientCertificate;
 use rocket_shared::description::Description;
 use rocket_shared::error::{DomainError, DomainResult};
 
