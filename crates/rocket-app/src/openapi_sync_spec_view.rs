@@ -51,7 +51,7 @@ impl OpenApiSyncService {
         let root = repo.collection_root_path(collection)?;
         // Only the reads need the lock, so a request save never waits for the parse below.
         let (source, bytes, state) = {
-            let lock = collection_lock(&root);
+            let lock = collection_lock(repo, &root);
             let _guard = lock.lock();
             let source = self.load(&root)?;
             // The source says a newer spec waits, but its copy is git-ignored and may not

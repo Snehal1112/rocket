@@ -17,6 +17,7 @@ use rocket_collection::openapi_schedule::{clamp_retry_after, next_check_at, Sche
 use rocket_collection::openapi_source::{
     OpenApiSource, OpenApiSourceRepository, SpecLocation, SyncInterval, SyncStatus,
 };
+use rocket_collection::CollectionRepository;
 use rocket_environment::SecretStore;
 use rocket_http::spec_fetch::{
     LocalReadFailure, LocalSpecReader, SpecFetchFailure, SpecFetchOutcome, SpecFetchRequest,
@@ -31,7 +32,7 @@ use rocket_shared::error::{DomainError, DomainResult};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
-use crate::collection_lock::collection_lock;
+use crate::collection_lock::{collection_lock, lock_for_key, CollectionLock};
 use crate::openapi_sync_apply::ApplyDeps;
 
 const TOKEN_KEY: &str = "token";
@@ -89,6 +90,8 @@ pub struct OpenApiSyncService {
     clock: Clock,
     /// Set by `with_apply`. Without it `apply` and `recover` refuse.
     pub(crate) apply_deps: Option<ApplyDeps>,
+    /// Set by `with_lock_keys`. Names the collection locks of a service without apply deps.
+    lock_keys: Option<Arc<dyn CollectionRepository>>,
     /// Set by `with_local`. Without it the repository of the apply deps is used.
     local: Option<Box<dyn OpenApiLocalRepository>>,
     /// Set by `with_consent`. Without it no source has consent, so nothing checks.
@@ -190,6 +193,7 @@ impl OpenApiSyncService {
             secrets,
             clock: Arc::new(Utc::now),
             apply_deps: None,
+            lock_keys: None,
             local: None,
             consent: None,
             backups: None,
@@ -274,7 +278,7 @@ impl OpenApiSyncService {
     /// shows another location, and when the location does not survive a round trip through
     /// the link parser (two such locations could display alike).
     pub fn grant_consent(&self, root: &Path, expected_location: &str) -> DomainResult<()> {
-        let lock = collection_lock(root);
+        let lock = self.lock_of(root);
         let _guard = lock.lock();
         let source = self.load(root)?;
         if source.location.display_url_at(root) != expected_location {
@@ -298,7 +302,7 @@ impl OpenApiSyncService {
     pub fn grant_consent_for_link(&self, root: &Path, link: &str) -> DomainResult<()> {
         let location =
             parse_spec_target(link, root).map_err(|e| DomainError::InvalidInput(e.to_string()))?;
-        let lock = collection_lock(root);
+        let lock = self.lock_of(root);
         let _guard = lock.lock();
         let source = self.load(root)?;
         // The typed link must be the source's location itself, not just look like it.
@@ -312,7 +316,7 @@ impl OpenApiSyncService {
 
     /// Withdraws the approval of this collection folder on this machine.
     pub fn revoke_consent(&self, root: &Path) -> DomainResult<()> {
-        let lock = collection_lock(root);
+        let lock = self.lock_of(root);
         let _guard = lock.lock();
         let source = self.load(root)?;
         let store = self.consent.as_ref().ok_or_else(|| {
@@ -381,6 +385,26 @@ impl OpenApiSyncService {
             None => Err(DomainError::Internal(
                 "The local sync state is not set up.".to_string(),
             )),
+        }
+    }
+
+    /// Adds the repository that names the collection locks, for a service built without apply
+    /// deps. It must resolve a root the way the repository of the other writers does.
+    pub fn with_lock_keys(mut self, repo: Arc<dyn CollectionRepository>) -> Self {
+        self.lock_keys = Some(repo);
+        self
+    }
+
+    /// The lock of one collection root. It is keyed through the apply repository, then through
+    /// the lock key repository, like every other writer of the collection. A service with
+    /// neither keys it by the root as given.
+    fn lock_of(&self, root: &Path) -> Arc<CollectionLock> {
+        if let Some(deps) = &self.apply_deps {
+            return collection_lock(deps.collections.as_ref(), root);
+        }
+        match &self.lock_keys {
+            Some(repo) => collection_lock(repo.as_ref(), root),
+            None => lock_for_key(root.to_path_buf()),
         }
     }
 
@@ -665,7 +689,7 @@ impl OpenApiSyncService {
 
         // The fetch can take long, so the lock was not held. Reload the source now and apply
         // only what the check owns, so a change made by an apply meanwhile is not undone.
-        let lock = collection_lock(collection_root);
+        let lock = self.lock_of(collection_root);
         let _guard = lock.lock();
         let mut source = self.load(collection_root)?;
         // A source file rewritten during the fetch is not the one that was approved, so
@@ -988,7 +1012,7 @@ impl OpenApiSyncService {
 
     pub fn set_interval(&self, collection_root: &Path, interval: SyncInterval) -> DomainResult<()> {
         self.settle(collection_root)?;
-        let lock = collection_lock(collection_root);
+        let lock = self.lock_of(collection_root);
         let _guard = lock.lock();
         // The source file must exist, so a stray folder gets no local state.
         let source = self.load(collection_root)?;
@@ -1015,7 +1039,7 @@ impl OpenApiSyncService {
             .apply_deps
             .as_ref()
             .ok_or_else(|| DomainError::Internal("Disconnecting is not set up.".to_string()))?;
-        let lock = collection_lock(root);
+        let lock = self.lock_of(root);
         let _guard = lock.lock();
         // A crash can leave a journal behind. A running apply is a conflict, not a wait.
         if deps.tx.recover_if_idle(root)?.is_none() {
@@ -1060,7 +1084,7 @@ impl OpenApiSyncService {
 
     pub fn set_token(&self, collection_root: &Path, token: &str) -> DomainResult<()> {
         self.settle(collection_root)?;
-        let lock = collection_lock(collection_root);
+        let lock = self.lock_of(collection_root);
         let _guard = lock.lock();
         let mut source = self.load(collection_root)?;
         if !matches!(source.location, SpecLocation::Github { .. }) {
@@ -1112,6 +1136,28 @@ mod tests {
             safe_message("not_https"),
             "The link must use https. Plain http works only for localhost."
         );
+    }
+
+    #[test]
+    fn a_service_without_apply_deps_keys_its_lock_through_the_lock_key_repo() {
+        let keys = crate::test_doubles::NullCollectionRepo::new().on_lock_key(|p| {
+            if p == Path::new("/alias-sync-test/demo") {
+                std::path::PathBuf::from("/real-sync-test/demo")
+            } else {
+                p.to_path_buf()
+            }
+        });
+        let svc = OpenApiSyncService::new(
+            Arc::new(SharedFetcher(Arc::new(FakeFetcher::default()))),
+            Box::new(FsOpenApiSourceRepo),
+            Arc::new(MemSecrets::default()),
+        )
+        .with_lock_keys(Arc::new(keys));
+
+        let alias = svc.lock_of(Path::new("/alias-sync-test/demo"));
+        let real = svc.lock_of(Path::new("/real-sync-test/demo"));
+
+        assert!(Arc::ptr_eq(&alias, &real));
     }
 
     #[derive(Default)]

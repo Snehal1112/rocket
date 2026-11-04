@@ -237,7 +237,7 @@ impl OpenApiSyncService {
         let root = repo.collection_root_path(collection)?;
         // Held from the recovery to the end, so a check, another apply or a settings change
         // never works on state this apply is about to replace.
-        let lock = collection_lock(&root);
+        let lock = collection_lock(repo, &root);
         let _guard = lock.lock();
         // An earlier apply that was cut short is settled first.
         deps.tx.recover(&root).map_err(|_| {
@@ -374,7 +374,7 @@ impl OpenApiSyncService {
         let repo: &dyn CollectionRepository =
             pinned.as_deref().unwrap_or(deps.collections.as_ref());
         let root = repo.collection_root_path(collection)?;
-        let lock = collection_lock(&root);
+        let lock = collection_lock(repo, &root);
         let _guard = lock.lock();
         self.plan_locked(deps, repo, collection, &root, links)
     }
@@ -387,7 +387,7 @@ impl OpenApiSyncService {
         let repo: &dyn CollectionRepository =
             pinned.as_deref().unwrap_or(deps.collections.as_ref());
         let root = repo.collection_root_path(collection)?;
-        let lock = collection_lock(&root);
+        let lock = collection_lock(repo, &root);
         let _guard = lock.lock();
         Ok(count_of(&self.plan_locked(
             deps,
@@ -513,7 +513,7 @@ impl OpenApiSyncService {
         collection: &str,
     ) -> DomainResult<RecoveryOutcome> {
         let root = repo.collection_root_path(collection)?;
-        let lock = collection_lock(&root);
+        let lock = collection_lock(repo, &root);
         let _guard = lock.lock();
         deps.tx.recover(&root)
     }

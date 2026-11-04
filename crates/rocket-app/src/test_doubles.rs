@@ -763,6 +763,7 @@ type SaveRequestHook =
 
 type CreateHook<T> = Option<Box<dyn Fn(&str, &str, &T) -> DomainResult<String> + Send + Sync>>;
 
+type LockKeyHook = Box<dyn Fn(&std::path::Path) -> std::path::PathBuf + Send + Sync>;
 type MoveItemHook = Box<dyn Fn(&str, &str, &str, &str) -> DomainResult<()> + Send + Sync>;
 
 /// A `CollectionRepository` that does nothing, with optional per-method hooks.
@@ -797,6 +798,7 @@ pub struct NullCollectionRepo {
     get_graphql_request: Hook2<GraphQlRequest>,
     get_grpc_request: Hook2<GrpcRequest>,
     get_websocket_request: Hook2<WebSocketRequest>,
+    lock_key: Option<LockKeyHook>,
 }
 
 impl Default for NullCollectionRepo {
@@ -837,7 +839,17 @@ impl NullCollectionRepo {
             get_graphql_request: None,
             get_grpc_request: None,
             get_websocket_request: None,
+            lock_key: None,
         }
+    }
+
+    /// Hooks the path a collection lock is keyed by.
+    pub fn on_lock_key(
+        mut self,
+        f: impl Fn(&std::path::Path) -> std::path::PathBuf + Send + Sync + 'static,
+    ) -> Self {
+        self.lock_key = Some(Box::new(f));
+        self
     }
 
     /// Strict repo: an unhooked method panics unless `lenient_for` names it.
@@ -1032,6 +1044,12 @@ impl NullCollectionRepo {
 }
 
 impl CollectionRepository for NullCollectionRepo {
+    fn lock_key(&self, path: &std::path::Path) -> std::path::PathBuf {
+        match &self.lock_key {
+            Some(f) => f(path),
+            None => path.to_path_buf(),
+        }
+    }
     fn list(&self) -> DomainResult<Vec<CollectionSummary>> {
         if let Some(f) = &self.list {
             return f();

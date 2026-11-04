@@ -64,7 +64,7 @@ fn editor_save_waits_for_a_running_apply_and_the_reverse() {
     let svc = Arc::new(plain_service(&dir));
 
     // Forward: an apply holds the lock, the editor save waits and then lands.
-    let lock = collection_lock(&root);
+    let lock = collection_lock(&repo(&dir), &root);
     let guard = lock.lock();
     let (done_tx, done_rx) = channel();
     let saver = {
@@ -141,7 +141,7 @@ fn a_method_that_calls_another_locked_method_does_not_deadlock() {
     let name = rx.recv_timeout(LONG).expect("no deadlock");
     worker.join().expect("join");
     assert_eq!(name, "Login copy");
-    assert!(collection_lock(&root).try_lock().is_some());
+    assert!(collection_lock(&repo(&dir), &root).try_lock().is_some());
 }
 
 #[test]
@@ -189,7 +189,7 @@ fn a_trust_toggle_waits_for_the_collection_lock_and_both_updates_land() {
         Arc::new(NullEventPublisher),
     ));
     // An apply holds the lock and rewrites the settings file meanwhile.
-    let lock = collection_lock(&root);
+    let lock = collection_lock(&repo(&dir), &root);
     let guard = lock.lock();
     let (tx, rx) = channel();
     let toggler = {
@@ -241,7 +241,7 @@ fn apply_and_the_service_use_the_same_lock_key_for_a_collection() {
     let apply_root = apply_repo.collection_root_path("c").expect("apply root");
     let service_root = standalone.collection_root_path("c").expect("service root");
     assert!(Arc::ptr_eq(
-        &collection_lock(&apply_root),
-        &collection_lock(&service_root)
+        &collection_lock(apply_repo, &apply_root),
+        &collection_lock(&standalone, &service_root)
     ));
 }

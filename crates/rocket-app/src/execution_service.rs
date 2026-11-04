@@ -8773,7 +8773,10 @@ mod tests {
             )),
         ));
         // An apply holds the lock, so the script write must wait and then land.
-        let lock = crate::collection_lock::collection_lock(dir.path());
+        let lock = crate::collection_lock::collection_lock(
+            &crate::test_doubles::NullCollectionRepo::new(),
+            dir.path(),
+        );
         let guard = lock.lock();
         let (tx, rx) = std::sync::mpsc::channel();
         let writer = {

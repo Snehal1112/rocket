@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use rocket_shared::action::HttpRequestExample;
 use rocket_shared::error::{DomainError, DomainResult};
@@ -187,6 +187,12 @@ pub trait CollectionRepository: Send + Sync {
         Err(DomainError::Internal(
             "collection root path is not available".into(),
         ))
+    }
+
+    /// The path used as the identity of a collection lock. The default returns `path`
+    /// as given; filesystem repositories resolve symlinks and fall back to `path` when that fails.
+    fn lock_key(&self, path: &Path) -> PathBuf {
+        path.to_path_buf()
     }
 
     /// Identity used to look up a collection's grants: canonical folder plus file uid.

@@ -97,7 +97,7 @@ impl OpenApiSyncService {
             pinned.as_deref().unwrap_or(deps.collections.as_ref());
         let root = repo.collection_root_path(collection).map_err(infra_error)?;
         let source = {
-            let lock = collection_lock(&root);
+            let lock = collection_lock(repo, &root);
             let _guard = lock.lock();
             self.sources
                 .load(&root)
@@ -158,7 +158,7 @@ impl OpenApiSyncService {
         let mut outcome = ChangeLinkOutcome::default();
         let old_location;
         {
-            let lock = collection_lock(&root);
+            let lock = collection_lock(repo, &root);
             let _guard = lock.lock();
             let mut source = self
                 .sources

@@ -187,6 +187,10 @@ impl CollectionRepository for SharedPathCollectionRepo {
         Some(Box::new(self.repo()))
     }
 
+    fn lock_key(&self, path: &std::path::Path) -> std::path::PathBuf {
+        self.repo().lock_key(path)
+    }
+
     fn collection_root_path(&self, name: &str) -> DomainResult<std::path::PathBuf> {
         self.repo().collection_root_path(name)
     }

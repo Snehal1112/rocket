@@ -28,7 +28,7 @@ impl OpenApiSyncService {
         let repo: &dyn CollectionRepository =
             pinned.as_deref().unwrap_or(deps.collections.as_ref());
         let root = repo.collection_root_path(collection)?;
-        let lock = collection_lock(&root);
+        let lock = collection_lock(repo, &root);
         let _guard = lock.lock();
         if self.load(&root)?.pending_sha256.is_none() {
             return Ok(Vec::new());
@@ -101,7 +101,7 @@ impl OpenApiSyncService {
         let repo: &dyn CollectionRepository =
             pinned.as_deref().unwrap_or(deps.collections.as_ref());
         let root = repo.collection_root_path(collection)?;
-        let lock = collection_lock(&root);
+        let lock = collection_lock(repo, &root);
         let _guard = lock.lock();
         match deps.tx.recover_if_idle(&root) {
             Ok(Some(_)) => {}

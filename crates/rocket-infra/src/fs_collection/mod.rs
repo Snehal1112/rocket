@@ -145,6 +145,10 @@ impl CollectionRepository for FsCollectionRepo {
         settings::collection_identity(self, name)
     }
 
+    fn lock_key(&self, path: &Path) -> PathBuf {
+        std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    }
+
     fn collection_root_path(&self, name: &str) -> DomainResult<PathBuf> {
         Collection::validate_name(name)?;
         let path = self.collection_path(name);

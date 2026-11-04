@@ -73,7 +73,10 @@ impl CollectionService {
         ) else {
             return self.locked(a, f);
         };
-        let (la, lb) = (collection_lock(&root_a), collection_lock(&root_b));
+        let (la, lb) = (
+            collection_lock(self.repo.as_ref(), &root_a),
+            collection_lock(self.repo.as_ref(), &root_b),
+        );
         if Arc::ptr_eq(&la, &lb) {
             let _guard = la.lock();
             return f();

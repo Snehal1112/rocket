@@ -162,10 +162,17 @@ fn store_token(
     token: &str,
 ) -> bool {
     OpenApiSyncService::new(Arc::clone(fetcher), Box::new(FsOpenApiSourceRepo), secrets)
+        .with_lock_keys(lock_key_repo())
         .with_local(Box::new(FsOpenApiLocalRepo))
         .with_consent(openapi_consent_store())
         .set_token(collection_root, token)
         .is_ok()
+}
+
+/// A repository used only to name the collection locks, so a service without apply deps
+/// takes the same lock as the other writers of a collection.
+fn lock_key_repo() -> Arc<dyn rocket_collection::CollectionRepository> {
+    Arc::new(rocket_infra::FsCollectionRepo::new_standalone(PathBuf::new()))
 }
 
 /// Builds the sync service with everything applying needs, for the active workspace.
@@ -317,6 +324,7 @@ pub async fn import_openapi_file(
         Box::new(FsOpenApiSourceRepo),
         Arc::new(KeyringSecretStore::new_openapi_sync()),
     )
+    .with_lock_keys(lock_key_repo())
     .with_local(Box::new(FsOpenApiLocalRepo))
     .with_consent(openapi_consent_store());
     approve_new_source(&approver, &root, &path, Some(true), &mut dto);
@@ -394,6 +402,7 @@ pub async fn import_openapi_url(
         Box::new(FsOpenApiSourceRepo),
         Arc::new(KeyringSecretStore::new_openapi_sync()),
     )
+    .with_lock_keys(lock_key_repo())
     .with_local(Box::new(FsOpenApiLocalRepo))
     .with_consent(openapi_consent_store());
     approve_new_source(&approver, &root, &link, check_for_updates, &mut dto);

@@ -80,8 +80,15 @@ static COLLECTION_LOCKS: std::sync::OnceLock<LockMap> = std::sync::OnceLock::new
 
 /// The lock of one collection, shared by every service in the process (commands build a
 /// sync service per call). It is not reentrant, so a holder must not lock twice.
-pub(crate) fn collection_lock(root: &Path) -> Arc<CollectionLock> {
-    let key = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+pub(crate) fn collection_lock(
+    repo: &dyn rocket_collection::CollectionRepository,
+    root: &Path,
+) -> Arc<CollectionLock> {
+    lock_for_key(repo.lock_key(root))
+}
+
+/// The lock registered under `key`. Callers without a repository pass the root as given.
+pub(crate) fn lock_for_key(key: std::path::PathBuf) -> Arc<CollectionLock> {
     let mut map = COLLECTION_LOCKS
         .get_or_init(Default::default)
         .lock()
@@ -100,7 +107,7 @@ pub(crate) fn with_collection_lock<T>(
     let Ok(root) = repo.collection_root_path(collection) else {
         return f();
     };
-    let lock = collection_lock(&root);
+    let lock = collection_lock(repo, &root);
     let _guard = lock.lock();
     f()
 }
@@ -108,6 +115,8 @@ pub(crate) fn with_collection_lock<T>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_doubles::NullCollectionRepo;
+    use std::path::PathBuf;
     use std::sync::mpsc::channel;
     use std::time::Duration;
 
@@ -168,5 +177,33 @@ mod tests {
         assert!(lock.try_lock().is_none());
         drop(guard);
         assert!(lock.try_lock().is_some());
+    }
+
+    #[test]
+    fn two_spellings_of_one_root_share_a_lock() {
+        let repo = NullCollectionRepo::new().on_lock_key(|p| {
+            if p == Path::new("/alias-lock-test/demo") {
+                PathBuf::from("/real-lock-test/demo")
+            } else {
+                p.to_path_buf()
+            }
+        });
+
+        let alias = collection_lock(&repo, Path::new("/alias-lock-test/demo"));
+        let real = collection_lock(&repo, Path::new("/real-lock-test/demo"));
+
+        assert!(Arc::ptr_eq(&alias, &real));
+    }
+
+    #[test]
+    fn a_root_without_an_alias_is_keyed_by_the_given_path() {
+        let repo = NullCollectionRepo::new();
+
+        let first = collection_lock(&repo, Path::new("/missing-lock-test/one"));
+        let again = collection_lock(&repo, Path::new("/missing-lock-test/one"));
+        let other = collection_lock(&repo, Path::new("/missing-lock-test/two"));
+
+        assert!(Arc::ptr_eq(&first, &again));
+        assert!(!Arc::ptr_eq(&first, &other));
     }
 }

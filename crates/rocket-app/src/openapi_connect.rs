@@ -203,7 +203,7 @@ impl OpenApiSyncService {
             pinned.as_deref().unwrap_or(deps.collections.as_ref());
         let root = repo.collection_root_path(collection).map_err(infra_error)?;
         let requests = {
-            let lock = collection_lock(&root);
+            let lock = collection_lock(repo, &root);
             let _guard = lock.lock();
             if self.sources.load(&root).map_err(infra_error)?.is_some() {
                 return Err(DomainError::Conflict(ALREADY_CONNECTED.to_string()));
@@ -287,7 +287,7 @@ impl OpenApiSyncService {
 
         let mut outcome = ConnectOutcome::default();
         {
-            let lock = collection_lock(&root);
+            let lock = collection_lock(repo, &root);
             let _guard = lock.lock();
             if self.sources.load(&root).map_err(infra_error)?.is_some() {
                 return Err(DomainError::Conflict(ALREADY_CONNECTED.to_string()));

@@ -3797,3 +3797,26 @@ fn list_strict_errors_on_a_legacy_collection_that_cannot_migrate() {
     let strict = repo.list_strict().expect("plain directories stay skipped");
     assert_eq!(strict.len(), 1);
 }
+
+#[cfg(unix)]
+#[test]
+fn lock_key_resolves_a_symlink_to_the_real_directory() {
+    let (dir, repo) = setup();
+    let real = dir.path().join("real");
+    fs::create_dir_all(&real).expect("mkdir");
+    let alias = dir.path().join("alias");
+    std::os::unix::fs::symlink(&real, &alias).expect("symlink");
+
+    assert_eq!(
+        repo.lock_key(&alias),
+        fs::canonicalize(&real).expect("canonical")
+    );
+}
+
+#[test]
+fn lock_key_of_a_missing_path_is_the_path_as_given() {
+    let (dir, repo) = setup();
+    let missing = dir.path().join("missing");
+
+    assert_eq!(repo.lock_key(&missing), missing);
+}

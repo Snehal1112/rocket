@@ -32,7 +32,7 @@ impl OpenApiSyncService {
             pinned.as_deref().unwrap_or(deps.collections.as_ref());
         let root = repo.collection_root_path(collection)?;
         let bytes = {
-            let lock = collection_lock(&root);
+            let lock = collection_lock(repo, &root);
             let _guard = lock.lock();
             let source = self.load(&root)?;
             // Same guard as the viewer: a waiting spec without its copy must not look in sync.
