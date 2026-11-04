@@ -1032,7 +1032,7 @@ fn source_name(source: &CertificateSource, domain: &str) -> String {
 /// relative path inside the collection folder into an absolute one, so one that is still
 /// relative here could not be resolved and is rejected.
 fn read_certificate_file(path: &str) -> DomainResult<Vec<u8>> {
-    let expanded = rocket_shared::paths::expand_tilde(path);
+    let expanded = crate::paths::expand_tilde(path);
     if !expanded.is_absolute() {
         return Err(DomainError::InvalidInput(format!(
             "Client certificate path {path} cannot be resolved. Use an absolute path, a ~/ path, \

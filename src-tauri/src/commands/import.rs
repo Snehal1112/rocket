@@ -127,7 +127,7 @@ pub(crate) fn openapi_consent_store() -> Arc<dyn rocket_collection::OpenApiConse
     static STORE: std::sync::OnceLock<Arc<dyn rocket_collection::OpenApiConsentStore>> =
         std::sync::OnceLock::new();
     Arc::clone(STORE.get_or_init(|| {
-        match rocket_shared::paths::home_dir() {
+        match rocket_infra::paths::home_dir() {
             Some(home) => Arc::new(FsOpenApiConsentRepo::new(
                 home.join(".rocket-api").join("openapi-sync.yml"),
             )),
@@ -172,7 +172,9 @@ fn store_token(
 /// A repository used only to name the collection locks, so a service without apply deps
 /// takes the same lock as the other writers of a collection.
 fn lock_key_repo() -> Arc<dyn rocket_collection::CollectionRepository> {
-    Arc::new(rocket_infra::FsCollectionRepo::new_standalone(PathBuf::new()))
+    Arc::new(rocket_infra::FsCollectionRepo::new_standalone(
+        PathBuf::new(),
+    ))
 }
 
 /// Builds the sync service with everything applying needs, for the active workspace.

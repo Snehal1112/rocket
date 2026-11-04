@@ -2,8 +2,8 @@
 
 use std::path::{Component, Path, PathBuf};
 
+use crate::paths::expand_tilde;
 use rocket_environment::{DotEnvFileInfo, DotEnvLoader};
-use rocket_shared::paths::expand_tilde;
 
 /// Filesystem implementation of `DotEnvLoader`.
 pub struct FsDotEnvLoader;

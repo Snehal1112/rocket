@@ -2302,6 +2302,7 @@ pub struct FixedHostEnv {
     pub vars: HashMap<String, String>,
     pub user: Option<String>,
     pub exe: Option<std::path::PathBuf>,
+    pub home: Option<std::path::PathBuf>,
 }
 
 impl FixedHostEnv {
@@ -2318,6 +2319,13 @@ impl FixedHostEnv {
     pub fn with_user(user: &str) -> Arc<Self> {
         Arc::new(Self {
             user: Some(user.to_string()),
+            ..Self::default()
+        })
+    }
+
+    pub fn with_home(home: &str) -> Arc<Self> {
+        Arc::new(Self {
+            home: Some(std::path::PathBuf::from(home)),
             ..Self::default()
         })
     }
@@ -2342,5 +2350,8 @@ impl rocket_shared::host_env::HostEnv for FixedHostEnv {
     }
     fn current_exe(&self) -> Option<std::path::PathBuf> {
         self.exe.clone()
+    }
+    fn home_dir(&self) -> Option<std::path::PathBuf> {
+        self.home.clone()
     }
 }

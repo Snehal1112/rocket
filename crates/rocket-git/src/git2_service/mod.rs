@@ -241,14 +241,14 @@ impl GitService for Git2Service {
     }
 
     fn ssh_key_paths(&self) -> Vec<String> {
-        match rocket_shared::paths::home_dir() {
+        match crate::home::home_dir() {
             Some(home) => ssh_keys::key_paths_in(&home.join(".ssh")),
             None => Vec::new(),
         }
     }
 
     fn default_ssh_key_path(&self) -> Option<String> {
-        ssh_keys::default_key_in(&rocket_shared::paths::home_dir()?.join(".ssh"))
+        ssh_keys::default_key_in(&crate::home::home_dir()?.join(".ssh"))
     }
 }
 

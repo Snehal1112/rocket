@@ -16,6 +16,7 @@ use rocket_grpc::{GrpcCall, GrpcExecutor, GrpcUnaryResponse, ProtoLoader, ProtoR
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{DomainEvent, EventPublisher};
 use rocket_shared::grpc::GrpcMetadataPair;
+use rocket_shared::host_env::{EmptyHostEnv, HostEnv};
 use rocket_shared::types::Auth;
 use tokio::sync::mpsc;
 use tokio::task::AbortHandle;
@@ -72,6 +73,7 @@ pub struct GrpcService {
     /// state has no call to abort yet, so it only takes the entry out.
     connecting: Mutex<HashMap<String, Instant>>,
     registries: Mutex<HashMap<String, ProtoRegistry>>,
+    host_env: Arc<dyn HostEnv>,
 }
 
 impl GrpcService {
@@ -91,7 +93,15 @@ impl GrpcService {
             sessions: Arc::new(Mutex::new(HashMap::new())),
             connecting: Mutex::new(HashMap::new()),
             registries: Mutex::new(HashMap::new()),
+            host_env: Arc::new(EmptyHostEnv),
         }
+    }
+
+    /// Sets where the home directory comes from, for `~/` proto paths. Without it a `~/` path
+    /// fails with "cannot find the home directory".
+    pub fn with_host_env(mut self, host_env: Arc<dyn HostEnv>) -> Self {
+        self.host_env = host_env;
+        self
     }
 
     /// Runs a unary call and returns its reply, headers, trailers and status.
@@ -536,7 +546,7 @@ impl GrpcService {
                 .join(name)
         });
         let extra: Vec<PathBuf> = collection_dir.iter().cloned().collect();
-        if let Some(path) = expand_home_prefix(raw, rocket_shared::paths::home_dir().as_deref())? {
+        if let Some(path) = expand_home_prefix(raw, self.host_env.home_dir().as_deref())? {
             return Ok((path, extra));
         }
         let path = Path::new(raw);
@@ -912,15 +922,25 @@ message Rep { string message = 1; }
 
     #[test]
     fn tilde_proto_path_uses_the_home_dir() {
-        let Some(home) = rocket_shared::paths::home_dir() else {
-            return;
-        };
-        let h = harness(None);
+        let mut h = harness(None);
+        h.svc = h
+            .svc
+            .with_host_env(crate::test_doubles::FixedHostEnv::with_home("/home/u"));
         let (path, _) = h
             .svc
             .resolve_proto_path(None, "~/x.proto")
             .expect("resolves");
-        assert_eq!(path, home.join("x.proto"));
+        assert_eq!(path, PathBuf::from("/home/u/x.proto"));
+    }
+
+    #[test]
+    fn a_service_without_a_host_env_cannot_expand_a_tilde_path() {
+        let h = harness(None);
+        let err = h
+            .svc
+            .resolve_proto_path(None, "~/x.proto")
+            .expect_err("no home");
+        assert!(err.to_string().contains("cannot find the home directory"));
     }
 
     #[test]

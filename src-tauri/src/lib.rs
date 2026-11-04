@@ -270,7 +270,7 @@ pub fn run() {
             }
 
             // Determine the application data directory.
-            let data_dir = rocket_shared::paths::home_dir()
+            let data_dir = rocket_infra::paths::home_dir()
                 .ok_or("Home directory could not be determined")?
                 .join(".rocket-api");
             std::fs::create_dir_all(&data_dir).ok();
@@ -870,7 +870,8 @@ pub fn run() {
                 ))),
                 Arc::clone(&active_workspace_path),
                 Arc::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
-            );
+            )
+            .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
             // Tracks every live per-session MCP HTTP server so it can be
             // swept on app exit and on individual session end. Shared with

@@ -32,7 +32,7 @@ pub(super) enum SshHostClassification {
 }
 
 pub(super) fn default_known_hosts_path() -> Option<PathBuf> {
-    rocket_shared::paths::home_dir().map(|home| home.join(".ssh").join("known_hosts"))
+    crate::home::home_dir().map(|home| home.join(".ssh").join("known_hosts"))
 }
 
 /// Parse the two SSH remote forms supported by Git: an `ssh://` URL or an

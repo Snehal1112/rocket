@@ -168,7 +168,7 @@ pub(super) fn build_callbacks(
             } => {
                 // libgit2 does not expand `~`, so we expand `~` and `~/` ourselves.
                 // A `~user` path is left alone.
-                let expanded = rocket_shared::paths::expand_tilde(private_key_path);
+                let expanded = crate::home::expand_tilde(private_key_path);
                 git2::Cred::ssh_key(
                     username.unwrap_or("git"),
                     None,

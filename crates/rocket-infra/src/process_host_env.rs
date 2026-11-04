@@ -27,6 +27,10 @@ impl HostEnv for ProcessHostEnv {
     fn current_exe(&self) -> Option<PathBuf> {
         std::env::current_exe().ok()
     }
+
+    fn home_dir(&self) -> Option<PathBuf> {
+        crate::paths::home_dir()
+    }
 }
 
 #[cfg(test)]

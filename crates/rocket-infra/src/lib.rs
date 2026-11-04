@@ -46,6 +46,7 @@ pub mod grpc;
 pub mod loopback_callback;
 pub(crate) mod migration;
 pub(crate) mod oc;
+pub mod paths;
 mod pem_key;
 pub mod process_host_env;
 pub mod reqwest_executor;

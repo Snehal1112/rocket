@@ -15,6 +15,8 @@ pub trait HostEnv: Send + Sync {
     fn user_name(&self) -> Option<String>;
     /// The path of the running executable.
     fn current_exe(&self) -> Option<PathBuf>;
+    /// The home directory of the user, only when it is an absolute path.
+    fn home_dir(&self) -> Option<PathBuf>;
 }
 
 /// A host with nothing in it. The default for a service that was not given a real one.
@@ -33,6 +35,9 @@ impl HostEnv for EmptyHostEnv {
     fn current_exe(&self) -> Option<PathBuf> {
         None
     }
+    fn home_dir(&self) -> Option<PathBuf> {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -48,5 +53,6 @@ mod tests {
         assert_eq!(env.var("PATH"), None);
         assert_eq!(env.user_name(), None);
         assert_eq!(env.current_exe(), None);
+        assert_eq!(env.home_dir(), None);
     }
 }

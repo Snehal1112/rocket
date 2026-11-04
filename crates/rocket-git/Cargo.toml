@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 rocket-shared.workspace = true
+dirs.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml.workspace = true
