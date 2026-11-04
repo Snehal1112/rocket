@@ -1,6 +1,7 @@
 pub(crate) mod bru;
 pub(crate) mod converter;
 pub mod error;
+mod files;
 mod importer;
 pub(crate) mod openapi;
 pub(crate) mod postman;
@@ -9,6 +10,7 @@ pub(crate) mod wsdl;
 
 pub use converter::openapi::{baseline_hash, CONVERTER_VERSION};
 pub use error::{ImportError, ImportResult};
+pub use files::{DirEntryInfo, EntryKind, ImportFiles};
 pub use importer::{
     EnvironmentRepositoryFactory, ImportService, ImportedOperation, OpenApiImportOutcome,
 };
