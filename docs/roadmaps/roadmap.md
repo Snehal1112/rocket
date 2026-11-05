@@ -72,6 +72,10 @@ Notes: `docs/features/rok-api-parity-notes.md` (its status table is current: A, 
 | R-23 | Stubbed `open_review` and `remind_reviewers`, and a `MarkBreaking` command | open | `ContractsTab.tsx`, `state_machine.rs:8,53` | Build commands and UI. |
 | R-24 | Collaboration enhancements (git-only sharing, local first) | open | `docs/features/contract-collaboration-enhancements.md` | Ideas only. Needs a spec. |
 | R-25 | Full legacy contract retirement (CD-006) | open | duplication remediation plan | Blocked on a product decision. |
+| R-79 | CA-1 headless `rocket` CLI: `run` and `contract check` for CI | open | `docs/roadmaps/contracts-ci-ai-roadmap.md` | Brainstorm and spec. Covers R-15 and the CI part of R-22. |
+| R-80 | CA-2 contracts from source code: check a spec generated from the code | open | `docs/roadmaps/contracts-ci-ai-roadmap.md` | Needs R-79. Brainstorm and spec. |
+| R-81 | CA-3 consumer impact: pin files, shape check, later a behaviour check on a PR preview | open | `docs/roadmaps/contracts-ci-ai-roadmap.md` | Needs R-79 and the cross-repo consumers decision. |
+| R-82 | CA-4 AI layer: `rocket mcp`, PR explainer, failure debug bundle, trace links | open | `docs/roadmaps/contracts-ci-ai-roadmap.md` | CA-4c can start now. The rest needs R-79. |
 
 ## 6. Auth and import
 

@@ -79,6 +79,7 @@ See `docs/features/elevation.md` for the four elevation levels (VS Code colours,
 See `docs/features/update-notification.md` for the update notice (schedule, install kinds, settings, manual checks).
 See `rocket-landing/.claude/deploy-railway.md` for hosting the landing page on Railway (project `rocket-app`, Dockerfile, manual deploy).
 See `docs/engineering/ddd-decisions.md` for the DDD rulings (mixed crates, `rocket-app` size, events direction, domain model depth, assistant naming).
+See `docs/roadmaps/contracts-ci-ai-roadmap.md` for the contracts, CI and AI direction (projects CA-1 to CA-4).
 See `docs/roadmaps/roadmap.md` for the master roadmap of unimplemented work, and `docs/roadmaps/flow-roadmap.md` for Flow (item IDs, status, batches). Update them when work ships.
 
 Delegation: for asks that mix sub-steps of different difficulty, use the `decompose-and-dispatch` skill and always state the subagent model. See `.claude/rules/delegation.md`.
