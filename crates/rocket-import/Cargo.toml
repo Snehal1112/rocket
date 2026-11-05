@@ -15,7 +15,6 @@ serde_yaml.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
-tempfile = "3"
 zip = "2"
 roxmltree = "0.20"
 url = "2"
@@ -25,3 +24,4 @@ rocket-infra = { path = "../rocket-infra" }
 rocket-export.workspace = true
 tokio = { workspace = true, features = ["macros", "rt"] }
 async-trait.workspace = true
+tempfile = "3"
