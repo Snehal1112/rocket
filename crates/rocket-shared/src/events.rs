@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use crate::acp::{ConfigOption, PermissionOption};
 
 pub use crate::published_event::PublishedEvent;
 
@@ -412,115 +411,6 @@ pub enum DomainEvent {
         failed_count: usize,
     },
 
-    // ACP session events
-    /// Emitted once a spawned agent process completes its ACP handshake.
-    AcpSessionStarted {
-        session_id: String,
-    },
-    /// Emitted per streamed text chunk while a prompt is being answered.
-    AcpSessionChunk {
-        session_id: String,
-        text: String,
-    },
-    /// Emitted per streamed reasoning chunk while a prompt is being answered.
-    AcpThoughtChunk {
-        session_id: String,
-        text: String,
-    },
-    /// Emitted once a prompt's turn ends. `stop_reason` is the raw ACP
-    /// `stopReason` string (`end_turn`, `max_tokens`, `max_turn_requests`,
-    /// `refusal`, `cancelled`, or an agent-specific custom reason) — kept as
-    /// a plain string rather than a fixed enum because ACP's own
-    /// `StopReason` type is `#[non_exhaustive]`.
-    AcpSessionFinished {
-        session_id: String,
-        stop_reason: String,
-    },
-    /// Emitted when a session ends abnormally: the agent process crashed,
-    /// a protocol-level error occurred, or `send_prompt` timed out.
-    AcpSessionFailed {
-        session_id: String,
-        error: String,
-    },
-    /// Emitted by `McpToolService` after a successful call of a read tool or
-    /// `run_request`, so agent-driven actions are auditable and
-    /// distinguishable from manual ones. Refused or failed calls publish
-    /// nothing. `propose_changes` and `list_proposals` do not publish it;
-    /// proposals have `AcpProposalCreated` and `AcpProposalResolved`. No
-    /// timestamp field, matching every other `DomainEvent` variant —
-    /// ordering comes from emission order, not a payload timestamp.
-    AcpToolInvoked {
-        session_id: String,
-        tool: String,
-        summary: String,
-    },
-    /// Emitted once per proposal the assistant queues. Nothing was written.
-    AcpProposalCreated {
-        session_id: String,
-        proposal_id: String,
-        summary: String,
-    },
-    /// Emitted when a proposal leaves `pending`. `status` is `accepted`,
-    /// `rejected`, `stale` or `failed`.
-    AcpProposalResolved {
-        session_id: String,
-        proposal_id: String,
-        status: String,
-    },
-    /// Emitted for every tool call start or change during a prompt turn.
-    /// `title` and `status` are the last known values, so the UI can upsert
-    /// by `call_id`. `status` is `pending`, `in_progress`, `completed` or
-    /// `failed`.
-    AcpToolActivity {
-        session_id: String,
-        call_id: String,
-        title: String,
-        status: String,
-    },
-    /// Emitted with the agent's full option list whenever it changes, during
-    /// a turn or after `set_config_option`.
-    AcpConfigOptionsChanged {
-        session_id: String,
-        options: Vec<ConfigOption>,
-    },
-    /// Emitted when the agent reports context window use. `cost_usd` is the
-    /// cumulative session cost, present only when reported in US dollars.
-    AcpUsage {
-        session_id: String,
-        used: u64,
-        size: u64,
-        cost_usd: Option<f64>,
-    },
-    /// Emitted when the agent asks the user to approve something. The turn
-    /// waits for the answer. `kind` is the ACP tool kind in snake_case;
-    /// `summary` is short, masked text about the call.
-    AcpPermissionRequested {
-        session_id: String,
-        request_id: String,
-        call_id: String,
-        title: String,
-        kind: String,
-        summary: String,
-        options: Vec<PermissionOption>,
-    },
-    /// Emitted when a permission request was answered. `option_id` is the
-    /// chosen option, or `None` when the request was cancelled.
-    AcpPermissionResolved {
-        session_id: String,
-        request_id: String,
-        option_id: Option<String>,
-    },
-    /// Emitted after an assistant conversation was saved. Carries the id
-    /// only, never message text.
-    AssistantConversationSaved {
-        conversation_id: String,
-    },
-    /// Emitted after one stored assistant conversation was deleted.
-    AssistantConversationDeleted {
-        conversation_id: String,
-    },
-    /// Emitted after every stored conversation of the workspace was deleted.
-    AssistantConversationsCleared,
     /// Emitted after a background OpenAPI sync check. `status` is `unchanged`,
     /// `changed` or `failed`. It is a refresh signal and carries no URL or message.
     OpenApiSyncChecked {
@@ -690,7 +580,9 @@ mod tests {
     #[test]
     fn null_publisher_does_not_panic() {
         let pub_ = NullEventPublisher;
-        pub_.publish(&DomainEvent::AssistantConversationsCleared);
+        pub_.publish(&DomainEvent::FileWatcherFailed {
+            message: "m".into(),
+        });
     }
 
     #[test]
@@ -1007,75 +899,6 @@ mod tests {
     }
 
     #[test]
-    fn acp_session_started_wire_shape() {
-        let event = DomainEvent::AcpSessionStarted {
-            session_id: "sess-1".into(),
-        };
-        let json = serde_json::to_string(&event).expect("serialize");
-        assert_eq!(
-            json,
-            r#"{"type":"acpSessionStarted","session_id":"sess-1"}"#
-        );
-    }
-
-    #[test]
-    fn acp_session_chunk_wire_shape() {
-        let event = DomainEvent::AcpSessionChunk {
-            session_id: "sess-1".into(),
-            text: "Hello, ".into(),
-        };
-        let json = serde_json::to_string(&event).expect("serialize");
-        assert_eq!(
-            json,
-            r#"{"type":"acpSessionChunk","session_id":"sess-1","text":"Hello, "}"#
-        );
-    }
-
-    #[test]
-    fn acp_thought_chunk_wire_shape() {
-        let event = DomainEvent::AcpThoughtChunk {
-            session_id: "sess-1".into(),
-            text: "Checking the auth header. ".into(),
-        };
-        let json = serde_json::to_string(&event).expect("serialize");
-        assert_eq!(
-            json,
-            r#"{"type":"acpThoughtChunk","session_id":"sess-1","text":"Checking the auth header. "}"#
-        );
-    }
-
-    #[test]
-    fn acp_session_finished_wire_shape_carries_arbitrary_stop_reason_unchanged() {
-        // stop_reason is a plain String (not a closed Rust enum) precisely
-        // because ACP's own StopReason is #[non_exhaustive] — an
-        // agent-specific custom reason (the spec's example: an underscore-
-        // prefixed value) must round-trip unchanged, not just a known value
-        // like "end_turn".
-        let event = DomainEvent::AcpSessionFinished {
-            session_id: "sess-1".into(),
-            stop_reason: "_custom_agent_reason".into(),
-        };
-        let json = serde_json::to_string(&event).expect("serialize");
-        assert_eq!(
-            json,
-            r#"{"type":"acpSessionFinished","session_id":"sess-1","stop_reason":"_custom_agent_reason"}"#
-        );
-    }
-
-    #[test]
-    fn acp_session_failed_wire_shape() {
-        let event = DomainEvent::AcpSessionFailed {
-            session_id: "sess-1".into(),
-            error: "agent process exited unexpectedly".into(),
-        };
-        let json = serde_json::to_string(&event).expect("serialize");
-        assert_eq!(
-            json,
-            r#"{"type":"acpSessionFailed","session_id":"sess-1","error":"agent process exited unexpectedly"}"#
-        );
-    }
-
-    #[test]
     fn graphql_subscription_events_serialize_like_the_websocket_ones() {
         let message = DomainEvent::GraphQlSubscriptionMessage {
             session_id: "s1".into(),
@@ -1249,164 +1072,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn acp_proposal_created_wire_shape() {
-        let event = DomainEvent::AcpProposalCreated {
-            session_id: "sess-1".into(),
-            proposal_id: "p-1".into(),
-            summary: "Create folder 'reports' in demo".into(),
-        };
-        let json = serde_json::to_string(&event).expect("serialize");
-        assert_eq!(
-            json,
-            r#"{"type":"acpProposalCreated","session_id":"sess-1","proposal_id":"p-1","summary":"Create folder 'reports' in demo"}"#
-        );
-    }
-
-    #[test]
-    fn acp_proposal_resolved_wire_shape() {
-        let event = DomainEvent::AcpProposalResolved {
-            session_id: "sess-1".into(),
-            proposal_id: "p-1".into(),
-            status: "stale".into(),
-        };
-        let json = serde_json::to_string(&event).expect("serialize");
-        assert_eq!(
-            json,
-            r#"{"type":"acpProposalResolved","session_id":"sess-1","proposal_id":"p-1","status":"stale"}"#
-        );
-    }
-
-    #[test]
-    fn acp_tool_invoked_wire_shape() {
-        let event = DomainEvent::AcpToolInvoked {
-            session_id: "sess-1".into(),
-            tool: "run_request".into(),
-            summary: "Ran GET /users".into(),
-        };
-        let json = serde_json::to_string(&event).expect("serialize");
-        assert_eq!(
-            json,
-            r#"{"type":"acpToolInvoked","session_id":"sess-1","tool":"run_request","summary":"Ran GET /users"}"#
-        );
-    }
-
-    #[test]
-    fn assistant_conversation_events_carry_ids_only() {
-        let saved = DomainEvent::AssistantConversationSaved {
-            conversation_id: "c1".into(),
-        };
-        assert_eq!(
-            serde_json::to_string(&saved).expect("serialize"),
-            r#"{"type":"assistantConversationSaved","conversation_id":"c1"}"#
-        );
-        let deleted = DomainEvent::AssistantConversationDeleted {
-            conversation_id: "c1".into(),
-        };
-        assert_eq!(
-            serde_json::to_string(&deleted).expect("serialize"),
-            r#"{"type":"assistantConversationDeleted","conversation_id":"c1"}"#
-        );
-        assert_eq!(
-            serde_json::to_string(&DomainEvent::AssistantConversationsCleared).expect("serialize"),
-            r#"{"type":"assistantConversationsCleared"}"#
-        );
-    }
-
-    #[test]
-    fn acp_tool_activity_wire_shape() {
-        let event = DomainEvent::AcpToolActivity {
-            session_id: "sess-1".into(),
-            call_id: "call-1".into(),
-            title: "Read file".into(),
-            status: "in_progress".into(),
-        };
-        let json = serde_json::to_string(&event).expect("serialize");
-        assert_eq!(
-            json,
-            r#"{"type":"acpToolActivity","session_id":"sess-1","call_id":"call-1","title":"Read file","status":"in_progress"}"#
-        );
-    }
-
-    #[test]
-    fn acp_config_options_changed_wire_shape() {
-        use crate::acp::ConfigChoice;
-        let event = DomainEvent::AcpConfigOptionsChanged {
-            session_id: "sess-1".into(),
-            options: vec![ConfigOption {
-                id: "model".into(),
-                name: "Model".into(),
-                category: Some("model".into()),
-                current_value: "opus".into(),
-                choices: vec![ConfigChoice {
-                    value: "opus".into(),
-                    name: "Opus".into(),
-                    description: None,
-                }],
-            }],
-        };
-        let json = serde_json::to_string(&event).expect("serialize");
-        assert_eq!(
-            json,
-            r#"{"type":"acpConfigOptionsChanged","session_id":"sess-1","options":[{"id":"model","name":"Model","category":"model","current_value":"opus","choices":[{"value":"opus","name":"Opus","description":null}]}]}"#
-        );
-    }
-
-    #[test]
-    fn acp_usage_wire_shape_with_and_without_cost() {
-        let with_cost = DomainEvent::AcpUsage {
-            session_id: "sess-1".into(),
-            used: 53_000,
-            size: 200_000,
-            cost_usd: Some(0.045),
-        };
-        assert_eq!(
-            serde_json::to_string(&with_cost).expect("serialize"),
-            r#"{"type":"acpUsage","session_id":"sess-1","used":53000,"size":200000,"cost_usd":0.045}"#
-        );
-        let without_cost = DomainEvent::AcpUsage {
-            session_id: "sess-1".into(),
-            used: 1,
-            size: 2,
-            cost_usd: None,
-        };
-        assert_eq!(
-            serde_json::to_string(&without_cost).expect("serialize"),
-            r#"{"type":"acpUsage","session_id":"sess-1","used":1,"size":2,"cost_usd":null}"#
-        );
-    }
-
-    #[test]
-    fn acp_permission_events_wire_shape() {
-        use crate::acp::{PermissionOption, PermissionOptionKind};
-        let requested = DomainEvent::AcpPermissionRequested {
-            session_id: "sess-1".into(),
-            request_id: "perm-1".into(),
-            call_id: "call-1".into(),
-            title: "propose_changes".into(),
-            kind: "other".into(),
-            summary: "{}".into(),
-            options: vec![PermissionOption {
-                id: "proceed_once".into(),
-                name: "Allow once".into(),
-                kind: PermissionOptionKind::AllowOnce,
-            }],
-        };
-        assert_eq!(
-            serde_json::to_string(&requested).expect("serialize"),
-            r#"{"type":"acpPermissionRequested","session_id":"sess-1","request_id":"perm-1","call_id":"call-1","title":"propose_changes","kind":"other","summary":"{}","options":[{"id":"proceed_once","name":"Allow once","kind":"allow_once"}]}"#
-        );
-        let resolved = DomainEvent::AcpPermissionResolved {
-            session_id: "sess-1".into(),
-            request_id: "perm-1".into(),
-            option_id: None,
-        };
-        assert_eq!(
-            serde_json::to_string(&resolved).expect("serialize"),
-            r#"{"type":"acpPermissionResolved","session_id":"sess-1","request_id":"perm-1","option_id":null}"#
-        );
-    }
-
     fn sorted_keys(event: &DomainEvent) -> Vec<String> {
         let value = serde_json::to_value(event).expect("serialize");
         let mut keys: Vec<String> = value.as_object().expect("object").keys().cloned().collect();
@@ -1431,7 +1096,6 @@ mod tests {
             },
             &["type", "old_name", "new_name"],
         );
-        assert_keys(&DomainEvent::AssistantConversationsCleared, &["type"]);
     }
 
     #[test]
@@ -1484,7 +1148,6 @@ mod tests {
     #[test]
     fn wire_contract_envelope_keys_are_free() {
         for event in [
-            DomainEvent::AssistantConversationsCleared,
             DomainEvent::FileWatcherFailed {
                 message: "m".into(),
             },
@@ -1497,23 +1160,7 @@ mod tests {
     }
 
     #[test]
-    fn wire_contract_acp_and_watcher_events() {
-        assert_keys(
-            &DomainEvent::AcpSessionChunk {
-                session_id: "s".into(),
-                text: "t".into(),
-            },
-            &["type", "session_id", "text"],
-        );
-        assert_keys(
-            &DomainEvent::AcpUsage {
-                session_id: "s".into(),
-                used: 1,
-                size: 2,
-                cost_usd: None,
-            },
-            &["type", "session_id", "used", "size", "cost_usd"],
-        );
+    fn wire_contract_watcher_events() {
         assert_keys(
             &DomainEvent::FileWatcherFailed {
                 message: "m".into(),

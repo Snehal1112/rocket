@@ -2,7 +2,9 @@
 #![allow(clippy::double_must_use)]
 pub mod agent_config;
 pub mod conversation;
+pub mod events;
 pub mod mcp_server_spec;
+pub mod options;
 pub mod prompt;
 pub mod proposal;
 pub mod session;
@@ -21,13 +23,14 @@ pub use conversation::{
     CONVERSATION_FORMAT_VERSION, MAX_CONVERSATIONS, MAX_MESSAGES, MAX_MESSAGE_TEXT_BYTES,
     MAX_TITLE_CHARS, TEXT_CUT_MARKER,
 };
+pub use events::AcpEvent;
 pub use mcp_server_spec::McpServerSpec;
+pub use options::{PermissionOption, PermissionOptionKind};
 pub use prompt::PromptPart;
 pub use proposal::{
     AgentProposal, FolderSettingsPatch, ProposalStatus, ProposedChange, ProposedRequest,
     ProposedVariable, RequestPatch, ScriptPhase,
 };
-pub use rocket_shared::acp::{PermissionOption, PermissionOptionKind};
 pub use session::AcpSessionClient;
 pub use session_info::{ConfigChoice, ConfigOption, PromptCapabilities, SessionInfo};
 pub use update::{AcpUpdate, ToolCallStatus};

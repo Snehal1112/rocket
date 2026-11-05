@@ -1196,7 +1196,7 @@ impl McpHttpServerHandle {
 /// second registry entry behind that `end_session` never removes.
 ///
 /// `session_id` is a parameter (not generated here) because tool calls need
-/// it up front for their `DomainEvent::AcpToolInvoked` audit events, and
+/// it up front for their `AcpEvent::AcpToolInvoked` audit events, and
 /// because one HTTP server instance serves exactly one ACP session for its
 /// whole lifetime.
 pub async fn spawn_mcp_http_server<R: tauri::Runtime>(

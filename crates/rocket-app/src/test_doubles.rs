@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::callback_listener::{CallbackEndpoint, CallbackListener, ReceivedCall};
 use async_trait::async_trait;
+use rocket_acp::AcpEvent;
 use rocket_collection::{
     Collection, CollectionRepository, CollectionSettings, CollectionSummary, CollectionVariable,
     FolderSettings, GraphQlRequest, GrpcRequest, Request as CollectionRequest, RequestKind,
@@ -1670,6 +1671,7 @@ pub struct RecordingPublisher {
     events: Mutex<Vec<DomainEvent>>,
     flow_events: Mutex<Vec<FlowEvent>>,
     git_events: Mutex<Vec<GitEvent>>,
+    acp_events: Mutex<Vec<AcpEvent>>,
     others: Mutex<Vec<(String, serde_json::Value)>>,
 }
 
@@ -1679,6 +1681,7 @@ impl RecordingPublisher {
             events: Mutex::new(Vec::new()),
             flow_events: Mutex::new(Vec::new()),
             git_events: Mutex::new(Vec::new()),
+            acp_events: Mutex::new(Vec::new()),
             others: Mutex::new(Vec::new()),
         })
     }
@@ -1693,8 +1696,12 @@ impl RecordingPublisher {
     pub fn git_events(&self) -> Vec<GitEvent> {
         self.git_events.lock().expect("lock").clone()
     }
+    /// Every published `AcpEvent`, in order.
+    pub fn acp_events(&self) -> Vec<AcpEvent> {
+        self.acp_events.lock().expect("lock").clone()
+    }
     /// The channel and JSON of every published event that is not a
-    /// `DomainEvent`, a `FlowEvent` or a `GitEvent`.
+    /// `DomainEvent`, a `FlowEvent`, a `GitEvent` or an `AcpEvent`.
     pub fn others(&self) -> Vec<(String, serde_json::Value)> {
         self.others.lock().expect("lock").clone()
     }
@@ -1708,6 +1715,10 @@ impl EventPublisher for RecordingPublisher {
         }
         if let Some(git) = event.downcast_ref::<GitEvent>() {
             self.git_events.lock().expect("lock").push(git.clone());
+            return;
+        }
+        if let Some(acp) = event.downcast_ref::<AcpEvent>() {
+            self.acp_events.lock().expect("lock").push(acp.clone());
             return;
         }
         let Some(domain) = event.downcast_ref::<DomainEvent>() else {
@@ -2220,6 +2231,18 @@ mod tests {
                 "history-changed".to_string(),
                 serde_json::json!({"type": "historyCleared"})
             )]
+        );
+    }
+
+    #[test]
+    fn recording_publisher_keeps_acp_events() {
+        let publisher = RecordingPublisher::new();
+        publisher.publish(&AcpEvent::AssistantConversationsCleared);
+        assert!(publisher.events().is_empty());
+        assert!(publisher.others().is_empty());
+        assert_eq!(
+            publisher.acp_events(),
+            [AcpEvent::AssistantConversationsCleared]
         );
     }
 

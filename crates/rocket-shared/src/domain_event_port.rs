@@ -15,26 +15,10 @@ impl PublishedEvent for DomainEvent {
             DomainEvent::RunnerStarted { .. } => "runner-started",
             DomainEvent::RunnerStepCompleted { .. } => "runner-step-completed",
             DomainEvent::RunnerFinished { .. } => "runner-finished",
-            DomainEvent::AcpSessionStarted { .. } => "agent-session-started",
-            DomainEvent::AcpSessionChunk { .. } => "agent-session-chunk",
-            DomainEvent::AcpThoughtChunk { .. } => "agent-session-thought",
-            DomainEvent::AcpSessionFinished { .. } => "agent-session-finished",
-            DomainEvent::AcpSessionFailed { .. } => "agent-session-failed",
             DomainEvent::WebSocketMessage { .. } => "ws:message",
             DomainEvent::WebSocketStatus { .. } => "ws:status",
             DomainEvent::GraphQlSubscriptionMessage { .. } => "graphql:subscription-message",
             DomainEvent::GraphQlSubscriptionStatus { .. } => "graphql:subscription-status",
-            DomainEvent::AcpToolInvoked { .. } => "agent-tool-invoked",
-            DomainEvent::AcpProposalCreated { .. } => "agent-proposal-created",
-            DomainEvent::AcpProposalResolved { .. } => "agent-proposal-resolved",
-            DomainEvent::AcpToolActivity { .. } => "agent-session-tool-activity",
-            DomainEvent::AcpConfigOptionsChanged { .. } => "agent-session-config-options",
-            DomainEvent::AcpUsage { .. } => "agent-session-usage",
-            DomainEvent::AcpPermissionRequested { .. } => "agent-permission-requested",
-            DomainEvent::AcpPermissionResolved { .. } => "agent-permission-resolved",
-            DomainEvent::AssistantConversationSaved { .. } => "assistant-conversation-saved",
-            DomainEvent::AssistantConversationDeleted { .. } => "assistant-conversation-deleted",
-            DomainEvent::AssistantConversationsCleared => "assistant-conversations-cleared",
             DomainEvent::OpenApiSyncChecked { .. } => "openapi-sync-checked",
             DomainEvent::OpenApiSyncApplied { .. } => "openapi-sync-applied",
             DomainEvent::CollectionCreated { .. }
@@ -190,75 +174,6 @@ mod tests {
                 step_count: 1,
                 failed_count: 0,
             },
-            DomainEvent::AcpSessionStarted { session_id: s() },
-            DomainEvent::AcpSessionChunk {
-                session_id: s(),
-                text: s(),
-            },
-            DomainEvent::AcpThoughtChunk {
-                session_id: s(),
-                text: s(),
-            },
-            DomainEvent::AcpSessionFinished {
-                session_id: s(),
-                stop_reason: s(),
-            },
-            DomainEvent::AcpSessionFailed {
-                session_id: s(),
-                error: s(),
-            },
-            DomainEvent::AcpToolInvoked {
-                session_id: s(),
-                tool: s(),
-                summary: s(),
-            },
-            DomainEvent::AcpProposalCreated {
-                session_id: s(),
-                proposal_id: s(),
-                summary: s(),
-            },
-            DomainEvent::AcpProposalResolved {
-                session_id: s(),
-                proposal_id: s(),
-                status: s(),
-            },
-            DomainEvent::AcpToolActivity {
-                session_id: s(),
-                call_id: s(),
-                title: s(),
-                status: s(),
-            },
-            DomainEvent::AcpConfigOptionsChanged {
-                session_id: s(),
-                options: Vec::new(),
-            },
-            DomainEvent::AcpUsage {
-                session_id: s(),
-                used: 1,
-                size: 2,
-                cost_usd: None,
-            },
-            DomainEvent::AcpPermissionRequested {
-                session_id: s(),
-                request_id: s(),
-                call_id: s(),
-                title: s(),
-                kind: s(),
-                summary: s(),
-                options: Vec::new(),
-            },
-            DomainEvent::AcpPermissionResolved {
-                session_id: s(),
-                request_id: s(),
-                option_id: None,
-            },
-            DomainEvent::AssistantConversationSaved {
-                conversation_id: s(),
-            },
-            DomainEvent::AssistantConversationDeleted {
-                conversation_id: s(),
-            },
-            DomainEvent::AssistantConversationsCleared,
             DomainEvent::OpenApiSyncChecked {
                 collection: s(),
                 status: s(),
@@ -329,39 +244,17 @@ mod tests {
     }
 
     /// The channel of each variant, keyed by its JSON  tag.
-    const CHANNELS: [(&str, &str); 47] = [
+    const CHANNELS: [(&str, &str); 31] = [
         ("fileChanged", "collection-changed"),
         ("requestExecuted", "request-executed"),
         ("fileWatcherFailed", "file-watcher-failed"),
         ("runnerStarted", "runner-started"),
         ("runnerStepCompleted", "runner-step-completed"),
         ("runnerFinished", "runner-finished"),
-        ("acpSessionStarted", "agent-session-started"),
-        ("acpSessionChunk", "agent-session-chunk"),
-        ("acpThoughtChunk", "agent-session-thought"),
-        ("acpSessionFinished", "agent-session-finished"),
-        ("acpSessionFailed", "agent-session-failed"),
         ("webSocketMessage", "ws:message"),
         ("webSocketStatus", "ws:status"),
         ("graphQlSubscriptionMessage", "graphql:subscription-message"),
         ("graphQlSubscriptionStatus", "graphql:subscription-status"),
-        ("acpToolInvoked", "agent-tool-invoked"),
-        ("acpProposalCreated", "agent-proposal-created"),
-        ("acpProposalResolved", "agent-proposal-resolved"),
-        ("acpToolActivity", "agent-session-tool-activity"),
-        ("acpConfigOptionsChanged", "agent-session-config-options"),
-        ("acpUsage", "agent-session-usage"),
-        ("acpPermissionRequested", "agent-permission-requested"),
-        ("acpPermissionResolved", "agent-permission-resolved"),
-        ("assistantConversationSaved", "assistant-conversation-saved"),
-        (
-            "assistantConversationDeleted",
-            "assistant-conversation-deleted",
-        ),
-        (
-            "assistantConversationsCleared",
-            "assistant-conversations-cleared",
-        ),
         ("openApiSyncChecked", "openapi-sync-checked"),
         ("openApiSyncApplied", "openapi-sync-applied"),
         ("collectionCreated", "collection-changed"),
@@ -393,9 +286,9 @@ mod tests {
     #[test]
     fn one_of_each_covers_every_variant() {
         let events = one_of_each();
-        assert_eq!(events.len(), 47);
+        assert_eq!(events.len(), 31);
         let tags: BTreeSet<String> = events.iter().map(tag).collect();
-        assert_eq!(tags.len(), 47);
+        assert_eq!(tags.len(), 31);
     }
 
     #[test]

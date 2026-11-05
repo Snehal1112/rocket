@@ -1192,7 +1192,7 @@ fn prompt_parts_to_wire(parts: Vec<PromptPart>, embedded_context: bool) -> Vec<C
 
 /// Maps the real, `#[non_exhaustive]` `StopReason` (agent-client-protocol-
 /// schema-1.9.1, `src/v1/agent.rs:3178-3201`) to the lowercase `snake_case`
-/// wire strings the spec and `DomainEvent::AcpSessionFinished` expect. The
+/// wire strings the spec and `AcpEvent::AcpSessionFinished` expect. The
 /// enum's own `#[serde(rename_all = "snake_case")]` attribute confirms this
 /// casing, but `{:?}` (Debug) still renders `PascalCase` variant names, so it
 /// cannot be used directly here.

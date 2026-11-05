@@ -1,6 +1,5 @@
-//! ACP session option values. They live here, not in `rocket-acp`, because
-//! `DomainEvent::AcpConfigOptionsChanged` carries them and this crate depends
-//! on no other workspace crate. `rocket-acp` re-exports both types.
+//! Option values an ACP agent reports or offers: session settings and
+//! permission answers.
 
 use serde::{Deserialize, Serialize};
 

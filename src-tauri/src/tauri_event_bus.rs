@@ -107,6 +107,7 @@ fn emit_channels(event: &dyn PublishedEvent) -> Vec<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rocket_acp::AcpEvent;
     use rocket_flow::FlowEvent;
     use rocket_git::GitEvent;
     use rocket_shared::events::DomainEvent;
@@ -184,22 +185,34 @@ mod tests {
     }
 
     #[test]
+    fn acp_events_emit_on_their_own_single_channel() {
+        let started = AcpEvent::AcpSessionStarted {
+            session_id: "s1".into(),
+        };
+        assert_eq!(emit_channels(&started), vec!["agent-session-started"]);
+        assert_eq!(
+            emit_channels(&AcpEvent::AssistantConversationsCleared),
+            vec!["assistant-conversations-cleared"]
+        );
+    }
+
+    #[test]
     fn assistant_conversation_events_have_their_own_channels() {
         let id = || "c1".to_string();
         assert_eq!(
-            PublishedEvent::channel(&DomainEvent::AssistantConversationSaved {
+            PublishedEvent::channel(&AcpEvent::AssistantConversationSaved {
                 conversation_id: id()
             }),
             "assistant-conversation-saved"
         );
         assert_eq!(
-            PublishedEvent::channel(&DomainEvent::AssistantConversationDeleted {
+            PublishedEvent::channel(&AcpEvent::AssistantConversationDeleted {
                 conversation_id: id()
             }),
             "assistant-conversation-deleted"
         );
         assert_eq!(
-            DomainEvent::AssistantConversationsCleared.channel(),
+            AcpEvent::AssistantConversationsCleared.channel(),
             "assistant-conversations-cleared"
         );
     }
@@ -228,7 +241,7 @@ mod tests {
     #[test]
     fn permission_events_have_their_own_channels() {
         assert_eq!(
-            PublishedEvent::channel(&DomainEvent::AcpPermissionRequested {
+            PublishedEvent::channel(&AcpEvent::AcpPermissionRequested {
                 session_id: "s".into(),
                 request_id: "perm-1".into(),
                 call_id: "c".into(),
@@ -240,7 +253,7 @@ mod tests {
             "agent-permission-requested"
         );
         assert_eq!(
-            PublishedEvent::channel(&DomainEvent::AcpPermissionResolved {
+            PublishedEvent::channel(&AcpEvent::AcpPermissionResolved {
                 session_id: "s".into(),
                 request_id: "perm-1".into(),
                 option_id: None,
@@ -351,7 +364,7 @@ mod tests {
 
     #[test]
     fn envelope_keeps_unit_variants_as_objects() {
-        let value = envelope(&DomainEvent::AssistantConversationsCleared, 1, 2).expect("envelope");
+        let value = envelope(&AcpEvent::AssistantConversationsCleared, 1, 2).expect("envelope");
         assert_eq!(value["type"], "assistantConversationsCleared");
         assert_eq!(value["seq"], 1);
     }

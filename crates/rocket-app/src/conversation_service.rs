@@ -12,10 +12,11 @@ use rocket_acp::conversation::{
     ConversationMode, ConversationRecord, ConversationRepository, ConversationSummary,
     StoredMessage, CONVERSATION_FORMAT_VERSION, MAX_MESSAGES,
 };
+use rocket_acp::AcpEvent;
 use rocket_collection::CollectionRepository;
 use rocket_environment::{EnvironmentRepository, EnvironmentRepositoryFactory};
 use rocket_shared::error::{DomainError, DomainResult};
-use rocket_shared::events::{DomainEvent, EventPublisher};
+use rocket_shared::events::EventPublisher;
 
 use crate::conversation_secrets::workspace_secret_values;
 use crate::mcp_read_views::secret_redaction_forms;
@@ -232,7 +233,7 @@ impl ConversationService {
         record.apply_caps();
         pin.conversations.save(&record)?;
         self.events
-            .publish(&DomainEvent::AssistantConversationSaved {
+            .publish(&AcpEvent::AssistantConversationSaved {
                 conversation_id: record.id.clone(),
             });
         Ok(record.summary())
@@ -242,7 +243,7 @@ impl ConversationService {
         validate_conversation_id(id)?;
         self.conversations.delete(id)?;
         self.events
-            .publish(&DomainEvent::AssistantConversationDeleted {
+            .publish(&AcpEvent::AssistantConversationDeleted {
                 conversation_id: id.to_string(),
             });
         Ok(())
@@ -251,7 +252,7 @@ impl ConversationService {
     pub fn clear(&self) -> DomainResult<()> {
         self.conversations.clear()?;
         self.events
-            .publish(&DomainEvent::AssistantConversationsCleared);
+            .publish(&AcpEvent::AssistantConversationsCleared);
         Ok(())
     }
 }
@@ -599,7 +600,7 @@ mod tests {
             !fx.ws_a_path.join("assistant").exists(),
             "nothing was written"
         );
-        assert!(fx.events.events().is_empty());
+        assert!(fx.events.acp_events().is_empty());
     }
 
     #[test]
@@ -641,7 +642,7 @@ mod tests {
         svc.clear().expect("clear");
         let events: Vec<String> = fx
             .events
-            .events()
+            .acp_events()
             .iter()
             .map(|e| serde_json::to_string(e).expect("json"))
             .collect();

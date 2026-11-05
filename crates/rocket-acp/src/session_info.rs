@@ -1,4 +1,4 @@
-pub use rocket_shared::acp::{ConfigChoice, ConfigOption};
+pub use crate::options::{ConfigChoice, ConfigOption};
 
 /// What the agent accepts inside a prompt, from its `initialize` answer.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

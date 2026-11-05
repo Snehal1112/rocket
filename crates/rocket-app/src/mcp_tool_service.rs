@@ -14,7 +14,7 @@
 //! only requests it. The trust store decides whether it is granted on this
 //! computer. The effective value is re-checked on every call so a mid-session
 //! toggle takes effect at once. Every successful call publishes
-//! `DomainEvent::AcpToolInvoked` for the audit trail.
+//! `AcpEvent::AcpToolInvoked` for the audit trail.
 //!
 //! Modes (spec section 3): each session has an `AssistantMode`. Read tools
 //! work in every mode, proposing changes needs Edit (checked by the tool
@@ -27,8 +27,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use rocket_acp::AcpEvent;
 use rocket_shared::error::{DomainError, DomainResult};
-use rocket_shared::events::{DomainEvent, EventPublisher};
+use rocket_shared::events::EventPublisher;
 
 mod chips;
 
@@ -323,7 +324,7 @@ impl McpToolService {
     }
 
     fn publish_tool_invoked(&self, session_id: &str, tool: &str, summary: String) {
-        self.event_publisher.publish(&DomainEvent::AcpToolInvoked {
+        self.event_publisher.publish(&AcpEvent::AcpToolInvoked {
             session_id: session_id.to_string(),
             tool: tool.to_string(),
             summary,
@@ -1372,9 +1373,9 @@ mod tests {
         }
         assert!(
             !publisher
-                .events()
+                .acp_events()
                 .iter()
-                .any(|e| matches!(e, DomainEvent::AcpToolInvoked { .. })),
+                .any(|e| matches!(e, AcpEvent::AcpToolInvoked { .. })),
             "a refused call must not publish an audit event"
         );
     }
@@ -1416,8 +1417,8 @@ mod tests {
             .expect_err("a traversal-shaped folder must be refused");
         assert!(matches!(err, DomainError::InvalidInput(_)));
 
-        assert!(publisher.events().iter().any(
-            |e| matches!(e, DomainEvent::AcpToolInvoked { tool, .. } if tool == "get_workspace_outline")
+        assert!(publisher.acp_events().iter().any(
+            |e| matches!(e, AcpEvent::AcpToolInvoked { tool, .. } if tool == "get_workspace_outline")
         ));
     }
 
@@ -1690,8 +1691,8 @@ mod tests {
         assert!(matches!(other, DomainError::NotFound(_)));
 
         assert!(
-            publisher.events().iter().any(
-                |e| matches!(e, DomainEvent::AcpToolInvoked { tool, .. } if tool == "run_request")
+            publisher.acp_events().iter().any(
+                |e| matches!(e, AcpEvent::AcpToolInvoked { tool, .. } if tool == "run_request")
             ),
             "expected an AcpToolInvoked event for run_request"
         );
@@ -1881,8 +1882,8 @@ mod tests {
         assert!(!serde_json::to_string(&view)
             .expect("serialize")
             .contains("sk-live-abc"));
-        assert!(publisher.events().iter().any(
-            |e| matches!(e, DomainEvent::AcpToolInvoked { tool, .. } if tool == "get_environment")
+        assert!(publisher.acp_events().iter().any(
+            |e| matches!(e, AcpEvent::AcpToolInvoked { tool, .. } if tool == "get_environment")
         ));
     }
 
@@ -4177,9 +4178,9 @@ mod tests {
         assert!(!text.contains("folder-secret-8888"), "{text}");
         assert!(text.contains("api.example.com"));
         assert!(text.contains("rok.setVar('a', 1);"));
-        assert!(publisher.events().iter().any(|e| matches!(
+        assert!(publisher.acp_events().iter().any(|e| matches!(
             e,
-            DomainEvent::AcpToolInvoked { tool, summary, .. }
+            AcpEvent::AcpToolInvoked { tool, summary, .. }
                 if tool == "get_folder_settings" && !summary.contains("folder-sig-4242")
         )));
     }
@@ -4215,9 +4216,9 @@ mod tests {
         ));
         assert!(
             !publisher
-                .events()
+                .acp_events()
                 .iter()
-                .any(|e| matches!(e, DomainEvent::AcpToolInvoked { .. })),
+                .any(|e| matches!(e, AcpEvent::AcpToolInvoked { .. })),
             "a refused call must not publish an audit event"
         );
     }

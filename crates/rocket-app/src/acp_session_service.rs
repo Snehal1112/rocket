@@ -4,10 +4,11 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use rocket_acp::{
-    AcpSessionClient, AcpUpdate, AgentConfig, ConfigOption, PromptPart, SessionInfo, ToolCallStatus,
+    AcpEvent, AcpSessionClient, AcpUpdate, AgentConfig, ConfigOption, PromptPart, SessionInfo,
+    ToolCallStatus,
 };
 use rocket_shared::error::{DomainError, DomainResult};
-use rocket_shared::events::{DomainEvent, EventPublisher};
+use rocket_shared::events::EventPublisher;
 
 use crate::acp_stream::{stream_secret_forms, ChunkKind, ChunkStream};
 use crate::agent_config_service::AgentConfigService;
@@ -299,7 +300,7 @@ impl AcpSessionService {
             .unwrap_or_else(PoisonError::into_inner)
             .insert(info.session_id.clone(), own_secrets);
         self.event_publisher
-            .publish(&DomainEvent::AcpSessionStarted {
+            .publish(&AcpEvent::AcpSessionStarted {
                 session_id: info.session_id.clone(),
             });
         Ok(info)
@@ -446,7 +447,7 @@ impl AcpSessionService {
         match outcome {
             Some(Ok(stop_reason)) => {
                 self.event_publisher
-                    .publish(&DomainEvent::AcpSessionFinished {
+                    .publish(&AcpEvent::AcpSessionFinished {
                         session_id: session_id.to_string(),
                         stop_reason: stop_reason.clone(),
                     });
@@ -460,7 +461,7 @@ impl AcpSessionService {
                     let _ = self.session_client.end_session(session_id).await;
                     self.release(session_id);
                     self.event_publisher
-                        .publish(&DomainEvent::AcpSessionFailed {
+                        .publish(&AcpEvent::AcpSessionFailed {
                             session_id: session_id.to_string(),
                             error: e.to_string(),
                         });
@@ -512,7 +513,7 @@ impl AcpSessionService {
             .await?;
         let options = mask_config_options(options, &forms);
         self.event_publisher
-            .publish(&DomainEvent::AcpConfigOptionsChanged {
+            .publish(&AcpEvent::AcpConfigOptionsChanged {
                 session_id: session_id.to_string(),
                 options: options.clone(),
             });
@@ -524,8 +525,8 @@ impl AcpSessionService {
         for (kind, text) in chunks {
             let session_id = session_id.to_string();
             self.event_publisher.publish(&match kind {
-                ChunkKind::Text => DomainEvent::AcpSessionChunk { session_id, text },
-                ChunkKind::Thought => DomainEvent::AcpThoughtChunk { session_id, text },
+                ChunkKind::Text => AcpEvent::AcpSessionChunk { session_id, text },
+                ChunkKind::Thought => AcpEvent::AcpThoughtChunk { session_id, text },
             });
         }
     }
@@ -553,7 +554,7 @@ impl AcpSessionService {
             } => {
                 let title = mask_text(title, forms);
                 tool_calls.insert(call_id.clone(), (title.clone(), status));
-                DomainEvent::AcpToolActivity {
+                AcpEvent::AcpToolActivity {
                     session_id,
                     call_id,
                     title,
@@ -574,14 +575,14 @@ impl AcpSessionService {
                 if let Some(status) = status {
                     entry.1 = status;
                 }
-                DomainEvent::AcpToolActivity {
+                AcpEvent::AcpToolActivity {
                     session_id,
                     call_id,
                     title: entry.0.clone(),
                     status: entry.1.as_str().to_string(),
                 }
             }
-            AcpUpdate::ConfigOptions { options } => DomainEvent::AcpConfigOptionsChanged {
+            AcpUpdate::ConfigOptions { options } => AcpEvent::AcpConfigOptionsChanged {
                 session_id,
                 options: mask_config_options(options, forms),
             },
@@ -589,7 +590,7 @@ impl AcpSessionService {
                 used,
                 size,
                 cost_usd,
-            } => DomainEvent::AcpUsage {
+            } => AcpEvent::AcpUsage {
                 session_id,
                 used,
                 size,
@@ -602,7 +603,7 @@ impl AcpSessionService {
                 kind,
                 summary,
                 options,
-            } => DomainEvent::AcpPermissionRequested {
+            } => AcpEvent::AcpPermissionRequested {
                 session_id,
                 request_id,
                 call_id,
@@ -620,7 +621,7 @@ impl AcpSessionService {
             AcpUpdate::PermissionResolved {
                 request_id,
                 option_id,
-            } => DomainEvent::AcpPermissionResolved {
+            } => AcpEvent::AcpPermissionResolved {
                 session_id,
                 request_id,
                 option_id,
@@ -637,7 +638,7 @@ impl AcpSessionService {
         let _ = self.session_client.end_session(session_id).await;
         self.release(session_id);
         self.event_publisher
-            .publish(&DomainEvent::AcpSessionFailed {
+            .publish(&AcpEvent::AcpSessionFailed {
                 session_id: session_id.to_string(),
                 error: message.clone(),
             });
@@ -1287,7 +1288,7 @@ mod tests {
     }
 
     struct FakeEventPublisher {
-        events: Mutex<Vec<DomainEvent>>,
+        events: Mutex<Vec<AcpEvent>>,
     }
     impl FakeEventPublisher {
         fn new() -> Self {
@@ -1298,9 +1299,9 @@ mod tests {
     }
     impl EventPublisher for FakeEventPublisher {
         fn publish(&self, event: &dyn PublishedEvent) {
-            let Some(event) = event.downcast_ref::<DomainEvent>() else {
+            let Some(event) = event.downcast_ref::<AcpEvent>() else {
                 panic!(
-                    "recorder got a non-DomainEvent on channel {}",
+                    "recorder got a non-AcpEvent on channel {}",
                     event.channel()
                 );
             };
@@ -1435,7 +1436,7 @@ mod tests {
 
         let events = publisher.events.lock().expect("lock");
         assert_eq!(events.len(), 1);
-        assert!(matches!(events[0], DomainEvent::AcpSessionStarted { .. }));
+        assert!(matches!(events[0], AcpEvent::AcpSessionStarted { .. }));
     }
 
     #[tokio::test]
@@ -1458,7 +1459,7 @@ mod tests {
         assert!(
             !events
                 .iter()
-                .any(|e| matches!(e, DomainEvent::AcpToolInvoked { .. })),
+                .any(|e| matches!(e, AcpEvent::AcpToolInvoked { .. })),
             "starting a session must not publish AcpToolInvoked, got {events:?}"
         );
     }
@@ -1499,8 +1500,8 @@ mod tests {
         );
         match (&events[0], &events[1]) {
             (
-                DomainEvent::AcpSessionChunk { text, .. },
-                DomainEvent::AcpSessionFinished { stop_reason, .. },
+                AcpEvent::AcpSessionChunk { text, .. },
+                AcpEvent::AcpSessionFinished { stop_reason, .. },
             ) => {
                 assert_eq!(text, "Hello, world!");
                 assert_eq!(stop_reason, "end_turn");
@@ -1629,7 +1630,7 @@ mod tests {
         assert!(
             events
                 .iter()
-                .any(|e| matches!(e, DomainEvent::AcpSessionFailed { .. })),
+                .any(|e| matches!(e, AcpEvent::AcpSessionFailed { .. })),
             "AcpSessionFailed must be published, got {events:?}"
         );
     }
@@ -1666,7 +1667,7 @@ mod tests {
         assert!(
             events
                 .iter()
-                .any(|e| matches!(e, DomainEvent::AcpSessionFailed { .. })),
+                .any(|e| matches!(e, AcpEvent::AcpSessionFailed { .. })),
             "AcpSessionFailed must be published on timeout, got {events:?}"
         );
     }
@@ -1925,12 +1926,12 @@ mod tests {
         let events = publisher.events.lock().expect("lock");
         assert!(events.iter().any(|e| matches!(
             e,
-            DomainEvent::AcpPermissionRequested { request_id, options, .. }
+            AcpEvent::AcpPermissionRequested { request_id, options, .. }
                 if request_id == "perm-1" && options.len() == 1
         )));
         assert!(events.iter().any(|e| matches!(
             e,
-            DomainEvent::AcpPermissionResolved { request_id, option_id, .. }
+            AcpEvent::AcpPermissionResolved { request_id, option_id, .. }
                 if request_id == "perm-1" && option_id.as_deref() == Some("proceed_once")
         )));
     }
@@ -1969,7 +1970,7 @@ mod tests {
     async fn events_for(
         service: &AcpSessionService,
         publisher: &Arc<FakeEventPublisher>,
-    ) -> Vec<DomainEvent> {
+    ) -> Vec<AcpEvent> {
         service.send_prompt("session-1", hi()).await.expect("turn");
         publisher.events.lock().expect("lock").clone()
     }
@@ -1987,7 +1988,7 @@ mod tests {
 
         assert!(events
             .iter()
-            .any(|e| matches!(e, DomainEvent::AcpToolActivity { .. })));
+            .any(|e| matches!(e, AcpEvent::AcpToolActivity { .. })));
         assert!(
             !format!("{events:?}").contains(TOOL_SECRET),
             "got {events:?}"
@@ -2011,7 +2012,7 @@ mod tests {
 
         let activity = events
             .iter()
-            .filter(|e| matches!(e, DomainEvent::AcpToolActivity { .. }))
+            .filter(|e| matches!(e, AcpEvent::AcpToolActivity { .. }))
             .count();
         assert_eq!(activity, 3);
         assert!(
@@ -2038,7 +2039,7 @@ mod tests {
 
         assert!(events
             .iter()
-            .any(|e| matches!(e, DomainEvent::AcpPermissionRequested { .. })));
+            .any(|e| matches!(e, AcpEvent::AcpPermissionRequested { .. })));
         assert!(
             !format!("{events:?}").contains(TOOL_SECRET),
             "got {events:?}"
@@ -2080,7 +2081,7 @@ mod tests {
         );
         assert!(events.iter().any(|e| matches!(
             e,
-            DomainEvent::AcpPermissionRequested { options, .. } if options[0].id == "proceed_once"
+            AcpEvent::AcpPermissionRequested { options, .. } if options[0].id == "proceed_once"
         )));
     }
 
@@ -2126,7 +2127,7 @@ mod tests {
 
         assert!(events.iter().any(|e| matches!(
             e,
-            DomainEvent::AcpToolActivity { title, .. } if title == "Read GET /orders"
+            AcpEvent::AcpToolActivity { title, .. } if title == "Read GET /orders"
         )));
     }
 
@@ -2148,7 +2149,7 @@ mod tests {
         let events = publisher.events.lock().expect("lock");
         assert!(events.iter().any(|e| matches!(
             e,
-            DomainEvent::AcpPermissionRequested { title, .. } if title.chars().count() == 201
+            AcpEvent::AcpPermissionRequested { title, .. } if title.chars().count() == 201
         )));
     }
 
@@ -2202,7 +2203,7 @@ mod tests {
         let events = publisher.events.lock().expect("lock");
         assert!(events
             .iter()
-            .any(|e| matches!(e, DomainEvent::AcpSessionFailed { .. })));
+            .any(|e| matches!(e, AcpEvent::AcpSessionFailed { .. })));
     }
 
     #[tokio::test]
@@ -2371,12 +2372,12 @@ mod tests {
     }
 
     /// Text of every chunk event of one kind, joined, and the event count.
-    fn joined_chunks(events: &[DomainEvent], thought: bool) -> (String, usize) {
+    fn joined_chunks(events: &[AcpEvent], thought: bool) -> (String, usize) {
         let texts: Vec<&str> = events
             .iter()
             .filter_map(|e| match e {
-                DomainEvent::AcpSessionChunk { text, .. } if !thought => Some(text.as_str()),
-                DomainEvent::AcpThoughtChunk { text, .. } if thought => Some(text.as_str()),
+                AcpEvent::AcpSessionChunk { text, .. } if !thought => Some(text.as_str()),
+                AcpEvent::AcpThoughtChunk { text, .. } if thought => Some(text.as_str()),
                 _ => None,
             })
             .collect();
@@ -2440,10 +2441,10 @@ mod tests {
         let shape: Vec<String> = events
             .iter()
             .map(|e| match e {
-                DomainEvent::AcpSessionChunk { text, .. } => format!("text:{text}"),
-                DomainEvent::AcpThoughtChunk { text, .. } => format!("thought:{text}"),
-                DomainEvent::AcpToolActivity { .. } => "tool".to_string(),
-                DomainEvent::AcpSessionFinished { .. } => "finished".to_string(),
+                AcpEvent::AcpSessionChunk { text, .. } => format!("text:{text}"),
+                AcpEvent::AcpThoughtChunk { text, .. } => format!("thought:{text}"),
+                AcpEvent::AcpToolActivity { .. } => "tool".to_string(),
+                AcpEvent::AcpSessionFinished { .. } => "finished".to_string(),
                 other => format!("{other:?}"),
             })
             .collect();
@@ -2481,7 +2482,7 @@ mod tests {
         assert!((2..40).contains(&count), "got {count} events");
         assert!(matches!(
             events.last(),
-            Some(DomainEvent::AcpSessionFinished { .. })
+            Some(AcpEvent::AcpSessionFinished { .. })
         ));
     }
 
@@ -2529,7 +2530,7 @@ mod tests {
         let (joined, _) = joined_chunks(&events, false);
         assert_eq!(joined, "partial sk-li");
         match events.last() {
-            Some(DomainEvent::AcpSessionFailed { error, .. }) => {
+            Some(AcpEvent::AcpSessionFailed { error, .. }) => {
                 assert!(!error.contains("agent crashed"), "{error}");
                 assert!(error.contains(crate::redaction::REDACTED), "{error}");
             }
@@ -2616,23 +2617,23 @@ mod tests {
         let thoughts: Vec<&str> = events
             .iter()
             .filter_map(|e| match e {
-                DomainEvent::AcpThoughtChunk { text, .. } => Some(text.as_str()),
+                AcpEvent::AcpThoughtChunk { text, .. } => Some(text.as_str()),
                 _ => None,
             })
             .collect();
         assert_eq!(thoughts, vec!["checking auth then docs"]);
         let last_thought = events
             .iter()
-            .rposition(|e| matches!(e, DomainEvent::AcpThoughtChunk { .. }))
+            .rposition(|e| matches!(e, AcpEvent::AcpThoughtChunk { .. }))
             .expect("a thought event");
         let first_text = events
             .iter()
-            .position(|e| matches!(e, DomainEvent::AcpSessionChunk { .. }))
+            .position(|e| matches!(e, AcpEvent::AcpSessionChunk { .. }))
             .expect("a text event");
         assert!(last_thought < first_text);
         assert!(matches!(
             events.last(),
-            Some(DomainEvent::AcpSessionFinished { .. })
+            Some(AcpEvent::AcpSessionFinished { .. })
         ));
     }
 
@@ -2701,17 +2702,17 @@ mod tests {
         let events = publisher.events.lock().expect("lock");
         assert_eq!(events.len(), 6, "got {events:?}");
         assert!(
-            matches!(&events[0], DomainEvent::AcpSessionChunk { text, .. } if text == "Reading")
+            matches!(&events[0], AcpEvent::AcpSessionChunk { text, .. } if text == "Reading")
         );
         assert!(matches!(
             &events[1],
-            DomainEvent::AcpToolActivity { call_id, title, status, .. }
+            AcpEvent::AcpToolActivity { call_id, title, status, .. }
                 if call_id == "call-1" && title == "Read GET /orders" && status == "pending"
         ));
         assert!(
             matches!(
                 &events[2],
-                DomainEvent::AcpToolActivity { title, status, .. }
+                AcpEvent::AcpToolActivity { title, status, .. }
                     if title == "Read GET /orders" && status == "completed"
             ),
             "an update without a title keeps the last known title, got {:?}",
@@ -2719,12 +2720,12 @@ mod tests {
         );
         assert!(matches!(
             &events[3],
-            DomainEvent::AcpConfigOptionsChanged { options, .. }
+            AcpEvent::AcpConfigOptionsChanged { options, .. }
                 if options.len() == 1 && options[0].current_value == "opus"
         ));
         assert!(matches!(
             &events[4],
-            DomainEvent::AcpUsage {
+            AcpEvent::AcpUsage {
                 used: 1_200,
                 size: 200_000,
                 cost_usd: Some(_),
@@ -2733,7 +2734,7 @@ mod tests {
         ));
         assert!(matches!(
             &events[5],
-            DomainEvent::AcpSessionFinished { stop_reason, .. } if stop_reason == "end_turn"
+            AcpEvent::AcpSessionFinished { stop_reason, .. } if stop_reason == "end_turn"
         ));
     }
 
@@ -2759,7 +2760,7 @@ mod tests {
         assert!(
             matches!(
                 &events[0],
-                DomainEvent::AcpToolActivity { call_id, title, status, .. }
+                AcpEvent::AcpToolActivity { call_id, title, status, .. }
                     if call_id == "call-9" && title.is_empty() && status == "pending"
             ),
             "got {events:?}"
@@ -2793,7 +2794,7 @@ mod tests {
         let events = publisher.events.lock().expect("lock");
         assert!(!events
             .iter()
-            .any(|e| matches!(e, DomainEvent::AcpSessionFailed { .. })));
+            .any(|e| matches!(e, AcpEvent::AcpSessionFailed { .. })));
     }
 
     #[tokio::test]
@@ -2828,10 +2829,10 @@ mod tests {
         let events = publisher.events.lock().expect("lock");
         assert!(events
             .iter()
-            .any(|e| matches!(e, DomainEvent::AcpSessionFinished { .. })));
+            .any(|e| matches!(e, AcpEvent::AcpSessionFinished { .. })));
         assert!(!events
             .iter()
-            .any(|e| matches!(e, DomainEvent::AcpSessionFailed { .. })));
+            .any(|e| matches!(e, AcpEvent::AcpSessionFailed { .. })));
     }
 
     #[tokio::test]
@@ -2855,11 +2856,11 @@ mod tests {
         let events = publisher.events.lock().expect("lock");
         assert!(matches!(
             events.last(),
-            Some(DomainEvent::AcpSessionFinished { stop_reason, .. }) if stop_reason == "cancelled"
+            Some(AcpEvent::AcpSessionFinished { stop_reason, .. }) if stop_reason == "cancelled"
         ));
         assert!(!events
             .iter()
-            .any(|e| matches!(e, DomainEvent::AcpSessionFailed { .. })));
+            .any(|e| matches!(e, AcpEvent::AcpSessionFailed { .. })));
     }
 
     #[tokio::test]
@@ -2902,7 +2903,7 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert!(matches!(
             &events[0],
-            DomainEvent::AcpConfigOptionsChanged { session_id, options }
+            AcpEvent::AcpConfigOptionsChanged { session_id, options }
                 if session_id == "session-1" && options.len() == 2
         ));
     }
@@ -3028,7 +3029,7 @@ mod tests {
         assert!(
             !events
                 .iter()
-                .any(|e| matches!(e, DomainEvent::AcpSessionFailed { .. })),
+                .any(|e| matches!(e, AcpEvent::AcpSessionFailed { .. })),
             "a recoverable error must not publish AcpSessionFailed, got {events:?}"
         );
     }
@@ -3303,7 +3304,7 @@ mod tests {
             let events = publisher.events.lock().expect("lock");
             assert!(matches!(
                 events.as_slice(),
-                [DomainEvent::AcpSessionStarted { .. }]
+                [AcpEvent::AcpSessionStarted { .. }]
             ));
         }
 

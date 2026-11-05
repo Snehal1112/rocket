@@ -11,13 +11,14 @@ use rocket_acp::proposal::{
     AgentProposal, FolderSettingsPatch, ProposalStatus, ProposedChange, ProposedRequest,
     RequestPatch, ScriptPhase,
 };
+use rocket_acp::AcpEvent;
 use rocket_collection::{
     request_filename_for, CollectionItem, CollectionVariable, Folder, FolderSettings, Request,
 };
 use rocket_environment::{Environment, EnvironmentRepositoryFactory, Variable};
 use rocket_shared::description::Documentation;
 use rocket_shared::error::{DomainError, DomainResult};
-use rocket_shared::events::{DomainEvent, EventPublisher, PublishedEvent};
+use rocket_shared::events::{EventPublisher, PublishedEvent};
 use rocket_shared::types::BodyMode;
 use sha2::{Digest, Sha256};
 
@@ -212,7 +213,7 @@ impl ProposalService {
 
         let mut ids = Vec::with_capacity(created.len());
         for (proposal_id, summary) in created {
-            self.events.publish(&DomainEvent::AcpProposalCreated {
+            self.events.publish(&AcpEvent::AcpProposalCreated {
                 session_id: session.clone(),
                 proposal_id: proposal_id.clone(),
                 summary,
@@ -306,7 +307,7 @@ impl ProposalService {
     }
 
     fn publish_resolved(&self, proposal: &AgentProposal) {
-        self.events.publish(&DomainEvent::AcpProposalResolved {
+        self.events.publish(&AcpEvent::AcpProposalResolved {
             session_id: proposal.session_id.clone(),
             proposal_id: proposal.id.clone(),
             status: proposal.status.as_str().to_string(),
@@ -1377,6 +1378,7 @@ mod tests {
     use rocket_acp::proposal::ProposedVariable;
     use rocket_collection::{CollectionRepository, RequestScriptPhase};
     use rocket_environment::{Environment, EnvironmentRepository};
+    use rocket_shared::events::DomainEvent;
     use rocket_shared::types::{Auth, Header, HttpMethod};
 
     use crate::test_doubles::{RecordingPublisher, SharedPublisher};
@@ -1518,10 +1520,10 @@ mod tests {
 
     fn resolved_statuses(events: &RecordingPublisher) -> Vec<String> {
         events
-            .events()
+            .acp_events()
             .into_iter()
             .filter_map(|e| match e {
-                DomainEvent::AcpProposalResolved { status, .. } => Some(status),
+                AcpEvent::AcpProposalResolved { status, .. } => Some(status),
                 _ => None,
             })
             .collect()
@@ -1624,9 +1626,9 @@ mod tests {
         assert_eq!(listed[0].id, ids[0]);
         assert_eq!(listed[0].status, ProposalStatus::Pending);
         assert!(!f._dir.path().join("demo").join("reports").exists());
-        assert!(f.events.events().iter().any(|e| matches!(
+        assert!(f.events.acp_events().iter().any(|e| matches!(
             e,
-            DomainEvent::AcpProposalCreated { proposal_id, .. } if *proposal_id == ids[0]
+            AcpEvent::AcpProposalCreated { proposal_id, .. } if *proposal_id == ids[0]
         )));
     }
 
@@ -1812,6 +1814,7 @@ mod tests {
         assert!(matches!(err, DomainError::NotFound(_)));
         assert!(f.svc.list("s1").is_empty());
         assert!(f.events.events().is_empty());
+        assert!(f.events.acp_events().is_empty());
     }
 
     #[test]
