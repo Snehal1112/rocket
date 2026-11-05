@@ -30,7 +30,7 @@ impl PublishedEvent for LoadTestEvent {
     }
 }
 
-/// Published as a domain event every 250 ms during a running load test.
+/// Published as a `LoadTestEvent` every 250 ms during a running load test.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LoadTestProgressEvent {

@@ -14,7 +14,7 @@ mod test_support;
 
 pub use call::{grpc_code_name, GrpcCall, GrpcExecutor, GrpcStatus, GrpcUnaryResponse};
 pub use call::{GrpcStreamEvent, GrpcStreamHandle};
-pub use events::{GrpcEvent, GrpcMetadataPair};
 pub use codec::{empty_message_json, json_to_message, message_to_json};
+pub use events::{GrpcEvent, GrpcMetadataPair};
 pub use prost_reflect::{DynamicMessage, MessageDescriptor, MethodDescriptor};
 pub use registry::{GrpcMethodInfo, GrpcServiceInfo, ProtoFileReader, ProtoLoader, ProtoRegistry};
