@@ -299,10 +299,9 @@ impl AcpSessionService {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .insert(info.session_id.clone(), own_secrets);
-        self.event_publisher
-            .publish(&AcpEvent::AcpSessionStarted {
-                session_id: info.session_id.clone(),
-            });
+        self.event_publisher.publish(&AcpEvent::AcpSessionStarted {
+            session_id: info.session_id.clone(),
+        });
         Ok(info)
     }
 
@@ -446,11 +445,10 @@ impl AcpSessionService {
         let outcome = outcome.map(|result| result.map_err(|e| mask_error(e, &forms)));
         match outcome {
             Some(Ok(stop_reason)) => {
-                self.event_publisher
-                    .publish(&AcpEvent::AcpSessionFinished {
-                        session_id: session_id.to_string(),
-                        stop_reason: stop_reason.clone(),
-                    });
+                self.event_publisher.publish(&AcpEvent::AcpSessionFinished {
+                    session_id: session_id.to_string(),
+                    stop_reason: stop_reason.clone(),
+                });
                 Ok(stop_reason)
             }
             Some(Err(e)) => {
@@ -460,11 +458,10 @@ impl AcpSessionService {
                 if !matches!(e, DomainError::InvalidInput(_)) {
                     let _ = self.session_client.end_session(session_id).await;
                     self.release(session_id);
-                    self.event_publisher
-                        .publish(&AcpEvent::AcpSessionFailed {
-                            session_id: session_id.to_string(),
-                            error: e.to_string(),
-                        });
+                    self.event_publisher.publish(&AcpEvent::AcpSessionFailed {
+                        session_id: session_id.to_string(),
+                        error: e.to_string(),
+                    });
                 }
                 Err(e)
             }
@@ -637,11 +634,10 @@ impl AcpSessionService {
     async fn end_idle_session(&self, session_id: &str, message: String) -> DomainError {
         let _ = self.session_client.end_session(session_id).await;
         self.release(session_id);
-        self.event_publisher
-            .publish(&AcpEvent::AcpSessionFailed {
-                session_id: session_id.to_string(),
-                error: message.clone(),
-            });
+        self.event_publisher.publish(&AcpEvent::AcpSessionFailed {
+            session_id: session_id.to_string(),
+            error: message.clone(),
+        });
         DomainError::Internal(message)
     }
 
@@ -1300,10 +1296,7 @@ mod tests {
     impl EventPublisher for FakeEventPublisher {
         fn publish(&self, event: &dyn PublishedEvent) {
             let Some(event) = event.downcast_ref::<AcpEvent>() else {
-                panic!(
-                    "recorder got a non-AcpEvent on channel {}",
-                    event.channel()
-                );
+                panic!("recorder got a non-AcpEvent on channel {}", event.channel());
             };
             self.events
                 .lock()
@@ -2701,9 +2694,7 @@ mod tests {
 
         let events = publisher.events.lock().expect("lock");
         assert_eq!(events.len(), 6, "got {events:?}");
-        assert!(
-            matches!(&events[0], AcpEvent::AcpSessionChunk { text, .. } if text == "Reading")
-        );
+        assert!(matches!(&events[0], AcpEvent::AcpSessionChunk { text, .. } if text == "Reading"));
         assert!(matches!(
             &events[1],
             AcpEvent::AcpToolActivity { call_id, title, status, .. }

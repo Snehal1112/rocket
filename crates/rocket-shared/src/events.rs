@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-
 pub use crate::published_event::PublishedEvent;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1147,11 +1146,9 @@ mod tests {
     // The envelope keys the bus adds must not collide with a top-level field.
     #[test]
     fn wire_contract_envelope_keys_are_free() {
-        for event in [
-            DomainEvent::FileWatcherFailed {
-                message: "m".into(),
-            },
-        ] {
+        for event in [DomainEvent::FileWatcherFailed {
+            message: "m".into(),
+        }] {
             let keys = sorted_keys(&event);
             for reserved in ["seq", "tsMs", "ts_ms", "workspaceId"] {
                 assert!(!keys.iter().any(|k| k == reserved));

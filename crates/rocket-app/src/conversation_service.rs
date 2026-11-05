@@ -232,10 +232,9 @@ impl ConversationService {
         // Masking ran first, so a cut can never keep part of a secret.
         record.apply_caps();
         pin.conversations.save(&record)?;
-        self.events
-            .publish(&AcpEvent::AssistantConversationSaved {
-                conversation_id: record.id.clone(),
-            });
+        self.events.publish(&AcpEvent::AssistantConversationSaved {
+            conversation_id: record.id.clone(),
+        });
         Ok(record.summary())
     }
 
