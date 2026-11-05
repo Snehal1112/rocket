@@ -14,9 +14,9 @@ large (about 33k non-test lines); D-80 to D-82 plan its split by context.
 
 | Type | Purpose |
 |---|---|
-| `CollectionService` | CRUD for collections, folders, and requests; enforces name validation; publishes a `DomainEvent` for every mutation. |
+| `CollectionService` | CRUD for collections, folders, and requests; enforces name validation; publishes an event for every mutation (`move_item` also publishes `FlowEvent::FlowRequestPathsRewritten`). |
 | `CookieService` | Thin wrapper over `CookieRepository` for per-domain cookie jars. |
-| `EnvironmentService` | CRUD for environments; publishes `EnvironmentSaved/Deleted` events. |
+| `EnvironmentService` | CRUD for environments; publishes `EnvironmentEvent::EnvironmentSaved/EnvironmentDeleted`. |
 | `WorkspaceWatcher` | Restarts the file watcher on `<workspace>/collections` through the `FileWatcher` port (stop, then start). A failed start is logged and published once as `FileWatcherFailed` with `<folder>: <reason>`. `restart` returns whether the watcher runs. Used at startup and by switch, close and delete of a workspace. |
 | `EnvironmentServices` | Managed state that hands out an `EnvironmentService` per call: `for_collection(name)` (rejects an empty name, a NUL byte, an absolute name or a `..` segment with `InvalidInput("invalid collection name")`) and `global()`. Its repository factories follow the active workspace, so each call points at the workspace active at that moment. Reads and writes share one event publisher and audit publisher (reads publish nothing). |
 | `RequestExecutionService` | Core HTTP dispatch: resolves variables, merges collection settings, runs the request, saves history, publishes `RequestExecuted`. |
@@ -42,9 +42,9 @@ large (about 33k non-test lines); D-80 to D-82 plan its split by context.
 ## Service Method Details
 
 ### CollectionService
-- Every mutating method publishes a `DomainEvent` (e.g. `CollectionCreated`, `RequestSaved`, `FolderDeleted`, `ItemMoved`, `CollectionSettingsSaved`) after the underlying repository call succeeds.
+- Every mutating method publishes an event (e.g. `CollectionCreated`, `RequestSaved`, `FolderDeleted`, `ItemMoved`, `CollectionSettingsSaved`) after the underlying repository call succeeds.
 - `rename_request` — mutates only the `name` field inside the JSON; the filename stays the same, producing a single `Modify` filesystem event.
-- `move_item` — moves a request or folder between collections or paths.
+- `move_item` — moves a request or folder between collections or paths. After the move it publishes `FlowEvent::FlowRequestPathsRewritten`.
 - `reorder_items` — reorders items within a folder by supplying the new name order.
 - `list_request_examples` / `add_request_example` / `rename_request_example` / `delete_request_example` — saved examples of one HTTP request, stored in the request file's `examples` list. Add, rename and delete publish `RequestSaved` only after the repo call succeeds; list publishes nothing. Names are trimmed, 1 to 120 characters, no control characters, unique case-insensitively (`InvalidInput`, `AlreadyExists`). One example is at most 1 MiB as YAML. Non-HTTP files are `InvalidInput`.
 - `get_settings` / `save_settings` — read and write per-collection settings (auth, headers, variables).
@@ -67,7 +67,7 @@ Constructor takes **two** repos: `WorkspaceRepository` (registry) and `Workspace
 | `get_multi_workspace_mode` / `set_multi_workspace_mode` | Reads/writes `registry.multi_workspace_mode`. |
 
 ### GitAppService
-Wraps `Box<dyn GitService>`. Every mutating operation publishes a `DomainEvent`. Notable methods:
+Wraps `Box<dyn GitService>`. Every mutating operation publishes a `GitEvent`. Notable methods:
 - `diff_staged` — diff for already-staged files.
 - `checkout_remote_branch` — creates a local tracking branch. Rejects an existing local branch of the same name unless `force` is set, which instead resets that branch (and its upstream) to the remote's tip, discarding local commits absent from that remote. A forced reset of the *checked-out* branch still refuses to run over uncommitted tracked changes.
 - `fetch` — no event published (read-only remote op).
@@ -89,7 +89,7 @@ Wraps `Box<dyn GitService>`. Every mutating operation publishes a `DomainEvent`.
 - **Header and auth merging.** `RequestExecutionService::inherited_auth_and_headers` is the one place defaults apply: collection headers, then the folder chain (`folder_chain` → `get_folder_chain_settings`, outermost first, merged by `rocket_collection::inherited_headers`), then the request. The request wins by key and a disabled header never shadows. A request auth of `none` or `inherit` takes the nearest folder auth (`resolve_folder_auth`), then the collection auth. `resolve_request` (single send, runner, Flow, load test, GraphQL introspection) and `resolve_websocket` (WebSocket, GraphQL subscriptions) both call it. A folder chain that fails to load fails the send. Inline Flow requests (`FLOW_INLINE_PATH_PREFIX`) inherit no folder settings. gRPC still applies collection defaults only, because `GrpcExecuteInput` carries no request path.
 - **One send, one workspace.** `execute`, `execute_capturing`, `CollectionRunnerService::run` and `FlowExecutionService::run_with_options` run inside `with_send_pins` (`execution_service/send_pins.rs`, a tokio task-local). At the start it pins the collection repo, the global env repo and the collection env factory (`pinned()` on `CollectionRepository`, `EnvironmentRepository` and `EnvironmentRepositoryFactory`), so a workspace switch mid-send never writes one workspace's script results (environment, collection, folder or request variables) into another. Inside `RequestExecutionService`, collection access goes through `send_collection_repo()` and environment lookups through `global_env_repo()` / `regular_env_repo()`, never `self.collection_repo` / `self.env_repo` directly. Nested calls keep the outer pins. Work spawned onto another tokio task does not inherit them. The runner's and Flow's own repos (run set, flow file) are read at run start and are not pinned.
 - **Non-fatal history write.** `let _ = self.history_repo.save(...)` is intentional — a history persistence failure must not abort the response.
-- **Event publishing is fire-and-forget.** Services publish `DomainEvent` variants after successful operations; errors from downstream listeners are not propagated back.
+- **Event publishing is fire-and-forget.** Services publish events (`DomainEvent` and the per-context enums) after successful operations; errors from downstream listeners are not propagated back.
 - **Tests use inline mocks.** Each service module contains its own mock implementations in `#[cfg(test)]`. `tempfile` is used in `WorkspaceService` tests that require real directories. A `CollectionRepository` stub that needs only a few real methods uses `NullCollectionRepo` from `test_doubles.rs` (`new()` is lenient, `strict()` panics on unhooked methods, `lenient_for` opts methods out, `on_*` hooks override one method). `execution_service.rs` keeps its own doubles on purpose, as `test_doubles.rs` states at the top.
 
 ## Workspace Position

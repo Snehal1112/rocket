@@ -26,7 +26,7 @@ cargo check -p rocket-shared
 - `DomainResult<T>` — type alias for `Result<T, DomainError>`. Used as the return type for every fallible service and repository method across the workspace.
 
 ### Events
-- `DomainEvent` — exhaustive enum of all domain events (collection, request, HTTP execution, file-system). Tagged with `#[serde(tag = "type", rename_all = "camelCase")]` so variants serialize as `{"type": "collectionCreated", ...}` for Tauri's event bus.
+- `DomainEvent` — the events not yet split out into per-context enums (collection, request, HTTP execution, file-system). Tagged with `#[serde(tag = "type", rename_all = "camelCase")]` so variants serialize as `{"type": "collectionCreated", ...}` for Tauri's event bus.
 - `PublishedEvent` (`published_event.rs`) — the port between event producers and the bus: `channel`, `to_json`, `also_emit_on`, `written_collections` and `as_any` (with `dyn PublishedEvent::downcast_ref`). `DomainEvent` implements it in `domain_event_port.rs`.
 - Moved out of `DomainEvent` (plan 1): `HistoryEvent` in `rocket-history`, `LoadTestEvent` in `rocket-http`, `GrpcEvent` in `rocket-grpc`. Each implements `PublishedEvent` and keeps the old channel names and JSON. `GrpcMetadataPair` and the load test payload types live in their own crates now. `DomainEvent` has 74 variants left.
 - Moved out of `DomainEvent` (plan 2): `EnvironmentEvent` in `rocket-environment` (channel `environment-changed`) and `WorkspaceEvent` in `rocket-workspace` (eight `workspace-*` channels). Same channels and JSON as before. `DomainEvent` has 64 variants left.
@@ -79,4 +79,4 @@ The client certificate model lives in `rocket-environment` (`certificate.rs`) an
 
 ## Workspace Role
 
-Every other crate depends on `rocket-shared`. Domain crates (`rocket-collection`, `rocket-environment`, etc.) use `DomainResult` and `DomainError` as their return types. Services in `rocket-app` accept a `Box<dyn EventPublisher>` and publish `DomainEvent` values by reference (as `&dyn PublishedEvent`). The Tauri shell (`src-tauri`) wires in `TauriEventBus` (`src-tauri/src/tauri_event_bus.rs`) as the live publisher.
+Every other crate depends on `rocket-shared`. Domain crates (`rocket-collection`, `rocket-environment`, etc.) use `DomainResult` and `DomainError` as their return types. Services in `rocket-app` accept a `Box<dyn EventPublisher>` and publish events by reference (`&dyn PublishedEvent`). The Tauri shell (`src-tauri`) wires in `TauriEventBus` (`src-tauri/src/tauri_event_bus.rs`) as the live publisher.
