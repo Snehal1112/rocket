@@ -2,9 +2,9 @@
 #![allow(clippy::double_must_use)]
 pub mod agent_config;
 pub mod conversation;
-pub mod events;
+mod events;
 pub mod mcp_server_spec;
-pub mod options;
+mod options;
 pub mod prompt;
 pub mod proposal;
 pub mod session;
