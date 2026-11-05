@@ -191,7 +191,7 @@ impl Worker {
                 .is_some_and(|deadline| Instant::now() >= deadline);
             if due {
                 for event in batch.take(self.echo.as_deref(), self.timing.echo_window) {
-                    self.publisher.publish(event);
+                    self.publisher.publish(&event);
                 }
             }
         }
@@ -245,6 +245,7 @@ impl rocket_workspace::FileWatcher for NotifyFileWatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rocket_shared::events::PublishedEvent;
     use rocket_shared::events::{DomainEvent, FileChangeKind, NullEventPublisher};
     use std::time::Duration;
     use tempfile::TempDir;
@@ -254,8 +255,11 @@ mod tests {
     struct Recorder(Mutex<Vec<DomainEvent>>);
 
     impl EventPublisher for Recorder {
-        fn publish(&self, event: DomainEvent) {
-            self.0.lock().expect("lock").push(event);
+        fn publish(&self, event: &dyn PublishedEvent) {
+            let Some(event) = event.downcast_ref::<DomainEvent>() else {
+                return;
+            };
+            self.0.lock().expect("lock").push(event.clone());
         }
     }
 

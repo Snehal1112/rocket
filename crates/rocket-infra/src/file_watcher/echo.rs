@@ -4,7 +4,7 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use rocket_shared::events::DomainEvent;
+use rocket_shared::events::PublishedEvent;
 
 /// How far before a file change an in-app write may be and still own it.
 ///
@@ -36,9 +36,9 @@ impl RecentWrites {
 
     /// Records the collections that `event` says the app just wrote.
     /// Events that do not describe a collection write are ignored.
-    pub fn record(&self, event: &DomainEvent) {
+    pub fn record(&self, event: &dyn PublishedEvent) {
         let now = Instant::now();
-        for collection in written_collections(event) {
+        for collection in event.written_collections() {
             self.record_at(collection, now);
         }
     }
@@ -79,42 +79,10 @@ impl RecentWrites {
     }
 }
 
-/// The collections an event reports as written by the app.
-///
-/// Only events that the bus also sends on the `collection-changed` channel
-/// count, so a dropped watcher event is always covered by a service event.
-/// Git events are left out: the frontend handles them on their own channel.
-pub(crate) fn written_collections(event: &DomainEvent) -> Vec<&str> {
-    match event {
-        DomainEvent::CollectionCreated { name } | DomainEvent::CollectionDeleted { name } => {
-            vec![name.as_str()]
-        }
-        DomainEvent::CollectionRenamed { old_name, new_name } => {
-            vec![old_name.as_str(), new_name.as_str()]
-        }
-        DomainEvent::ItemMoved {
-            src_collection,
-            dst_collection,
-            ..
-        } => vec![src_collection.as_str(), dst_collection.as_str()],
-        DomainEvent::RequestSaved { collection, .. }
-        | DomainEvent::RequestDeleted { collection, .. }
-        | DomainEvent::FolderCreated { collection, .. }
-        | DomainEvent::FolderDeleted { collection, .. }
-        | DomainEvent::ItemsReordered { collection, .. }
-        | DomainEvent::CollectionSettingsSaved { collection }
-        | DomainEvent::FolderVariablesSaved { collection, .. }
-        | DomainEvent::FolderSettingsSaved { collection, .. }
-        | DomainEvent::RequestVariablesSaved { collection, .. }
-        | DomainEvent::CollectionVariableWritten { collection, .. } => vec![collection.as_str()],
-        _ => Vec::new(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rocket_shared::events::FileChangeKind;
+    use rocket_shared::events::{DomainEvent, FileChangeKind};
 
     const MS: Duration = Duration::from_millis(1);
 
