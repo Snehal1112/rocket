@@ -177,16 +177,10 @@ pub fn run() {
         }
     }
 
-    // Bound libgit2's network operations before anything else runs. These
-    // write process-global C state with no synchronization, so they are only
-    // safe here, before any other thread exists. Without this, a stalled
-    // connection (e.g. an unreachable remote) blocks the calling thread
-    // forever instead of failing — this only bounds the HTTPS transport;
-    // libgit2 has no equivalent timeout for its SSH (libssh2) transport.
-    unsafe {
-        let _ = git2::opts::set_server_connect_timeout_in_milliseconds(10_000);
-        let _ = git2::opts::set_server_timeout_in_milliseconds(60_000);
-    }
+    // Bound libgit2's network operations before anything else runs. This writes
+    // process-global C state, so it is only safe here, before any other thread
+    // exists.
+    rocket_git::set_network_timeouts();
 
     // Structured logging subscriber with reload layer for TauriTracingLayer.
     // The reload layer starts as None and gets hot-swapped in .setup() once

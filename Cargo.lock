@@ -5559,7 +5559,6 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "chrono",
- "git2",
  "keyring",
  "reqwest 0.12.28",
  "rmcp",

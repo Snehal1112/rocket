@@ -20,7 +20,7 @@ cargo test -p rocket-git -- --nocapture
 
 ## Architecture
 
-`rocket-git` is the `GitService` port plus its libgit2 adapter (`Git2Service`), no Tauri, no async. The adapter does filesystem, process and network work, so the crate is mixed on purpose (ruling D-01 in `docs/engineering/ddd-decisions.md`). `GitService` stays the only way in; keep adapter code under `git2_service/`.
+`rocket-git` is the `GitService` port plus its libgit2 adapter (`Git2Service`), no Tauri, no async. The adapter does filesystem, process and network work, so the crate is mixed on purpose (ruling D-01 in `docs/engineering/ddd-decisions.md`). `GitService` is the only way in, with no exception: even the process-wide libgit2 network timeouts are set through `rocket_git::set_network_timeouts()` (called once at startup in `src-tauri/src/lib.rs`), so no other crate depends on `git2`. Keep adapter code under `git2_service/`.
 
 ### Trait + Implementation pattern
 
@@ -96,4 +96,4 @@ Tests live in `#[cfg(test)]` blocks within each module. All integration tests us
 
 ## Adapter boundary (D-55)
 
-`rocket-git` is a mixed crate (D-01): `GitService` is the port, and the libgit2 adapter lives in the private `git2_service/` module. Other crates reach it only through `GitService` and the re-exports in `lib.rs` (`Git2Service`, `SshTrustStore`, `SystemSshTrustStore`). New libgit2 code goes into `git2_service/`, not into the port modules. `home.rs` reads the home directory for the adapter, because this crate may do I/O.
+`rocket-git` is a mixed crate (D-01): `GitService` is the port, and the libgit2 adapter lives in the private `git2_service/` module. Other crates reach it only through `GitService` and the re-exports in `lib.rs` (`Git2Service`, `SshTrustStore`, `SystemSshTrustStore`, `set_network_timeouts`). New libgit2 code goes into `git2_service/`, not into the port modules. `home.rs` reads the home directory for the adapter, because this crate may do I/O.
