@@ -1,12 +1,13 @@
 //! WebSocket session registry. A session id is chosen by the caller (the frontend), because the
 //! pump publishes events before `connect` returns and the frontend has to know which id to route.
-//! Inbound frames and lifecycle changes leave as `DomainEvent`s, never as return values.
+//! Inbound frames and lifecycle changes leave as `ExecutionEvent`s, never as return values.
 
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use crate::execution_events::ExecutionEvent;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use rocket_http::websocket::{
     WebSocketClient, WebSocketClose, WebSocketCommand, WebSocketConnectRequest, WebSocketEvent,
@@ -14,7 +15,7 @@ use rocket_http::websocket::{
 };
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{
-    DomainEvent, EventPublisher, WebSocketDirection, WebSocketPayloadKind, WebSocketSessionState,
+    EventPublisher, WebSocketDirection, WebSocketPayloadKind, WebSocketSessionState,
 };
 use tokio::sync::mpsc;
 
@@ -42,7 +43,7 @@ fn publish_status(
     subprotocol: Option<String>,
     close: Option<&WebSocketClose>,
 ) {
-    events.publish(&DomainEvent::WebSocketStatus {
+    events.publish(&ExecutionEvent::WebSocketStatus {
         session_id: session_id.to_string(),
         state,
         subprotocol,
@@ -58,7 +59,7 @@ fn publish_frame(
     frame: &WebSocketFrame,
 ) {
     let (kind, data, truncated) = frame_event_data(frame, MAX_STREAM_MESSAGE_BYTES);
-    events.publish(&DomainEvent::WebSocketMessage {
+    events.publish(&ExecutionEvent::WebSocketMessage {
         session_id: session_id.to_string(),
         direction,
         kind,
@@ -261,7 +262,7 @@ impl WebSocketService {
         error
     }
 
-    /// Forwards inbound events as `DomainEvent`s, then publishes exactly one terminal status and
+    /// Forwards inbound events as `ExecutionEvent`s, then publishes exactly one terminal status and
     /// frees the session id.
     fn spawn_pump(
         &self,
@@ -489,25 +490,25 @@ mod tests {
     async fn wait_for(
         publisher: &RecordingPublisher,
         what: &str,
-        pred: impl Fn(&[DomainEvent]) -> bool,
+        pred: impl Fn(&[ExecutionEvent]) -> bool,
     ) {
         for _ in 0..400 {
-            if pred(&publisher.events()) {
+            if pred(&publisher.execution_events()) {
                 return;
             }
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }
         panic!(
             "timed out waiting for {what}; events: {:?}",
-            publisher.events()
+            publisher.execution_events()
         );
     }
 
-    fn statuses(events: &[DomainEvent]) -> Vec<WebSocketSessionState> {
+    fn statuses(events: &[ExecutionEvent]) -> Vec<WebSocketSessionState> {
         events
             .iter()
             .filter_map(|e| match e {
-                DomainEvent::WebSocketStatus { state, .. } => Some(*state),
+                ExecutionEvent::WebSocketStatus { state, .. } => Some(*state),
                 _ => None,
             })
             .collect()
@@ -523,7 +524,7 @@ mod tests {
 
         svc.connect("s1", request()).await.expect("connect");
 
-        let events = publisher.events();
+        let events = publisher.execution_events();
         assert_eq!(
             statuses(&events),
             vec![
@@ -532,7 +533,7 @@ mod tests {
             ]
         );
         match &events[1] {
-            DomainEvent::WebSocketStatus {
+            ExecutionEvent::WebSocketStatus {
                 session_id,
                 subprotocol,
                 ..
@@ -564,17 +565,17 @@ mod tests {
             .expect("send");
         wait_for(&publisher, "two messages", |e| {
             e.iter()
-                .filter(|x| matches!(x, DomainEvent::WebSocketMessage { .. }))
+                .filter(|x| matches!(x, ExecutionEvent::WebSocketMessage { .. }))
                 .count()
                 == 2
         })
         .await;
 
         let messages: Vec<_> = publisher
-            .events()
+            .execution_events()
             .into_iter()
             .filter_map(|e| match e {
-                DomainEvent::WebSocketMessage {
+                ExecutionEvent::WebSocketMessage {
                     direction,
                     kind,
                     data,
@@ -619,9 +620,9 @@ mod tests {
             endpoints.commands.recv().await,
             Some(WebSocketCommand::Send(WebSocketFrame::Text("hello".into())))
         );
-        assert!(publisher.events().iter().any(|e| matches!(
+        assert!(publisher.execution_events().iter().any(|e| matches!(
             e,
-            DomainEvent::WebSocketMessage { direction: WebSocketDirection::Out, data, .. } if data == "hello"
+            ExecutionEvent::WebSocketMessage { direction: WebSocketDirection::Out, data, .. } if data == "hello"
         )));
 
         let err = svc
@@ -653,7 +654,7 @@ mod tests {
         .await;
 
         assert_eq!(svc.session_count(), 0);
-        let terminal = statuses(&publisher.events())
+        let terminal = statuses(&publisher.execution_events())
             .into_iter()
             .filter(|s| {
                 matches!(
@@ -700,7 +701,7 @@ mod tests {
 
         assert!(err.to_string().contains("401"), "{err}");
         assert_eq!(
-            statuses(&publisher.events()),
+            statuses(&publisher.execution_events()),
             vec![
                 WebSocketSessionState::Connecting,
                 WebSocketSessionState::Failed
@@ -937,7 +938,7 @@ mod tests {
             "no socket may be opened for a cancelled connect"
         );
         assert_eq!(svc.session_count(), 0);
-        assert!(statuses(&publisher.events()).contains(&WebSocketSessionState::Closed));
+        assert!(statuses(&publisher.execution_events()).contains(&WebSocketSessionState::Closed));
     }
 
     #[tokio::test]
@@ -956,7 +957,7 @@ mod tests {
 
         assert!(err.to_string().contains("Digest"), "{err}");
         assert_eq!(
-            statuses(&publisher.events()),
+            statuses(&publisher.execution_events()),
             vec![
                 WebSocketSessionState::Connecting,
                 WebSocketSessionState::Failed

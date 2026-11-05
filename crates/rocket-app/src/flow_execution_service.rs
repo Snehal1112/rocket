@@ -8434,18 +8434,17 @@ mod tests {
 
         let summary = service.run(&exec, run_input("poll")).await.expect("run");
 
-        let script_errors: Vec<String> = exec_events
-            .events()
-            .into_iter()
-            .filter_map(|e| match e {
-                rocket_shared::events::DomainEvent::ScriptError { phase, message, .. }
-                    if phase == "before-request" =>
-                {
-                    Some(message)
-                }
-                _ => None,
-            })
-            .collect();
+        let script_errors: Vec<String> =
+            exec_events
+                .execution_events()
+                .into_iter()
+                .filter_map(|e| match e {
+                    crate::execution_events::ExecutionEvent::ScriptError {
+                        phase, message, ..
+                    } if phase == "before-request" => Some(message),
+                    _ => None,
+                })
+                .collect();
         assert_eq!(
             script_errors,
             vec![
@@ -8713,7 +8712,9 @@ mod tests {
         );
         assert!(message.contains("port in use"), "got: {message}");
         assert!(
-            publisher.events().is_empty() && publisher.flow_events().is_empty(),
+            publisher.events().is_empty()
+                && publisher.execution_events().is_empty()
+                && publisher.flow_events().is_empty(),
             "no FlowRunStarted or any other event for a run that never started"
         );
         assert!(

@@ -10,17 +10,7 @@ impl PublishedEvent for DomainEvent {
             // File watcher events are collection changes, so the sidebar
             // refreshes when files are created, modified or deleted.
             DomainEvent::FileChanged { .. } => "collection-changed",
-            DomainEvent::RequestExecuted { .. } => "request-executed",
             DomainEvent::FileWatcherFailed { .. } => "file-watcher-failed",
-            DomainEvent::RunnerStarted { .. } => "runner-started",
-            DomainEvent::RunnerStepCompleted { .. } => "runner-step-completed",
-            DomainEvent::RunnerFinished { .. } => "runner-finished",
-            DomainEvent::WebSocketMessage { .. } => "ws:message",
-            DomainEvent::WebSocketStatus { .. } => "ws:status",
-            DomainEvent::GraphQlSubscriptionMessage { .. } => "graphql:subscription-message",
-            DomainEvent::GraphQlSubscriptionStatus { .. } => "graphql:subscription-status",
-            DomainEvent::OpenApiSyncChecked { .. } => "openapi-sync-checked",
-            DomainEvent::OpenApiSyncApplied { .. } => "openapi-sync-applied",
             DomainEvent::CollectionCreated { .. }
             | DomainEvent::CollectionDeleted { .. }
             | DomainEvent::CollectionRenamed { .. }
@@ -36,10 +26,6 @@ impl PublishedEvent for DomainEvent {
             | DomainEvent::RequestVariablesSaved { .. }
             | DomainEvent::CollectionVariableWritten { .. } => "collection-changed",
             DomainEvent::CollectionTrustChanged { .. } => "collection-trust-changed",
-            DomainEvent::ConsoleOutput { .. } => "script-console",
-            DomainEvent::TestsCompleted { .. } => "script-tests",
-            DomainEvent::ScriptError { .. } => "script-error",
-            DomainEvent::ScriptVariableWritten { .. } => "script-variable-written",
         }
     }
 
@@ -143,99 +129,12 @@ mod tests {
                 collection: s(),
                 folder_path: s(),
             },
-            DomainEvent::RequestExecuted {
-                method: s(),
-                url: s(),
-                status: 200,
-                duration_ms: 1,
-            },
-            DomainEvent::RunnerStarted {
-                run_id: s(),
-                collection: s(),
-                folder_path: None,
-                total_steps: 1,
-            },
-            DomainEvent::RunnerStepCompleted {
-                run_id: s(),
-                index: 0,
-                item_name: s(),
-                request_path: s(),
-                status: s(),
-                status_code: None,
-                duration_ms: 1,
-                test_pass_count: 0,
-                test_fail_count: 0,
-                script_error: None,
-                error: None,
-            },
-            DomainEvent::RunnerFinished {
-                run_id: s(),
-                stopped_reason: s(),
-                step_count: 1,
-                failed_count: 0,
-            },
-            DomainEvent::OpenApiSyncChecked {
-                collection: s(),
-                status: s(),
-            },
-            DomainEvent::OpenApiSyncApplied {
-                collection: s(),
-                applied: 1,
-                stale: 0,
-            },
-            DomainEvent::WebSocketMessage {
-                session_id: s(),
-                direction: WebSocketDirection::In,
-                kind: WebSocketPayloadKind::Text,
-                data: s(),
-                size: 1,
-                timestamp_ms: 0,
-                truncated: false,
-            },
-            DomainEvent::WebSocketStatus {
-                session_id: s(),
-                state: WebSocketSessionState::Open,
-                subprotocol: None,
-                code: None,
-                reason: None,
-            },
-            DomainEvent::GraphQlSubscriptionMessage {
-                session_id: s(),
-                event: GraphQlSubscriptionEventKind::Next,
-                data: s(),
-                timestamp_ms: 0,
-            },
-            DomainEvent::GraphQlSubscriptionStatus {
-                session_id: s(),
-                state: WebSocketSessionState::Open,
-                dialect: None,
-                reason: None,
-            },
             DomainEvent::FileChanged {
                 path: s(),
                 event_type: FileChangeKind::Modify,
                 collection: None,
             },
             DomainEvent::FileWatcherFailed { message: s() },
-            DomainEvent::ConsoleOutput {
-                request_name: s(),
-                entries: Vec::new(),
-            },
-            DomainEvent::TestsCompleted {
-                request_name: s(),
-                results: Vec::new(),
-            },
-            DomainEvent::ScriptError {
-                request_name: s(),
-                phase: s(),
-                message: s(),
-            },
-            DomainEvent::ScriptVariableWritten {
-                scope: s(),
-                environment: None,
-                collection: None,
-                key: s(),
-            },
             DomainEvent::CollectionVariableWritten {
                 collection: s(),
                 key: s(),
@@ -244,19 +143,9 @@ mod tests {
     }
 
     /// The channel of each variant, keyed by its JSON  tag.
-    const CHANNELS: [(&str, &str); 31] = [
+    const CHANNELS: [(&str, &str); 17] = [
         ("fileChanged", "collection-changed"),
-        ("requestExecuted", "request-executed"),
         ("fileWatcherFailed", "file-watcher-failed"),
-        ("runnerStarted", "runner-started"),
-        ("runnerStepCompleted", "runner-step-completed"),
-        ("runnerFinished", "runner-finished"),
-        ("webSocketMessage", "ws:message"),
-        ("webSocketStatus", "ws:status"),
-        ("graphQlSubscriptionMessage", "graphql:subscription-message"),
-        ("graphQlSubscriptionStatus", "graphql:subscription-status"),
-        ("openApiSyncChecked", "openapi-sync-checked"),
-        ("openApiSyncApplied", "openapi-sync-applied"),
         ("collectionCreated", "collection-changed"),
         ("collectionDeleted", "collection-changed"),
         ("collectionRenamed", "collection-changed"),
@@ -272,10 +161,6 @@ mod tests {
         ("requestVariablesSaved", "collection-changed"),
         ("collectionVariableWritten", "collection-changed"),
         ("collectionTrustChanged", "collection-trust-changed"),
-        ("consoleOutput", "script-console"),
-        ("testsCompleted", "script-tests"),
-        ("scriptError", "script-error"),
-        ("scriptVariableWritten", "script-variable-written"),
     ];
 
     fn tag(event: &DomainEvent) -> String {
@@ -286,9 +171,9 @@ mod tests {
     #[test]
     fn one_of_each_covers_every_variant() {
         let events = one_of_each();
-        assert_eq!(events.len(), 31);
+        assert_eq!(events.len(), 17);
         let tags: BTreeSet<String> = events.iter().map(tag).collect();
-        assert_eq!(tags.len(), 31);
+        assert_eq!(tags.len(), 17);
     }
 
     #[test]

@@ -10,9 +10,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::openapi_sync_events::OpenApiSyncEvent;
 use chrono::{DateTime, Utc};
 use rocket_shared::error::DomainError;
-use rocket_shared::events::{DomainEvent, EventPublisher};
+use rocket_shared::events::EventPublisher;
 use tokio::sync::watch;
 
 use crate::openapi_sync_service::{CheckOutcome, OpenApiSyncService};
@@ -187,7 +188,7 @@ impl OpenApiSyncScheduler {
                     "failed"
                 }
             };
-            self.events.publish(&DomainEvent::OpenApiSyncChecked {
+            self.events.publish(&OpenApiSyncEvent::OpenApiSyncChecked {
                 collection: target.collection,
                 status: status.to_string(),
             });

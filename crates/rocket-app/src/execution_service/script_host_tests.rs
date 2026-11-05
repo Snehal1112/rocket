@@ -1854,10 +1854,10 @@ fn withheld_lines(out: &ExecuteRequestOutput) -> usize {
 /// The warning lines in every `ConsoleOutput` event published.
 fn withheld_events(publisher: &crate::test_doubles::RecordingPublisher) -> usize {
     publisher
-        .events()
+        .execution_events()
         .iter()
         .map(|event| match event {
-            rocket_shared::events::DomainEvent::ConsoleOutput { entries, .. } => entries
+            crate::execution_events::ExecutionEvent::ConsoleOutput { entries, .. } => entries
                 .iter()
                 .filter(|e| e["message"] == WITHHELD_TEXT)
                 .count(),
@@ -1883,7 +1883,12 @@ async fn a_nested_withheld_run_warns_once_across_output_and_events() {
     let out = svc.execute(input).await.expect("execute");
     assert!(out.script_error.is_none(), "{:?}", out.script_error);
     assert_eq!(withheld_lines(&out), 1, "{:?}", console(&out));
-    assert_eq!(withheld_events(&publisher), 1, "{:?}", publisher.events());
+    assert_eq!(
+        withheld_events(&publisher),
+        1,
+        "{:?}",
+        publisher.execution_events()
+    );
 }
 
 #[tokio::test]

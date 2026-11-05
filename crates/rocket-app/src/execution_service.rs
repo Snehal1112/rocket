@@ -1,4 +1,5 @@
 use crate::env_audit;
+use crate::execution_events::ExecutionEvent;
 use rocket_audit::{
     actor::AuditActor,
     event::AuditEventKind,
@@ -2179,7 +2180,7 @@ impl RequestExecutionService {
                 collection: collection.to_string(),
                 key: key.to_string(),
             });
-        self.events.publish(&DomainEvent::ScriptVariableWritten {
+        self.events.publish(&ExecutionEvent::ScriptVariableWritten {
             scope: "collection".to_string(),
             environment: None,
             collection: Some(collection.to_string()),
@@ -2207,7 +2208,7 @@ impl RequestExecutionService {
                 collection: collection.to_string(),
                 key: key.to_string(),
             });
-        self.events.publish(&DomainEvent::ScriptVariableWritten {
+        self.events.publish(&ExecutionEvent::ScriptVariableWritten {
             scope: "collection".to_string(),
             environment: None,
             collection: Some(collection.to_string()),
@@ -2238,7 +2239,7 @@ impl RequestExecutionService {
     /// environment editor UI. On a successful save, publishes the same
     /// `EnvironmentEvent::EnvironmentSaved` / `AuditEventKind::SecretVariableWritten`
     /// audit trail a manual save produces (via `env_audit::publish_env_write_events`),
-    /// plus one `DomainEvent::ScriptVariableWritten` per write actually applied.
+    /// plus one `ExecutionEvent::ScriptVariableWritten` per write actually applied.
     fn apply_env_writes(
         &self,
         repo: &dyn EnvironmentRepository,
@@ -2312,7 +2313,7 @@ impl RequestExecutionService {
                     &env,
                 );
                 for write in persist_writes.iter() {
-                    self.events.publish(&DomainEvent::ScriptVariableWritten {
+                    self.events.publish(&ExecutionEvent::ScriptVariableWritten {
                         scope: "environment".to_string(),
                         environment: Some(env_name.to_string()),
                         collection: None,
@@ -2432,7 +2433,7 @@ impl RequestExecutionService {
                 if let Some(err) = result.error.take() {
                     let message =
                         script.attribute(phase, &crate::redaction::redact_secrets(&err, &secrets));
-                    self.events.publish(&DomainEvent::ScriptError {
+                    self.events.publish(&ExecutionEvent::ScriptError {
                         request_name: request_name.to_string(),
                         phase: phase.to_string(),
                         message: message.clone(),
@@ -2447,7 +2448,7 @@ impl RequestExecutionService {
                     phase,
                     &crate::redaction::redact_secrets(&e.to_string(), &secrets),
                 );
-                self.events.publish(&DomainEvent::ScriptError {
+                self.events.publish(&ExecutionEvent::ScriptError {
                     request_name: request_name.to_string(),
                     phase: phase.to_string(),
                     message: message.clone(),
@@ -2531,7 +2532,7 @@ impl RequestExecutionService {
             let result = match engine.execute(ctx).await {
                 Ok(r) => r,
                 Err(e) => {
-                    self.events.publish(&DomainEvent::ScriptError {
+                    self.events.publish(&ExecutionEvent::ScriptError {
                         request_name: request_name.to_string(),
                         phase: format!("action:{phase_str}"),
                         message: crate::redaction::redact_secrets(
@@ -2543,7 +2544,7 @@ impl RequestExecutionService {
                 }
             };
             if let Some(err) = result.error {
-                self.events.publish(&DomainEvent::ScriptError {
+                self.events.publish(&ExecutionEvent::ScriptError {
                     request_name: request_name.to_string(),
                     phase: format!("action:{phase_str}"),
                     message: crate::redaction::redact_secrets(&err, &var_ctx.secret_values),
@@ -3450,7 +3451,7 @@ impl RequestExecutionService {
             })
             .collect();
         // The live event is capped; the request's output keeps every entry.
-        self.events.publish(&DomainEvent::ConsoleOutput {
+        self.events.publish(&ExecutionEvent::ConsoleOutput {
             request_name: request_name.to_string(),
             entries: crate::event_caps::cap_console_entries(entries),
         });
@@ -3513,7 +3514,7 @@ impl RequestExecutionService {
                 })
                 .collect();
             // The live event is capped; the request's output keeps every result.
-            self.events.publish(&DomainEvent::TestsCompleted {
+            self.events.publish(&ExecutionEvent::TestsCompleted {
                 request_name: request_name.clone(),
                 results: crate::event_caps::cap_test_results(results),
             });
@@ -3543,7 +3544,7 @@ impl RequestExecutionService {
         };
 
         // Publish domain event.
-        self.events.publish(&DomainEvent::RequestExecuted {
+        self.events.publish(&ExecutionEvent::RequestExecuted {
             method: input.method.to_string(),
             url: redacted_url,
             status: response.status,
@@ -5940,8 +5941,6 @@ mod tests {
 
     #[tokio::test]
     async fn request_executed_event_redacts_external_secret_value_from_the_url() {
-        use rocket_shared::events::DomainEvent;
-
         struct SharedPublisher(Arc<RecordingPublisher>);
         impl rocket_shared::events::EventPublisher for SharedPublisher {
             fn publish(&self, event: &dyn PublishedEvent) {
@@ -5985,7 +5984,7 @@ mod tests {
         let url = events
             .iter()
             .find_map(|e| match e {
-                DomainEvent::RequestExecuted { url, .. } => Some(url.clone()),
+                ExecutionEvent::RequestExecuted { url, .. } => Some(url.clone()),
                 _ => None,
             })
             .expect("a RequestExecuted event");
@@ -6001,8 +6000,6 @@ mod tests {
 
     #[tokio::test]
     async fn request_executed_event_keeps_a_url_without_secrets_unchanged() {
-        use rocket_shared::events::DomainEvent;
-
         struct SharedPublisher(Arc<RecordingPublisher>);
         impl rocket_shared::events::EventPublisher for SharedPublisher {
             fn publish(&self, event: &dyn PublishedEvent) {
@@ -6033,7 +6030,7 @@ mod tests {
         let url = events
             .iter()
             .find_map(|e| match e {
-                DomainEvent::RequestExecuted { url, .. } => Some(url.clone()),
+                ExecutionEvent::RequestExecuted { url, .. } => Some(url.clone()),
                 _ => None,
             })
             .expect("a RequestExecuted event");
@@ -7641,8 +7638,6 @@ mod tests {
 
     #[tokio::test]
     async fn execute_publishes_event() {
-        use rocket_shared::events::DomainEvent;
-
         let publisher = Arc::new(RecordingPublisher::new());
 
         struct SharedPublisher(Arc<RecordingPublisher>);
@@ -7674,7 +7669,7 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert!(matches!(
             events[0],
-            DomainEvent::RequestExecuted { status: 201, .. }
+            ExecutionEvent::RequestExecuted { status: 201, .. }
         ));
     }
 
@@ -8022,13 +8017,15 @@ mod tests {
     }
 
     struct RecordingPublisher {
-        events: Mutex<Vec<DomainEvent>>,
+        events: Mutex<Vec<ExecutionEvent>>,
+        domain_events: Mutex<Vec<DomainEvent>>,
         env_events: Mutex<Vec<rocket_environment::EnvironmentEvent>>,
     }
     impl RecordingPublisher {
         fn new() -> Self {
             Self {
                 events: Mutex::new(vec![]),
+                domain_events: Mutex::new(vec![]),
                 env_events: Mutex::new(vec![]),
             }
         }
@@ -8039,7 +8036,11 @@ mod tests {
                 self.env_events.lock().expect("lock").push(event.clone());
                 return;
             }
-            let Some(event) = event.downcast_ref::<DomainEvent>() else {
+            if let Some(event) = event.downcast_ref::<DomainEvent>() {
+                self.domain_events.lock().expect("lock").push(event.clone());
+                return;
+            }
+            let Some(event) = event.downcast_ref::<ExecutionEvent>() else {
                 panic!(
                     "recorder got an unknown event on channel {}",
                     event.channel()
@@ -8083,7 +8084,7 @@ mod tests {
         let published = events
             .iter()
             .find_map(|e| match e {
-                DomainEvent::ConsoleOutput { entries, .. } => Some(entries.clone()),
+                ExecutionEvent::ConsoleOutput { entries, .. } => Some(entries.clone()),
                 _ => None,
             })
             .expect("a console event");
@@ -9907,7 +9908,7 @@ mod tests {
         assert!(
             published.iter().any(|e| matches!(
                 e,
-                DomainEvent::ScriptVariableWritten { scope, environment, key, .. }
+                ExecutionEvent::ScriptVariableWritten { scope, environment, key, .. }
                     if scope == "environment" && environment.as_deref() == Some("prod") && key == "API_KEY"
             )),
             "expected ScriptVariableWritten, got {:?}", *published
@@ -10064,20 +10065,21 @@ mod tests {
         input.post_response_script = Some("// post".into());
         svc.execute(input).await.expect("execute failed");
 
+        let domain_published = event_publisher.domain_events.lock().expect("lock");
         let published = event_publisher.events.lock().expect("lock");
         assert!(
-            published.iter().any(|e| matches!(
+            domain_published.iter().any(|e| matches!(
                 e,
                 DomainEvent::CollectionVariableWritten { collection, key }
                     if collection == "my-api" && key == "BASE_URL"
             )),
             "expected CollectionVariableWritten, got {:?}",
-            *published
+            *domain_published
         );
         assert!(
             published.iter().any(|e| matches!(
                 e,
-                DomainEvent::ScriptVariableWritten { scope, collection, key, .. }
+                ExecutionEvent::ScriptVariableWritten { scope, collection, key, .. }
                     if scope == "collection" && collection.as_deref() == Some("my-api") && key == "BASE_URL"
             )),
             "expected ScriptVariableWritten, got {:?}", *published
@@ -11977,7 +11979,7 @@ mod tests {
         let completed: Vec<_> = events
             .iter()
             .filter_map(|e| match e {
-                DomainEvent::TestsCompleted {
+                ExecutionEvent::TestsCompleted {
                     request_name,
                     results,
                 } => Some((request_name.clone(), results.clone())),
@@ -12007,7 +12009,7 @@ mod tests {
         let events = publisher.events.lock().expect("lock");
         assert!(!events
             .iter()
-            .any(|e| matches!(e, DomainEvent::TestsCompleted { .. })));
+            .any(|e| matches!(e, ExecutionEvent::TestsCompleted { .. })));
     }
 
     #[tokio::test]
@@ -13265,7 +13267,7 @@ mod tests {
             .expect("lock")
             .iter()
             .filter_map(|e| match e {
-                DomainEvent::ScriptError { message, .. } => Some(message.clone()),
+                ExecutionEvent::ScriptError { message, .. } => Some(message.clone()),
                 _ => None,
             })
             .collect();
@@ -14422,13 +14424,16 @@ mod tests {
 
     impl rocket_shared::events::EventPublisher for UrlRecorder {
         fn publish(&self, event: &dyn PublishedEvent) {
-            let Some(event) = event.downcast_ref::<DomainEvent>() else {
+            if event.downcast_ref::<DomainEvent>().is_some() {
+                return;
+            }
+            let Some(event) = event.downcast_ref::<ExecutionEvent>() else {
                 panic!(
-                    "recorder got a non-DomainEvent on channel {}",
+                    "recorder got an unknown event on channel {}",
                     event.channel()
                 );
             };
-            if let DomainEvent::RequestExecuted { url, .. } = event {
+            if let ExecutionEvent::RequestExecuted { url, .. } = event {
                 self.0.lock().expect("lock").push(url.clone());
             }
         }

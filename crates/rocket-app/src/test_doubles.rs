@@ -10,6 +10,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::callback_listener::{CallbackEndpoint, CallbackListener, ReceivedCall};
+use crate::execution_events::ExecutionEvent;
 use async_trait::async_trait;
 use rocket_acp::AcpEvent;
 use rocket_collection::{
@@ -1672,6 +1673,7 @@ pub struct RecordingPublisher {
     flow_events: Mutex<Vec<FlowEvent>>,
     git_events: Mutex<Vec<GitEvent>>,
     acp_events: Mutex<Vec<AcpEvent>>,
+    execution_events: Mutex<Vec<ExecutionEvent>>,
     others: Mutex<Vec<(String, serde_json::Value)>>,
 }
 
@@ -1682,6 +1684,7 @@ impl RecordingPublisher {
             flow_events: Mutex::new(Vec::new()),
             git_events: Mutex::new(Vec::new()),
             acp_events: Mutex::new(Vec::new()),
+            execution_events: Mutex::new(Vec::new()),
             others: Mutex::new(Vec::new()),
         })
     }
@@ -1700,8 +1703,12 @@ impl RecordingPublisher {
     pub fn acp_events(&self) -> Vec<AcpEvent> {
         self.acp_events.lock().expect("lock").clone()
     }
+    /// Every published `ExecutionEvent`, in order.
+    pub fn execution_events(&self) -> Vec<ExecutionEvent> {
+        self.execution_events.lock().expect("lock").clone()
+    }
     /// The channel and JSON of every published event that is not a
-    /// `DomainEvent`, a `FlowEvent`, a `GitEvent` or an `AcpEvent`.
+    /// `DomainEvent`, a `FlowEvent`, a `GitEvent`, an `AcpEvent` or an `ExecutionEvent`.
     pub fn others(&self) -> Vec<(String, serde_json::Value)> {
         self.others.lock().expect("lock").clone()
     }
@@ -1719,6 +1726,13 @@ impl EventPublisher for RecordingPublisher {
         }
         if let Some(acp) = event.downcast_ref::<AcpEvent>() {
             self.acp_events.lock().expect("lock").push(acp.clone());
+            return;
+        }
+        if let Some(execution) = event.downcast_ref::<ExecutionEvent>() {
+            self.execution_events
+                .lock()
+                .expect("lock")
+                .push(execution.clone());
             return;
         }
         let Some(domain) = event.downcast_ref::<DomainEvent>() else {
@@ -2243,6 +2257,28 @@ mod tests {
         assert_eq!(
             publisher.acp_events(),
             [AcpEvent::AssistantConversationsCleared]
+        );
+    }
+
+    #[test]
+    fn recording_publisher_keeps_execution_events() {
+        let publisher = RecordingPublisher::new();
+        publisher.publish(&ExecutionEvent::RunnerFinished {
+            run_id: "r1".to_string(),
+            stopped_reason: "completed".to_string(),
+            step_count: 1,
+            failed_count: 0,
+        });
+        assert!(publisher.events().is_empty());
+        assert!(publisher.others().is_empty());
+        assert_eq!(
+            publisher.execution_events(),
+            [ExecutionEvent::RunnerFinished {
+                run_id: "r1".to_string(),
+                stopped_reason: "completed".to_string(),
+                step_count: 1,
+                failed_count: 0,
+            }]
         );
     }
 

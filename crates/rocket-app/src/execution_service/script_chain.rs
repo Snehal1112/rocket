@@ -403,6 +403,7 @@ mod tests {
 #[cfg(test)]
 mod service_tests {
     use super::*;
+    use crate::execution_events::ExecutionEvent;
     use crate::execution_service::{ExecuteRequestInput, RequestExecutionService};
     use crate::test_doubles::{
         EmptySecretManagerRepo, FakeSecretStore, FakeVaultSecretFetcher, InMemoryCollectionRepo,
@@ -418,7 +419,6 @@ mod service_tests {
         ScriptFileScope, ScriptResult,
     };
     use rocket_shared::error::DomainResult;
-    use rocket_shared::events::DomainEvent;
     use rocket_shared::types::{Auth, HttpMethod};
     use std::collections::HashMap;
     use std::path::PathBuf;
@@ -748,15 +748,15 @@ mod service_tests {
             1,
             "a script error does not stop the send"
         );
-        let events = h.publisher.events();
+        let events = h.publisher.execution_events();
         assert!(events.iter().any(|e| matches!(
             e,
-            DomainEvent::ScriptError { phase, message, .. }
+            ExecutionEvent::ScriptError { phase, message, .. }
                 if phase == "before-request" && message == expected
         )));
         assert!(events.iter().any(|e| matches!(
             e,
-            DomainEvent::ScriptError { message, .. }
+            ExecutionEvent::ScriptError { message, .. }
                 if message == "Folder \"api\" after-response script: later"
         )));
     }

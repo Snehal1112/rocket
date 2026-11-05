@@ -9,15 +9,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::execution_events::ExecutionEvent;
 use rocket_collection::WebSocketMessageKind;
 use rocket_http::websocket::{
     WebSocketClient, WebSocketCommand, WebSocketConnectRequest, WebSocketEvent, WebSocketFrame,
     WebSocketHandle,
 };
 use rocket_shared::error::{DomainError, DomainResult};
-use rocket_shared::events::{
-    DomainEvent, EventPublisher, GraphQlSubscriptionEventKind, WebSocketSessionState,
-};
+use rocket_shared::events::{EventPublisher, GraphQlSubscriptionEventKind, WebSocketSessionState};
 use rocket_shared::types::{Auth, Header};
 use serde::Deserialize;
 use serde_json::Value;
@@ -278,7 +277,7 @@ fn publish_status(
     dialect: Option<&str>,
     reason: Option<String>,
 ) {
-    events.publish(&DomainEvent::GraphQlSubscriptionStatus {
+    events.publish(&ExecutionEvent::GraphQlSubscriptionStatus {
         session_id: session_id.to_string(),
         state,
         dialect: dialect.map(str::to_string),
@@ -295,7 +294,7 @@ fn publish_message(
     // A huge result is cut for the live event. The marker says how much was left out.
     let (data, _) =
         crate::event_caps::cap_with_marker(data, crate::event_caps::MAX_STREAM_MESSAGE_BYTES);
-    events.publish(&DomainEvent::GraphQlSubscriptionMessage {
+    events.publish(&ExecutionEvent::GraphQlSubscriptionMessage {
         session_id: session_id.to_string(),
         event,
         data,
@@ -1078,35 +1077,35 @@ mod session_tests {
     async fn wait_for(
         publisher: &RecordingPublisher,
         what: &str,
-        pred: impl Fn(&[DomainEvent]) -> bool,
+        pred: impl Fn(&[ExecutionEvent]) -> bool,
     ) {
         for _ in 0..600 {
-            if pred(&publisher.events()) {
+            if pred(&publisher.execution_events()) {
                 return;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         panic!(
             "timed out waiting for {what}; events: {:?}",
-            publisher.events()
+            publisher.execution_events()
         );
     }
 
-    fn states(events: &[DomainEvent]) -> Vec<WebSocketSessionState> {
+    fn states(events: &[ExecutionEvent]) -> Vec<WebSocketSessionState> {
         events
             .iter()
             .filter_map(|e| match e {
-                DomainEvent::GraphQlSubscriptionStatus { state, .. } => Some(*state),
+                ExecutionEvent::GraphQlSubscriptionStatus { state, .. } => Some(*state),
                 _ => None,
             })
             .collect()
     }
 
-    fn results(events: &[DomainEvent]) -> Vec<(GraphQlSubscriptionEventKind, String)> {
+    fn results(events: &[ExecutionEvent]) -> Vec<(GraphQlSubscriptionEventKind, String)> {
         events
             .iter()
             .filter_map(|e| match e {
-                DomainEvent::GraphQlSubscriptionMessage { event, data, .. } => {
+                ExecutionEvent::GraphQlSubscriptionMessage { event, data, .. } => {
                     Some((*event, data.clone()))
                 }
                 _ => None,
@@ -1114,7 +1113,7 @@ mod session_tests {
             .collect()
     }
 
-    fn terminal(events: &[DomainEvent]) -> bool {
+    fn terminal(events: &[ExecutionEvent]) -> bool {
         states(events).iter().any(|s| {
             matches!(
                 s,
@@ -1166,7 +1165,7 @@ mod session_tests {
         svc.start("s1", start_for(port)).await.expect("start");
         wait_for(&publisher, "terminal status", terminal).await;
 
-        let events = publisher.events();
+        let events = publisher.execution_events();
         assert_eq!(
             states(&events),
             vec![
@@ -1221,13 +1220,13 @@ mod session_tests {
             types(&received)
         );
         assert!(!types(&received).contains(&"subscribe".to_string()));
-        let next_results = results(&publisher.events())
+        let next_results = results(&publisher.execution_events())
             .iter()
             .filter(|(kind, _)| *kind == GraphQlSubscriptionEventKind::Next)
             .count();
         assert_eq!(next_results, 2, "legacy `data` frames are results");
-        let open_dialect = publisher.events().iter().find_map(|e| match e {
-            DomainEvent::GraphQlSubscriptionStatus {
+        let open_dialect = publisher.execution_events().iter().find_map(|e| match e {
+            ExecutionEvent::GraphQlSubscriptionStatus {
                 state: WebSocketSessionState::Open,
                 dialect,
                 ..
@@ -1266,10 +1265,10 @@ mod session_tests {
         svc.start("s1", start_for(port)).await.expect("start");
         wait_for(&publisher, "terminal status", terminal).await;
 
-        let events = publisher.events();
+        let events = publisher.execution_events();
         assert_eq!(states(&events).last(), Some(&WebSocketSessionState::Failed));
         let reason = events.iter().find_map(|e| match e {
-            DomainEvent::GraphQlSubscriptionStatus {
+            ExecutionEvent::GraphQlSubscriptionStatus {
                 state: WebSocketSessionState::Failed,
                 reason,
                 ..
@@ -1298,7 +1297,7 @@ mod session_tests {
         wait_for(&publisher, "terminal status", terminal).await;
 
         assert_eq!(
-            states(&publisher.events()).last(),
+            states(&publisher.execution_events()).last(),
             Some(&WebSocketSessionState::Closed)
         );
         let completes = received
@@ -1322,7 +1321,7 @@ mod session_tests {
         svc.start("s1", start_for(port)).await.expect("start");
         wait_for(&publisher, "terminal status", terminal).await;
 
-        let events = publisher.events();
+        let events = publisher.execution_events();
         let seen = results(&events);
         assert_eq!(seen.len(), 1, "{seen:?}");
         assert_eq!(seen[0].0, GraphQlSubscriptionEventKind::Error);
@@ -1339,10 +1338,10 @@ mod session_tests {
         svc.start("s1", start_for(port)).await.expect("start");
         wait_for(&publisher, "terminal status", terminal).await;
 
-        let events = publisher.events();
+        let events = publisher.execution_events();
         assert_eq!(states(&events).last(), Some(&WebSocketSessionState::Failed));
         let reason = events.iter().find_map(|e| match e {
-            DomainEvent::GraphQlSubscriptionStatus {
+            ExecutionEvent::GraphQlSubscriptionStatus {
                 state: WebSocketSessionState::Failed,
                 reason,
                 ..
@@ -1385,7 +1384,7 @@ mod session_tests {
 
         assert!(err.to_string().contains("connection failed"), "{err}");
         assert_eq!(
-            states(&publisher.events()),
+            states(&publisher.execution_events()),
             vec![
                 WebSocketSessionState::Connecting,
                 WebSocketSessionState::Failed
@@ -1456,12 +1455,12 @@ mod event_cap_tests {
     use std::sync::Mutex;
 
     #[derive(Default)]
-    struct Recorder(Mutex<Vec<DomainEvent>>);
+    struct Recorder(Mutex<Vec<ExecutionEvent>>);
     impl EventPublisher for Recorder {
         fn publish(&self, event: &dyn PublishedEvent) {
-            let Some(event) = event.downcast_ref::<DomainEvent>() else {
+            let Some(event) = event.downcast_ref::<ExecutionEvent>() else {
                 panic!(
-                    "recorder got a non-DomainEvent on channel {}",
+                    "recorder got a non-ExecutionEvent on channel {}",
                     event.channel()
                 );
             };
@@ -1477,7 +1476,7 @@ mod event_cap_tests {
         publish_message(&recorder, "s1", GraphQlSubscriptionEventKind::Next, data);
         let events = recorder.0.into_inner().unwrap_or_else(|e| e.into_inner());
         match events.into_iter().next() {
-            Some(DomainEvent::GraphQlSubscriptionMessage { data, .. }) => data,
+            Some(ExecutionEvent::GraphQlSubscriptionMessage { data, .. }) => data,
             other => panic!("expected a message event, got {other:?}"),
         }
     }

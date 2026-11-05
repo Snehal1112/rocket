@@ -28,6 +28,7 @@ pub mod env_audit;
 pub mod environment_service;
 pub mod environment_services;
 pub mod event_caps;
+pub mod execution_events;
 pub mod execution_service;
 pub mod export_service;
 pub mod flow_auth;
@@ -64,6 +65,7 @@ pub mod openapi_connect;
 pub mod openapi_sync_apply;
 pub mod openapi_sync_changes;
 pub mod openapi_sync_delete;
+pub mod openapi_sync_events;
 #[cfg(test)]
 mod openapi_sync_lock_tests;
 pub mod openapi_sync_reset;

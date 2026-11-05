@@ -1587,7 +1587,7 @@ pub async fn openapi_sync_check_now(
                 _ => "failed",
             };
             crate::tauri_event_bus::TauriEventBus::new(app).publish(
-                &rocket_shared::events::DomainEvent::OpenApiSyncChecked {
+                &rocket_app::openapi_sync_events::OpenApiSyncEvent::OpenApiSyncChecked {
                     collection,
                     status: status.to_string(),
                 },
@@ -1606,11 +1606,13 @@ fn publish_applied(
     result: &Result<ApplyReport, DomainError>,
 ) {
     if let Ok(report) = result {
-        events.publish(&rocket_shared::events::DomainEvent::OpenApiSyncApplied {
-            collection: collection.to_string(),
-            applied: report.applied.len(),
-            stale: report.stale.len(),
-        });
+        events.publish(
+            &rocket_app::openapi_sync_events::OpenApiSyncEvent::OpenApiSyncApplied {
+                collection: collection.to_string(),
+                applied: report.applied.len(),
+                stale: report.stale.len(),
+            },
+        );
     }
 }
 
@@ -2063,13 +2065,15 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct Recorded(Mutex<Vec<rocket_shared::events::DomainEvent>>);
+    struct Recorded(Mutex<Vec<rocket_app::openapi_sync_events::OpenApiSyncEvent>>);
 
     impl EventPublisher for Recorded {
         fn publish(&self, event: &dyn rocket_shared::events::PublishedEvent) {
-            let Some(event) = event.downcast_ref::<rocket_shared::events::DomainEvent>() else {
+            let Some(event) =
+                event.downcast_ref::<rocket_app::openapi_sync_events::OpenApiSyncEvent>()
+            else {
                 panic!(
-                    "recorder got a non-DomainEvent on channel {}",
+                    "recorder got a non-OpenApiSyncEvent on channel {}",
                     event.channel()
                 );
             };
@@ -2097,14 +2101,14 @@ mod tests {
 
     #[test]
     fn apply_publishes_one_event() {
-        use rocket_shared::events::DomainEvent;
+        use rocket_app::openapi_sync_events::OpenApiSyncEvent;
         let events = Recorded::default();
         publish_applied(&events, "api", &Ok(report(3, 1)));
         let seen = events.0.lock().expect("lock");
         assert_eq!(seen.len(), 1);
         assert!(matches!(
             &seen[0],
-            DomainEvent::OpenApiSyncApplied { collection, applied: 3, stale: 1 } if collection == "api"
+            OpenApiSyncEvent::OpenApiSyncApplied { collection, applied: 3, stale: 1 } if collection == "api"
         ));
     }
 

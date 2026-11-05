@@ -284,7 +284,8 @@ pub struct FlowRewriteFailure {
     pub message: String,
 }
 
-/// Every event the backend publishes.
+/// The collection events left after the split into per-context enums.
+/// Plan 6 moves them too.
 ///
 /// Wire format, pinned by the `wire_contract_*` tests below:
 /// - The `type` tag is camelCase.
@@ -362,110 +363,6 @@ pub enum DomainEvent {
         folder_path: String,
     },
 
-    // HTTP execution events
-    RequestExecuted {
-        method: String,
-        url: String,
-        status: u16,
-        duration_ms: u64,
-    },
-
-    // Collection Runner events
-    /// Emitted once when a run starts, before its first step.
-    /// `total_steps` is the run set's length; a script jumping with
-    /// `setNextRequest` can make the number of executed steps differ from it.
-    RunnerStarted {
-        run_id: String,
-        collection: String,
-        folder_path: Option<String>,
-        total_steps: usize,
-    },
-    /// Emitted after every step of a run, in execution order.
-    /// `status` is `"completed"`, `"skipped"`, or `"error"`.
-    RunnerStepCompleted {
-        run_id: String,
-        /// Position in the emitted step stream, starting at 0.
-        index: usize,
-        item_name: String,
-        request_path: String,
-        status: String,
-        /// `None` for a skipped or errored step.
-        status_code: Option<u16>,
-        duration_ms: u64,
-        test_pass_count: usize,
-        test_fail_count: usize,
-        /// Uncaught script exception message, if any.
-        script_error: Option<String>,
-        /// Transport or sequencing error, if any.
-        error: Option<String>,
-    },
-    /// Emitted once when a run ends, for any reason.
-    /// `stopped_reason` is `"completed"`, `"stoppedByScript"`,
-    /// `"stoppedOnFailure"`, `"unknownNextRequest"`, `"cancelled"`, or
-    /// `"stepLimitReached"`.
-    RunnerFinished {
-        run_id: String,
-        stopped_reason: String,
-        step_count: usize,
-        failed_count: usize,
-    },
-
-    /// Emitted after a background OpenAPI sync check. `status` is `unchanged`,
-    /// `changed` or `failed`. It is a refresh signal and carries no URL or message.
-    OpenApiSyncChecked {
-        collection: String,
-        status: String,
-    },
-    /// Emitted once after an OpenAPI sync apply finished. `applied` and `stale` are counts,
-    /// so the event carries no names or paths. It is a refresh signal.
-    OpenApiSyncApplied {
-        collection: String,
-        applied: usize,
-        stale: usize,
-    },
-
-    // WebSocket session events
-    /// One frame sent or received on a WebSocket session.
-    WebSocketMessage {
-        session_id: String,
-        direction: WebSocketDirection,
-        kind: WebSocketPayloadKind,
-        /// Text as is, or base64 for binary frames.
-        data: String,
-        /// Payload size in bytes (before base64).
-        size: usize,
-        timestamp_ms: i64,
-        /// True when `data` was cut to the live event size cap. Text then
-        /// ends with a marker; base64 is cut whole so it still decodes.
-        /// Left out of the JSON when false, so the pinned key set holds.
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        truncated: bool,
-    },
-    /// A WebSocket session changed state. `code` and `reason` describe a close.
-    WebSocketStatus {
-        session_id: String,
-        state: WebSocketSessionState,
-        subprotocol: Option<String>,
-        code: Option<u16>,
-        reason: Option<String>,
-    },
-    // GraphQL subscription events
-    /// One result, error or completion of a GraphQL subscription.
-    GraphQlSubscriptionMessage {
-        session_id: String,
-        event: GraphQlSubscriptionEventKind,
-        /// Pretty-printed JSON. Empty for `complete`.
-        data: String,
-        timestamp_ms: i64,
-    },
-    /// A subscription changed state. `dialect` is the subprotocol the server selected.
-    GraphQlSubscriptionStatus {
-        session_id: String,
-        state: WebSocketSessionState,
-        dialect: Option<String>,
-        reason: Option<String>,
-    },
-
     // File system events
     FileChanged {
         path: String,
@@ -479,39 +376,6 @@ pub enum DomainEvent {
         message: String,
     },
 
-    // Script events
-    /// Emitted after all script phases complete. Carries combined console output.
-    ConsoleOutput {
-        request_name: String,
-        /// JSON array of {level, message} objects.
-        entries: Vec<serde_json::Value>,
-    },
-    /// Emitted after the tests phase completes.
-    TestsCompleted {
-        request_name: String,
-        /// JSON array of {name, status, error?} objects.
-        results: Vec<serde_json::Value>,
-    },
-    /// Emitted when a script throws an uncaught exception.
-    ScriptError {
-        request_name: String,
-        /// "before-request" | "after-response" | "tests"
-        phase: String,
-        message: String,
-    },
-    /// Emitted when a script (`rok.setEnvVar`/`setGlobalEnvVar`/`setCollectionVar`)
-    /// or a declarative `runtime.actions` set-variable write persists a variable.
-    /// Distinct from `EnvironmentSaved`/`CollectionVariableWritten`, which fire
-    /// alongside it — this variant exists so the frontend can distinguish an
-    /// automated script write from a manual user edit without correlating
-    /// timestamps.
-    ScriptVariableWritten {
-        /// "environment" | "collection"
-        scope: String,
-        environment: Option<String>,
-        collection: Option<String>,
-        key: String,
-    },
     /// Emitted when a collection-scoped variable is written (currently only via
     /// `rok.setCollectionVar` / `runtime.actions` collection-scope writes; manual
     /// collection-settings saves publish `CollectionSettingsSaved` instead, not
@@ -590,20 +454,6 @@ mod tests {
     }
 
     #[test]
-    fn script_variable_written_serializes() {
-        let event = DomainEvent::ScriptVariableWritten {
-            scope: "environment".into(),
-            environment: Some("staging".into()),
-            collection: None,
-            key: "API_KEY".into(),
-        };
-        let json = serde_json::to_string(&event).expect("serialize");
-        assert!(json.contains("scriptVariableWritten") || json.contains("ScriptVariableWritten"));
-        assert!(json.contains("staging"));
-        assert!(json.contains("API_KEY"));
-    }
-
-    #[test]
     fn collection_variable_written_serializes() {
         let event = DomainEvent::CollectionVariableWritten {
             collection: "my-api".into(),
@@ -616,61 +466,6 @@ mod tests {
         );
         assert!(json.contains("my-api"));
         assert!(json.contains("BASE_URL"));
-    }
-
-    #[test]
-    fn runner_started_wire_shape() {
-        let event = DomainEvent::RunnerStarted {
-            run_id: "01J".into(),
-            collection: "my-api".into(),
-            folder_path: Some("auth".into()),
-            total_steps: 3,
-        };
-        let json = serde_json::to_string(&event).expect("serialize");
-        assert_eq!(
-            json,
-            r#"{"type":"runnerStarted","run_id":"01J","collection":"my-api","folder_path":"auth","total_steps":3}"#
-        );
-    }
-
-    #[test]
-    fn runner_step_completed_wire_shape() {
-        let event = DomainEvent::RunnerStepCompleted {
-            run_id: "01J".into(),
-            index: 0,
-            item_name: "Login".into(),
-            request_path: "auth/login.yml".into(),
-            status: "completed".into(),
-            status_code: Some(200),
-            duration_ms: 12,
-            test_pass_count: 2,
-            test_fail_count: 0,
-            script_error: None,
-            error: None,
-        };
-        let json = serde_json::to_string(&event).expect("serialize");
-        assert!(json.contains(r#""type":"runnerStepCompleted""#));
-        // Struct-variant fields stay snake_case — the enum's rename_all only
-        // renames variants. The frontend contract depends on this.
-        assert!(json.contains(r#""run_id":"01J""#));
-        assert!(json.contains(r#""item_name":"Login""#));
-        assert!(json.contains(r#""test_pass_count":2"#));
-        assert!(json.contains(r#""status_code":200"#));
-    }
-
-    #[test]
-    fn runner_finished_wire_shape() {
-        let event = DomainEvent::RunnerFinished {
-            run_id: "01J".into(),
-            stopped_reason: "completed".into(),
-            step_count: 3,
-            failed_count: 1,
-        };
-        let json = serde_json::to_string(&event).expect("serialize");
-        assert_eq!(
-            json,
-            r#"{"type":"runnerFinished","run_id":"01J","stopped_reason":"completed","step_count":3,"failed_count":1}"#
-        );
     }
 
     #[test]
@@ -733,33 +528,6 @@ mod tests {
         assert_eq!(
             json,
             r#"{"type":"collectionTrustChanged","collection":"my-api"}"#
-        );
-    }
-
-    #[test]
-    fn openapi_sync_checked_wire_shape() {
-        let event = DomainEvent::OpenApiSyncChecked {
-            collection: "my-api".into(),
-            status: "changed".into(),
-        };
-        let json = serde_json::to_string(&event).expect("serialize");
-        assert_eq!(
-            json,
-            r#"{"type":"openApiSyncChecked","collection":"my-api","status":"changed"}"#
-        );
-    }
-
-    #[test]
-    fn openapi_sync_applied_wire_shape() {
-        let event = DomainEvent::OpenApiSyncApplied {
-            collection: "api".into(),
-            applied: 3,
-            stale: 1,
-        };
-        let json = serde_json::to_string(&event).expect("serialize");
-        assert_eq!(
-            json,
-            r#"{"type":"openApiSyncApplied","collection":"api","applied":3,"stale":1}"#
         );
     }
 
@@ -895,65 +663,6 @@ mod tests {
             let back: FlowSkipReason = serde_json::from_str(&json).expect("deserialize");
             assert_eq!(back, reason);
         }
-    }
-
-    #[test]
-    fn graphql_subscription_events_serialize_like_the_websocket_ones() {
-        let message = DomainEvent::GraphQlSubscriptionMessage {
-            session_id: "s1".into(),
-            event: GraphQlSubscriptionEventKind::Next,
-            data: "{}".into(),
-            timestamp_ms: 7,
-        };
-        let json = serde_json::to_value(&message).expect("serialize");
-        assert_eq!(json["type"], "graphQlSubscriptionMessage");
-        assert_eq!(json["session_id"], "s1");
-        assert_eq!(json["event"], "next");
-        assert_eq!(json["timestamp_ms"], 7);
-
-        let status = DomainEvent::GraphQlSubscriptionStatus {
-            session_id: "s1".into(),
-            state: WebSocketSessionState::Open,
-            dialect: Some("graphql-transport-ws".into()),
-            reason: None,
-        };
-        let json = serde_json::to_value(&status).expect("serialize");
-        assert_eq!(json["type"], "graphQlSubscriptionStatus");
-        assert_eq!(json["state"], "open");
-        assert_eq!(json["dialect"], "graphql-transport-ws");
-        assert!(json["reason"].is_null());
-    }
-
-    #[test]
-    fn websocket_events_serialize_with_snake_case_fields_and_lowercase_enums() {
-        let message = DomainEvent::WebSocketMessage {
-            session_id: "s1".into(),
-            direction: WebSocketDirection::In,
-            kind: WebSocketPayloadKind::Binary,
-            data: "AQID".into(),
-            size: 3,
-            timestamp_ms: 42,
-            truncated: false,
-        };
-        let json = serde_json::to_value(&message).expect("serialize");
-        assert_eq!(json["type"], "webSocketMessage");
-        assert_eq!(json["session_id"], "s1");
-        assert_eq!(json["direction"], "in");
-        assert_eq!(json["kind"], "binary");
-        assert_eq!(json["timestamp_ms"], 42);
-
-        let status = DomainEvent::WebSocketStatus {
-            session_id: "s1".into(),
-            state: WebSocketSessionState::Failed,
-            subprotocol: None,
-            code: Some(4001),
-            reason: Some("bye".into()),
-        };
-        let json = serde_json::to_value(&status).expect("serialize");
-        assert_eq!(json["type"], "webSocketStatus");
-        assert_eq!(json["state"], "failed");
-        assert_eq!(json["code"], 4001);
-        assert!(json["subprotocol"].is_null());
     }
 
     #[test]
@@ -1094,52 +803,6 @@ mod tests {
                 new_name: "b".into(),
             },
             &["type", "old_name", "new_name"],
-        );
-    }
-
-    #[test]
-    fn wire_contract_stream_events() {
-        assert_keys(
-            &DomainEvent::WebSocketMessage {
-                session_id: "s".into(),
-                direction: WebSocketDirection::Out,
-                kind: WebSocketPayloadKind::Text,
-                data: "d".into(),
-                size: 1,
-                timestamp_ms: 0,
-                truncated: false,
-            },
-            &[
-                "type",
-                "session_id",
-                "direction",
-                "kind",
-                "data",
-                "size",
-                "timestamp_ms",
-            ],
-        );
-        // The cut flag is additive: present only when true.
-        assert_keys(
-            &DomainEvent::WebSocketMessage {
-                session_id: "s".into(),
-                direction: WebSocketDirection::In,
-                kind: WebSocketPayloadKind::Binary,
-                data: "AAAA".into(),
-                size: 9,
-                timestamp_ms: 0,
-                truncated: true,
-            },
-            &[
-                "type",
-                "session_id",
-                "direction",
-                "kind",
-                "data",
-                "size",
-                "timestamp_ms",
-                "truncated",
-            ],
         );
     }
 

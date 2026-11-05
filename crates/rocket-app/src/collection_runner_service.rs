@@ -9,10 +9,11 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
+use crate::execution_events::ExecutionEvent;
 use rocket_collection::CollectionRepository;
 use rocket_scripting::{ExecutionMode, NextRequest};
 use rocket_shared::error::DomainResult;
-use rocket_shared::events::{DomainEvent, EventPublisher};
+use rocket_shared::events::EventPublisher;
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
@@ -61,7 +62,7 @@ pub enum RunStepStatus {
 }
 
 impl RunStepStatus {
-    /// Wire string used in `DomainEvent::RunnerStepCompleted.status`.
+    /// Wire string used in `ExecutionEvent::RunnerStepCompleted.status`.
     pub fn as_str(self) -> &'static str {
         match self {
             RunStepStatus::Completed => "completed",
@@ -138,7 +139,7 @@ pub enum StoppedReason {
 }
 
 impl StoppedReason {
-    /// Wire string used in `DomainEvent::RunnerFinished.stopped_reason`.
+    /// Wire string used in `ExecutionEvent::RunnerFinished.stopped_reason`.
     pub fn as_str(&self) -> &'static str {
         match self {
             StoppedReason::Completed => "completed",
@@ -247,7 +248,7 @@ impl CollectionRunnerService {
             set.insert(run_id.clone());
         }
 
-        self.events.publish(&DomainEvent::RunnerStarted {
+        self.events.publish(&ExecutionEvent::RunnerStarted {
             run_id: run_id.clone(),
             collection: input.collection.clone(),
             folder_path: input.folder_path.clone(),
@@ -336,7 +337,7 @@ impl CollectionRunnerService {
         }
 
         let failed_count = steps.iter().filter(|s| s.is_failure()).count();
-        self.events.publish(&DomainEvent::RunnerFinished {
+        self.events.publish(&ExecutionEvent::RunnerFinished {
             run_id: run_id.clone(),
             stopped_reason: stopped_reason.as_str().to_string(),
             step_count: steps.len(),
@@ -513,7 +514,7 @@ impl CollectionRunnerService {
     }
 
     fn publish_step(&self, run_id: &str, result: &RunStepResult) {
-        self.events.publish(&DomainEvent::RunnerStepCompleted {
+        self.events.publish(&ExecutionEvent::RunnerStepCompleted {
             run_id: run_id.to_string(),
             index: result.index,
             item_name: result.item_name.clone(),
@@ -857,10 +858,12 @@ mod tests {
         runner.run(&exec, input).await.expect("run");
 
         let warnings: Vec<String> = publisher
-            .events()
+            .execution_events()
             .into_iter()
             .filter_map(|e| match e {
-                rocket_shared::events::DomainEvent::ConsoleOutput { entries, .. } => Some(entries),
+                crate::execution_events::ExecutionEvent::ConsoleOutput { entries, .. } => {
+                    Some(entries)
+                }
                 _ => None,
             })
             .flatten()
@@ -1247,8 +1250,6 @@ mod tests {
 
     #[tokio::test]
     async fn publishes_started_step_and_finished_events() {
-        use rocket_shared::events::DomainEvent;
-
         let h = harness(
             three_step_collection(),
             ProgrammableEngine::new(),
@@ -1259,29 +1260,29 @@ mod tests {
             .run(&h.exec, sample_run_input())
             .await
             .expect("run");
-        let events = h.publisher.events();
+        let events = h.publisher.execution_events();
 
         assert!(matches!(
             events.first(),
-            Some(DomainEvent::RunnerStarted { total_steps: 3, .. })
+            Some(ExecutionEvent::RunnerStarted { total_steps: 3, .. })
         ));
-        let step_events: Vec<&DomainEvent> = events
+        let step_events: Vec<&ExecutionEvent> = events
             .iter()
-            .filter(|e| matches!(e, DomainEvent::RunnerStepCompleted { .. }))
+            .filter(|e| matches!(e, ExecutionEvent::RunnerStepCompleted { .. }))
             .collect();
         assert_eq!(step_events.len(), 3);
         assert!(matches!(
             events.last(),
-            Some(DomainEvent::RunnerFinished {
+            Some(ExecutionEvent::RunnerFinished {
                 step_count: 3,
                 failed_count: 0,
                 ..
             })
         ));
         assert!(events.iter().all(|e| match e {
-            DomainEvent::RunnerStarted { run_id, .. }
-            | DomainEvent::RunnerStepCompleted { run_id, .. }
-            | DomainEvent::RunnerFinished { run_id, .. } => run_id == &summary.run_id,
+            ExecutionEvent::RunnerStarted { run_id, .. }
+            | ExecutionEvent::RunnerStepCompleted { run_id, .. }
+            | ExecutionEvent::RunnerFinished { run_id, .. } => run_id == &summary.run_id,
             _ => true,
         }));
     }
@@ -1303,7 +1304,7 @@ mod tests {
     }
 
     // These two lock the IPC DTO wire shapes the frontend plan is written
-    // against. Unlike `DomainEvent`, these are camelCase all the way down.
+    // against. Unlike `ExecutionEvent`, these are camelCase all the way down.
     #[test]
     fn stopped_reason_wire_shape_is_camel_case() {
         let reason = StoppedReason::UnknownNextRequest {
@@ -1603,13 +1604,13 @@ mod tests {
 
     impl EventPublisher for CancelAfterSteps {
         fn publish(&self, event: &dyn PublishedEvent) {
-            let Some(event) = event.downcast_ref::<DomainEvent>() else {
+            let Some(event) = event.downcast_ref::<ExecutionEvent>() else {
                 panic!(
-                    "recorder got a non-DomainEvent on channel {}",
+                    "recorder got a non-ExecutionEvent on channel {}",
                     event.channel()
                 );
             };
-            if let DomainEvent::RunnerStepCompleted { run_id, .. } = &event {
+            if let ExecutionEvent::RunnerStepCompleted { run_id, .. } = &event {
                 let mut seen = self.seen.lock().expect("lock");
                 *seen += 1;
                 if *seen >= self.cancel_after {
@@ -1786,13 +1787,13 @@ mod tests {
 
     impl EventPublisher for CancelViaRealMethod {
         fn publish(&self, event: &dyn PublishedEvent) {
-            let Some(event) = event.downcast_ref::<DomainEvent>() else {
+            let Some(event) = event.downcast_ref::<ExecutionEvent>() else {
                 panic!(
-                    "recorder got a non-DomainEvent on channel {}",
+                    "recorder got a non-ExecutionEvent on channel {}",
                     event.channel()
                 );
             };
-            if let DomainEvent::RunnerStepCompleted { run_id, .. } = &event {
+            if let ExecutionEvent::RunnerStepCompleted { run_id, .. } = &event {
                 let mut seen = self.seen.lock().expect("lock");
                 *seen += 1;
                 if *seen >= self.cancel_after {
@@ -1985,11 +1986,11 @@ mod tests {
     }
 
     /// The `ConsoleOutput` lines of `events` that say `process.env` was sent unresolved.
-    fn withheld_lines(events: &[rocket_shared::events::DomainEvent]) -> usize {
+    fn withheld_lines(events: &[ExecutionEvent]) -> usize {
         events
             .iter()
             .map(|event| match event {
-                rocket_shared::events::DomainEvent::ConsoleOutput { entries, .. } => entries
+                crate::execution_events::ExecutionEvent::ConsoleOutput { entries, .. } => entries
                     .iter()
                     .filter(|e| {
                         e["message"]
@@ -2049,7 +2050,7 @@ mod tests {
             vec!["https://api.test/{{process.env.ROCKET_T6_KEY}}".to_string()]
         );
         // Only the step that was sent says so.
-        assert_eq!(withheld_lines(&publisher.events()), 1);
+        assert_eq!(withheld_lines(&publisher.execution_events()), 1);
     }
 
     #[tokio::test]
@@ -2097,15 +2098,15 @@ mod tests {
         let summary = runner.run(&exec, input).await.expect("run");
 
         assert_eq!(summary.steps.len(), 3);
-        assert_eq!(vault_lines(&publisher.events()), 2);
+        assert_eq!(vault_lines(&publisher.execution_events()), 2);
     }
 
     /// The `ConsoleOutput` lines of `events` that say a RocketVault placeholder was withheld.
-    fn vault_lines(events: &[rocket_shared::events::DomainEvent]) -> usize {
+    fn vault_lines(events: &[ExecutionEvent]) -> usize {
         events
             .iter()
             .map(|event| match event {
-                rocket_shared::events::DomainEvent::ConsoleOutput { entries, .. } => entries
+                crate::execution_events::ExecutionEvent::ConsoleOutput { entries, .. } => entries
                     .iter()
                     .filter(|e| {
                         e["message"]

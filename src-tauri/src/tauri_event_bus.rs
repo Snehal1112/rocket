@@ -108,6 +108,8 @@ fn emit_channels(event: &dyn PublishedEvent) -> Vec<&'static str> {
 mod tests {
     use super::*;
     use rocket_acp::AcpEvent;
+    use rocket_app::execution_events::ExecutionEvent;
+    use rocket_app::openapi_sync_events::OpenApiSyncEvent;
     use rocket_flow::FlowEvent;
     use rocket_git::GitEvent;
     use rocket_shared::events::DomainEvent;
@@ -194,6 +196,47 @@ mod tests {
             emit_channels(&AcpEvent::AssistantConversationsCleared),
             vec!["assistant-conversations-cleared"]
         );
+    }
+
+    #[test]
+    fn openapi_sync_events_emit_on_their_own_single_channel() {
+        let checked = OpenApiSyncEvent::OpenApiSyncChecked {
+            collection: "api".into(),
+            status: "changed".into(),
+        };
+        assert_eq!(emit_channels(&checked), vec!["openapi-sync-checked"]);
+        let applied = OpenApiSyncEvent::OpenApiSyncApplied {
+            collection: "api".into(),
+            applied: 3,
+            stale: 1,
+        };
+        assert_eq!(emit_channels(&applied), vec!["openapi-sync-applied"]);
+    }
+
+    #[test]
+    fn execution_events_emit_on_their_own_single_channel() {
+        let runner = ExecutionEvent::RunnerFinished {
+            run_id: "r".into(),
+            stopped_reason: "completed".into(),
+            step_count: 1,
+            failed_count: 0,
+        };
+        assert_eq!(emit_channels(&runner), vec!["runner-finished"]);
+        let websocket = ExecutionEvent::WebSocketStatus {
+            session_id: "s".into(),
+            state: rocket_shared::events::WebSocketSessionState::Open,
+            subprotocol: None,
+            code: None,
+            reason: None,
+        };
+        assert_eq!(emit_channels(&websocket), vec!["ws:status"]);
+        let script = ExecutionEvent::ScriptVariableWritten {
+            scope: "collection".into(),
+            environment: None,
+            collection: Some("c".into()),
+            key: "K".into(),
+        };
+        assert_eq!(emit_channels(&script), vec!["script-variable-written"]);
     }
 
     #[test]
