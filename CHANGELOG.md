@@ -1,5 +1,41 @@
 # Changelog
 
+## [2.1.6](https://github.com/Snehal1112/rocket/compare/v2.1.5...v2.1.6) (2026-11-05)
+
+### Features
+
+* **acp:** add AcpEvent and move the option types into rocket-acp ([5f46a4c](https://github.com/Snehal1112/rocket/commit/5f46a4c87ef4a7f6f758f566282a1fa1d16b6fd6))
+* **collection:** add contract scope and version rules ([645ca00](https://github.com/Snehal1112/rocket/commit/645ca0091e2271a5d505b9cf528f73a32635e1af))
+* **collection:** add duplicate-request rules ([4b2d6a8](https://github.com/Snehal1112/rocket/commit/4b2d6a85dd749da691811ccb2a48cd67395d19cf))
+* **collection:** add effective_auth for the send-time auth chain ([e708caa](https://github.com/Snehal1112/rocket/commit/e708caa1b0a9c99f83f95da7321fefb4b49724c3))
+* **collection:** add the CollectionName type ([14271a1](https://github.com/Snehal1112/rocket/commit/14271a1254e9036ee9cf97c6820e80591c083762))
+* **collection:** add the RelPath type ([b509fc0](https://github.com/Snehal1112/rocket/commit/b509fc073497c76ee73b79c7b2cb7e350018a11d))
+* **environment:** add VariableContext::add_scope ([60db2e9](https://github.com/Snehal1112/rocket/commit/60db2e916c36dfc2825bc01e273abde76f08c4b1))
+* **flow:** add FlowEvent and publish flow events as it ([e6c1518](https://github.com/Snehal1112/rocket/commit/e6c151803429a23a60a6372f4b026c5e6faad192))
+* **git:** add GitEvent and publish git changes as it ([858756e](https://github.com/Snehal1112/rocket/commit/858756ec71c522719b94f7f8efb3f88e8133e048))
+* **history:** add the HistoryEvent enum ([e310f92](https://github.com/Snehal1112/rocket/commit/e310f9253b79296d98f2ce0247f11225bfcf8d97))
+* **http:** add the LoadTestProgress port ([7742c9f](https://github.com/Snehal1112/rocket/commit/7742c9f015f9969bdaeb9d62fe5fae987bdb800b))
+* **landing:** add OpenAPI Sync and Contracts sections, lightbox screenshots ([#144](https://github.com/Snehal1112/rocket/issues/144)) ([36bb87b](https://github.com/Snehal1112/rocket/commit/36bb87b1e2a4d2c9c36849cb1f8863ae69fc7b59))
+* **landing:** add Railway deployment ([ae52890](https://github.com/Snehal1112/rocket/commit/ae52890fd9abc1d5c57eca2ddd85e443dcf93c1b))
+* **settings:** add details to the About section ([302be01](https://github.com/Snehal1112/rocket/commit/302be01699f29b5802b4f217c5e39c0a040bdefd))
+* **shared:** add the PublishedEvent port ([24f8e71](https://github.com/Snehal1112/rocket/commit/24f8e7154602c77cc41e536f35f8966f05cf2077))
+* **workspace:** let the registry guard add and rename ([d954739](https://github.com/Snehal1112/rocket/commit/d9547391850bfabe400c1d49e0e09087416f8d13))
+
+### Bug Fixes
+
+* **app:** record WorkspaceCreated in the test recorder ([97663e3](https://github.com/Snehal1112/rocket/commit/97663e3bfaaaaa0c0543aa1a2c4c39713c1e5718))
+* check workspace name before disk writes ([e9f6885](https://github.com/Snehal1112/rocket/commit/e9f688564ba7c9938feac0435de83c5759a8a113))
+* **http:** parse token responses leniently ([67502c4](https://github.com/Snehal1112/rocket/commit/67502c47de212773c2b4cb848c6c54c589fc94aa))
+* **import:** cap Postman environment file reads ([7d84d8b](https://github.com/Snehal1112/rocket/commit/7d84d8bdce0b4fbf72815db4cc9f1d0917b3924e))
+* **import:** cap the size of imported text files ([2f217f4](https://github.com/Snehal1112/rocket/commit/2f217f4b7104e45d7040ed82178cbe5768ce089c))
+* **import:** do not follow folder symlinks in walks ([163f365](https://github.com/Snehal1112/rocket/commit/163f3650c6cd7fc10ed44c27c25b492123c2a921))
+* **import:** limit zip entries and expanded size ([9888935](https://github.com/Snehal1112/rocket/commit/9888935e7dc7c826e2998001ae7938ee85237069))
+* **import:** read markers and proto paths via the port ([fda72cf](https://github.com/Snehal1112/rocket/commit/fda72cfa64cdb1a43b125138b6fb7bd768e6f31b))
+* **import:** skip symlinks in legacy environments walk ([08d3c27](https://github.com/Snehal1112/rocket/commit/08d3c27e81b2cb1ec5f71a412e078988639781ac))
+* **import:** skip symlinks in the Bruno 3 copy ([f117184](https://github.com/Snehal1112/rocket/commit/f117184883835f4cf6bab735d78a32f1dae1ab90))
+* **infra:** harden the OAuth token POST ([5f5246c](https://github.com/Snehal1112/rocket/commit/5f5246c5c62e66b931c9105756c2a079e39d8bf9))
+* **infra:** send direct grant tokens through post_form ([dedf0e2](https://github.com/Snehal1112/rocket/commit/dedf0e21b0d94d6f374e7e8ac9807a84b1cd8ad5))
+
 ## [2.1.5](https://github.com/Snehal1112/rocket/compare/v2.1.4...v2.1.5) (2026-11-03)
 
 ### Features

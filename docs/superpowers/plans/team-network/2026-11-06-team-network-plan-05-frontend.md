@@ -2610,3 +2610,1728 @@ No commit; reviewed at the plan end.
 
 ---
 
+### Task 3: Pairing dialog, incoming notice, intro card, Settings section and docs
+
+**Files:**
+- Create: `src/components/network/PairingDialog.tsx`, `src/components/network/IncomingPairingToast.tsx`, `src/hooks/useIncomingPairingNotice.tsx`, `src/components/network/NetworkIntroCard.tsx`, `src/components/settings/sections/NetworkSection.tsx`, `docs/features/team-network.md`, `docs/manual-tests/team-network.md`
+- Modify: `src/components/network/network-helpers.ts`, `src/components/network/__tests__/network-helpers.test.ts`, `src/stores/settings-store.ts`, `src/components/settings/settings-sections.ts`, `src/components/settings/__tests__/SettingsPage.test.tsx`, `src/App.tsx`, `docs/features/settings-page.md`, `CLAUDE.md`, `docs/roadmaps/roadmap.md`, `docs/roadmaps/contracts-ci-ai-roadmap.md`
+- Test: `src/components/network/__tests__/PairingDialog.test.tsx`, `src/components/network/__tests__/IncomingPairingToast.test.tsx`, `src/hooks/__tests__/useIncomingPairingNotice.test.tsx`, `src/components/network/__tests__/NetworkIntroCard.test.tsx`, `src/components/settings/sections/__tests__/NetworkSection.test.tsx`
+
+**Interfaces:**
+- Consumes: Task 1 store, bridge, wrappers and fixtures; Task 2 `network-helpers.ts` (this task adds to it).
+- Produces:
+
+```ts
+// network-helpers.ts (added)
+export const DISPLAY_NAME_MAX_CHARS = 40;
+export type NameCheck = { ok: true; name: string } | { ok: false; error: string };
+export function validateDisplayName(input: string): NameCheck;   // trimmed, 1..40 characters (code points), no control characters
+
+// PairingDialog.tsx
+export function PairingDialog(): JSX.Element | null;             // Mounted once in App. Open while dialogPairingId is set.
+
+// IncomingPairingToast.tsx
+export const incomingToastId: (pairingId: string) => string;     // `network-pairing-<id>`
+export function IncomingPairingToast(props: { pairingId: string; displayName: string; shortId: string }): JSX.Element;
+
+// useIncomingPairingNotice.tsx
+export function useIncomingPairingNotice(): void;                // One toast per open request, fixed id, dismissed when the request goes.
+
+// NetworkIntroCard.tsx
+export function NetworkIntroCard(): JSX.Element | null;
+
+// NetworkSection.tsx
+export function NetworkSection(): JSX.Element;
+```
+
+- [ ] **Step 1: Write the failing helper tests**
+
+In `src/components/network/__tests__/network-helpers.test.ts`, change the import block at the top to also import `validateDisplayName`:
+
+```ts
+import {
+  filterNodes,
+  groupNodes,
+  sortNodes,
+  validateAddress,
+  validateDisplayName,
+} from '@/components/network/network-helpers';
+```
+
+and append at the end of the file:
+
+```ts
+
+describe('validateDisplayName', () => {
+  it('trims the name', () => {
+    expect(validateDisplayName('  Ana Lima ')).toEqual({ ok: true, name: 'Ana Lima' });
+  });
+
+  it('refuses an empty or blank name', () => {
+    expect(validateDisplayName('')).toEqual({ ok: false, error: 'Enter a name.' });
+    expect(validateDisplayName('   ')).toEqual({ ok: false, error: 'Enter a name.' });
+  });
+
+  it('accepts 40 characters and refuses 41', () => {
+    expect(validateDisplayName('a'.repeat(40))).toMatchObject({ ok: true });
+    expect(validateDisplayName('a'.repeat(41))).toEqual({
+      ok: false,
+      error: 'Use 40 characters or fewer.',
+    });
+  });
+
+  it('counts an emoji as one character, like the backend', () => {
+    expect(validateDisplayName('😀'.repeat(40))).toMatchObject({ ok: true });
+    expect(validateDisplayName('😀'.repeat(41))).toMatchObject({ ok: false });
+  });
+
+  it('refuses control characters', () => {
+    expect(validateDisplayName('Ana\tLima')).toEqual({
+      ok: false,
+      error: 'The name cannot contain control characters.',
+    });
+  });
+});
+```
+
+- [ ] **Step 2: Write the failing pairing dialog tests**
+
+Create `src/components/network/__tests__/PairingDialog.test.tsx`:
+
+```tsx
+import { act, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { PairingDialog } from '@/components/network/PairingDialog';
+import {
+  type ActivePairing,
+  type PairingIncoming,
+  useNetworkStore,
+} from '@/stores/network-store';
+import { createDeferred } from '@/test/deferred';
+
+const mocks = vi.hoisted(() => ({
+  toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
+  api: {
+    respondNetworkPairing: vi.fn(),
+    cancelNetworkPairing: vi.fn(),
+    getNetworkStatus: vi.fn(),
+    listNetworkNodes: vi.fn(),
+    requestNetworkPairing: vi.fn(),
+  },
+}));
+
+vi.mock('@/lib/tauri-api', () => mocks.api);
+vi.mock('sonner', () => ({ toast: mocks.toast }));
+
+const store = () => useNetworkStore.getState();
+
+const started = (patch: Partial<ActivePairing> = {}): ActivePairing => ({
+  pairingId: 'p1',
+  deviceId: 'DEV1',
+  shortId: 'AAAA-1111',
+  displayName: 'Ben Ortiz',
+  code: '482913',
+  phase: 'waiting',
+  ...patch,
+});
+
+const request = (patch: Partial<PairingIncoming> = {}): PairingIncoming => ({
+  pairingId: 'p1',
+  deviceId: 'DEV2',
+  shortId: 'DDDD-4444',
+  displayName: 'Dana Roy',
+  code: '048213',
+  accepted: false,
+  ...patch,
+});
+
+function openStarted(patch: Partial<ActivePairing> = {}) {
+  useNetworkStore.setState({ activePairing: started(patch), dialogPairingId: 'p1' });
+  render(<PairingDialog />);
+}
+
+function openRequest(patch: Partial<PairingIncoming> = {}) {
+  store().addIncoming(request(patch));
+  useNetworkStore.setState({ dialogPairingId: 'p1' });
+  render(<PairingDialog />);
+}
+
+describe('PairingDialog', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    store().reset();
+    mocks.api.respondNetworkPairing.mockResolvedValue(undefined);
+    mocks.api.cancelNetworkPairing.mockResolvedValue(undefined);
+  });
+
+  it('renders nothing while no dialog is open', () => {
+    render(<PairingDialog />);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  describe('started by this node', () => {
+    it('shows the name, the code with a space, the short id and the buttons', async () => {
+      openStarted();
+      expect(await screen.findByRole('dialog', { name: 'Pair with Ben Ortiz' })).toBeInTheDocument();
+      expect(screen.getByText('482 913')).toBeInTheDocument();
+      expect(screen.getByText('Device ID AAAA-1111')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Accept' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled();
+    });
+
+    it('Accept sends the decision and waits for the peer', async () => {
+      openStarted();
+      await userEvent.click(await screen.findByRole('button', { name: 'Accept' }));
+      await waitFor(() =>
+        expect(mocks.api.respondNetworkPairing).toHaveBeenCalledWith('p1', 'accept'),
+      );
+      expect(await screen.findByText('Waiting for Ben Ortiz...')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Accept' })).not.toBeInTheDocument();
+      expect(store().activePairing?.phase).toBe('done');
+    });
+
+    it('Cancel cancels the pairing and closes the dialog', async () => {
+      openStarted();
+      await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+      await waitFor(() => expect(mocks.api.cancelNetworkPairing).toHaveBeenCalledWith('p1'));
+      await waitFor(() => expect(store().dialogPairingId).toBeNull());
+      expect(store().activePairing).toBeNull();
+    });
+
+    it('closing a dialog that still waits for the user cancels the pairing', async () => {
+      openStarted();
+      await screen.findByRole('dialog');
+      await userEvent.keyboard('{Escape}');
+      await waitFor(() => expect(mocks.api.cancelNetworkPairing).toHaveBeenCalledWith('p1'));
+    });
+
+    it('closing after Accept only hides the dialog', async () => {
+      openStarted({ phase: 'done' });
+      await screen.findByRole('dialog');
+      await userEvent.keyboard('{Escape}');
+      await waitFor(() => expect(store().dialogPairingId).toBeNull());
+      expect(mocks.api.cancelNetworkPairing).not.toHaveBeenCalled();
+      expect(store().activePairing?.phase).toBe('done');
+    });
+
+    it('does not bring a pairing back when it finished during the call', async () => {
+      const pending = createDeferred<void>();
+      mocks.api.respondNetworkPairing.mockReturnValue(pending.promise);
+      openStarted();
+      await userEvent.click(await screen.findByRole('button', { name: 'Accept' }));
+      act(() => {
+        store().setActivePairing(null);
+        store().closePairingDialog();
+      });
+      pending.resolve();
+      await waitFor(() => expect(mocks.api.respondNetworkPairing).toHaveBeenCalled());
+      expect(store().activePairing).toBeNull();
+    });
+
+    it('shows the error and keeps the buttons when the decision fails', async () => {
+      mocks.api.respondNetworkPairing.mockRejectedValue('Internal error: link down');
+      openStarted();
+      await userEvent.click(await screen.findByRole('button', { name: 'Accept' }));
+      expect(await screen.findByRole('alert')).toHaveTextContent('link down');
+      expect(screen.getByRole('button', { name: 'Accept' })).toBeEnabled();
+      expect(store().activePairing?.phase).toBe('waiting');
+    });
+  });
+
+  describe('request from another node', () => {
+    it('shows the name, the code with its leading zero and three buttons', async () => {
+      openRequest();
+      expect(await screen.findByRole('dialog', { name: 'Dana Roy wants to pair' })).toBeInTheDocument();
+      expect(screen.getByText('048 213')).toBeInTheDocument();
+      expect(screen.getByText('Device ID DDDD-4444')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Accept' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Decline' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Block' })).toBeEnabled();
+    });
+
+    it('Accept waits for the peer and keeps the request', async () => {
+      openRequest();
+      await userEvent.click(await screen.findByRole('button', { name: 'Accept' }));
+      await waitFor(() =>
+        expect(mocks.api.respondNetworkPairing).toHaveBeenCalledWith('p1', 'accept'),
+      );
+      expect(await screen.findByText('Waiting for Dana Roy...')).toBeInTheDocument();
+      expect(store().incoming[0]?.accepted).toBe(true);
+    });
+
+    it('Decline answers, removes the request and closes the dialog', async () => {
+      openRequest();
+      await userEvent.click(await screen.findByRole('button', { name: 'Decline' }));
+      await waitFor(() =>
+        expect(mocks.api.respondNetworkPairing).toHaveBeenCalledWith('p1', 'decline'),
+      );
+      await waitFor(() => expect(store().dialogPairingId).toBeNull());
+      expect(store().incoming).toEqual([]);
+    });
+
+    it('Block answers with block and says so', async () => {
+      openRequest();
+      await userEvent.click(await screen.findByRole('button', { name: 'Block' }));
+      await waitFor(() =>
+        expect(mocks.api.respondNetworkPairing).toHaveBeenCalledWith('p1', 'block'),
+      );
+      expect(mocks.toast.info).toHaveBeenCalledWith('Dana Roy is blocked.');
+      expect(store().incoming).toEqual([]);
+    });
+
+    it('switches to "The request expired." when the request goes while open', async () => {
+      openRequest();
+      await screen.findByRole('dialog', { name: 'Dana Roy wants to pair' });
+      act(() => store().removeIncoming('p1'));
+      expect(await screen.findByText('The request expired.')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Accept' })).not.toBeInTheDocument();
+      expect(screen.queryByText('048 213')).not.toBeInTheDocument();
+      await userEvent.click(screen.getByRole('button', { name: 'Done' }));
+      expect(store().dialogPairingId).toBeNull();
+    });
+  });
+});
+```
+
+- [ ] **Step 3: Write the failing notice tests**
+
+Create `src/components/network/__tests__/IncomingPairingToast.test.tsx`:
+
+```tsx
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { IncomingPairingToast } from '@/components/network/IncomingPairingToast';
+import { useNetworkStore } from '@/stores/network-store';
+
+const mocks = vi.hoisted(() => ({
+  toast: { dismiss: vi.fn(), custom: vi.fn() },
+  api: { getNetworkStatus: vi.fn(), listNetworkNodes: vi.fn(), requestNetworkPairing: vi.fn() },
+}));
+
+vi.mock('@/lib/tauri-api', () => mocks.api);
+vi.mock('sonner', () => ({ toast: mocks.toast }));
+
+function setup() {
+  render(<IncomingPairingToast pairingId='p1' displayName='Dana Roy' shortId='DDDD-4444' />);
+}
+
+describe('IncomingPairingToast', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useNetworkStore.getState().reset();
+  });
+
+  it('names the sender and its short id, but not the code', () => {
+    setup();
+    expect(screen.getByText('Dana Roy wants to pair')).toBeInTheDocument();
+    expect(screen.getByText('DDDD-4444')).toBeInTheDocument();
+  });
+
+  it('Review opens the pairing dialog and dismisses the toast', async () => {
+    setup();
+    await userEvent.click(screen.getByRole('button', { name: 'Review' }));
+    expect(useNetworkStore.getState().dialogPairingId).toBe('p1');
+    expect(mocks.toast.dismiss).toHaveBeenCalledWith('network-pairing-p1');
+  });
+
+  it('Later only dismisses the toast', async () => {
+    setup();
+    await userEvent.click(screen.getByRole('button', { name: 'Later' }));
+    expect(useNetworkStore.getState().dialogPairingId).toBeNull();
+    expect(mocks.toast.dismiss).toHaveBeenCalledWith('network-pairing-p1');
+  });
+});
+```
+
+Create `src/hooks/__tests__/useIncomingPairingNotice.test.tsx`:
+
+```tsx
+import { renderHook } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { useIncomingPairingNotice } from '@/hooks/useIncomingPairingNotice';
+import {
+  INCOMING_TTL_MS,
+  type PairingIncoming,
+  useNetworkStore,
+} from '@/stores/network-store';
+
+const mocks = vi.hoisted(() => ({
+  toast: { custom: vi.fn(), dismiss: vi.fn() },
+  api: { getNetworkStatus: vi.fn(), listNetworkNodes: vi.fn(), requestNetworkPairing: vi.fn() },
+}));
+
+vi.mock('@/lib/tauri-api', () => mocks.api);
+vi.mock('sonner', () => ({ toast: mocks.toast }));
+
+const request = (pairingId: string): PairingIncoming => ({
+  pairingId,
+  deviceId: `DEV-${pairingId}`,
+  shortId: 'DDDD-4444',
+  displayName: 'Dana Roy',
+  code: '482913',
+  accepted: false,
+});
+
+describe('useIncomingPairingNotice', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useNetworkStore.getState().reset();
+  });
+
+  it('shows one toast with a fixed id and the request lifetime', () => {
+    renderHook(() => useIncomingPairingNotice());
+    useNetworkStore.getState().addIncoming(request('p1'));
+    expect(mocks.toast.custom).toHaveBeenCalledTimes(1);
+    expect(mocks.toast.custom).toHaveBeenCalledWith(expect.any(Function), {
+      id: 'network-pairing-p1',
+      duration: INCOMING_TTL_MS,
+    });
+  });
+
+  it('shows no second toast for a duplicate event', () => {
+    renderHook(() => useIncomingPairingNotice());
+    useNetworkStore.getState().addIncoming(request('p1'));
+    useNetworkStore.getState().addIncoming(request('p1'));
+    expect(mocks.toast.custom).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows one toast per request, with different ids', () => {
+    renderHook(() => useIncomingPairingNotice());
+    useNetworkStore.getState().addIncoming(request('p1'));
+    useNetworkStore.getState().addIncoming(request('p2'));
+    const ids = mocks.toast.custom.mock.calls.map((call) => (call[1] as { id: string }).id);
+    expect(ids).toEqual(['network-pairing-p1', 'network-pairing-p2']);
+  });
+
+  it('dismisses the toast when the request goes away', () => {
+    renderHook(() => useIncomingPairingNotice());
+    useNetworkStore.getState().addIncoming(request('p1'));
+    useNetworkStore.getState().removeIncoming('p1');
+    expect(mocks.toast.dismiss).toHaveBeenCalledWith('network-pairing-p1');
+  });
+
+  it('does not react to changes that leave the requests alone', () => {
+    renderHook(() => useIncomingPairingNotice());
+    useNetworkStore.setState({ panelOpen: true });
+    expect(mocks.toast.custom).not.toHaveBeenCalled();
+    expect(mocks.toast.dismiss).not.toHaveBeenCalled();
+  });
+
+  it('shows a toast for a request that exists at mount', () => {
+    useNetworkStore.getState().addIncoming(request('p1'));
+    renderHook(() => useIncomingPairingNotice());
+    expect(mocks.toast.custom).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops listening after unmount', () => {
+    const view = renderHook(() => useIncomingPairingNotice());
+    view.unmount();
+    useNetworkStore.getState().addIncoming(request('p1'));
+    expect(mocks.toast.custom).not.toHaveBeenCalled();
+  });
+});
+```
+
+- [ ] **Step 4: Write the failing intro card tests**
+
+Create `src/components/network/__tests__/NetworkIntroCard.test.tsx`:
+
+```tsx
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { NetworkIntroCard } from '@/components/network/NetworkIntroCard';
+import { useNetworkStore } from '@/stores/network-store';
+import { useSettingsStore } from '@/stores/settings-store';
+import { makeStatus } from '@/test/network-fixtures';
+
+const mocks = vi.hoisted(() => ({
+  toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
+  api: {
+    markNetworkIntroSeen: vi.fn(),
+    setNetworkVisibility: vi.fn(),
+    getNetworkStatus: vi.fn(),
+    listNetworkNodes: vi.fn(),
+    requestNetworkPairing: vi.fn(),
+  },
+}));
+
+vi.mock('@/lib/tauri-api', () => mocks.api);
+vi.mock('sonner', () => ({ toast: mocks.toast }));
+
+const INTRO = "You're visible on this network as 'Ana Lima'.";
+
+function setup(patch = {}) {
+  useNetworkStore.setState({ status: makeStatus({ introSeen: false, ...patch }) });
+  render(<NetworkIntroCard />);
+}
+
+describe('NetworkIntroCard', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useNetworkStore.getState().reset();
+    useSettingsStore.getState().reset();
+    mocks.api.markNetworkIntroSeen.mockResolvedValue(undefined);
+    mocks.api.setNetworkVisibility.mockResolvedValue(undefined);
+    mocks.api.getNetworkStatus.mockResolvedValue(makeStatus({ introSeen: true }));
+  });
+
+  it('says who the user is visible as', () => {
+    setup();
+    expect(screen.getByText(INTRO)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Edit name' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Hide my node' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'OK' })).toBeInTheDocument();
+  });
+
+  it.each([
+    ['the intro was seen', { introSeen: true }],
+    ['the node is hidden', { hidden: true }],
+    ['networking is off', { state: 'off' as const, offReason: 'No keychain.' }],
+  ])('stays away when %s', (_label, patch) => {
+    setup(patch);
+    expect(screen.queryByText(INTRO)).not.toBeInTheDocument();
+  });
+
+  it('stays away until the status is loaded', () => {
+    render(<NetworkIntroCard />);
+    expect(screen.queryByText(INTRO)).not.toBeInTheDocument();
+  });
+
+  it('OK marks the intro as seen once and hides the card at once', async () => {
+    setup();
+    await userEvent.click(screen.getByRole('button', { name: 'OK' }));
+    expect(screen.queryByText(INTRO)).not.toBeInTheDocument();
+    await waitFor(() => expect(mocks.api.markNetworkIntroSeen).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mocks.api.getNetworkStatus).toHaveBeenCalled());
+    expect(useNetworkStore.getState().status?.introSeen).toBe(true);
+  });
+
+  it('Edit name opens the Network section of Settings and marks the intro as seen', async () => {
+    setup();
+    await userEvent.click(screen.getByRole('button', { name: 'Edit name' }));
+    expect(useSettingsStore.getState().open).toBe(true);
+    expect(useSettingsStore.getState().section).toBe('network');
+    await waitFor(() => expect(mocks.api.markNetworkIntroSeen).toHaveBeenCalledTimes(1));
+  });
+
+  it('Hide my node hides the node and marks the intro as seen', async () => {
+    setup();
+    await userEvent.click(screen.getByRole('button', { name: 'Hide my node' }));
+    await waitFor(() => expect(mocks.api.setNetworkVisibility).toHaveBeenCalledWith(true));
+    await waitFor(() => expect(mocks.api.markNetworkIntroSeen).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(INTRO)).not.toBeInTheDocument();
+  });
+
+  it('keeps the card and shows the error when hiding fails', async () => {
+    mocks.api.setNetworkVisibility.mockRejectedValue('Internal error: settings locked');
+    setup();
+    await userEvent.click(screen.getByRole('button', { name: 'Hide my node' }));
+    await waitFor(() => expect(mocks.toast.error).toHaveBeenCalledWith('settings locked'));
+    expect(mocks.api.markNetworkIntroSeen).not.toHaveBeenCalled();
+    expect(screen.getByText(INTRO)).toBeInTheDocument();
+  });
+
+  it('hides the card for this session even when saving the flag fails', async () => {
+    mocks.api.markNetworkIntroSeen.mockRejectedValue('Internal error: disk full');
+    const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    setup();
+    await userEvent.click(screen.getByRole('button', { name: 'OK' }));
+    await waitFor(() => expect(log).toHaveBeenCalled());
+    expect(screen.queryByText(INTRO)).not.toBeInTheDocument();
+    log.mockRestore();
+  });
+});
+```
+
+- [ ] **Step 5: Write the failing Settings section tests**
+
+Create `src/components/settings/sections/__tests__/NetworkSection.test.tsx`:
+
+```tsx
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { NetworkSection } from '@/components/settings/sections/NetworkSection';
+import type { NetworkStatus } from '@/lib/tauri-api';
+import { useNetworkStore } from '@/stores/network-store';
+import { makeStatus } from '@/test/network-fixtures';
+
+const mocks = vi.hoisted(() => ({
+  toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
+  api: {
+    getNetworkStatus: vi.fn(),
+    listNetworkNodes: vi.fn(),
+    requestNetworkPairing: vi.fn(),
+    setNetworkVisibility: vi.fn(),
+    setNetworkProfile: vi.fn(),
+    listNetworkBlocked: vi.fn(),
+    listNetworkAddresses: vi.fn(),
+    unblockNetworkDevice: vi.fn(),
+    removeNetworkAddress: vi.fn(),
+  },
+}));
+
+vi.mock('@/lib/tauri-api', () => mocks.api);
+vi.mock('sonner', () => ({ toast: mocks.toast }));
+
+const mallory = {
+  deviceId: 'B1',
+  shortId: 'BBBB-0001',
+  name: 'Mallory',
+  blockedAt: '2026-11-06T10:00:00Z',
+};
+const saved = { host: '10.0.0.5', port: 47821, addedAt: '2026-11-06T10:00:00Z' };
+
+function setup(status: NetworkStatus = makeStatus()) {
+  mocks.api.getNetworkStatus.mockResolvedValue(status);
+  useNetworkStore.setState({ status });
+  render(<NetworkSection />);
+}
+
+describe('NetworkSection', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useNetworkStore.getState().reset();
+    mocks.api.listNetworkBlocked.mockResolvedValue([mallory]);
+    mocks.api.listNetworkAddresses.mockResolvedValue([saved]);
+    mocks.api.listNetworkNodes.mockResolvedValue([]);
+    mocks.api.setNetworkVisibility.mockResolvedValue(undefined);
+    mocks.api.setNetworkProfile.mockResolvedValue(undefined);
+    mocks.api.unblockNetworkDevice.mockResolvedValue(undefined);
+    mocks.api.removeNetworkAddress.mockResolvedValue(undefined);
+  });
+
+  it('shows the port in use and the short device id as read-only text', async () => {
+    setup();
+    expect(screen.getByRole('heading', { name: 'Team network' })).toBeInTheDocument();
+    expect(screen.getByText('47821')).toBeInTheDocument();
+    expect(screen.getByText('K7QF-2M9X')).toBeInTheDocument();
+  });
+
+  it('says there is no port when the node is not listening', () => {
+    setup(makeStatus({ port: null, deviceShortId: null }));
+    expect(screen.getByText('Not listening')).toBeInTheDocument();
+  });
+
+  it('shows why networking is off', () => {
+    setup(makeStatus({ state: 'off', offReason: 'The keychain is not available.' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('The keychain is not available.');
+  });
+
+  it('lists the warnings', () => {
+    setup(makeStatus({ warnings: ['blocked.yml was damaged and was reset.'] }));
+    expect(screen.getByText('blocked.yml was damaged and was reset.')).toBeInTheDocument();
+  });
+
+  it('hides the node with the switch and reloads the status', async () => {
+    mocks.api.getNetworkStatus
+      .mockResolvedValueOnce(makeStatus())
+      .mockResolvedValueOnce(makeStatus({ hidden: true }));
+    useNetworkStore.setState({ status: makeStatus() });
+    render(<NetworkSection />);
+    const toggle = screen.getByRole('switch', { name: 'Hide my node' });
+    expect(toggle).not.toBeChecked();
+    await userEvent.click(toggle);
+    await waitFor(() => expect(mocks.api.setNetworkVisibility).toHaveBeenCalledWith(true));
+    await waitFor(() => expect(screen.getByRole('switch', { name: 'Hide my node' })).toBeChecked());
+  });
+
+  it('shows the error and keeps the switch when hiding fails', async () => {
+    mocks.api.setNetworkVisibility.mockRejectedValue('Internal error: settings locked');
+    setup();
+    await userEvent.click(screen.getByRole('switch', { name: 'Hide my node' }));
+    await waitFor(() => expect(mocks.toast.error).toHaveBeenCalledWith('settings locked'));
+    expect(screen.getByRole('switch', { name: 'Hide my node' })).not.toBeChecked();
+  });
+
+  it('saves a new display name', async () => {
+    setup();
+    const field = screen.getByLabelText('Display name');
+    await userEvent.clear(field);
+    await userEvent.type(field, '  Ana L.  ');
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(mocks.api.setNetworkProfile).toHaveBeenCalledWith('Ana L.'));
+    await waitFor(() => expect(mocks.toast.success).toHaveBeenCalledWith('Name saved.'));
+  });
+
+  it('keeps Save off while the name is unchanged', () => {
+    setup();
+    expect(screen.getByLabelText('Display name')).toHaveValue('Ana Lima');
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+  });
+
+  it('refuses an empty name and a name over 40 characters', async () => {
+    setup();
+    const field = screen.getByLabelText('Display name');
+    await userEvent.clear(field);
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(screen.getByText('Enter a name.')).toBeInTheDocument();
+    await userEvent.type(field, 'a'.repeat(41));
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(screen.getByText('Use 40 characters or fewer.')).toBeInTheDocument();
+    expect(mocks.api.setNetworkProfile).not.toHaveBeenCalled();
+  });
+
+  it('lists blocked devices and unblocks one', async () => {
+    setup();
+    const row = (await screen.findByText('Mallory')).closest('li');
+    if (!row) throw new Error('no blocked row');
+    expect(within(row).getByText('BBBB-0001')).toBeInTheDocument();
+    await userEvent.click(within(row).getByRole('button', { name: 'Unblock Mallory' }));
+    await waitFor(() => expect(mocks.api.unblockNetworkDevice).toHaveBeenCalledWith('B1'));
+    await waitFor(() => expect(screen.queryByText('Mallory')).not.toBeInTheDocument());
+    expect(screen.getByText('No blocked devices.')).toBeInTheDocument();
+  });
+
+  it('lists saved addresses and removes one', async () => {
+    setup();
+    expect(await screen.findByText('10.0.0.5:47821')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Remove 10.0.0.5:47821' }));
+    await waitFor(() =>
+      expect(mocks.api.removeNetworkAddress).toHaveBeenCalledWith('10.0.0.5', 47821),
+    );
+    await waitFor(() => expect(screen.queryByText('10.0.0.5:47821')).not.toBeInTheDocument());
+    expect(screen.getByText('No saved addresses.')).toBeInTheDocument();
+    expect(mocks.api.listNetworkNodes).toHaveBeenCalled();
+  });
+
+  it('shows the error when the lists cannot load', async () => {
+    mocks.api.listNetworkBlocked.mockRejectedValue('Internal error: repo down');
+    setup();
+    expect(await screen.findByText('repo down')).toBeInTheDocument();
+  });
+});
+```
+
+In `src/components/settings/__tests__/SettingsPage.test.tsx`, replace the quoted line
+
+```tsx
+    expect(labels).toEqual(['Proxy', 'Secret Managers', 'AI Agents', 'Support', 'About']);
+```
+
+with:
+
+```tsx
+    expect(labels).toEqual([
+      'Proxy',
+      'Secret Managers',
+      'AI Agents',
+      'Team network',
+      'Support',
+      'About',
+    ]);
+```
+
+- [ ] **Step 6: Run the tests to verify they fail**
+
+Run: `bunx vitest run src/components/network src/hooks/__tests__/useIncomingPairingNotice.test.tsx src/components/settings`
+Expected: FAIL. `network-helpers.test.ts` reports `validateDisplayName is not a function`; the other new files report `Failed to resolve import` for `PairingDialog`, `IncomingPairingToast`, `useIncomingPairingNotice`, `NetworkIntroCard` and `NetworkSection`; `SettingsPage.test.tsx` reports a list mismatch (`'Team network'` missing).
+
+- [ ] **Step 7: Add `validateDisplayName` to `src/components/network/network-helpers.ts`**
+
+Append at the end of the file:
+
+```ts
+
+export const DISPLAY_NAME_MAX_CHARS = 40;
+
+export type NameCheck = { ok: true; name: string } | { ok: false; error: string };
+
+// Counts code points, like the backend counts chars, so an emoji is one character.
+const hasControlChar = (text: string): boolean =>
+  [...text].some((char) => {
+    const code = char.codePointAt(0) ?? 0;
+    return code < 32 || code === 127;
+  });
+
+/** Checks the display name before it goes to the backend. */
+export function validateDisplayName(input: string): NameCheck {
+  const name = input.trim();
+  const length = [...name].length;
+  if (length === 0) return { ok: false, error: 'Enter a name.' };
+  if (length > DISPLAY_NAME_MAX_CHARS) {
+    return { ok: false, error: `Use ${DISPLAY_NAME_MAX_CHARS} characters or fewer.` };
+  }
+  if (hasControlChar(name)) {
+    return { ok: false, error: 'The name cannot contain control characters.' };
+  }
+  return { ok: true, name };
+}
+```
+
+- [ ] **Step 8: Add `src/components/network/PairingDialog.tsx`**
+
+```tsx
+import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { errorText, formatPairingCode } from '@/lib/network-utils';
+import { cancelNetworkPairing, respondNetworkPairing } from '@/lib/tauri-api';
+import { useNetworkStore } from '@/stores/network-store';
+
+const store = () => useNetworkStore.getState();
+
+/**
+ * The pairing dialog, for both roles. The node that started the pairing sees Accept and
+ * Cancel. A node that received a request sees Accept, Decline and Block. Both compare the
+ * same 6-digit code. Mount it once, outside the Network popover.
+ */
+export function PairingDialog() {
+  const id = useNetworkStore((s) => s.dialogPairingId);
+  const active = useNetworkStore((s) => s.activePairing);
+  const request = useNetworkStore((s) => s.incoming.find((i) => i.pairingId === s.dialogPairingId));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Another pairing starts with a clean error.
+  useEffect(() => {
+    setError(null);
+    setBusy(false);
+  }, [id]);
+
+  if (!id) return null;
+
+  const started = active && active.pairingId === id ? active : null;
+  const view = started ?? request ?? null;
+  const done = () => store().closePairingDialog();
+
+  async function run(action: () => Promise<void>) {
+    setBusy(true);
+    setError(null);
+    try {
+      await action();
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const acceptStarted = () =>
+    run(async () => {
+      await respondNetworkPairing(id, 'accept');
+      // The pairing may have finished while the call was in flight. Then it stays gone.
+      const current = store().activePairing;
+      if (current?.pairingId === id) store().setActivePairing({ ...current, phase: 'done' });
+    });
+
+  const cancelStarted = () =>
+    run(async () => {
+      await cancelNetworkPairing(id);
+      store().setActivePairing(null);
+      store().closePairingDialog();
+    });
+
+  const acceptRequest = () =>
+    run(async () => {
+      await respondNetworkPairing(id, 'accept');
+      store().markIncomingAccepted(id);
+    });
+
+  const answerRequest = (decision: 'decline' | 'block', name: string) =>
+    run(async () => {
+      await respondNetworkPairing(id, decision);
+      store().removeIncoming(id);
+      store().closePairingDialog();
+      if (decision === 'block') toast.info(`${name} is blocked.`);
+    });
+
+  // Closing a dialog that still waits for the user's choice ends the pairing it started.
+  function handleOpenChange(next: boolean) {
+    if (next || busy) return;
+    if (started && started.phase === 'waiting') {
+      void cancelStarted();
+      return;
+    }
+    done();
+  }
+
+  // The request is gone: it expired, or another event finished it.
+  if (!view) {
+    return (
+      <Dialog open onOpenChange={handleOpenChange}>
+        <DialogContent className='sm:max-w-sm'>
+          <DialogHeader>
+            <DialogTitle>Pairing request</DialogTitle>
+            <DialogDescription>The request expired.</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button onClick={done}>Done</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    );
+  }
+
+  const name = view.displayName;
+  const waitingForPeer = started ? started.phase === 'done' : (request?.accepted ?? false);
+
+  return (
+    <Dialog open onOpenChange={handleOpenChange}>
+      <DialogContent className='sm:max-w-sm'>
+        <DialogHeader>
+          <DialogTitle className='break-words'>
+            {started ? `Pair with ${name}` : `${name} wants to pair`}
+          </DialogTitle>
+          <DialogDescription>
+            {`Check that ${name} sees the same code, then accept.`}
+          </DialogDescription>
+        </DialogHeader>
+        <div role='group' aria-label='Pairing code' className='flex flex-col items-center gap-1 py-2'>
+          <p className='font-mono text-4xl font-semibold tracking-[0.2em]'>
+            {formatPairingCode(view.code)}
+          </p>
+          <p className='font-mono text-xs text-muted-foreground'>{`Device ID ${view.shortId}`}</p>
+        </div>
+        {waitingForPeer && (
+          <p role='status' className='text-center text-sm text-muted-foreground'>
+            {`Waiting for ${name}...`}
+          </p>
+        )}
+        {error && (
+          <p role='alert' className='text-sm text-destructive'>
+            {error}
+          </p>
+        )}
+        <DialogFooter>
+          {waitingForPeer ? (
+            <Button variant='outline' onClick={done}>
+              Done
+            </Button>
+          ) : started ? (
+            <>
+              <Button variant='outline' disabled={busy} onClick={() => void cancelStarted()}>
+                Cancel
+              </Button>
+              <Button disabled={busy} onClick={() => void acceptStarted()}>
+                Accept
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                variant='ghost'
+                className='text-destructive hover:text-destructive'
+                disabled={busy}
+                onClick={() => void answerRequest('block', name)}
+              >
+                Block
+              </Button>
+              <Button
+                variant='outline'
+                disabled={busy}
+                onClick={() => void answerRequest('decline', name)}
+              >
+                Decline
+              </Button>
+              <Button disabled={busy} onClick={() => void acceptRequest()}>
+                Accept
+              </Button>
+            </>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+```
+
+- [ ] **Step 9: Add the incoming notice**
+
+Create `src/components/network/IncomingPairingToast.tsx`:
+
+```tsx
+import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
+import { useNetworkStore } from '@/stores/network-store';
+
+/** One fixed toast id per pairing, so a repeated event updates the toast in place. */
+export const incomingToastId = (pairingId: string): string => `network-pairing-${pairingId}`;
+
+interface IncomingPairingToastProps {
+  pairingId: string;
+  displayName: string;
+  shortId: string;
+}
+
+// The code is not in the toast. It shows in the dialog the user opens.
+export function IncomingPairingToast({
+  pairingId,
+  displayName,
+  shortId,
+}: IncomingPairingToastProps) {
+  const dismiss = () => toast.dismiss(incomingToastId(pairingId));
+
+  return (
+    <div className='flex w-[356px] max-w-full flex-col gap-2 rounded-md border bg-popover p-4 text-popover-foreground shadow-lg'>
+      <p className='break-words text-sm font-medium'>{`${displayName} wants to pair`}</p>
+      <p className='font-mono text-xs text-muted-foreground'>{shortId}</p>
+      <div className='flex flex-wrap items-center gap-2'>
+        <Button
+          size='sm'
+          onClick={() => {
+            useNetworkStore.getState().openPairingDialog(pairingId);
+            dismiss();
+          }}
+        >
+          Review
+        </Button>
+        <Button size='sm' variant='ghost' onClick={dismiss}>
+          Later
+        </Button>
+      </div>
+    </div>
+  );
+}
+```
+
+Create `src/hooks/useIncomingPairingNotice.tsx`:
+
+```tsx
+import { useEffect } from 'react';
+import { toast } from 'sonner';
+import { IncomingPairingToast, incomingToastId } from '@/components/network/IncomingPairingToast';
+import { INCOMING_TTL_MS, type PairingIncoming, useNetworkStore } from '@/stores/network-store';
+
+function showToast(request: PairingIncoming): void {
+  toast.custom(
+    () => (
+      <IncomingPairingToast
+        pairingId={request.pairingId}
+        displayName={request.displayName}
+        shortId={request.shortId}
+      />
+    ),
+    { id: incomingToastId(request.pairingId), duration: INCOMING_TTL_MS },
+  );
+}
+
+// Shows one toast for each open pairing request and removes it when the request goes.
+// The store drops a repeated event, so a duplicate never reaches this hook. Mount once.
+export function useIncomingPairingNotice(): void {
+  useEffect(() => {
+    // A hot reload keeps the store, so requests that already exist get their toast too.
+    for (const request of useNetworkStore.getState().incoming) showToast(request);
+
+    return useNetworkStore.subscribe((state, prev) => {
+      if (state.incoming === prev.incoming) return;
+      for (const request of state.incoming) {
+        if (!prev.incoming.some((p) => p.pairingId === request.pairingId)) showToast(request);
+      }
+      for (const request of prev.incoming) {
+        if (!state.incoming.some((i) => i.pairingId === request.pairingId)) {
+          toast.dismiss(incomingToastId(request.pairingId));
+        }
+      }
+    });
+  }, []);
+}
+```
+
+- [ ] **Step 10: Add `src/components/network/NetworkIntroCard.tsx`**
+
+```tsx
+import { useState } from 'react';
+import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { errorText } from '@/lib/network-utils';
+import { markNetworkIntroSeen, setNetworkVisibility } from '@/lib/tauri-api';
+import { useNetworkStore } from '@/stores/network-store';
+import { useSettingsStore } from '@/stores/settings-store';
+
+/**
+ * A one-time card after the first launch: "You're visible on this network as ...".
+ * Every button marks the intro as seen. It does not show for a hidden node or when
+ * networking is off.
+ */
+export function NetworkIntroCard() {
+  const status = useNetworkStore((s) => s.status);
+  const [dismissed, setDismissed] = useState(false);
+
+  if (!status || status.state !== 'running' || status.introSeen || status.hidden || dismissed) {
+    return null;
+  }
+
+  // The card goes at once. A failed save only means it may return after the next launch.
+  async function markSeen() {
+    setDismissed(true);
+    try {
+      await markNetworkIntroSeen();
+      await useNetworkStore.getState().refresh();
+    } catch (err) {
+      console.error('[NetworkIntroCard] could not save the intro flag', err);
+    }
+  }
+
+  function editName() {
+    useSettingsStore.getState().openSettings('network');
+    void markSeen();
+  }
+
+  async function hideNode() {
+    try {
+      await setNetworkVisibility(true);
+    } catch (err) {
+      toast.error(errorText(err));
+      return;
+    }
+    await markSeen();
+  }
+
+  return (
+    <Card
+      role='region'
+      aria-label='Team network'
+      className='fixed bottom-9 left-3 z-40 w-80 max-w-[calc(100vw-1.5rem)]'
+    >
+      <CardHeader className='p-4 pb-2'>
+        <CardTitle className='text-sm'>Team network</CardTitle>
+      </CardHeader>
+      <CardContent className='px-4 pb-2 text-sm text-muted-foreground'>
+        {`You're visible on this network as '${status.displayName}'.`}
+      </CardContent>
+      <CardFooter className='flex flex-wrap gap-2 p-4 pt-2'>
+        <Button size='sm' variant='outline' onClick={editName}>
+          Edit name
+        </Button>
+        <Button size='sm' variant='outline' onClick={() => void hideNode()}>
+          Hide my node
+        </Button>
+        <Button size='sm' onClick={() => void markSeen()}>
+          OK
+        </Button>
+      </CardFooter>
+    </Card>
+  );
+}
+```
+
+- [ ] **Step 11: Add `src/components/settings/sections/NetworkSection.tsx`**
+
+```tsx
+import { type ReactNode, useEffect, useState } from 'react';
+import { toast } from 'sonner';
+import { validateDisplayName } from '@/components/network/network-helpers';
+import { SettingsSectionHeader } from '@/components/settings/SettingsSectionHeader';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import { errorText } from '@/lib/network-utils';
+import {
+  listNetworkAddresses,
+  listNetworkBlocked,
+  type NetworkAddress,
+  type NetworkBlockedDevice,
+  removeNetworkAddress,
+  setNetworkProfile,
+  setNetworkVisibility,
+  unblockNetworkDevice,
+} from '@/lib/tauri-api';
+import { useNetworkStore } from '@/stores/network-store';
+
+function Block({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className='space-y-2 border-b border-border py-4 last:border-b-0'>
+      <h3 className='text-sm font-medium'>{title}</h3>
+      {children}
+    </section>
+  );
+}
+
+// Settings for the team network: visibility, name, port, blocked devices, saved addresses.
+export function NetworkSection() {
+  const status = useNetworkStore((s) => s.status);
+  const displayName = status?.displayName ?? '';
+  const [name, setName] = useState(displayName);
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [savingName, setSavingName] = useState(false);
+  const [blocked, setBlocked] = useState<NetworkBlockedDevice[]>([]);
+  const [addresses, setAddresses] = useState<NetworkAddress[]>([]);
+  const [listError, setListError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void useNetworkStore.getState().refresh();
+  }, []);
+
+  // The field follows the stored name after a save or a reload.
+  useEffect(() => {
+    setName(displayName);
+  }, [displayName]);
+
+  useEffect(() => {
+    let disposed = false;
+    Promise.all([listNetworkBlocked(), listNetworkAddresses()]).then(
+      ([blockedList, addressList]) => {
+        if (disposed) return;
+        setBlocked(blockedList);
+        setAddresses(addressList);
+      },
+      (err) => {
+        if (!disposed) setListError(errorText(err));
+      },
+    );
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  async function toggleHidden(hidden: boolean) {
+    try {
+      await setNetworkVisibility(hidden);
+    } catch (err) {
+      toast.error(errorText(err));
+    }
+    // The switch shows the stored value, so a failure puts it back.
+    await useNetworkStore.getState().refresh();
+  }
+
+  async function saveName() {
+    const check = validateDisplayName(name);
+    if (!check.ok) {
+      setNameError(check.error);
+      return;
+    }
+    setNameError(null);
+    setSavingName(true);
+    try {
+      await setNetworkProfile(check.name);
+      await useNetworkStore.getState().refresh();
+      toast.success('Name saved.');
+    } catch (err) {
+      setNameError(errorText(err));
+    } finally {
+      setSavingName(false);
+    }
+  }
+
+  async function unblock(device: NetworkBlockedDevice) {
+    try {
+      await unblockNetworkDevice(device.deviceId);
+      setBlocked((list) => list.filter((d) => d.deviceId !== device.deviceId));
+    } catch (err) {
+      toast.error(errorText(err));
+    }
+  }
+
+  async function removeAddress(address: NetworkAddress) {
+    try {
+      await removeNetworkAddress(address.host, address.port);
+      setAddresses((list) =>
+        list.filter((a) => !(a.host === address.host && a.port === address.port)),
+      );
+      void useNetworkStore.getState().refreshNodes();
+    } catch (err) {
+      toast.error(errorText(err));
+    }
+  }
+
+  return (
+    <div>
+      <SettingsSectionHeader
+        title='Team network'
+        description='Find and pair with other Rocket apps on your network.'
+      />
+      {!status ? (
+        <p className='text-sm text-muted-foreground'>Loading...</p>
+      ) : (
+        <>
+          {status.state === 'off' && (
+            <div role='alert' className='mb-2 rounded-md border border-border p-3 text-sm'>
+              {status.offReason ?? 'Team network is off.'}
+            </div>
+          )}
+          {status.warnings.length > 0 && (
+            <ul className='mb-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground'>
+              {status.warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          )}
+
+          <Block title='Visibility'>
+            <div className='flex items-center justify-between gap-4'>
+              <div className='space-y-1'>
+                <Label htmlFor='network-hidden'>Hide my node</Label>
+                <p className='text-xs text-muted-foreground'>
+                  Others on the network do not see you and cannot send pairing requests. Paired
+                  nodes still reach you.
+                </p>
+              </div>
+              <Switch
+                id='network-hidden'
+                checked={status.hidden}
+                onCheckedChange={(next) => void toggleHidden(next)}
+              />
+            </div>
+          </Block>
+
+          <Block title='Name'>
+            <Label htmlFor='network-display-name'>Display name</Label>
+            <div className='flex items-start gap-2'>
+              <div className='flex-1 space-y-1'>
+                <Input
+                  id='network-display-name'
+                  value={name}
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    setNameError(null);
+                  }}
+                />
+                {nameError && <p className='text-xs text-destructive'>{nameError}</p>}
+              </div>
+              <Button
+                disabled={savingName || name.trim() === displayName}
+                onClick={() => void saveName()}
+              >
+                Save
+              </Button>
+            </div>
+          </Block>
+
+          <Block title='This device'>
+            <dl className='grid grid-cols-[8rem_1fr] gap-x-4 gap-y-2 text-sm'>
+              <dt className='text-muted-foreground'>Port in use</dt>
+              <dd className='select-text font-mono'>{status.port ?? 'Not listening'}</dd>
+              <dt className='text-muted-foreground'>Device ID</dt>
+              <dd className='select-text font-mono'>{status.deviceShortId ?? '-'}</dd>
+            </dl>
+          </Block>
+
+          <Block title='Blocked devices'>
+            {listError && <p className='text-sm text-destructive'>{listError}</p>}
+            {!listError && blocked.length === 0 && (
+              <p className='text-sm text-muted-foreground'>No blocked devices.</p>
+            )}
+            <ul className='space-y-1'>
+              {blocked.map((device) => (
+                <li key={device.deviceId} className='flex items-center gap-2 text-sm'>
+                  <span className='min-w-0 flex-1 truncate'>{device.name}</span>
+                  <span className='font-mono text-xs text-muted-foreground'>{device.shortId}</span>
+                  <Button
+                    size='sm'
+                    variant='outline'
+                    aria-label={`Unblock ${device.name}`}
+                    onClick={() => void unblock(device)}
+                  >
+                    Unblock
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </Block>
+
+          <Block title='Saved addresses'>
+            {!listError && addresses.length === 0 && (
+              <p className='text-sm text-muted-foreground'>No saved addresses.</p>
+            )}
+            <ul className='space-y-1'>
+              {addresses.map((address) => {
+                const text = `${address.host}:${address.port}`;
+                return (
+                  <li key={text} className='flex items-center gap-2 text-sm'>
+                    <span className='min-w-0 flex-1 truncate font-mono'>{text}</span>
+                    <Button
+                      size='sm'
+                      variant='outline'
+                      aria-label={`Remove ${text}`}
+                      onClick={() => void removeAddress(address)}
+                    >
+                      Remove
+                    </Button>
+                  </li>
+                );
+              })}
+            </ul>
+          </Block>
+        </>
+      )}
+    </div>
+  );
+}
+```
+
+- [ ] **Step 12: Register the section**
+
+Edit `src/stores/settings-store.ts`. Replace the quoted line
+
+```ts
+export type SettingsSection = 'proxy' | 'secret-managers' | 'ai' | 'support' | 'about';
+```
+
+with:
+
+```ts
+export type SettingsSection = 'proxy' | 'secret-managers' | 'ai' | 'network' | 'support' | 'about';
+```
+
+Edit `src/components/settings/settings-sections.ts`.
+
+Edit 1: replace the quoted line `import { Bot, Globe, Info, KeyRound, LifeBuoy, type LucideIcon } from 'lucide-react';` with:
+
+```ts
+import {
+  Bot,
+  Globe,
+  Info,
+  KeyRound,
+  LifeBuoy,
+  type LucideIcon,
+  Radar,
+} from 'lucide-react';
+```
+
+Edit 2: after the quoted line `import { AiAgentsSection } from '@/components/settings/sections/AiAgentsSection';` add:
+
+```ts
+import { NetworkSection } from '@/components/settings/sections/NetworkSection';
+```
+
+Edit 3: after the quoted line `  { id: 'ai', label: 'AI Agents', icon: Bot, Component: AiAgentsSection, wide: true },` add:
+
+```ts
+  {
+    id: 'network',
+    label: 'Team network',
+    icon: Radar,
+    Component: NetworkSection,
+    wide: true,
+  },
+```
+
+- [ ] **Step 13: Mount the new pieces in `src/App.tsx`**
+
+Edit 1: after the quoted line `import { WorkspaceToolbar } from '@/components/layout/WorkspaceToolbar';` add:
+
+```tsx
+import { NetworkIntroCard } from '@/components/network/NetworkIntroCard';
+import { PairingDialog } from '@/components/network/PairingDialog';
+```
+
+Edit 2: after the quoted line `import { useFlowRequestPathEvents } from '@/hooks/useFlowRequestPathEvents';` add:
+
+```tsx
+import { useIncomingPairingNotice } from '@/hooks/useIncomingPairingNotice';
+```
+
+Edit 3: after the quoted line `  useNetworkEventBridge();` add:
+
+```tsx
+  useIncomingPairingNotice();
+```
+
+Edit 4: after the quoted line `      <TrustMigrationNotice />` add:
+
+```tsx
+      <PairingDialog />
+      <NetworkIntroCard />
+```
+
+- [ ] **Step 14: Run the tests to verify they pass**
+
+Run: `bunx vitest run src/components/network src/components/status-bar src/hooks/__tests__/useIncomingPairingNotice.test.tsx src/components/settings src/components/layout/__tests__/StatusBar.test.tsx src/stores/__tests__/network-store.test.ts src/lib/__tests__/network-event-bridge.test.ts`
+Expected: PASS.
+
+- [ ] **Step 15: Run the checks**
+
+Run: `bun run tsc --noEmit && bun run check`
+Expected: no errors. If `check` reports format or import order, run `bun run lint`, then `bun run check` again.
+
+- [ ] **Step 16: Write `docs/features/team-network.md`**
+
+````markdown
+# Team network
+
+Rocket nodes on the same network find each other, pair once with a matching 6-digit code and stay paired until one side removes the pairing. This is the base for sending collections and checking contracts between nodes (later projects). Spec: `docs/superpowers/specs/2026-11-05-team-network-discovery-pairing-design.md`. Plans: `docs/superpowers/plans/team-network/`. Roadmap: R-83, project CA-5.
+
+## What the user sees
+
+- A radar icon in the status bar with the number of online paired nodes. It opens the Network panel.
+- The Network panel (a popover): search box (name, initials or short id), open requests at the top, Paired (online first, offline greyed, menu with Remove) and Nearby (Pair button), and Add by address at the bottom.
+- The pairing dialog: both screens show the same code, for example `482 913`. The node that started the pairing sees Accept and Cancel. The other node sees Accept, Decline and Block and also gets a toast.
+- A one-time card after the first launch: "You're visible on this network as '<name>'." with Edit name, Hide my node and OK.
+- Settings, Team network: Hide my node, display name, port in use, device id (short), blocked devices with Unblock, saved addresses with Remove, warnings.
+
+## Where the code lives
+
+| Layer | Place |
+|---|---|
+| Domain (ids, pairing state machine, presence, dialer, wire types, events, ports) | `crates/rocket-network` |
+| Identity, YAML repos, TLS, peer server and client, mDNS | `crates/rocket-infra/src/network/` |
+| `NetworkService` (state, pairing, presence, audit) | `crates/rocket-app/src/network_service.rs` |
+| Tauri commands and DTOs | `src-tauri/src/commands/network.rs` (commands are in `src-tauri/app-commands.txt`) |
+| Wrappers, types and listeners | `src/lib/tauri-api.ts`, section "Team network" |
+| State | `src/stores/network-store.ts` |
+| Events | `src/lib/network-event-bridge.ts`, `src/hooks/useIncomingPairingNotice.tsx` |
+| UI | `src/components/network/`, `src/components/status-bar/NetworkStatusItem.tsx`, `src/components/settings/sections/NetworkSection.tsx` |
+| Data | `~/.rocket-api/network/` (`paired.yml`, `blocked.yml`, `addresses.yml`, `settings.yml`). Machine-local. The device key is in the OS keychain, service `com.rocketapi.device-identity`. |
+
+## Frontend rules
+
+- The backend owns the state. The store mirrors it. `nodesChanged` and `statusChanged` events trigger a refetch of `network_list_nodes` and `network_status`. A sequence counter drops a stale response.
+- `pairingIncoming` and `pairingFinished` feed `incoming` and `activePairing` directly. Event fields are snake_case.
+- `incoming` is deduped by pairing id and each entry expires 120 seconds after it arrived. A repeated event neither adds a row nor extends the expiry.
+- Only the node that started a pairing gets the "<name> declined." toast.
+- The Add by address, Remove and Pairing dialogs are mounted outside the Popover. Closing the panel never closes them.
+- Closing the pairing dialog of a pairing you started, before you pressed Accept, cancels it.
+- The UI shows the short device id only. Nonces, keys, certificates and the full device id are never shown or logged.
+
+## Decisions
+
+- Visible to everyone on the network by default, with a Hide my node switch (spec section 2). Hiding stops the announcement and refuses new requests. Paired nodes still connect.
+- Pairing lasts until removed. A new key is a new device.
+- The deviations from the spec are listed in `docs/superpowers/plans/team-network/00-plan-index.md`: quarantined files instead of `.bak`, coarser events (`nodesChanged`), a settings file, the dial grace period, hyper's low-level client, the pairing request first calls `/hello`.
+- Error and empty-state copy comes from spec section 9 and is pinned by tests.
+
+## Limits
+
+- 200 paired devices, 50 saved addresses, 256 connections (32 unpaired), 5 pairing requests a minute.
+- A pairing request expires after 2 minutes. A declined device waits 1 minute.
+- Same-network discovery only, plus Add by address. No relay, no internet pairing.
+- No sending of collections or contracts yet.
+
+## How to test
+
+```bash
+bunx vitest run src/lib/__tests__/tauri-api.network.test.ts src/stores/__tests__/network-store.test.ts \
+  src/lib/__tests__/network-event-bridge.test.ts src/components/network src/components/status-bar \
+  src/hooks/__tests__/useIncomingPairingNotice.test.tsx src/components/settings
+bun run tsc --noEmit
+bun run check
+```
+
+Backend tests: `cargo test -j4 -p rocket-network`, `cargo test -j4 -p rocket-infra network`, `cargo test -j4 -p rocket-app network`. Real network checks: `docs/manual-tests/team-network.md`.
+````
+
+- [ ] **Step 17: Write `docs/manual-tests/team-network.md`**
+
+````markdown
+# Manual test: team network
+
+Checks of discovery, pairing and presence on real machines. Written 2026-11-06 from the plan. None of these steps were run when this file was written, so the first pass is also the check of the steps.
+
+Contents
+
+- Setup
+- 1: two machines on one Wi-Fi
+- 2: pairing
+- 3: restart and reconnect
+- 4: sleep and wake
+- 5: network change
+- 6: Add by address over VPN or Tailscale
+- 7: declined firewall prompt
+- 8: Wi-Fi with client isolation
+- 9: hub with 30 teammates
+- 10: hide, block, remove
+
+## Setup
+
+- Two machines, A and B, with the same Rocket build, on the same Wi-Fi. A third machine C helps in checks 9 and 10.
+- Start each with `bun run tauri dev` or an installed build.
+- To start clean on a machine: quit Rocket, delete `~/.rocket-api/network/` and the keychain entry with service `com.rocketapi.device-identity`. The machine then gets a new device id.
+- Each machine shows its own short device id in Settings, Team network.
+
+## 1: two machines on one Wi-Fi
+
+1. Start A, then B. Do not touch either.
+2. Wait at most 5 seconds. Open the radar icon in the status bar on A.
+3. Expect B under Nearby with its name, initials and short device id, and a Pair button. B shows A the same way.
+4. Type the first letters of B's name, then B's initials, then B's short id (with and without the dash). Each finds B. Type `zzz`: the panel says no nodes match.
+5. First launch only: a card says "You're visible on this network as '<name>'." Press OK. Restart: the card does not return.
+
+## 2: pairing
+
+1. On A press Pair next to B. A shows a dialog with a 6-digit code (like `482 913`), B's name and B's short id.
+2. B shows a toast "<A> wants to pair" and, in the panel, a request at the top. Press Review.
+3. Expect the same code on both screens.
+4. Press Accept on A, then on B. Both show "Paired with <name>." and the other node moves to Paired with the chip Online.
+5. Repeat the pairing and press Decline on B. A shows "<B> declined." and nothing is saved.
+6. Repeat and leave the request unanswered for 2 minutes. Expect "The request expired." and the dialog on B switches to the same text if it was open.
+7. Press Pair on A again right after a decline. Expect the request to be refused for about 1 minute (busy).
+
+## 3: restart and reconnect
+
+1. With A and B paired and online, quit Rocket on B and start it again.
+2. Expect B to show A as Paired and Online within about 30 seconds, with no action. A shows B going Offline, then Online again.
+3. Quit both and start both. Expect the same result.
+
+## 4: sleep and wake
+
+1. Put B to sleep for 2 minutes. A shows B Offline after about 40 seconds (two missed pings).
+2. Wake B. Expect B Online on A again within about 2 minutes, without any click.
+
+## 5: network change
+
+1. Move B from the Wi-Fi to another network (or switch Wi-Fi off and on). Move it back.
+2. Expect B Offline while away and Online again after it returns. The pairing is still there.
+3. Join both to a different Wi-Fi. Expect them to find each other again with the same pairing.
+
+## 6: Add by address over VPN or Tailscale
+
+1. Put A and B on different networks joined by a VPN or Tailscale.
+2. On A open the panel and press Add by address. Enter B's VPN address or Tailscale name and the port from B's Settings (default 47821).
+3. Expect B under Nearby on A within about a minute. Try port `0` and `70000`: the dialog refuses them. Try a closed port: the dialog or the list shows no node, with no crash.
+4. Pair as in check 2. Restart both: the pair reconnects through the saved address.
+5. In Settings, Team network, remove the saved address. Expect the pair to stay paired.
+
+## 7: declined firewall prompt
+
+1. On a machine with a firewall (macOS or Windows), start Rocket for the first time and deny the incoming connection prompt.
+2. Expect the banner "Others can't connect to you. Allow Rocket in your firewall settings." in the panel.
+3. Outgoing still works: this machine can pair with a node that can reach it? No. Pairing needs only this machine to reach the other one, so from this machine pressing Pair on a visible node works.
+4. Allow Rocket in the firewall settings, restart, and expect the banner to be gone.
+
+## 8: Wi-Fi with client isolation
+
+1. Join A and B to a Wi-Fi with client isolation (guest Wi-Fi).
+2. Expect "No Rocket nodes found on this network." and the hint "VPNs and some Wi-Fi networks block discovery." Add by address still shows its dialog.
+3. If mDNS is blocked on the machine, expect "Automatic discovery isn't available here." and no hint.
+
+## 9: hub with 30 teammates
+
+Needs 30 nodes. Use real teammates or 30 machines or VMs.
+
+1. Pick one node as the hub H. Each teammate presses Pair on H, one at a time or a few at once.
+2. On H review each request from the panel (several open requests list at the top, each with its own toast). Accept each one. After 5 requests in a minute extra requests see "busy"; the teammate tries again a minute later.
+3. When all 30 are paired, expect 30 rows under Paired, all Online, and the status bar number 30. Searching by one name finds one row. The panel stays smooth to scroll.
+4. Leave it for 10 minutes. Expect all 30 to stay Online (the connection limit is 256).
+5. The in-process version of this check is in the Rocket infra tests (one node paired with 30 nodes).
+
+## 10: hide, block, remove
+
+1. On B turn on Hide my node in Settings, Team network. A stops seeing B under Nearby within about 2 minutes, but B stays Online under Paired on A.
+2. On C, try to pair with B: C does not see B. Turn Hide off: C sees B again.
+3. On B press Block in a request from C. C sees "<B> declined." B lists C under Blocked devices. Press Unblock: C can request again.
+4. On A remove B from the Paired menu and confirm. B sees "<A> removed the pairing." and A moves to Nearby (or disappears). Repeat with B offline: B sees the message when it reconnects, and the pairing is gone on both.
+5. Change the display name on A (Settings). B shows the new name after the next connection. A name of 41 characters is refused.
+6. Open Settings, Team network on a machine where the keychain is locked or unavailable. Expect networking off with the reason, in the panel and in Settings.
+````
+
+- [ ] **Step 18: Update `docs/features/settings-page.md`**
+
+Replace the quoted line (inside "Sections"):
+
+`Order follows Bruno: Proxy, Secret Managers, AI Agents, Support, About. The list is`
+
+with:
+
+`Order follows Bruno, with Team network (not in Bruno) after AI Agents: Proxy, Secret Managers, AI Agents, Team network, Support, About. The list is`
+
+and replace the quoted sentence `Secret Managers and AI Agents use the wide panel.` with `Secret Managers, AI Agents and Team network use the wide panel. Team network is described in \`docs/features/team-network.md\`.`
+
+- [ ] **Step 19: Add the pointer to `CLAUDE.md`**
+
+After the quoted line (the update notification pointer):
+
+```
+See `docs/features/update-notification.md` for the update notice (schedule, install kinds, settings, manual checks).
+```
+
+add:
+
+```
+See `docs/features/team-network.md` for the team network (discovery, pairing, presence, Network panel, Settings section, limits, manual checks).
+```
+
+- [ ] **Step 20: Update the roadmaps**
+
+In `docs/roadmaps/roadmap.md`, in the R-83 row replace the quoted cell `| spec |` (the status cell right after the project text, before the spec path) with `| built, manual checks open |`, and replace the last cell text `User reviews the spec, then plans. Send and receive, and contract checks between nodes, get their own specs.` with `Manual checks in \`docs/manual-tests/team-network.md\`. Feature doc: \`docs/features/team-network.md\`. Send and receive, and contract checks between nodes, get their own specs.`
+
+In `docs/roadmaps/contracts-ci-ai-roadmap.md`:
+
+- In the table row `| CA-5 | Team network: AirDrop-style discovery and pairing, one node as hub | none | spec |` replace the last cell `spec` with `built, manual checks open`.
+- In the CA-5 section replace `- MVP (spec written): every Rocket is a node.` with `- MVP (built, manual checks open in \`docs/manual-tests/team-network.md\`): every Rocket is a node.`
+
+Do not touch other rows. These two files already have uncommitted edits from the user; edit by quoted text only.
+
+- [ ] **Step 21: Run the whole frontend verification**
+
+Run: `bun run tsc --noEmit && bun run check && bunx vitest run src/lib src/stores src/components/network src/components/status-bar src/components/layout src/components/settings src/hooks`
+Expected: all PASS. No Rust file changed in this plan, so no cargo command is needed.
+
+- [ ] **Step 22: No commit**
+
+No commit; reviewed at the plan end.
+
+---
+
+## End of Plan 5. Verify:
+
+```bash
+bun run tsc --noEmit
+bun run check
+bunx vitest run src/lib src/stores src/components/network src/components/status-bar src/components/layout src/components/settings src/hooks
+git status --short   # only the files named in the File Structure table, plus the user's existing roadmap edits
+```
+
+Then stop. Show the user the whole Plan 5 change. After the user's OK, commit through `dev-workflow-skills:1-git-commit`, staging explicit paths only, in this split:
+
+1. `feat(network): add network store, event bridge and wrappers` (Task 1 files).
+2. `feat(network): add status bar item, Network panel and address dialogs` (Task 2 files).
+3. `feat(network): add pairing dialog, intro card and Settings section` (Task 3 source and tests).
+4. `docs(network): add feature doc, manual checks and roadmap status` (docs, `CLAUDE.md`, roadmaps).
+
+After all five plans are merged, run the Opus security review of the protocol and the peer server from spec section 8.7, then the manual checks in `docs/manual-tests/team-network.md` on two real machines.
+
+### Manual check
+
+Run the real app on two machines (`bun run tauri dev`), both on one Wi-Fi.
+
+1. The status bar shows the radar icon. The panel lists the other machine under Nearby within 5 seconds, and the search box finds it by name, initials and short id.
+2. Pair: both screens show the same code in the form `482 913`. Accept on both. The panel shows Paired and Online, and the status bar number is 1.
+3. Decline once and let one request expire. Check the toasts and the dialog text: "Dana declined." only on the node that started the pairing, "The request expired." for the expiry.
+4. Restart one machine. The pair comes back Online with no action.
+5. Remove the pairing from the row menu. The confirmation names the node. The other machine shows "<name> removed the pairing."
+6. Add by address with a wrong port (0), then with a valid address. The dialog shows the validation and the backend error text.
+7. Settings, Team network: Hide my node, rename (try 41 characters), port and device id, blocked list with Unblock, saved addresses with Remove.
+8. First launch (delete `~/.rocket-api/network/settings.yml`): the intro card shows once. Edit name opens Settings on Team network.
+9. Switch between light and dark themes: the panel, the chips and the pairing dialog stay readable. Check in WebKitGTK on Linux that the popover opens upward above the status bar.
+
+## Self-Review
+
+**Spec mapping**
+
+| Spec | Where |
+|---|---|
+| 5.5 panel, dialogs, notice, first-launch card | Tasks 2 and 3 |
+| 5.5 Settings: visibility, name, port, blocked devices | Task 3 `NetworkSection` |
+| 5.5 status bar icon with online count | Task 2 `NetworkStatusItem` |
+| 5.5 `network-store` fed by listeners | Task 1 |
+| 3a many peers (several requests, 200 limit message) | Task 2 requests list, backend error surfaced by `toast.error`; manual check 9 |
+| 7.5 panel (search, groups, chips, Add by address, requests on top) | Task 2 |
+| 8.4 first launch card | Task 3 `NetworkIntroCard` |
+| 9 error copy (firewall, discovery, failed, expired, declined, needs update, keychain, limit 200) | Task 1 bridge, Task 2 panel, Task 3 dialog and section; strings pinned in tests |
+| 10 Vitest: store reacts to each event; search, groups, chips; dialog commands; card once | Tasks 1 to 3 tests |
+| 10 manual checks | `docs/manual-tests/team-network.md` |
+| Index command table (14 wrappers) and event channels | Task 1 |
+
+**Names used.** Wrappers, channels and DTO fields match the plan index. TS type names (`NetworkStatus`, `NetworkNode`, `NetworkAddress`, `NetworkBlockedDevice`, `NetworkPairingStarted`) drop the `Dto` suffix used on the Rust side, as the repo does for other IPC types. `Presence` values are the node statuses (`online`, `offline`, `pairing`, `needs_update`, `available`).
+
+**Deviations from the plan index and the task brief**
+
+1. `ActivePairing` and `PairingIncoming` carry extra fields (`deviceId`, `shortId`; `accepted` on incoming) because the dialog shows the short id and a request that was accepted must show "Waiting for ...". `phase` means: `waiting` = the user has not decided, `done` = the user accepted and waits for the peer.
+2. The store also owns two UI flags, `panelOpen` and `dialogPairingId`, so a toast, the intro card and the panel can open each other's UI.
+3. The incoming toast is created by a store subscriber hook (`useIncomingPairingNotice`), not by the bridge, so Task 1 does not depend on a Task 3 component and a duplicate event cannot make a second toast.
+4. The two event channels have two payload unions (`NetworkChangedEvent`, `NetworkPairingEvent`), one per channel, instead of one union.
+5. Dialog buttons that only hide the dialog are named "Done" because `DialogContent` already has an X button named "Close".
+6. The "declined" toast is limited to the node that started the pairing, and `cancelled` is silent. The spec does not say who sees "<name> declined." and a user should not get a toast about their own click.
+
+**Not covered / assumptions that need the backend to confirm**
+
+- `respondNetworkPairing(id, 'accept')` is assumed to work for the node that started the pairing (the initiator's Accept), and `cancelNetworkPairing` to work for either role. Plan 4 defines `respond_pairing(id, decision)` without a role split; if the initiator needs another command, Task 3's `acceptStarted` changes only.
+- It is assumed that `PairingFinished` is also sent to the node that pressed Decline or Block, and that the Rust side emits `nodesChanged` after a pairing is saved. The frontend works if it does not, because `accepted` also reloads the nodes and the panel reloads on open.
+- The exact wording of backend error messages (for example the 200-device limit) comes from the backend. The UI shows them as received after dropping the type prefix.
+- Window focus and tray behaviour for the incoming toast (no OS notification when Rocket is in the background) are not built. Manual check 2 shows what happens today.
+- A visual Network tab, a diagnostics view, "paired only" visibility, team invite and any sending of data are post-MVP items from spec section 11.
