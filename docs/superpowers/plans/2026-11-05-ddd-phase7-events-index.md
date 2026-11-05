@@ -9,7 +9,7 @@ Spec: `docs/superpowers/specs/2026-11-05-domain-event-split-design.md`. One plan
 | 2 | `EnvironmentEvent`, `WorkspaceEvent` | `2026-11-05-ddd-phase7-events-plan-2-environment-workspace.md` | done, merged |
 | 3 | `FlowEvent`, `GitEvent` | `2026-11-05-ddd-phase7-events-plan-3-flow-git.md` | done, merged |
 | 4 | `AcpEvent` (+ `acp.rs` types) | `2026-11-05-ddd-phase7-events-plan-4-acp.md` | done, merged |
-| 5 | `OpenApiSyncEvent`, `ExecutionEvent` | `2026-11-05-ddd-phase7-events-plan-5-openapi-execution.md` | written |
+| 5 | `OpenApiSyncEvent`, `ExecutionEvent` | `2026-11-05-ddd-phase7-events-plan-5-openapi-execution.md` | done, unmerged |
 | 6 | `CollectionEvent`, `RecentWrites`, file watcher | | not written |
 | 7 | Delete `DomainEvent` and the temporary `domain_event_port.rs` | | not written |
 
