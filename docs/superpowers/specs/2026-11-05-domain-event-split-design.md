@@ -1,6 +1,6 @@
 # Splitting DomainEvent into per-context events (D-74, D-71)
 
-Status: design for review. Roadmap: `docs/roadmaps/ddd-roadmap.md` D-74 and D-71. Decision: `docs/engineering/ddd-decisions.md` D-03 (direction (b), per-context enums behind the same wire format). Related: R-55 (events and IPC rework) stays parked; this spec does not need it.
+Status: implemented by plans 0 to 7. Roadmap: `docs/roadmaps/ddd-roadmap.md` D-74 and D-71. Decision: `docs/engineering/ddd-decisions.md` D-03 (direction (b), per-context enums behind the same wire format). Related: R-55 (events and IPC rework) stays parked; this spec does not need it.
 
 ## Goal
 

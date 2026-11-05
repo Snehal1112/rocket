@@ -32,15 +32,17 @@ Ruling (2026-11-04): `rocket-git` stays mixed. `rocket-import` gets a file port 
 
 Ruling (2026-11-04): split by context over time, not before Phases 3 and 4 are done for the same area, and each split needs its own spec. Why: the app layer is one crate with flow at 25k lines, but a split before the I/O cleanup would move the leaks. Follow-ups: D-80, D-81, D-82.## D-03 Events: one global `DomainEvent` or one enum per context
 
-**Evidence:** `DomainEvent` has 81 variants in one 2,522-line file (`crates/rocket-shared/src/events.rs`). `TauriEventBus` maps each variant to a channel in one `match`. Contract tests in `events.rs` pin the wire keys. R-55 (events and IPC rework) is parked since 2026-10-11 with no spec (`docs/engineering/events-and-ipc-rework.md`). D-74 (split the enum) depends on this ruling and on R-55.
+**Evidence:** `DomainEvent` has 81 variants in one 2,522-line file (`crates/rocket-shared/src/events.rs`). `TauriEventBus` maps each variant to a channel in one `match`. Contract tests in `events.rs` pin the wire keys. R-55 (events and IPC rework) is parked since 2026-10-11 with no spec (`docs/engineering/events-and-ipc-rework.md`). D-74 (split the enum) implements this ruling.
 
 **Options**
 - (a) Keep one global enum.
 - (b) Per-context enums in the owning crates behind the same wire format, with the contract tests as the guard.
 
-**Proposal:** (b) as the direction, no work until R-55 is unparked. Phases 3 to 6 do not need this decision to be executed.
+**Proposal:** (b) as the direction. Phases 3 to 6 do not need this decision to be executed.
 
-Proposed (not yet ruled): per-context enums as the direction, no work until R-55 is unparked. Status stays `open`. D-74 waits for this ruling.## D-04 Rich domain model
+Ruling (2026-11-05): (b), per-context enums behind the same wire format, implemented by the DomainEvent split (D-74, plans 0 to 7; spec docs/superpowers/specs/2026-11-05-domain-event-split-design.md). Status: done.
+
+## D-04 Rich domain model
 
 **Evidence** (callers that bypass rules today): `workspace_service.rs` mutates the registry directly at lines 112 and 289 (`registry.workspaces.push`) and 165 (`workspace.name = ..`). `flow_service.rs` calls `validate_report` before it saves, and has an in-crate helper that bypasses `validate`, so a validity check is easy to skip.
 

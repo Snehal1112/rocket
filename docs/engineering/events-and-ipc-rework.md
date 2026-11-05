@@ -23,6 +23,8 @@ It is a large change. It touches the backend event bus, the Tauri bridge and mos
 - No backend-internal subscribers. Services cannot react to each other. The audit path uses a separate trait (`SecurityAuditPublisher`) with direct calls.
 - Payload naming is mixed: the enum tag is camelCase but field names inside variants stay snake_case.
 
+Note: D-74 split `DomainEvent` into per-context enums on 2026-11-05, so the `DomainEvent` counts above are history.
+
 ## Findings
 
 ### Frontend multi-call sequences (round trips per user action)

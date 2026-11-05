@@ -43,7 +43,7 @@ All structs use `#[serde(rename_all = "camelCase")]` for JSON serialization. Opt
 
 ## Events
 
-`events.rs` defines `CollectionEvent` (17 variants: collection, request, folder and variable events plus the file watcher events). It implements `PublishedEvent` and overrides `written_collections()`, which the echo guard reads: `TauriEventBus` passes each event to `RecentWrites::record`. Its `wire_contract_*` tests pin the JSON keys. `FileChangeKind` stays in `rocket-shared`.
+`events.rs` defines `CollectionEvent` (17 variants: collection, request, folder and variable events plus the file watcher events). It implements `PublishedEvent` and overrides `written_collections()`, which the echo guard reads: `TauriEventBus` passes each event to `RecentWrites::record`. Its `wire_contract_*` tests pin the JSON keys. `FileChangeKind` (the file watcher change kind) is defined in the same file and re-exported as `rocket_collection::FileChangeKind`. `rocket-import` has its own unrelated `FileChangeKind` (`Put`, `Delete`).
 
 ## Key Design Rules
 

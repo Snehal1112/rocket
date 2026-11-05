@@ -26,14 +26,9 @@ cargo check -p rocket-shared
 - `DomainResult<T>` — type alias for `Result<T, DomainError>`. Used as the return type for every fallible service and repository method across the workspace.
 
 ### Events
-- `events.rs` holds `FileChangeKind`, the Flow DTOs (for example `FlowCallbackInfo`, `FlowLiveProgress`), the four WebSocket and GraphQL payload enums, `EventPublisher` and `NullEventPublisher`. There is no `DomainEvent` any more. Plan 7 moves the helper types to their contexts.
+- `events.rs` holds only the publisher port: the `PublishedEvent` re-export, `EventPublisher` and `NullEventPublisher`. There is no `DomainEvent` any more, and no event payload type lives here.
 - `PublishedEvent` (`published_event.rs`) — the port between event producers and the bus: `channel`, `to_json`, `also_emit_on`, `written_collections` and `as_any` (with `dyn PublishedEvent::downcast_ref`). Each context's event enum implements it next to the enum.
-- Moved out of `DomainEvent` (plan 1): `HistoryEvent` in `rocket-history`, `LoadTestEvent` in `rocket-http`, `GrpcEvent` in `rocket-grpc`. Each implements `PublishedEvent` and keeps the old channel names and JSON. `GrpcMetadataPair` and the load test payload types live in their own crates now. `DomainEvent` has 74 variants left.
-- Moved out of `DomainEvent` (plan 2): `EnvironmentEvent` in `rocket-environment` (channel `environment-changed`) and `WorkspaceEvent` in `rocket-workspace` (eight `workspace-*` channels). Same channels and JSON as before. `DomainEvent` has 64 variants left.
-- Moved out of `DomainEvent` (plan 3): `FlowEvent` in `rocket-flow` (one `flow-*` channel per variant) and `GitEvent` in `rocket-git` (channel `git-changed`). Same channels and JSON as before. `DomainEvent` has 47 variants left.
-- Moved out of `DomainEvent` (plan 4): `AcpEvent` in `rocket-acp` (13 ACP session and proposal events plus 3 assistant conversation events). Same channels and JSON as before. `ConfigOption`, `ConfigChoice`, `PermissionOption` and `PermissionOptionKind` moved to `rocket-acp` with it, and the `acp` module is gone from this crate. `DomainEvent` has 31 variants left, and no ACP, gRPC or load test types remain here.
-- Moved out of `DomainEvent` (plan 5): `OpenApiSyncEvent` (2 variants) and `ExecutionEvent` (12 variants: request, runner, WebSocket, GraphQL and script events), both in `rocket-app` because their publishers live there. The WebSocket and GraphQL payload enums (`WebSocketDirection`, `WebSocketPayloadKind`, `GraphQlSubscriptionEventKind`, `WebSocketSessionState`) stay in `rocket-shared` until plan 7. Same channels and JSON as before. `DomainEvent` had 17 variants left, all collection events.
-- Moved out of `DomainEvent` (plan 6): `CollectionEvent` in `rocket-collection` (`events.rs`, 17 variants: collection, request, folder and variable events, the file watcher events and `CollectionVariableWritten`). It overrides `written_collections()` for the echo guard. `DomainEvent` and `domain_event_port.rs` are deleted. `RecordingPublisher::events()` is now `collection_events()`.
+- History: the D-74 split moved every event enum and helper type to its owning context (plans 0 to 7). The D-74 progress paragraph in `docs/roadmaps/ddd-roadmap.md` lists the plans and where each type went.
 - `EventPublisher` — object-safe trait (`fn publish(&self, event: &dyn PublishedEvent)`). Implemented by `TauriEventBus` in `src-tauri/src/tauri_event_bus.rs`; `NullEventPublisher` is the no-op used in tests.
 
 ### Update settings
@@ -65,7 +60,7 @@ cargo check -p rocket-shared
 The client certificate model lives in `rocket-environment` (`certificate.rs`) and the proxy types in `rocket-http` (`proxy.rs`). This crate has neither.
 
 ### Event wire format (pinned)
-- The `type` tag is camelCase (`collectionCreated`). Variant fields are deliberately snake_case (`session_id`). Nested helper DTOs (for example `FlowCallbackInfo`, `LoadTestProgressEvent`) are camelCase.
+- The `type` tag is camelCase (`collectionCreated`). Variant fields are deliberately snake_case (`session_id`). Nested helper DTOs (for example `FlowCallbackInfo` in `rocket-flow`, `LoadTestProgressEvent`) are camelCase.
 - This mix is kept on purpose. Renaming any of it breaks the frontend listeners and needs its own decision.
 - The `wire_contract_*` tests live in each context's own `events.rs` (`rocket-collection`, `rocket-acp`, `rocket-git`, `rocket-app/src/execution_events.rs`). They assert exact key sets, so an accidental rename fails the build.
 - The bus reads each event through `PublishedEvent` (`channel`, `to_json`). `TauriEventBus` adds `seq` (process-wide counter) and `tsMs` (unix ms) at emit time. Do not add top-level fields with those names to a variant.

@@ -36,6 +36,7 @@ cargo test -p rocket-flow -j4
 | `routing.rs` | Run-time routing rules (spec §6.2–6.3): `NodeOutcome`, `NodeFate`, `is_live` and `decide_fate`. Pure; `rocket-app` flow execution calls them (D-61). |
 | `save_error.rs` | The save-error text of an invalid flow (`graph_errors_message`, private to the crate). Reached through `Flow::ensure_valid`. |
 | `request_refs.rs` | Rewrites Saved request paths in a flow after a move (whole path segments, folder prefix) and finds flows that use a path |
+| `run_types.rs` | The run payload types that ride in `FlowEvent` and the IPC results (18 types, for example `FlowNodeStatus`, `FlowStepTrace`, `FlowWireValue`, `FlowLiveProgress`, `FlowCallbackInfo`). Reached as `rocket_flow::run_types::*`. The serde attributes are the wire format, and the wire tests sit in the file. |
 | `events.rs` | `FlowEvent` (run started, step started, progress and completed, run finished, request paths rewritten; one channel per variant, `flow-run-started` and so on; implements `PublishedEvent`). Frozen JSON literals in the tests pin the wire format. `FlowExecutionService` and `CollectionService` in `rocket-app` publish it. |
 
 ### Key Design Points
