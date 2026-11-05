@@ -54,7 +54,7 @@ impl ProxySettings {
                 continue;
             };
             any = true;
-            let parsed = reqwest::Url::parse(url).map_err(|_| {
+            let parsed = url::Url::parse(url).map_err(|_| {
                 DomainError::InvalidInput(format!(
                     "The {label} proxy URL is not valid. Use http://host:port or https://host:port"
                 ))

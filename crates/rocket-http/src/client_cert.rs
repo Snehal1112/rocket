@@ -3,7 +3,7 @@
 //! Pure matching only: the executor in `rocket-infra` loads the material of the certificate
 //! chosen here.
 
-use reqwest::Url;
+use url::Url;
 
 use crate::resolved_certificate::ResolvedClientCertificate;
 

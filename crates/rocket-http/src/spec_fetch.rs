@@ -152,7 +152,7 @@ pub trait LocalSpecReader: Send + Sync {
 /// True for a plain `http` link to this machine: the host is exactly `localhost`, `127.0.0.1`
 /// or `::1`, with no user info. Anything else on `http` stays refused, and a host that only
 /// starts with one of these names is another host.
-pub fn is_loopback_http(url: &reqwest::Url) -> bool {
+pub fn is_loopback_http(url: &url::Url) -> bool {
     use std::net::{Ipv4Addr, Ipv6Addr};
     if url.scheme() != "http" || !url.username().is_empty() || url.password().is_some() {
         return false;
@@ -169,7 +169,7 @@ pub fn is_loopback_http(url: &reqwest::Url) -> bool {
 /// a loopback, private, link-local or unspecified address. Host names are not resolved, so
 /// this only stops address literals and `localhost`.
 pub fn redirect_target_allowed(to: &str) -> bool {
-    let Ok(url) = reqwest::Url::parse(to) else {
+    let Ok(url) = url::Url::parse(to) else {
         return false;
     };
     if url.scheme() != "https" {
@@ -214,7 +214,7 @@ fn ip_is_local(ip: IpAddr) -> bool {
 
 /// True when both URLs have the same scheme, host and port.
 pub fn same_origin(a: &str, b: &str) -> bool {
-    let (Ok(a), Ok(b)) = (reqwest::Url::parse(a), reqwest::Url::parse(b)) else {
+    let (Ok(a), Ok(b)) = (url::Url::parse(a), url::Url::parse(b)) else {
         return false;
     };
     a.scheme() == b.scheme()
@@ -260,7 +260,7 @@ mod tests {
 
     #[test]
     fn is_loopback_http_table() {
-        let parse = |s: &str| reqwest::Url::parse(s).expect("url");
+        let parse = |s: &str| url::Url::parse(s).expect("url");
         for ok in [
             "http://localhost/x",
             "http://LOCALHOST:3000/x",

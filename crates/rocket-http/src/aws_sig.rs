@@ -75,7 +75,7 @@ pub fn sign_request_with_payload_hash(
     credentials: &AwsCredentials,
     timestamp: &str,
 ) -> Result<SignedHeaders, String> {
-    let parsed_url = reqwest::Url::parse(url).map_err(|e| format!("Failed to parse URL: {e}"))?;
+    let parsed_url = url::Url::parse(url).map_err(|e| format!("Failed to parse URL: {e}"))?;
 
     // Date portion is the first 8 characters of the timestamp.
     let date_stamp = timestamp
@@ -161,7 +161,7 @@ pub fn sign_request_with_payload_hash(
 }
 
 /// Canonical query string: every key and value percent-encoded, sorted by encoded key.
-fn canonical_query(url: &reqwest::Url) -> String {
+fn canonical_query(url: &url::Url) -> String {
     let mut pairs: Vec<(String, String)> = url
         .query_pairs()
         .map(|(k, v)| {
@@ -534,7 +534,7 @@ mod tests {
     fn query_values_are_percent_encoded_in_the_canonical_request() {
         // The URL parser decodes `+` and raw spaces to a space and `%2F` to `/`. The canonical
         // query must encode every key and value again, then sort by the encoded key.
-        let url = reqwest::Url::parse("https://example.com/p?b=a b&a=1+2&c=%2F").expect("url");
+        let url = url::Url::parse("https://example.com/p?b=a b&a=1+2&c=%2F").expect("url");
         assert_eq!(canonical_query(&url), "a=1%202&b=a%20b&c=%2F");
     }
 

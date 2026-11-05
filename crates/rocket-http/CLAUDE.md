@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `rocket-http` defines HTTP request/response types, auth utilities, cookie management, and a load-testing harness. The concrete `ReqwestExecutor` and `FsCookieRepository` live in `rocket-infra`.
 
-No known I/O leaks remain in this crate (D-50 shipped on 2026-11-04). The token POST lives in `rocket-infra` (`ReqwestTokenClientProvider::post_form`). `spec_fetch.rs` is a port (`SpecFetcher`) but uses `reqwest::Url` in its helpers, which is parsing only. Keep new code free of I/O.
+No known I/O leaks remain in this crate (D-50 shipped on 2026-11-04). The token POST lives in `rocket-infra` (`ReqwestTokenClientProvider::post_form`). `spec_fetch.rs` is a port (`SpecFetcher`); its helpers parse with `url::Url`. The crate does not depend on `reqwest`. Keep new code free of I/O.
 
 ## Commands
 

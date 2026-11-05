@@ -105,7 +105,7 @@ pub fn signature_base_string(
     url: &str,
     params: &[(String, String)],
 ) -> Result<String, String> {
-    let parsed = reqwest::Url::parse(url).map_err(|e| format!("Failed to parse URL: {e}"))?;
+    let parsed = url::Url::parse(url).map_err(|e| format!("Failed to parse URL: {e}"))?;
     let host = parsed
         .host_str()
         .ok_or_else(|| "URL has no host".to_string())?;

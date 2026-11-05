@@ -7,11 +7,10 @@ edition.workspace = true
 rocket-environment.workspace = true
 rocket-shared.workspace = true
 serde.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["rt", "sync", "time", "macros"] }
 serde_json.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
-reqwest.workspace = true
 sha2.workspace = true
 hmac.workspace = true
 sha1 = "0.10"
@@ -26,3 +25,4 @@ zeroize = "1"
 
 [dev-dependencies]
 serde_yaml.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread"] }
