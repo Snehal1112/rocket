@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use crate::acp::{ConfigOption, PermissionOption};
 use crate::load_test::{LoadTestProgressEvent, LoadTestResult};
 
+pub use crate::published_event::PublishedEvent;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FlowNodeStatus {
