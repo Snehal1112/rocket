@@ -26,7 +26,7 @@ cargo check -p rocket-shared
 - `DomainResult<T>` — type alias for `Result<T, DomainError>`. Used as the return type for every fallible service and repository method across the workspace.
 
 ### Events
-- `DomainEvent` — exhaustive enum of all domain events (collection, request, environment, workspace, HTTP execution, file-system, history, git). Tagged with `#[serde(tag = "type", rename_all = "camelCase")]` so variants serialize as `{"type": "collectionCreated", ...}` for Tauri's event bus.
+- `DomainEvent` — exhaustive enum of all domain events (collection, request, environment, workspace, HTTP execution, file-system, git). Tagged with `#[serde(tag = "type", rename_all = "camelCase")]` so variants serialize as `{"type": "collectionCreated", ...}` for Tauri's event bus.
 - `PublishedEvent` (`published_event.rs`) — the port between event producers and the bus: `channel`, `to_json`, `also_emit_on`, `written_collections` and `as_any` (with `dyn PublishedEvent::downcast_ref`). `DomainEvent` implements it in `domain_event_port.rs`.
 - Moved out of `DomainEvent` (plan 1): `HistoryEvent` in `rocket-history`, `LoadTestEvent` in `rocket-http`, `GrpcEvent` in `rocket-grpc`. Each implements `PublishedEvent` and keeps the old channel names and JSON. `GrpcMetadataPair` and the load test payload types live in their own crates now. `DomainEvent` has 74 variants left.
 - `EventPublisher` — object-safe trait (`fn publish(&self, event: &dyn PublishedEvent)`). Implemented by `TauriEventBus` in `rocket-infra`; `NullEventPublisher` is the no-op used in tests.
