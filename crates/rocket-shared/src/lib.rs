@@ -5,7 +5,6 @@ pub mod description;
 pub mod domain_event_port;
 pub mod error;
 pub mod events;
-pub mod grpc;
 pub mod host_env;
 pub mod oauth2;
 pub mod paths;

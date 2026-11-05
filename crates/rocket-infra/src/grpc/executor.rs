@@ -141,10 +141,10 @@ impl GrpcExecutor for TonicGrpcExecutor {
 }
 
 type UnaryParts = (
-    Vec<rocket_shared::grpc::GrpcMetadataPair>,
+    Vec<rocket_grpc::GrpcMetadataPair>,
     Option<String>,
     GrpcStatus,
-    Vec<rocket_shared::grpc::GrpcMetadataPair>,
+    Vec<rocket_grpc::GrpcMetadataPair>,
 );
 
 /// Sends the request through the streaming API, which also exposes trailers.
@@ -345,7 +345,7 @@ fn failed(code: Code, message: &str) -> GrpcStreamEvent {
 mod tests {
     use std::time::Duration;
 
-    use rocket_shared::grpc::GrpcMetadataPair;
+    use rocket_grpc::GrpcMetadataPair;
 
     use super::*;
     use crate::grpc::test_server::{start, Reflection, TestServer};

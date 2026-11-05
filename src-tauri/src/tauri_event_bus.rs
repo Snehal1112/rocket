@@ -253,6 +253,44 @@ mod tests {
     }
 
     #[test]
+    fn grpc_events_keep_their_channel_names() {
+        use rocket_grpc::GrpcEvent;
+        assert_eq!(
+            emit_channels(&GrpcEvent::GrpcSessionStarted {
+                session_id: "s".into(),
+                method_type: "bidi-streaming".into(),
+            }),
+            vec!["grpc-session-started"]
+        );
+        assert_eq!(
+            emit_channels(&GrpcEvent::GrpcSessionHeaders {
+                session_id: "s".into(),
+                headers: vec![],
+            }),
+            vec!["grpc-session-headers"]
+        );
+        assert_eq!(
+            emit_channels(&GrpcEvent::GrpcSessionMessage {
+                session_id: "s".into(),
+                index: 0,
+                json: "{}".into(),
+            }),
+            vec!["grpc-session-message"]
+        );
+        assert_eq!(
+            emit_channels(&GrpcEvent::GrpcSessionFinished {
+                session_id: "s".into(),
+                code: 0,
+                code_name: "OK".into(),
+                message: String::new(),
+                trailers: vec![],
+                duration_ms: 0,
+            }),
+            vec!["grpc-session-finished"]
+        );
+    }
+
+    #[test]
     fn envelope_adds_seq_and_ts_ms_to_the_event_object() {
         let event = DomainEvent::FileWatcherFailed {
             message: "m".into(),

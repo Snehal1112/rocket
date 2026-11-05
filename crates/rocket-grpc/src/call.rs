@@ -1,8 +1,8 @@
 use std::time::Duration;
 
+use crate::events::GrpcMetadataPair;
 use async_trait::async_trait;
 use rocket_shared::error::{DomainError, DomainResult};
-use rocket_shared::grpc::GrpcMetadataPair;
 use serde::Serialize;
 use tokio::sync::mpsc;
 use tokio::task::AbortHandle;

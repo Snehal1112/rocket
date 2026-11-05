@@ -25,10 +25,6 @@ impl PublishedEvent for DomainEvent {
             DomainEvent::AcpThoughtChunk { .. } => "agent-session-thought",
             DomainEvent::AcpSessionFinished { .. } => "agent-session-finished",
             DomainEvent::AcpSessionFailed { .. } => "agent-session-failed",
-            DomainEvent::GrpcSessionStarted { .. } => "grpc-session-started",
-            DomainEvent::GrpcSessionHeaders { .. } => "grpc-session-headers",
-            DomainEvent::GrpcSessionMessage { .. } => "grpc-session-message",
-            DomainEvent::GrpcSessionFinished { .. } => "grpc-session-finished",
             DomainEvent::WebSocketMessage { .. } => "ws:message",
             DomainEvent::WebSocketStatus { .. } => "ws:status",
             DomainEvent::GraphQlSubscriptionMessage { .. } => "graphql:subscription-message",
@@ -387,27 +383,6 @@ mod tests {
                 applied: 1,
                 stale: 0,
             },
-            DomainEvent::GrpcSessionStarted {
-                session_id: s(),
-                method_type: s(),
-            },
-            DomainEvent::GrpcSessionHeaders {
-                session_id: s(),
-                headers: Vec::new(),
-            },
-            DomainEvent::GrpcSessionMessage {
-                session_id: s(),
-                index: 0,
-                json: s(),
-            },
-            DomainEvent::GrpcSessionFinished {
-                session_id: s(),
-                code: 0,
-                code_name: s(),
-                message: s(),
-                trailers: Vec::new(),
-                duration_ms: 1,
-            },
             DomainEvent::WebSocketMessage {
                 session_id: s(),
                 direction: WebSocketDirection::In,
@@ -509,7 +484,7 @@ mod tests {
     }
 
     /// The channel of each variant, keyed by its JSON  tag.
-    const CHANNELS: [(&str, &str); 78] = [
+    const CHANNELS: [(&str, &str); 74] = [
         ("fileChanged", "collection-changed"),
         ("requestExecuted", "request-executed"),
         ("fileWatcherFailed", "file-watcher-failed"),
@@ -526,10 +501,6 @@ mod tests {
         ("acpThoughtChunk", "agent-session-thought"),
         ("acpSessionFinished", "agent-session-finished"),
         ("acpSessionFailed", "agent-session-failed"),
-        ("grpcSessionStarted", "grpc-session-started"),
-        ("grpcSessionHeaders", "grpc-session-headers"),
-        ("grpcSessionMessage", "grpc-session-message"),
-        ("grpcSessionFinished", "grpc-session-finished"),
         ("webSocketMessage", "ws:message"),
         ("webSocketStatus", "ws:status"),
         ("graphQlSubscriptionMessage", "graphql:subscription-message"),
@@ -607,9 +578,9 @@ mod tests {
     #[test]
     fn one_of_each_covers_every_variant() {
         let events = one_of_each();
-        assert_eq!(events.len(), 78);
+        assert_eq!(events.len(), 74);
         let tags: BTreeSet<String> = events.iter().map(tag).collect();
-        assert_eq!(tags.len(), 78);
+        assert_eq!(tags.len(), 74);
     }
 
     #[test]

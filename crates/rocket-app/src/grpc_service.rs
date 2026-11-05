@@ -10,12 +10,12 @@ use base64::Engine;
 use rocket_collection::GrpcMethodType;
 use rocket_collection::{CollectionRepository, GrpcRequest};
 use rocket_environment::resolve;
-use rocket_grpc::GrpcServiceInfo;
+use rocket_grpc::GrpcMetadataPair;
 use rocket_grpc::{json_to_message, GrpcStreamEvent, MessageDescriptor};
 use rocket_grpc::{GrpcCall, GrpcExecutor, GrpcUnaryResponse, ProtoLoader, ProtoRegistry};
+use rocket_grpc::{GrpcEvent, GrpcServiceInfo};
 use rocket_shared::error::{DomainError, DomainResult};
-use rocket_shared::events::{DomainEvent, EventPublisher};
-use rocket_shared::grpc::GrpcMetadataPair;
+use rocket_shared::events::EventPublisher;
 use rocket_shared::host_env::{EmptyHostEnv, HostEnv};
 use rocket_shared::types::Auth;
 use tokio::sync::mpsc;
@@ -201,7 +201,7 @@ impl GrpcService {
             );
             handle.events
         };
-        self.events.publish(&DomainEvent::GrpcSessionStarted {
+        self.events.publish(&GrpcEvent::GrpcSessionStarted {
             session_id: session_id.clone(),
             method_type: method_type.as_str().to_string(),
         });
@@ -304,7 +304,7 @@ impl GrpcService {
         if let Some(abort) = abort {
             abort.abort();
         }
-        self.events.publish(&DomainEvent::GrpcSessionFinished {
+        self.events.publish(&GrpcEvent::GrpcSessionFinished {
             session_id: session_id.to_string(),
             code: 1,
             code_name: "CANCELLED".into(),
@@ -577,7 +577,7 @@ async fn forward_events(
         match event {
             GrpcStreamEvent::Headers(headers) => {
                 if !publish_while_open(&sessions, &events, &session_id, || {
-                    DomainEvent::GrpcSessionHeaders {
+                    GrpcEvent::GrpcSessionHeaders {
                         session_id: session_id.clone(),
                         headers,
                     }
@@ -592,7 +592,7 @@ async fn forward_events(
                     crate::event_caps::MAX_STREAM_MESSAGE_BYTES,
                 );
                 if !publish_while_open(&sessions, &events, &session_id, || {
-                    DomainEvent::GrpcSessionMessage {
+                    GrpcEvent::GrpcSessionMessage {
                         session_id: session_id.clone(),
                         index,
                         json,
@@ -636,7 +636,7 @@ fn publish_while_open(
     sessions: &Sessions,
     events: &Arc<dyn EventPublisher>,
     session_id: &str,
-    event: impl FnOnce() -> DomainEvent,
+    event: impl FnOnce() -> GrpcEvent,
 ) -> bool {
     let sessions = lock(sessions);
     if !sessions.contains_key(session_id) {
@@ -659,7 +659,7 @@ fn finish(
     let Some(entry) = lock(sessions).remove(session_id) else {
         return;
     };
-    events.publish(&DomainEvent::GrpcSessionFinished {
+    events.publish(&GrpcEvent::GrpcSessionFinished {
         session_id: session_id.to_string(),
         code,
         code_name: code_name.to_string(),
@@ -838,13 +838,13 @@ message Rep { string message = 1; }
     }
 
     #[derive(Default)]
-    struct Recorder(Mutex<Vec<DomainEvent>>);
+    struct Recorder(Mutex<Vec<GrpcEvent>>);
 
     impl EventPublisher for Recorder {
         fn publish(&self, event: &dyn PublishedEvent) {
-            let Some(event) = event.downcast_ref::<DomainEvent>() else {
+            let Some(event) = event.downcast_ref::<GrpcEvent>() else {
                 panic!(
-                    "recorder got a non-DomainEvent on channel {}",
+                    "recorder got a non-GrpcEvent on channel {}",
                     event.channel()
                 );
             };
@@ -857,15 +857,14 @@ message Rep { string message = 1; }
             lock(&self.0)
                 .iter()
                 .map(|e| match e {
-                    DomainEvent::GrpcSessionStarted { method_type, .. } => {
+                    GrpcEvent::GrpcSessionStarted { method_type, .. } => {
                         format!("started:{method_type}")
                     }
-                    DomainEvent::GrpcSessionHeaders { .. } => "headers".to_string(),
-                    DomainEvent::GrpcSessionMessage { index, .. } => format!("message:{index}"),
-                    DomainEvent::GrpcSessionFinished { code_name, .. } => {
+                    GrpcEvent::GrpcSessionHeaders { .. } => "headers".to_string(),
+                    GrpcEvent::GrpcSessionMessage { index, .. } => format!("message:{index}"),
+                    GrpcEvent::GrpcSessionFinished { code_name, .. } => {
                         format!("finished:{code_name}")
                     }
-                    _ => "other".to_string(),
                 })
                 .collect()
         }
@@ -1394,7 +1393,7 @@ message Rep { string message = 1; }
         let json = lock(&h.events.0)
             .iter()
             .find_map(|e| match e {
-                DomainEvent::GrpcSessionMessage { json, .. } => Some(json.clone()),
+                GrpcEvent::GrpcSessionMessage { json, .. } => Some(json.clone()),
                 _ => None,
             })
             .unwrap_or_default();

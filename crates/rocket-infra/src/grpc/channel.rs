@@ -3,8 +3,8 @@ use std::time::Duration;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use rocket_grpc::GrpcCall;
+use rocket_grpc::GrpcMetadataPair;
 use rocket_shared::error::{DomainError, DomainResult};
-use rocket_shared::grpc::GrpcMetadataPair;
 use tonic::metadata::{Ascii, Binary, KeyAndValueRef, MetadataKey, MetadataMap, MetadataValue};
 use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint};
 
