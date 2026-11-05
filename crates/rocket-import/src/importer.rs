@@ -475,6 +475,14 @@ impl ImportService {
         let env_repo = self.env_factory.for_collection(collection_name);
         for entry in self.files.list_dir(env_dir)? {
             let p = entry.path;
+            // A cloned collection could point a link at a private file outside the folder.
+            if entry.kind == EntryKind::Symlink {
+                let name = p.file_name().unwrap_or_default();
+                report
+                    .skipped
+                    .push(symlink_skip(&Path::new("environments").join(name)));
+                continue;
+            }
             let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
             if !matches!(ext, "bru" | "yml" | "yaml") {
                 continue;
@@ -1750,6 +1758,44 @@ mod auto_tests {
                 "a symlinked .yml file is not copied".to_string(),
             ]
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn legacy_walk_does_not_read_a_symlinked_environment_file() {
+        let root = TempDir::new().unwrap();
+        let src = root.path().join("my-collection");
+        let outside = root.path().join("outside-dir");
+        std::fs::create_dir_all(src.join("environments")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(src.join("bruno.json"), "{}").unwrap();
+        let env_body = "vars {\n  token: secret\n}\n";
+        std::fs::write(outside.join("x.bru"), env_body).unwrap();
+        std::fs::write(src.join("environments").join("y.bru"), env_body).unwrap();
+        std::os::unix::fs::symlink(
+            outside.join("x.bru"),
+            src.join("environments").join("x.bru"),
+        )
+        .unwrap();
+
+        let ws = TempDir::new().unwrap();
+        let service = ImportService::new_with_workspace_path(ws.path());
+        let report = service.import_auto(&src, "default", false).unwrap();
+
+        let envs = ws.path().join("collections/my-collection/environments");
+        let names: Vec<String> = std::fs::read_dir(&envs)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+        assert!(names.iter().any(|n| n.starts_with('y')), "{names:?}");
+        assert!(!names.iter().any(|n| n.starts_with('x')), "{names:?}");
+        assert_eq!(report.skipped.len(), 1, "{:?}", report.skipped);
+        assert!(matches!(
+            &report.skipped[0].reason,
+            SkipReason::ParseError(m) if m == "a symlinked .bru file is not copied"
+        ));
+        assert_eq!(report.skipped[0].path, "environments/x.bru");
     }
 
     #[cfg(unix)]
