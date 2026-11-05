@@ -3348,8 +3348,8 @@ export const cancelFlowRun = (runId: string) => invoke<void>('cancel_flow_run', 
 export const getFlowRunCallbacks = (runId: string) =>
   invoke<FlowRunCallback[]>('get_flow_run_callbacks', { runId });
 
-// Event payloads are DomainEvent JSON. Their fields are snake_case, like
-// every other DomainEvent. Do not camelCase them here.
+// Event payloads are backend event JSON. Their fields are snake_case, like
+// every other backend event. Do not camelCase them here.
 export interface FlowRunStartedEvent {
   type: 'flowRunStarted';
   run_id: string;
@@ -3583,8 +3583,8 @@ export const startWorkspaceAssistant = (
  */
 export const endStaleAssistantSessions = () => invoke<number>('end_stale_assistant_sessions');
 
-// Event payloads are DomainEvent JSON. Their fields are snake_case, like
-// every other DomainEvent. Do not camelCase them here.
+// Event payloads are backend event JSON. Their fields are snake_case, like
+// every other backend event. Do not camelCase them here.
 export interface AgentSessionStartedEvent {
   type: 'acpSessionStarted';
   session_id: string;
@@ -3666,7 +3666,7 @@ export const wsSend = (sessionId: string, input: WebSocketSendInput) =>
 
 export const wsDisconnect = (sessionId: string) => invoke<void>('ws_disconnect', { sessionId });
 
-/** Payload of the `ws:message` event. Fields are snake_case, like every `DomainEvent`. */
+/** Payload of the `ws:message` event. Fields are snake_case, like every backend event. */
 export interface WebSocketMessageEvent {
   type: 'webSocketMessage';
   session_id: string;
@@ -3710,7 +3710,7 @@ export const onAgentSessionFailed = (
 
 // ==== AI Assistant proposals ====
 // Proposals are DTOs, so their fields are camelCase. The two events below
-// are DomainEvent JSON, so their fields stay snake_case.
+// are backend event JSON, so their fields stay snake_case.
 
 export type AgentProposalStatus = 'pending' | 'accepted' | 'rejected' | 'stale' | 'failed';
 
@@ -3814,7 +3814,7 @@ export const onAgentProposalResolved = (
 
 // Stored assistant conversations. Records are DTOs, so their fields are
 // camelCase. Message kinds and statuses are the same words as on disk. The
-// three events are DomainEvent JSON, so their fields stay snake_case, and
+// three events are backend event JSON, so their fields stay snake_case, and
 // they carry ids only.
 
 export type StoredMessage =
@@ -4079,7 +4079,7 @@ export const graphqlSubscribe = (sessionId: string, input: GraphQlSubscribeInput
 export const graphqlUnsubscribe = (sessionId: string) =>
   invoke<void>('graphql_unsubscribe', { sessionId });
 
-/** Payload of `graphql:subscription-message`. Fields are snake_case, like every `DomainEvent`. */
+/** Payload of `graphql:subscription-message`. Fields are snake_case, like every backend event. */
 export interface GraphQlSubscriptionMessageEvent {
   type: 'graphQlSubscriptionMessage';
   session_id: string;

@@ -41,6 +41,10 @@ CollectionSummary         — lightweight listing type (no full tree)
 
 All structs use `#[serde(rename_all = "camelCase")]` for JSON serialization. Optional fields use `#[serde(default, skip_serializing_if = ...)]` to maintain backward compatibility with older saved files.
 
+## Events
+
+`events.rs` defines `CollectionEvent` (17 variants: collection, request, folder and variable events plus the file watcher events). It implements `PublishedEvent` and overrides `written_collections()`, which the echo guard reads: `TauriEventBus` passes each event to `RecentWrites::record`. Its `wire_contract_*` tests pin the JSON keys. `FileChangeKind` stays in `rocket-shared`.
+
 ## Key Design Rules
 
 - **No I/O here.** `CollectionRepository` is a trait only; the concrete `FsCollectionRepo` is in `rocket-infra`.

@@ -51,7 +51,7 @@ Frontend (React) → Tauri command → rocket-app service → rocket-infra repo 
 
 - `rocket-app` holds `Box<dyn Trait>` only; `rocket-infra` wired at startup in `src-tauri/src/lib.rs`.
 - Environment vars override collection vars before HTTP dispatch (`rocket_environment::resolve()`).
-- `DomainEvent` published fire-and-forget; `TauriEventBus` in prod, `NullEventPublisher` in tests.
+- Per-context events (`CollectionEvent`, `AcpEvent`, ...) published fire-and-forget; `TauriEventBus` in prod, `NullEventPublisher` in tests.
 - Tests: `tempfile` for fs fixtures, `wiremock` for HTTP mocking. `cargo check -j4` for fast validation.
 
 ## Rules and conventions

@@ -57,7 +57,7 @@ cargo test -p rocket-acp -j4
 - `FolderSettingsPatch` has no auth field and uses `ProposedVariable` because this crate must not depend on `rocket-collection`.
 - `AcpSessionClient` must stay object-safe (`rocket-app` holds it as
   `Box<dyn AcpSessionClient>`) and must not depend on `agent-client-protocol`,
-  `DomainEvent`, or Tauri. `send_prompt` streams typed `AcpUpdate`s through a plain
+  the event enums, or Tauri. `send_prompt` streams typed `AcpUpdate`s through a plain
   `tokio::sync::mpsc::UnboundedSender<AcpUpdate>` — event publishing belongs in
   `rocket-app`'s `AcpSessionService`, not in this trait. `ConfigOption` is defined in this crate (`options.rs`) because `AcpEvent` carries it.
 - Plain (non-camelCase) field names — this struct persists to its own

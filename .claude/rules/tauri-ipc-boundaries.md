@@ -20,9 +20,9 @@
 - camelCase rename only on IPC DTOs.
 - Do not apply camelCase rename on persistence structs.
 
-## DomainEvent Wire Format
+## Event Wire Format
 
-- `DomainEvent` tag is camelCase, variant fields are snake_case on purpose, nested helper DTOs are camelCase. Do not rename: it breaks frontend listeners and needs its own decision. Contract tests in `crates/rocket-shared/src/events.rs` pin the keys.
+- Each context owns its event enum (`CollectionEvent`, `AcpEvent`, `ExecutionEvent`, ...). The tag is camelCase, variant fields are snake_case on purpose, nested helper DTOs are camelCase. Do not rename: it breaks frontend listeners and needs its own decision. Contract tests (`wire_contract_*`) in each enum's own module (for example `rocket-collection/src/events.rs`, `rocket-app/src/execution_events.rs`) pin the keys.
 - Events reach the bus through `PublishedEvent` (`channel` and `to_json`). `TauriEventBus` has no channel match any more.
 - `TauriEventBus` adds `seq` and `tsMs` to every emitted payload. Listeners must ignore unknown keys.
 
