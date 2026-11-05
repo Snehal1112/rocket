@@ -7,7 +7,6 @@ pub mod error;
 pub mod events;
 pub mod grpc;
 pub mod host_env;
-pub mod load_test;
 pub mod oauth2;
 pub mod paths;
 pub mod published_event;

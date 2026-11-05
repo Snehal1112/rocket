@@ -46,9 +46,6 @@ impl PublishedEvent for DomainEvent {
             DomainEvent::AssistantConversationsCleared => "assistant-conversations-cleared",
             DomainEvent::OpenApiSyncChecked { .. } => "openapi-sync-checked",
             DomainEvent::OpenApiSyncApplied { .. } => "openapi-sync-applied",
-            // Load test events keep the channel names the frontend listens on.
-            DomainEvent::LoadTestProgress(_) => "load_test_progress",
-            DomainEvent::LoadTestComplete(_) => "load_test_complete",
             DomainEvent::CollectionCreated { .. }
             | DomainEvent::CollectionDeleted { .. }
             | DomainEvent::CollectionRenamed { .. }
@@ -150,7 +147,6 @@ impl PublishedEvent for DomainEvent {
 mod tests {
     use super::*;
     use crate::events::*;
-    use crate::load_test::{LoadTestProgressEvent, LoadTestResult};
     use std::collections::BTreeSet;
 
     fn s() -> String {
@@ -391,38 +387,6 @@ mod tests {
                 applied: 1,
                 stale: 0,
             },
-            DomainEvent::LoadTestProgress(LoadTestProgressEvent {
-                elapsed_ms: 0,
-                completed: 0,
-                active_concurrent: 0,
-                succeeded: 0,
-                failed_status: 0,
-                failed_transport: 0,
-                requests_per_second: 0.0,
-                p50_ms: 0.0,
-                p95_ms: 0.0,
-                p99_ms: 0.0,
-                current_phase_index: 0,
-                recent_log: Vec::new(),
-            }),
-            DomainEvent::LoadTestComplete(LoadTestResult {
-                total_requests: 0,
-                succeeded: 0,
-                failed: 0,
-                failed_transport: 0,
-                failed_status: 0,
-                min_latency_ms: 0.0,
-                avg_latency_ms: 0.0,
-                p50_latency_ms: 0.0,
-                p95_latency_ms: 0.0,
-                p99_latency_ms: 0.0,
-                max_latency_ms: 0.0,
-                requests_per_second: 0.0,
-                total_duration_ms: 0.0,
-                phase_timeline: Vec::new(),
-                request_log: Vec::new(),
-                time_series: Vec::new(),
-            }),
             DomainEvent::GrpcSessionStarted {
                 session_id: s(),
                 method_type: s(),
@@ -545,7 +509,7 @@ mod tests {
     }
 
     /// The channel of each variant, keyed by its JSON  tag.
-    const CHANNELS: [(&str, &str); 80] = [
+    const CHANNELS: [(&str, &str); 78] = [
         ("fileChanged", "collection-changed"),
         ("requestExecuted", "request-executed"),
         ("fileWatcherFailed", "file-watcher-failed"),
@@ -589,8 +553,6 @@ mod tests {
         ),
         ("openApiSyncChecked", "openapi-sync-checked"),
         ("openApiSyncApplied", "openapi-sync-applied"),
-        ("loadTestProgress", "load_test_progress"),
-        ("loadTestComplete", "load_test_complete"),
         ("collectionCreated", "collection-changed"),
         ("collectionDeleted", "collection-changed"),
         ("collectionRenamed", "collection-changed"),
@@ -645,9 +607,9 @@ mod tests {
     #[test]
     fn one_of_each_covers_every_variant() {
         let events = one_of_each();
-        assert_eq!(events.len(), 80);
+        assert_eq!(events.len(), 78);
         let tags: BTreeSet<String> = events.iter().map(tag).collect();
-        assert_eq!(tags.len(), 80);
+        assert_eq!(tags.len(), 78);
     }
 
     #[test]

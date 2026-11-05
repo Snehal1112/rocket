@@ -209,7 +209,7 @@ mod tests {
 
     #[test]
     fn load_test_events_keep_their_channel_names() {
-        use rocket_shared::load_test::{LoadTestProgressEvent, LoadTestResult};
+        use rocket_http::{LoadTestEvent, LoadTestProgressEvent, LoadTestResult};
         let progress = LoadTestProgressEvent {
             elapsed_ms: 0,
             completed: 0,
@@ -225,8 +225,8 @@ mod tests {
             recent_log: vec![],
         };
         assert_eq!(
-            PublishedEvent::channel(&DomainEvent::LoadTestProgress(progress)),
-            "load_test_progress"
+            emit_channels(&LoadTestEvent::LoadTestProgress(progress)),
+            vec!["load_test_progress"]
         );
         let result = LoadTestResult {
             total_requests: 0,
@@ -247,8 +247,8 @@ mod tests {
             time_series: vec![],
         };
         assert_eq!(
-            PublishedEvent::channel(&DomainEvent::LoadTestComplete(result)),
-            "load_test_complete"
+            emit_channels(&LoadTestEvent::LoadTestComplete(result)),
+            vec!["load_test_complete"]
         );
     }
 

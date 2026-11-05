@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Notify, Semaphore};
 
-pub use rocket_shared::load_test::{
+pub use crate::load_test_events::{
     LoadTestProgressEvent, LoadTestResult, PhaseMarker, RequestLogEntry, TimeSeriesPoint,
 };
 

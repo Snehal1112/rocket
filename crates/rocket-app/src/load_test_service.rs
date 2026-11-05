@@ -1,24 +1,24 @@
 use std::sync::Arc;
 
 use rocket_http::{
-    run_load_test_v2, HttpExecutor, LoadTestConfigV2, LoadTestProgress, LoadTestProgressEvent,
-    LoadTestResult,
+    run_load_test_v2, HttpExecutor, LoadTestConfigV2, LoadTestEvent, LoadTestProgress,
+    LoadTestProgressEvent, LoadTestResult,
 };
 use rocket_shared::error::{DomainError, DomainResult};
-use rocket_shared::events::{DomainEvent, EventPublisher};
+use rocket_shared::events::EventPublisher;
 
 use crate::execution_service::{ExecuteRequestInput, RequestExecutionService};
 
-/// Publishes load test progress as domain events.
+/// Publishes load test progress as load test events.
 struct EventProgress(Arc<dyn EventPublisher>);
 
 impl LoadTestProgress for EventProgress {
     fn progress(&self, event: LoadTestProgressEvent) {
-        self.0.publish(&DomainEvent::LoadTestProgress(event));
+        self.0.publish(&LoadTestEvent::LoadTestProgress(event));
     }
 
     fn complete(&self, result: LoadTestResult) {
-        self.0.publish(&DomainEvent::LoadTestComplete(result));
+        self.0.publish(&LoadTestEvent::LoadTestComplete(result));
     }
 }
 
@@ -298,17 +298,15 @@ mod tests {
             .unwrap();
 
         // The run publishes progress events and exactly one completion event.
-        let events = recorder.events();
+        let events = recorder.others();
         let completes = events
             .iter()
-            .filter(|e| matches!(e, rocket_shared::events::DomainEvent::LoadTestComplete(_)))
+            .filter(|(channel, _)| channel == "load_test_complete")
             .count();
         assert_eq!(completes, 1, "expected one completion event");
-        assert!(
-            matches!(
-                events.last(),
-                Some(rocket_shared::events::DomainEvent::LoadTestComplete(_))
-            ),
+        assert_eq!(
+            events.last().map(|(channel, _)| channel.as_str()),
+            Some("load_test_complete"),
             "completion must be the last event"
         );
 
@@ -448,7 +446,7 @@ mod tests {
         assert!(!mixed.has_uniform_target_unit());
     }
     #[test]
-    fn event_progress_publishes_the_matching_domain_events() {
+    fn event_progress_publishes_the_matching_load_test_events() {
         use rocket_http::LoadTestProgress;
         let recorder = crate::test_doubles::RecordingPublisher::new();
         let adapter = EventProgress(recorder.clone());
@@ -475,15 +473,11 @@ mod tests {
         .expect("result");
         adapter.progress(event);
         adapter.complete(result);
-        let events = recorder.events();
+        let events = recorder.others();
         assert_eq!(events.len(), 2);
-        assert!(matches!(
-            &events[0],
-            rocket_shared::events::DomainEvent::LoadTestProgress(e) if e.elapsed_ms == 250
-        ));
-        assert!(matches!(
-            &events[1],
-            rocket_shared::events::DomainEvent::LoadTestComplete(r) if r.total_requests == 1
-        ));
+        assert_eq!(events[0].0, "load_test_progress");
+        assert_eq!(events[0].1["elapsedMs"], 250);
+        assert_eq!(events[1].0, "load_test_complete");
+        assert_eq!(events[1].1["totalRequests"], 1);
     }
 }

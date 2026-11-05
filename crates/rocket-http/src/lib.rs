@@ -8,6 +8,7 @@ pub mod digest_sig;
 pub mod executor;
 pub mod jwt;
 pub mod load_test;
+pub mod load_test_events;
 pub mod ntlm_sig;
 pub mod oauth1_sig;
 pub mod oauth2;
@@ -31,8 +32,11 @@ pub use executor::HttpExecutor;
 pub use jwt::{decode_jwt, JwtClaims};
 pub use load_test::{
     run_load_test, run_load_test_v2, LoadTestConfig, LoadTestConfigV2, LoadTestPhase,
-    LoadTestProgress, LoadTestProgressEvent, LoadTestResult, PhaseKind, PhaseMarker, PhaseTarget,
-    RequestLogEntry, SuccessRule, TargetUnit, TimeSeriesPoint,
+    LoadTestProgress, PhaseKind, PhaseTarget, SuccessRule, TargetUnit,
+};
+pub use load_test_events::{
+    LoadTestEvent, LoadTestProgressEvent, LoadTestResult, PhaseMarker, RequestLogEntry,
+    TimeSeriesPoint,
 };
 pub use oauth2::{apply_params_to_body, apply_params_to_url, AdditionalParam, OAuthToken};
 pub use path_params::{encode_path_param_value, substitute_path_params};

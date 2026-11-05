@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 
 use crate::acp::{ConfigOption, PermissionOption};
-use crate::load_test::{LoadTestProgressEvent, LoadTestResult};
 
 pub use crate::published_event::PublishedEvent;
 
@@ -678,13 +677,6 @@ pub enum DomainEvent {
         applied: usize,
         stale: usize,
     },
-
-    // Load test events
-    /// Emitted every 250 ms while a load test runs. The payload fields keep
-    /// their camelCase names, so the frontend reads them unchanged.
-    LoadTestProgress(LoadTestProgressEvent),
-    /// Emitted once when a load test has finished.
-    LoadTestComplete(LoadTestResult),
 
     // gRPC session events
     /// Emitted once a streaming gRPC call has been opened.
@@ -2278,60 +2270,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn load_test_events_wire_shape() {
-        use crate::load_test::RequestLogEntry;
-        let progress = DomainEvent::LoadTestProgress(LoadTestProgressEvent {
-            elapsed_ms: 250,
-            completed: 3,
-            active_concurrent: 2,
-            succeeded: 2,
-            failed_status: 1,
-            failed_transport: 0,
-            requests_per_second: 12.0,
-            p50_ms: 1.0,
-            p95_ms: 2.0,
-            p99_ms: 3.0,
-            current_phase_index: 0,
-            recent_log: vec![RequestLogEntry {
-                seq: 1,
-                status: Some(200),
-                latency_ms: 1.5,
-                response_bytes: 10,
-                error: None,
-                phase_index: 0,
-            }],
-        });
-        let value = serde_json::to_value(&progress).expect("serialize");
-        assert_eq!(value["type"], "loadTestProgress");
-        assert_eq!(value["elapsedMs"], 250);
-        assert_eq!(value["currentPhaseIndex"], 0);
-        assert_eq!(value["recentLog"][0]["latencyMs"], 1.5);
-
-        let complete = DomainEvent::LoadTestComplete(LoadTestResult {
-            total_requests: 3,
-            succeeded: 2,
-            failed: 1,
-            failed_transport: 0,
-            failed_status: 1,
-            min_latency_ms: 1.0,
-            avg_latency_ms: 2.0,
-            p50_latency_ms: 2.0,
-            p95_latency_ms: 3.0,
-            p99_latency_ms: 3.0,
-            max_latency_ms: 3.0,
-            requests_per_second: 5.0,
-            total_duration_ms: 600.0,
-            phase_timeline: vec![],
-            request_log: vec![],
-            time_series: vec![],
-        });
-        let value = serde_json::to_value(&complete).expect("serialize");
-        assert_eq!(value["type"], "loadTestComplete");
-        assert_eq!(value["totalRequests"], 3);
-        assert_eq!(value["requestLog"], serde_json::json!([]));
-    }
-
     fn sorted_keys(event: &DomainEvent) -> Vec<String> {
         let value = serde_json::to_value(event).expect("serialize");
         let mut keys: Vec<String> = value.as_object().expect("object").keys().cloned().collect();
@@ -2468,42 +2406,6 @@ mod tests {
                 "size",
                 "timestamp_ms",
                 "truncated",
-            ],
-        );
-    }
-
-    #[test]
-    fn wire_contract_load_test_events_are_camel_case() {
-        let progress = DomainEvent::LoadTestProgress(LoadTestProgressEvent {
-            elapsed_ms: 0,
-            completed: 0,
-            active_concurrent: 0,
-            succeeded: 0,
-            failed_status: 0,
-            failed_transport: 0,
-            requests_per_second: 0.0,
-            p50_ms: 0.0,
-            p95_ms: 0.0,
-            p99_ms: 0.0,
-            current_phase_index: 0,
-            recent_log: vec![],
-        });
-        assert_keys(
-            &progress,
-            &[
-                "type",
-                "elapsedMs",
-                "completed",
-                "activeConcurrent",
-                "succeeded",
-                "failedStatus",
-                "failedTransport",
-                "requestsPerSecond",
-                "p50Ms",
-                "p95Ms",
-                "p99Ms",
-                "currentPhaseIndex",
-                "recentLog",
             ],
         );
     }
