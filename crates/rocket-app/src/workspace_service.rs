@@ -913,6 +913,7 @@ mod tests {
                 );
             };
             let name = match event {
+                WorkspaceEvent::WorkspaceCreated { id, .. } => format!("created:{id}"),
                 WorkspaceEvent::WorkspaceSwitched { id, .. } => format!("switched:{id}"),
                 WorkspaceEvent::WorkspaceClosed { id } => format!("closed:{id}"),
                 WorkspaceEvent::WorkspaceDeleted { id } => format!("deleted:{id}"),
@@ -926,7 +927,6 @@ mod tests {
                 WorkspaceEvent::WorkspaceDescriptionUpdated { id, description } => {
                     format!("description:{id}:{description:?}")
                 }
-                _ => return,
             };
             self.0.lock().expect("lock").push(name);
         }
@@ -952,6 +952,8 @@ mod tests {
         assert_eq!(
             *events.0.lock().unwrap(),
             [
+                format!("created:{}", closing.id),
+                format!("created:{}", deleting.id),
                 format!("switched:{}", closing.id),
                 format!("closed:{}", closing.id),
                 "switched:default".to_string(),
@@ -963,6 +965,14 @@ mod tests {
     }
 
     #[test]
+    fn workspace_created_is_recorded() {
+        let tmp = TempDir::new().unwrap();
+        let (svc, events) = service_with_events(&tmp);
+        let ws = svc.create("Created", tmp.path().join("created")).unwrap();
+        assert_eq!(*events.0.lock().unwrap(), [format!("created:{}", ws.id)]);
+    }
+
+    #[test]
     fn rename_publishes_workspace_renamed_with_both_names() {
         let tmp = TempDir::new().unwrap();
         let (svc, events) = service_with_events(&tmp);
@@ -970,7 +980,10 @@ mod tests {
         svc.rename(&ws.id, "After").unwrap();
         assert_eq!(
             *events.0.lock().unwrap(),
-            [format!("renamed:{}:Before:After", ws.id)]
+            [
+                format!("created:{}", ws.id),
+                format!("renamed:{}:Before:After", ws.id),
+            ]
         );
     }
 
@@ -981,7 +994,7 @@ mod tests {
         let ws = svc.create("Name", tmp.path().join("name")).unwrap();
         assert!(svc.rename(&ws.id, "").is_err());
         assert!(svc.rename("missing", "Other").is_err());
-        assert!(events.0.lock().unwrap().is_empty());
+        assert_eq!(*events.0.lock().unwrap(), [format!("created:{}", ws.id)]);
     }
 
     #[test]
@@ -993,7 +1006,11 @@ mod tests {
         svc.unpin(&ws.id).unwrap();
         assert_eq!(
             *events.0.lock().unwrap(),
-            [format!("pinned:{}", ws.id), format!("unpinned:{}", ws.id)]
+            [
+                format!("created:{}", ws.id),
+                format!("pinned:{}", ws.id),
+                format!("unpinned:{}", ws.id),
+            ]
         );
     }
 
@@ -1018,6 +1035,7 @@ mod tests {
         assert_eq!(
             *events.0.lock().unwrap(),
             [
+                format!("created:{}", ws.id),
                 format!("description:{}:Some(\"hello\")", ws.id),
                 format!("description:{}:None", ws.id),
             ]
@@ -1030,7 +1048,13 @@ mod tests {
         let (svc, events) = service_with_events(&tmp);
         let other = svc.create("Other", tmp.path().join("other")).unwrap();
         svc.close(&other.id).unwrap();
-        assert_eq!(*events.0.lock().unwrap(), [format!("closed:{}", other.id)]);
+        assert_eq!(
+            *events.0.lock().unwrap(),
+            [
+                format!("created:{}", other.id),
+                format!("closed:{}", other.id),
+            ]
+        );
     }
 
     #[test]
