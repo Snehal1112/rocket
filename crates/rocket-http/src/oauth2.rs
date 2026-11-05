@@ -5,14 +5,41 @@ use serde::{Deserialize, Serialize};
 pub struct OAuthToken {
     pub access_token: String,
     /// Some providers leave it out, and the direct grants only need the access token.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "lenient_token_type")]
     pub token_type: String,
+    #[serde(default, deserialize_with = "lenient_expires_in")]
     pub expires_in: Option<u64>,
     pub refresh_token: Option<String>,
+    #[serde(default, deserialize_with = "lenient_scope")]
     pub scope: Option<String>,
     /// Raw ID token JWT string, if returned by the OIDC provider.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id_token: Option<String>,
+}
+
+/// A null or non-string `token_type` becomes the default empty string.
+fn lenient_token_type<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    let v = serde_json::Value::deserialize(d)?;
+    Ok(v.as_str().map(str::to_string).unwrap_or_default())
+}
+
+/// Accepts a number or a numeric string. Null or a bad value becomes `None`.
+fn lenient_expires_in<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u64>, D::Error> {
+    let v = serde_json::Value::deserialize(d)?;
+    Ok(match v {
+        serde_json::Value::Number(n) => n.as_u64(),
+        serde_json::Value::String(s) => s.trim().parse::<u64>().ok(),
+        _ => None,
+    })
+}
+
+/// A non-string `scope` becomes `None`.
+fn lenient_scope<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    let v = serde_json::Value::deserialize(d)?;
+    Ok(match v {
+        serde_json::Value::String(s) => Some(s),
+        _ => None,
+    })
 }
 
 impl OAuthToken {
@@ -80,6 +107,70 @@ mod tests {
             scope: None,
             id_token: None,
         }
+    }
+
+    fn parse(json: &str) -> OAuthToken {
+        serde_json::from_str::<OAuthToken>(json).expect("token parses")
+    }
+
+    #[test]
+    fn a_normal_response_parses_unchanged() {
+        let t = parse(
+            r#"{"access_token":"a","token_type":"Bearer","expires_in":3600,"refresh_token":"r","scope":"x y"}"#,
+        );
+        assert_eq!(t.access_token, "a");
+        assert_eq!(t.token_type, "Bearer");
+        assert_eq!(t.expires_in, Some(3600));
+        assert_eq!(t.refresh_token.as_deref(), Some("r"));
+        assert_eq!(t.scope.as_deref(), Some("x y"));
+    }
+
+    #[test]
+    fn a_string_expires_in_parses() {
+        assert_eq!(
+            parse(r#"{"access_token":"a","expires_in":"3599"}"#).expires_in,
+            Some(3599)
+        );
+    }
+
+    #[test]
+    fn a_null_or_bad_expires_in_becomes_none() {
+        assert_eq!(
+            parse(r#"{"access_token":"a","expires_in":null}"#).expires_in,
+            None
+        );
+        assert_eq!(
+            parse(r#"{"access_token":"a","expires_in":"soon"}"#).expires_in,
+            None
+        );
+        assert_eq!(
+            parse(r#"{"access_token":"a","expires_in":-5}"#).expires_in,
+            None
+        );
+    }
+
+    #[test]
+    fn a_null_token_type_uses_the_default() {
+        assert_eq!(
+            parse(r#"{"access_token":"a","token_type":null}"#).token_type,
+            ""
+        );
+    }
+
+    #[test]
+    fn a_missing_token_type_parses() {
+        assert_eq!(parse(r#"{"access_token":"a"}"#).token_type, "");
+    }
+
+    #[test]
+    fn a_non_string_scope_becomes_none() {
+        assert_eq!(parse(r#"{"access_token":"a","scope":42}"#).scope, None);
+        assert_eq!(parse(r#"{"access_token":"a","scope":["x"]}"#).scope, None);
+    }
+
+    #[test]
+    fn the_access_token_stays_required() {
+        assert!(serde_json::from_str::<OAuthToken>(r#"{"token_type":"Bearer"}"#).is_err());
     }
 
     #[test]

@@ -1991,6 +1991,26 @@ mod oauth2_tests {
     }
 
     #[tokio::test]
+    async fn direct_grant_accepts_a_string_expires_in_and_a_null_token_type() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token": "tok",
+                "token_type": null,
+                "expires_in": "3599"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let token = direct_grant(&server, &direct_grant_credentials(None))
+            .await
+            .expect("token");
+        assert_eq!(token, "tok");
+    }
+
+    #[tokio::test]
     async fn direct_grant_sends_credentials_in_the_body() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
