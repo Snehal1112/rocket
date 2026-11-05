@@ -82,6 +82,7 @@ See `docs/engineering/ddd-decisions.md` for the DDD rulings (mixed crates, `rock
 See `docs/roadmaps/roadmap.md` for the master roadmap of unimplemented work, and `docs/roadmaps/flow-roadmap.md` for Flow (item IDs, status, batches). Update them when work ships.
 
 Delegation: for asks that mix sub-steps of different difficulty, use the `decompose-and-dispatch` skill and always state the subagent model. See `.claude/rules/delegation.md`.
+See `docs/engineering/benchmarks.md` for the Rocket vs Bruno vs Postman benchmark (method, per-run numbers, findings, how to re-run).
 See `docs/engineering/subagents.md` for which subagent type and model to use, the cost model and the limits seen in practice.
 
 ---
