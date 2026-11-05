@@ -2374,7 +2374,7 @@ mod folder_settings_tests {
         fn publish(&self, event: &dyn PublishedEvent) {
             let Some(event) = event.downcast_ref::<DomainEvent>() else {
                 panic!(
-                    "recorder got a non-DomainEvent on channel {}",
+                    "recorder got an unknown event on channel {}",
                     event.channel()
                 );
             };

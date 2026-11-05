@@ -211,18 +211,19 @@ mod tests {
             .save(&Environment::new("shared"))
             .expect("save");
 
-        let names: Vec<String> = events
-            .others()
-            .into_iter()
-            .filter(|(channel, _)| channel == "environment-changed")
-            .filter_map(|(_, json)| {
-                if json["type"] == "environmentSaved" {
-                    json["name"].as_str().map(str::to_string)
-                } else {
-                    None
-                }
-            })
-            .collect();
-        assert_eq!(names, vec!["dev".to_string(), "shared".to_string()]);
+        let saved: Vec<(String, serde_json::Value)> = events.others();
+        assert_eq!(
+            saved,
+            vec![
+                (
+                    "environment-changed".to_string(),
+                    serde_json::json!({"type": "environmentSaved", "name": "dev"})
+                ),
+                (
+                    "environment-changed".to_string(),
+                    serde_json::json!({"type": "environmentSaved", "name": "shared"})
+                ),
+            ]
+        );
     }
 }

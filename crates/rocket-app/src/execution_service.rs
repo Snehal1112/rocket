@@ -5957,10 +5957,7 @@ mod tests {
             FakeSecretOutcome::Value("sk-live-test-value".to_string()),
         )]));
 
-        let publisher = Arc::new(RecordingPublisher {
-            events: Mutex::new(vec![]),
-            env_events: Mutex::new(vec![]),
-        });
+        let publisher = Arc::new(RecordingPublisher::new());
         let pub_arc = Arc::clone(&publisher);
         let svc = RequestExecutionService::new(
             Box::new(MockEnvRepo::with_env(env)),
@@ -6013,10 +6010,7 @@ mod tests {
             }
         }
 
-        let publisher = Arc::new(RecordingPublisher {
-            events: Mutex::new(vec![]),
-            env_events: Mutex::new(vec![]),
-        });
+        let publisher = Arc::new(RecordingPublisher::new());
         let pub_arc = Arc::clone(&publisher);
         let svc = RequestExecutionService::new(
             Box::new(MockEnvRepo::empty()),
@@ -7649,10 +7643,7 @@ mod tests {
     async fn execute_publishes_event() {
         use rocket_shared::events::DomainEvent;
 
-        let publisher = Arc::new(RecordingPublisher {
-            events: Mutex::new(vec![]),
-            env_events: Mutex::new(vec![]),
-        });
+        let publisher = Arc::new(RecordingPublisher::new());
 
         struct SharedPublisher(Arc<RecordingPublisher>);
         impl rocket_shared::events::EventPublisher for SharedPublisher {
@@ -8034,6 +8025,14 @@ mod tests {
         events: Mutex<Vec<DomainEvent>>,
         env_events: Mutex<Vec<rocket_environment::EnvironmentEvent>>,
     }
+    impl RecordingPublisher {
+        fn new() -> Self {
+            Self {
+                events: Mutex::new(vec![]),
+                env_events: Mutex::new(vec![]),
+            }
+        }
+    }
     impl rocket_shared::events::EventPublisher for RecordingPublisher {
         fn publish(&self, event: &dyn PublishedEvent) {
             if let Some(event) = event.downcast_ref::<rocket_environment::EnvironmentEvent>() {
@@ -8058,10 +8057,7 @@ mod tests {
                 self.0.publish(event);
             }
         }
-        let publisher = Arc::new(RecordingPublisher {
-            events: Mutex::new(vec![]),
-            env_events: Mutex::new(vec![]),
-        });
+        let publisher = Arc::new(RecordingPublisher::new());
         let svc = RequestExecutionService::new(
             Box::new(MockEnvRepo::empty()),
             Arc::new(MockExecutor::new(200)),
@@ -9868,10 +9864,7 @@ mod tests {
             ..Default::default()
         };
 
-        let event_publisher = Arc::new(RecordingPublisher {
-            events: Mutex::new(vec![]),
-            env_events: Mutex::new(vec![]),
-        });
+        let event_publisher = Arc::new(RecordingPublisher::new());
         struct SharedPub(Arc<RecordingPublisher>);
         impl rocket_shared::events::EventPublisher for SharedPub {
             fn publish(&self, event: &dyn PublishedEvent) {
@@ -10044,10 +10037,7 @@ mod tests {
             ..Default::default()
         };
 
-        let event_publisher = Arc::new(RecordingPublisher {
-            events: Mutex::new(vec![]),
-            env_events: Mutex::new(vec![]),
-        });
+        let event_publisher = Arc::new(RecordingPublisher::new());
         struct SharedPub(Arc<RecordingPublisher>);
         impl rocket_shared::events::EventPublisher for SharedPub {
             fn publish(&self, event: &dyn PublishedEvent) {
@@ -11954,10 +11944,7 @@ mod tests {
                 self.0.publish(event);
             }
         }
-        let publisher = Arc::new(RecordingPublisher {
-            events: Mutex::new(vec![]),
-            env_events: Mutex::new(vec![]),
-        });
+        let publisher = Arc::new(RecordingPublisher::new());
         let svc = RequestExecutionService::new(
             Box::new(MockEnvRepo::empty()),
             Arc::new(MockExecutor::new(200)),
@@ -13255,10 +13242,7 @@ mod tests {
         }
         let mut env = Environment::new("dev");
         env.set_variable(Variable::secret("API_KEY", "sk-live-abcdef123"));
-        let publisher = Arc::new(RecordingPublisher {
-            events: Mutex::new(vec![]),
-            env_events: Mutex::new(vec![]),
-        });
+        let publisher = Arc::new(RecordingPublisher::new());
         let svc = RequestExecutionService::new(
             Box::new(MockEnvRepo::with_env(env)),
             Arc::new(MockExecutor::new(200)),
