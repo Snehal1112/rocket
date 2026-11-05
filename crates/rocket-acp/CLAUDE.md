@@ -31,7 +31,9 @@ cargo test -p rocket-acp -j4
 |---|---|
 | `agent_config.rs` | `AgentConfig` struct + `AgentKind` (Claude, Gemini, Generic; per-kind reserved env names and `validate_kind_env`) + `AgentConfigRepository` trait |
 | `session.rs` | `AcpSessionClient` trait (`start_session`, `send_prompt`, `cancel`, `set_config_option`, `end_session`, `end_all_sessions`) |
-| `session_info.rs` | `SessionInfo`, `PromptCapabilities`; re-exports `ConfigOption`/`ConfigChoice` from `rocket_shared::acp` |
+| `session_info.rs` | `SessionInfo`, `PromptCapabilities`; `SessionInfo` carries `ConfigOption`/`ConfigChoice` (defined here, re-exported at the crate root) |
+| `events.rs` | `AcpEvent` (13 session and proposal events plus 3 assistant conversation events; implements `PublishedEvent`, same channels and JSON as the old `DomainEvent` variants). Published by `AcpSessionService`, `ProposalService`, `ConversationService` and `McpToolService` in `rocket-app`. |
+| `options.rs` | `ConfigOption`, `ConfigChoice`, `PermissionOption`, `PermissionOptionKind`: option types that `AcpEvent` and `SessionInfo` carry |
 | `update.rs` | `AcpUpdate` (typed agent updates) and `ToolCallStatus` |
 | `prompt.rs` | `PromptPart` (text and embedded text resources) |
 | `mcp_server_spec.rs` | `McpServerSpec` |
@@ -57,8 +59,7 @@ cargo test -p rocket-acp -j4
   `Box<dyn AcpSessionClient>`) and must not depend on `agent-client-protocol`,
   `DomainEvent`, or Tauri. `send_prompt` streams typed `AcpUpdate`s through a plain
   `tokio::sync::mpsc::UnboundedSender<AcpUpdate>` — event publishing belongs in
-  `rocket-app`'s `AcpSessionService`, not in this trait. `ConfigOption` is
-  defined in `rocket-shared` because `DomainEvent` carries it.
+  `rocket-app`'s `AcpSessionService`, not in this trait. `ConfigOption` is defined in this crate (`options.rs`) because `AcpEvent` carries it.
 - Plain (non-camelCase) field names — this struct persists to its own
   app-level `agent_configs.yml`, not the OpenCollection format.
 - `extra_env` (plain env vars for the agent process) caveats:

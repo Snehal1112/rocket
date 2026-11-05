@@ -31,6 +31,7 @@ cargo check -p rocket-shared
 - Moved out of `DomainEvent` (plan 1): `HistoryEvent` in `rocket-history`, `LoadTestEvent` in `rocket-http`, `GrpcEvent` in `rocket-grpc`. Each implements `PublishedEvent` and keeps the old channel names and JSON. `GrpcMetadataPair` and the load test payload types live in their own crates now. `DomainEvent` has 74 variants left.
 - Moved out of `DomainEvent` (plan 2): `EnvironmentEvent` in `rocket-environment` (channel `environment-changed`) and `WorkspaceEvent` in `rocket-workspace` (eight `workspace-*` channels). Same channels and JSON as before. `DomainEvent` has 64 variants left.
 - Moved out of `DomainEvent` (plan 3): `FlowEvent` in `rocket-flow` (one `flow-*` channel per variant) and `GitEvent` in `rocket-git` (channel `git-changed`). Same channels and JSON as before. `DomainEvent` has 47 variants left.
+- Moved out of `DomainEvent` (plan 4): `AcpEvent` in `rocket-acp` (13 ACP session and proposal events plus 3 assistant conversation events). Same channels and JSON as before. `ConfigOption`, `ConfigChoice`, `PermissionOption` and `PermissionOptionKind` moved to `rocket-acp` with it, and the `acp` module is gone from this crate. `DomainEvent` has 31 variants left, and no ACP, gRPC or load test types remain here.
 - `EventPublisher` — object-safe trait (`fn publish(&self, event: &dyn PublishedEvent)`). Implemented by `TauriEventBus` in `src-tauri/src/tauri_event_bus.rs`; `NullEventPublisher` is the no-op used in tests.
 
 ### Update settings
