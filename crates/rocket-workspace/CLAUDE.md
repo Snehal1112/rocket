@@ -68,7 +68,7 @@ pub trait WorkspaceConfigRepository: Send + Sync {
 
 ## Events
 
-`events.rs` holds `WorkspaceEvent` (created, switched, renamed, closed, deleted, pinned, unpinned, description updated; channels `workspace-created`, `workspace-switched` and so on; implements `PublishedEvent`). Frozen JSON literals in the tests pin the wire format. `WorkspaceService` in `rocket-app` publishes it.
+`events.rs` holds `WorkspaceEvent` (created, switched, renamed, closed, deleted, pinned, unpinned, description updated; channels `workspace-created`, `workspace-switched` and so on; implements `PublishedEvent`). Frozen JSON literals in the tests pin the wire format. `WorkspaceService` in `rocket-app` publishes it. The event fields stay snake_case on purpose, as before the split; the tag is camelCase.
 
 ## UI state and file watcher ports
 
