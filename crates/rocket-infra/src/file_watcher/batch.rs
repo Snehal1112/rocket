@@ -6,8 +6,7 @@ use std::time::{Duration, Instant};
 
 use notify::event::{ModifyKind, RenameMode};
 use notify::{Event, EventKind};
-use rocket_collection::CollectionEvent;
-use rocket_shared::events::FileChangeKind;
+use rocket_collection::{CollectionEvent, FileChangeKind};
 
 use super::echo::RecentWrites;
 use super::ignore::is_ignored;

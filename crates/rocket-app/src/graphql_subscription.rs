@@ -9,14 +9,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::execution_events::ExecutionEvent;
+use crate::execution_events::{
+    ExecutionEvent, GraphQlSubscriptionEventKind, WebSocketSessionState,
+};
 use rocket_collection::WebSocketMessageKind;
 use rocket_http::websocket::{
     WebSocketClient, WebSocketCommand, WebSocketConnectRequest, WebSocketEvent, WebSocketFrame,
     WebSocketHandle,
 };
 use rocket_shared::error::{DomainError, DomainResult};
-use rocket_shared::events::{EventPublisher, GraphQlSubscriptionEventKind, WebSocketSessionState};
+use rocket_shared::events::EventPublisher;
 use rocket_shared::types::{Auth, Header};
 use serde::Deserialize;
 use serde_json::Value;

@@ -7,16 +7,16 @@ use std::future::Future;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::execution_events::ExecutionEvent;
+use crate::execution_events::{
+    ExecutionEvent, WebSocketDirection, WebSocketPayloadKind, WebSocketSessionState,
+};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use rocket_http::websocket::{
     WebSocketClient, WebSocketClose, WebSocketCommand, WebSocketConnectRequest, WebSocketEvent,
     WebSocketFrame, WebSocketHandle,
 };
 use rocket_shared::error::{DomainError, DomainResult};
-use rocket_shared::events::{
-    EventPublisher, WebSocketDirection, WebSocketPayloadKind, WebSocketSessionState,
-};
+use rocket_shared::events::EventPublisher;
 use tokio::sync::mpsc;
 
 use crate::event_caps::{cap_with_marker, MAX_STREAM_MESSAGE_BYTES};

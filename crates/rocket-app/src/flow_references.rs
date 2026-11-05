@@ -2,9 +2,9 @@
 
 use crate::flow_service::FlowService;
 use rocket_collection::Collection;
+use rocket_flow::run_types::FlowRewriteFailure;
 use rocket_flow::{rewrite_saved_paths, uses_saved_path};
 use rocket_shared::error::{DomainError, DomainResult};
-use rocket_shared::events::FlowRewriteFailure;
 
 const ALL_FLOWS: &str = "(all flows)";
 

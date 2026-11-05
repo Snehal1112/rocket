@@ -245,9 +245,8 @@ impl rocket_workspace::FileWatcher for NotifyFileWatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rocket_collection::CollectionEvent;
-    use rocket_shared::events::PublishedEvent;
-    use rocket_shared::events::{FileChangeKind, NullEventPublisher};
+    use rocket_collection::{CollectionEvent, FileChangeKind};
+    use rocket_shared::events::{NullEventPublisher, PublishedEvent};
     use std::time::Duration;
     use tempfile::TempDir;
 

@@ -4,8 +4,8 @@
 
 use std::collections::HashMap;
 
+use crate::run_types::FlowSkipReason;
 use crate::{handle, FlowEdge};
-use rocket_shared::events::FlowSkipReason;
 
 /// What happened to a node earlier in the run.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,7 +129,7 @@ pub fn decide_fate<'a>(
 mod tests {
     use super::*;
     use crate::handle;
-    use rocket_shared::events::FlowSkipReason;
+    use crate::run_types::FlowSkipReason;
     use std::collections::HashMap;
 
     fn edge(id: &str, from: &str, exit: &str, field: &str) -> FlowEdge {

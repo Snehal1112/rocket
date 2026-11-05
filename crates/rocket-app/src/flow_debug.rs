@@ -3,10 +3,10 @@
 use crate::callback_listener::ReceivedCall;
 use crate::execution_service::sensitive_auth_label;
 use crate::redaction::{is_sensitive_header, redact_secrets, redact_url_secrets, REDACTED};
-use rocket_http::{HttpRequest, HttpResponse};
-use rocket_shared::events::{
+use rocket_flow::run_types::{
     FlowDebugHeader, FlowDebugRequest, FlowDebugResponse, FlowRejectedCall,
 };
+use rocket_http::{HttpRequest, HttpResponse};
 use rocket_shared::types::{Auth, Body, BodyMode, Header};
 use std::collections::HashSet;
 

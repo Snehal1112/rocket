@@ -3,9 +3,9 @@
 
 use std::collections::HashMap;
 
+use rocket_flow::run_types::FlowCallbackInfo;
 use rocket_flow::{Flow, FlowNodeKind, CALLBACK_VAR_PREFIX};
 use rocket_shared::error::{DomainError, DomainResult};
-use rocket_shared::events::FlowCallbackInfo;
 
 use crate::callback_listener::{CallbackEndpoint, CallbackListener};
 

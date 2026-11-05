@@ -1,8 +1,16 @@
 //! Events the collection files, the collection settings and the file watcher publish.
 
-use rocket_shared::events::FileChangeKind;
 use rocket_shared::published_event::PublishedEvent;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+
+/// The kind of change the file watcher saw. Not the same type as the rocket-import FileChangeKind.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FileChangeKind {
+    Create,
+    Modify,
+    Remove,
+}
 
 /// Wire format: the `type` tag is camelCase and variant fields stay snake_case.
 /// A rename breaks the frontend listeners and needs its own decision.
@@ -608,6 +616,22 @@ mod tests {
                 assert!(!keys.iter().any(|k| k == reserved));
             }
         }
+    }
+
+    #[test]
+    fn file_change_kind_is_lowercase() {
+        assert_eq!(
+            serde_json::to_string(&FileChangeKind::Create).expect("serializes"),
+            "\"create\""
+        );
+        assert_eq!(
+            serde_json::to_string(&FileChangeKind::Modify).expect("serializes"),
+            "\"modify\""
+        );
+        assert_eq!(
+            serde_json::to_string(&FileChangeKind::Remove).expect("serializes"),
+            "\"remove\""
+        );
     }
 
     #[test]

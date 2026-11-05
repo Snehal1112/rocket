@@ -33,7 +33,7 @@ pub use collection::Collection;
 pub use duplicate::{
     duplicate_candidate, duplicate_of, DuplicateCandidate, MAX_DUPLICATE_ATTEMPTS,
 };
-pub use events::CollectionEvent;
+pub use events::{CollectionEvent, FileChangeKind};
 pub use file_tx::{validate_rel_path, CollectionFileTx, CollectionFileTxFactory, RecoveryOutcome};
 pub use folder::{CollectionItem, Folder, OpaqueProtocolItem};
 pub use folder_settings::{

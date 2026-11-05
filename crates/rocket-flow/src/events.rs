@@ -3,7 +3,7 @@
 //! The payload helper types live in `rocket-shared` and are camelCase inside
 //! these snake_case events.
 
-use rocket_shared::events::{
+use crate::run_types::{
     FlowCallbackInfo, FlowDebugRequest, FlowLiveProgress, FlowLogEntry, FlowNodeStatus,
     FlowPartialRunInfo, FlowRewriteFailure, FlowSkipReason, FlowStepTrace,
 };
@@ -140,7 +140,7 @@ impl PublishedEvent for FlowEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rocket_shared::events::{
+    use crate::run_types::{
         FlowDebugHeader, FlowDebugResponse, FlowLogLevel, FlowPartialMode, FlowPollDetail,
         FlowRejectedCall, FlowRouteEval, FlowWaitDetail, FlowWireValue,
     };

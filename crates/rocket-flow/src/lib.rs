@@ -7,6 +7,7 @@ pub mod lint;
 pub mod node;
 pub mod request_refs;
 pub mod routing;
+pub mod run_types;
 mod save_error;
 pub mod validate;
 

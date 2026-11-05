@@ -82,8 +82,7 @@ impl RecentWrites {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rocket_collection::CollectionEvent;
-    use rocket_shared::events::FileChangeKind;
+    use rocket_collection::{CollectionEvent, FileChangeKind};
 
     const MS: Duration = Duration::from_millis(1);
 

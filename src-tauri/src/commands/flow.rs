@@ -2,12 +2,12 @@ use rocket_app::{
     FlowExecutionService, FlowReferenceUpdater, FlowRunCallback, FlowRunOptions, FlowRunSummary,
     FlowService, LintEnvironment, PartialRun, RequestExecutionService, RunFlowInput,
 };
+use rocket_flow::run_types::FlowPartialMode;
 use rocket_flow::{
     Flow, FlowEdge, FlowNode, FlowNodeKind, InlineHeader, InlineRequestData, NodePosition,
     RepeatUntil, RequestSource, SwitchCase,
 };
 use rocket_shared::error::DomainError;
-use rocket_shared::events::FlowPartialMode;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 

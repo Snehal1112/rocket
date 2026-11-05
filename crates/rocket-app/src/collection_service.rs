@@ -11,11 +11,12 @@ use rocket_collection::{
     CollectionVariable, FolderSettings, GrantSource, GraphQlRequest, GrpcRequest, Request,
     RequestKind, RequestScriptPhase, WebSocketRequest,
 };
+use rocket_flow::run_types::FlowRewriteFailure;
 use rocket_flow::FlowEvent;
 use rocket_shared::action::HttpRequestExample;
 use rocket_shared::description::Documentation;
 use rocket_shared::error::{DomainError, DomainResult};
-use rocket_shared::events::{EventPublisher, FlowRewriteFailure};
+use rocket_shared::events::EventPublisher;
 use std::sync::Arc;
 
 pub struct CollectionService {
@@ -1897,7 +1898,7 @@ mod tests {
     fn move_item_succeeds_when_a_flow_rewrite_fails() {
         let report = FlowRewriteReport {
             rewritten: vec![],
-            failed: vec![rocket_shared::events::FlowRewriteFailure {
+            failed: vec![rocket_flow::run_types::FlowRewriteFailure {
                 flow: "B".into(),
                 message: "bad".into(),
             }],

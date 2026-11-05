@@ -224,7 +224,7 @@ mod tests {
         assert_eq!(emit_channels(&runner), vec!["runner-finished"]);
         let websocket = ExecutionEvent::WebSocketStatus {
             session_id: "s".into(),
-            state: rocket_shared::events::WebSocketSessionState::Open,
+            state: rocket_app::execution_events::WebSocketSessionState::Open,
             subprotocol: None,
             code: None,
             reason: None,

@@ -1,10 +1,43 @@
 //! Events the request, runner, WebSocket, GraphQL and script paths publish.
 
-use rocket_shared::events::{
-    GraphQlSubscriptionEventKind, WebSocketDirection, WebSocketPayloadKind, WebSocketSessionState,
-};
 use rocket_shared::published_event::PublishedEvent;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+
+/// Direction of a WebSocket frame from the client's point of view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WebSocketDirection {
+    In,
+    Out,
+}
+
+/// Wire kind of a logged frame. `Binary` data is base64.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WebSocketPayloadKind {
+    Text,
+    Binary,
+}
+
+/// What a GraphQL subscription result line is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GraphQlSubscriptionEventKind {
+    Next,
+    Error,
+    Complete,
+}
+
+/// Lifecycle of a streaming session. `Closed` is a clean close; `Failed` is a
+/// refused connect or an unclean end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WebSocketSessionState {
+    Connecting,
+    Open,
+    Closed,
+    Failed,
+}
 
 /// Wire format: the `type` tag is camelCase and variant fields stay snake_case.
 /// A rename breaks the frontend listeners and needs its own decision.

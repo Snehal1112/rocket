@@ -709,12 +709,12 @@ fn apply_header_override(
 
 use std::sync::{Arc, Mutex};
 
-use rocket_flow::FlowEvent;
-use rocket_scripting::{ConsoleEntry, ConsoleLevel};
-use rocket_shared::events::{
+use rocket_flow::run_types::{
     FlowDebugRequest, FlowLiveProgress, FlowLogEntry, FlowLogLevel, FlowNodeStatus,
     FlowPartialRunInfo, FlowSkipReason, FlowStepTrace,
 };
+use rocket_flow::FlowEvent;
+use rocket_scripting::{ConsoleEntry, ConsoleLevel};
 
 use crate::flow_trace::{mask_then_cap, NodeTrace, STEP_VALUE_LIMIT};
 
@@ -2676,7 +2676,7 @@ mod tests {
 
     #[test]
     fn step_completed_event_leaves_out_debug_request() {
-        let record = rocket_shared::events::FlowDebugRequest {
+        let record = rocket_flow::run_types::FlowDebugRequest {
             method: "GET".into(),
             url: "https://h.test/".into(),
             headers: Vec::new(),
@@ -4090,7 +4090,7 @@ mod tests {
         assert_eq!(summary.steps[0].node_id, "a");
         assert_eq!(
             summary.steps[0].status,
-            rocket_shared::events::FlowNodeStatus::Success
+            rocket_flow::run_types::FlowNodeStatus::Success
         );
         assert_eq!(summary.steps[0].status_code, Some(200));
     }
@@ -8164,7 +8164,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_poll_reports_live_progress_after_each_unmet_condition() {
-        use rocket_shared::events::FlowLiveProgress;
+        use rocket_flow::run_types::FlowLiveProgress;
 
         let executor = SequenceExecutor::new(vec![(404, "{}"), (404, "{}"), (200, "{}")]);
         let history = InMemoryHistoryRepo::new();
@@ -8949,7 +8949,7 @@ mod tests {
 
         service.run(&exec, run_input("cb")).await.expect("run");
 
-        let live: Vec<rocket_shared::events::FlowLiveProgress> = publisher
+        let live: Vec<rocket_flow::run_types::FlowLiveProgress> = publisher
             .flow_events()
             .into_iter()
             .filter_map(|e| match e {
@@ -9202,7 +9202,7 @@ mod tests {
 
     #[tokio::test]
     async fn run_started_lists_the_callback_nodes_and_no_event_carries_a_url() {
-        use rocket_shared::events::FlowCallbackInfo;
+        use rocket_flow::run_types::FlowCallbackInfo;
 
         let fake = crate::test_doubles::FakeCallbackListener::with_long_tokens();
         fake.queue_on_open(event_call("payment.completed"));
@@ -11785,7 +11785,7 @@ mod tests {
                 crate::flow_partial::PartialRun {
                     base_run_id: base.run_id.clone(),
                     start_node_id: "out".to_string(),
-                    mode: rocket_shared::events::FlowPartialMode::Node,
+                    mode: rocket_flow::run_types::FlowPartialMode::Node,
                 },
             )
             .await
@@ -13698,7 +13698,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_auth_wire_is_recorded_as_a_credential_without_a_value() {
-        use rocket_shared::events::FlowWireValue;
+        use rocket_flow::run_types::FlowWireValue;
         use rocket_shared::types::Auth;
 
         let executor = crate::test_doubles::RecordingExecutor::new();
@@ -13758,7 +13758,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_if_records_its_condition_result_and_its_input_wire() {
-        use rocket_shared::events::FlowRouteEval;
+        use rocket_flow::run_types::FlowRouteEval;
 
         let service = service_with_flow(if_flow("if-route"));
         let executor = RecordingExecutor::new();
@@ -13792,7 +13792,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_switch_records_its_value_masked_and_the_matched_case() {
-        use rocket_shared::events::FlowRouteEval;
+        use rocket_flow::run_types::FlowRouteEval;
 
         let mut env = env_with(&[]);
         let mut key = rocket_environment::Variable::new("apiKey", "sk-live-123456");

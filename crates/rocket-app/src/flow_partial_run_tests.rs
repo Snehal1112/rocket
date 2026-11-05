@@ -5,9 +5,9 @@ use super::*;
 
 use async_trait::async_trait;
 use rocket_collection::Collection;
+use rocket_flow::run_types::FlowPartialMode;
 use rocket_flow::{FlowRepository, NodePosition};
 use rocket_scripting::{ScriptContext, ScriptEngine, ScriptResult};
-use rocket_shared::events::FlowPartialMode;
 
 use crate::flow_auth::SuppliedToken;
 use crate::flow_partial::PartialRun;
