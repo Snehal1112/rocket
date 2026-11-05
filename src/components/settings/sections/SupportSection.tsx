@@ -9,7 +9,7 @@ export const SUPPORT_LINKS: readonly { label: string; url: string; icon: LucideI
   { label: 'GitHub', url: 'https://github.com/Snehal1112/rocket', icon: GitFork },
 ];
 
-async function openLink(url: string) {
+export async function openLink(url: string) {
   try {
     await openUrl(url);
   } catch {

@@ -75,7 +75,8 @@ invalid keep a Save button.
 6. Clicking a request in the sidebar closes Settings and shows the request. So do the workspace home
    button and the audit log shortcut.
 7. Switching workspace with Settings open keeps it open.
-8. Support links open the browser; About shows the right version and folder.
+8. Support links open the browser. About shows the right version and folder, the MIT license, the
+   copyright line, and a Website link that opens web.rocket.numericlabs.io in the browser.
 9. With a Flow tab (selected nodes) or a Contracts tab open underneath, Backspace and Delete in
    Settings do not touch it, and Ctrl+, and Ctrl+W still work.
 
