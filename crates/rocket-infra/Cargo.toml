@@ -22,7 +22,6 @@ rocket-import.workspace = true
 rocket-environment.workspace = true
 rocket-acp.workspace = true
 rocket-flow.workspace = true
-rocket-git.workspace = true
 rocket-grpc = { path = "../rocket-grpc" }
 prost = "0.14"
 tokio-stream = "0.1"
@@ -86,6 +85,7 @@ rustix = { version = "1", default-features = false, features = ["std", "process"
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_Foundation"] }
 
 [dev-dependencies]
+rocket-git.workspace = true
 wiremock = "0.6"
 futures-util = "0.3"
 rcgen = { version = "0.13", default-features = false, features = ["crypto", "ring", "pem"] }

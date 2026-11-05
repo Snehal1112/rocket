@@ -6,7 +6,6 @@ use serde::Serialize;
 /// A git operation changed a repository. All of them use the `git-changed`
 /// channel. Fields stay snake_case on the wire, as before the split.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[cfg_attr(test, derive(serde::Deserialize))]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum GitEvent {
     GitStatusChanged {
