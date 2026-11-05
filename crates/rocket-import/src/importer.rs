@@ -221,7 +221,7 @@ impl ImportService {
         for entry in self.files.list_dir(&scan_root)? {
             let p = entry.path;
             if entry.kind == EntryKind::Symlink {
-                combined.skipped.push(symlinked_folder_skip(&p));
+                combined.skipped.push(symlink_skip(&p));
                 continue;
             }
             if entry.kind == EntryKind::Dir && detect_collection(&p).is_some() {
@@ -340,16 +340,12 @@ impl ImportService {
         for entry in self.files.list_dir(dir)? {
             let p = entry.path;
 
-            // The port cannot tell a linked folder from a linked file, so a link whose
-            // name has no file extension that the walk reads is reported as a folder.
-            let reads_ext = matches!(
-                p.extension().and_then(|e| e.to_str()),
-                Some("bru" | "yml" | "yaml" | "proto" | "js")
-            );
-            if entry.kind == EntryKind::Symlink && !reads_ext {
-                // A cloned collection could point a link at a private folder.
+            // A cloned collection could point a link at a private file or folder. Links
+            // to `.proto` and `.js` files are reported by `copy_support_file` below.
+            let is_support = matches!(p.extension().and_then(|e| e.to_str()), Some("proto" | "js"));
+            if entry.kind == EntryKind::Symlink && !is_support {
                 let rel = p.strip_prefix(root).unwrap_or(&p);
-                report.skipped.push(symlinked_folder_skip(rel));
+                report.skipped.push(symlink_skip(rel));
                 continue;
             }
             if entry.kind == EntryKind::Dir {
@@ -1118,6 +1114,17 @@ impl ImportService {
             let rel = src_path.strip_prefix(src_root).unwrap_or(&src_path);
             let dest_path = dest_root.join(rel);
 
+            // A cloned collection could point a link at a private file or folder. Links to
+            // `.proto` and `.js` files are reported by `copy_support_file` below.
+            let is_support = matches!(
+                src_path.extension().and_then(|e| e.to_str()),
+                Some("proto" | "js")
+            );
+            if entry.kind == EntryKind::Symlink && !is_support {
+                report.skipped.push(symlink_skip(rel));
+                continue;
+            }
+
             if entry.kind == EntryKind::Dir {
                 // Never import dependency trees.
                 if src_path.file_name().is_some_and(|n| n == "node_modules") {
@@ -1159,14 +1166,19 @@ impl ImportService {
                 continue;
             }
 
-            if let Some(parent) = dest_path.parent() {
-                self.files.create_dir_all(parent)?;
-            }
-            self.files.copy(&src_path, &dest_path)?;
+            // A copy that fails is reported, and only a copied file is counted.
+            let copied = copy_support_file(
+                self.files.as_ref(),
+                &src_path,
+                &dest_path,
+                rel,
+                ".yml",
+                report,
+            );
 
             // Count only request files (not environment entries).
             let in_environments = rel.components().any(|c| c.as_os_str() == "environments");
-            if !in_environments {
+            if copied && !in_environments {
                 report.imported += 1;
             }
         }
@@ -1179,11 +1191,19 @@ fn is_real_dir(files: &dyn ImportFiles, path: &Path) -> bool {
     matches!(files.kind(path), Ok(EntryKind::Dir))
 }
 
-/// The report entry for a symlinked folder that the import does not follow.
-fn symlinked_folder_skip(path: &Path) -> SkippedItem {
+/// The report entry for a symlink that the import does not follow. The port cannot tell a
+/// linked file from a linked folder, so only the extension of a file type that the import
+/// reads decides the wording.
+fn symlink_skip(path: &Path) -> SkippedItem {
+    let message = match path.extension().and_then(|e| e.to_str()) {
+        Some(ext @ ("bru" | "yml" | "yaml" | "proto" | "js")) => {
+            format!("a symlinked .{ext} file is not copied")
+        }
+        _ => "a symlink is not copied".to_string(),
+    };
     SkippedItem {
         path: path.to_string_lossy().to_string(),
-        reason: SkipReason::ParseError("a symlinked folder is not copied".to_string()),
+        reason: SkipReason::ParseError(message),
     }
 }
 
@@ -1267,7 +1287,8 @@ fn merge_root_defaults(
 
 /// Copies a support file (`.proto` or `.js`, named by `label`) next to the requests. A
 /// symlink is never followed, because a cloned collection could point one at a private
-/// file, and a copy that fails is reported instead of aborting the whole import.
+/// file, and a copy that fails is reported instead of aborting the whole import. Returns
+/// true when the file was copied.
 fn copy_support_file(
     files: &dyn ImportFiles,
     src: &Path,
@@ -1275,7 +1296,7 @@ fn copy_support_file(
     rel: &Path,
     label: &str,
     report: &mut ImportReport,
-) {
+) -> bool {
     let mut skip = |why: String| {
         report.skipped.push(SkippedItem {
             path: rel.to_string_lossy().to_string(),
@@ -1290,16 +1311,18 @@ fn copy_support_file(
             if let Some(parent) = dest.parent() {
                 if let Err(e) = files.create_dir_all(parent) {
                     skip(format!("could not copy the {label} file: {e}"));
-                    return;
+                    return false;
                 }
             }
-            if let Err(e) = files.copy(src, dest) {
-                skip(format!("could not copy the {label} file: {e}"));
+            match files.copy(src, dest) {
+                Ok(()) => return true,
+                Err(e) => skip(format!("could not copy the {label} file: {e}")),
             }
         }
         Ok(_) => {}
         Err(e) => skip(format!("could not read the {label} file: {e}")),
     }
+    false
 }
 
 /// Finds the `.proto` file a Bruno request names and returns its path relative to
@@ -1664,7 +1687,7 @@ mod auto_tests {
         assert_eq!(report.imported, 1);
         assert!(report.skipped.iter().any(|s| matches!(
             &s.reason,
-            SkipReason::ParseError(m) if m == "a symlinked folder is not copied"
+            SkipReason::ParseError(m) if m == "a symlink is not copied"
         )));
         assert!(!ws
             .path()
@@ -1678,6 +1701,44 @@ mod auto_tests {
             .join("my-collection")
             .join("outside.yml")
             .exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn legacy_walk_does_not_read_a_symlinked_request_file() {
+        let root = TempDir::new().unwrap();
+        let src = root.path().join("my-collection");
+        let outside = root.path().join("outside-dir");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(src.join("bruno.json"), "{}").unwrap();
+        std::fs::write(src.join("a.bru"), MINI_BRU).unwrap();
+        std::fs::write(outside.join("secret.bru"), MINI_BRU).unwrap();
+        std::fs::write(outside.join("secret.yml"), "name: x\n").unwrap();
+        std::os::unix::fs::symlink(outside.join("secret.bru"), src.join("link.bru")).unwrap();
+        std::os::unix::fs::symlink(outside.join("secret.yml"), src.join("link.yml")).unwrap();
+
+        let ws = TempDir::new().unwrap();
+        let service = ImportService::new_with_workspace_path(ws.path());
+        let report = service.import_auto(&src, "default", false).unwrap();
+
+        assert_eq!(report.imported, 1);
+        let mut found: Vec<String> = report
+            .skipped
+            .iter()
+            .filter_map(|s| match &s.reason {
+                SkipReason::ParseError(m) => Some(m.clone()),
+                _ => None,
+            })
+            .collect();
+        found.sort();
+        assert_eq!(
+            found,
+            vec![
+                "a symlinked .bru file is not copied".to_string(),
+                "a symlinked .yml file is not copied".to_string(),
+            ]
+        );
     }
 
     #[cfg(unix)]
@@ -1705,7 +1766,7 @@ mod auto_tests {
         assert_eq!(report.created_collections.len(), 1);
         assert!(report.skipped.iter().any(|s| matches!(
             &s.reason,
-            SkipReason::ParseError(m) if m == "a symlinked folder is not copied"
+            SkipReason::ParseError(m) if m == "a symlink is not copied"
         )));
     }
 
@@ -2667,6 +2728,7 @@ mod port_tests {
     #[derive(Default)]
     struct FakeFiles {
         kinds: Vec<(PathBuf, EntryKind)>,
+        entries: Vec<DirEntryInfo>,
         texts: Vec<(PathBuf, String)>,
         fail_copy: bool,
         fail_list: bool,
@@ -2678,7 +2740,7 @@ mod port_tests {
             if self.fail_list {
                 return Err(io::Error::other("cannot list"));
             }
-            Ok(Vec::new())
+            Ok(self.entries.clone())
         }
         fn kind(&self, path: &Path) -> io::Result<EntryKind> {
             self.kinds
@@ -2784,6 +2846,90 @@ mod port_tests {
             reasons(&report),
             vec!["a symlinked .proto file is not copied".to_string()]
         );
+    }
+
+    fn copy_listing(entries: Vec<(&str, EntryKind)>) -> ImportReport {
+        let tmp = tempfile::TempDir::new().expect("tmp");
+        let mut service = ImportService::new_with_workspace_path(tmp.path());
+        let files = FakeFiles {
+            kinds: entries
+                .iter()
+                .map(|(p, k)| (PathBuf::from(p), *k))
+                .collect(),
+            entries: entries
+                .iter()
+                .map(|(p, k)| DirEntryInfo {
+                    path: PathBuf::from(p),
+                    kind: *k,
+                })
+                .collect(),
+            fail_copy: true,
+            ..Default::default()
+        };
+        service.files = Arc::new(files);
+        let mut report = ImportReport::default();
+        service
+            .copy_collection_files(Path::new("s"), Path::new("s"), Path::new("d"), &mut report)
+            .expect("copy");
+        report
+    }
+
+    #[test]
+    fn a_symlinked_yml_is_reported_not_copied() {
+        let report = copy_listing(vec![("s/leak.yml", EntryKind::Symlink)]);
+
+        assert_eq!(
+            reasons(&report),
+            vec!["a symlinked .yml file is not copied".to_string()]
+        );
+        assert_eq!(report.imported, 0);
+    }
+
+    #[test]
+    fn a_symlinked_entry_without_an_extension_is_reported_neutrally() {
+        let report = copy_listing(vec![("s/linked", EntryKind::Symlink)]);
+
+        assert_eq!(
+            reasons(&report),
+            vec!["a symlink is not copied".to_string()]
+        );
+        assert_eq!(report.imported, 0);
+    }
+
+    #[test]
+    fn a_yml_that_cannot_be_copied_is_reported_and_not_counted() {
+        let report = copy_listing(vec![("s/a.yml", EntryKind::File)]);
+
+        assert_eq!(
+            reasons(&report),
+            vec!["could not copy the .yml file: disk full".to_string()]
+        );
+        assert_eq!(report.imported, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_yml_symlink_to_a_folder_does_not_abort_the_import() {
+        let src_dir = tempfile::TempDir::new().expect("tmp");
+        let src = src_dir.path().join("col");
+        let some_dir = src_dir.path().join("some_dir");
+        std::fs::create_dir_all(&src).expect("mkdir");
+        std::fs::create_dir_all(&some_dir).expect("mkdir");
+        std::fs::write(
+            src.join("opencollection.yml"),
+            "opencollection: \"1.0.0\"\ninfo:\n  name: col\n",
+        )
+        .expect("root");
+        std::os::unix::fs::symlink(&some_dir, src.join("link.yml")).expect("link");
+        let ws = tempfile::TempDir::new().expect("ws");
+
+        let report = ImportService::new_with_workspace_path(ws.path())
+            .import_modern_collection(&src, "default", None)
+            .expect("import");
+
+        assert_eq!(report.imported, 0);
+        assert_eq!(report.skipped.len(), 1, "{:?}", report.skipped);
+        assert_eq!(report.skipped[0].path, "link.yml");
     }
 
     #[test]
