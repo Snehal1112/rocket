@@ -1604,7 +1604,10 @@ mod tests {
     impl EventPublisher for CancelAfterSteps {
         fn publish(&self, event: &dyn PublishedEvent) {
             let Some(event) = event.downcast_ref::<DomainEvent>() else {
-                return;
+                panic!(
+                    "recorder got a non-DomainEvent on channel {}",
+                    event.channel()
+                );
             };
             if let DomainEvent::RunnerStepCompleted { run_id, .. } = &event {
                 let mut seen = self.seen.lock().expect("lock");
@@ -1784,7 +1787,10 @@ mod tests {
     impl EventPublisher for CancelViaRealMethod {
         fn publish(&self, event: &dyn PublishedEvent) {
             let Some(event) = event.downcast_ref::<DomainEvent>() else {
-                return;
+                panic!(
+                    "recorder got a non-DomainEvent on channel {}",
+                    event.channel()
+                );
             };
             if let DomainEvent::RunnerStepCompleted { run_id, .. } = &event {
                 let mut seen = self.seen.lock().expect("lock");

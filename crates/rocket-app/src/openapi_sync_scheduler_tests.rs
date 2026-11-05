@@ -171,7 +171,10 @@ struct Recorder(Mutex<Vec<(String, String)>>);
 impl EventPublisher for Recorder {
     fn publish(&self, event: &dyn PublishedEvent) {
         let Some(event) = event.downcast_ref::<DomainEvent>() else {
-            return;
+            panic!(
+                "recorder got a non-DomainEvent on channel {}",
+                event.channel()
+            );
         };
         if let DomainEvent::OpenApiSyncChecked { collection, status } = event {
             self.0

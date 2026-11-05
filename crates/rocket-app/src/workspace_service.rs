@@ -906,7 +906,10 @@ mod tests {
     impl EventPublisher for EventNames {
         fn publish(&self, event: &dyn PublishedEvent) {
             let Some(event) = event.downcast_ref::<DomainEvent>() else {
-                return;
+                panic!(
+                    "recorder got a non-DomainEvent on channel {}",
+                    event.channel()
+                );
             };
             let name = match event {
                 DomainEvent::WorkspaceSwitched { id, .. } => format!("switched:{id}"),

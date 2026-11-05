@@ -1169,7 +1169,10 @@ mod tests {
     impl EventPublisher for RecordingEventPublisher {
         fn publish(&self, event: &dyn PublishedEvent) {
             let Some(event) = event.downcast_ref::<DomainEvent>() else {
-                return;
+                panic!(
+                    "recorder got a non-DomainEvent on channel {}",
+                    event.channel()
+                );
             };
             self.events.lock().expect("lock").push(event.clone());
         }
@@ -2411,7 +2414,10 @@ mod folder_settings_tests {
     impl EventPublisher for SharedRecorder {
         fn publish(&self, event: &dyn PublishedEvent) {
             let Some(event) = event.downcast_ref::<DomainEvent>() else {
-                return;
+                panic!(
+                    "recorder got a non-DomainEvent on channel {}",
+                    event.channel()
+                );
             };
             self.0 .0.lock().expect("lock").push(event.clone());
         }

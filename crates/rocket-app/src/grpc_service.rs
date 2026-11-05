@@ -843,7 +843,10 @@ message Rep { string message = 1; }
     impl EventPublisher for Recorder {
         fn publish(&self, event: &dyn PublishedEvent) {
             let Some(event) = event.downcast_ref::<DomainEvent>() else {
-                return;
+                panic!(
+                    "recorder got a non-DomainEvent on channel {}",
+                    event.channel()
+                );
             };
             lock(&self.0).push(event.clone());
         }

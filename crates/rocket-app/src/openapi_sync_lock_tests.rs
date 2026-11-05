@@ -46,7 +46,10 @@ struct Gate {
 impl EventPublisher for Gate {
     fn publish(&self, event: &dyn PublishedEvent) {
         let Some(event) = event.downcast_ref::<DomainEvent>() else {
-            return;
+            panic!(
+                "recorder got a non-DomainEvent on channel {}",
+                event.channel()
+            );
         };
         if matches!(event, DomainEvent::RequestSaved { .. }) {
             self.inside.lock().expect("lock").send(()).expect("inside");

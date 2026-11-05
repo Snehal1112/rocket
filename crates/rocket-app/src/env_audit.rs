@@ -59,7 +59,10 @@ mod tests {
     impl EventPublisher for RecordingPublisher {
         fn publish(&self, event: &dyn PublishedEvent) {
             let Some(event) = event.downcast_ref::<DomainEvent>() else {
-                return;
+                panic!(
+                    "recorder got a non-DomainEvent on channel {}",
+                    event.channel()
+                );
             };
             self.events.lock().expect("lock").push(event.clone());
         }
@@ -72,6 +75,15 @@ mod tests {
         fn publish(&self, _actor: String, _workspace_id: Option<String>, kind: AuditEventKind) {
             self.captured.lock().expect("lock").push(kind);
         }
+    }
+
+    #[test]
+    #[should_panic(expected = "history-changed")]
+    fn foreign_event_panics_with_its_channel() {
+        let events = RecordingPublisher {
+            events: Mutex::new(vec![]),
+        };
+        events.publish(&rocket_history::HistoryEvent::HistoryCleared);
     }
 
     #[test]

@@ -1299,7 +1299,10 @@ mod tests {
     impl EventPublisher for FakeEventPublisher {
         fn publish(&self, event: &dyn PublishedEvent) {
             let Some(event) = event.downcast_ref::<DomainEvent>() else {
-                return;
+                panic!(
+                    "recorder got a non-DomainEvent on channel {}",
+                    event.channel()
+                );
             };
             self.events
                 .lock()

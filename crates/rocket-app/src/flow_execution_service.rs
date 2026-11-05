@@ -5054,7 +5054,10 @@ mod tests {
     impl EventPublisher for CancelAfterSteps {
         fn publish(&self, event: &dyn PublishedEvent) {
             let Some(event) = event.downcast_ref::<DomainEvent>() else {
-                return;
+                panic!(
+                    "recorder got a non-DomainEvent on channel {}",
+                    event.channel()
+                );
             };
             if let DomainEvent::FlowStepCompleted { run_id, .. } = event {
                 let mut seen = self.seen.lock().expect("lock seen");
@@ -5167,7 +5170,10 @@ mod tests {
     impl EventPublisher for CancelOnStart {
         fn publish(&self, event: &dyn PublishedEvent) {
             let Some(event) = event.downcast_ref::<DomainEvent>() else {
-                return;
+                panic!(
+                    "recorder got a non-DomainEvent on channel {}",
+                    event.channel()
+                );
             };
             if let DomainEvent::FlowStepStarted { run_id, node_id } = event {
                 if node_id == self.node_id {
@@ -9251,7 +9257,10 @@ mod tests {
     impl EventPublisher for ProbeUrlsOnStart {
         fn publish(&self, event: &dyn PublishedEvent) {
             let Some(event) = event.downcast_ref::<DomainEvent>() else {
-                return;
+                panic!(
+                    "recorder got a non-DomainEvent on channel {}",
+                    event.channel()
+                );
             };
             if let DomainEvent::FlowRunStarted { run_id, .. } = &event {
                 let found = self
