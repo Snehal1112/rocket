@@ -873,14 +873,14 @@ pub enum FileChangeKind {
 /// Trait for publishing domain events.
 /// Implemented by TauriEventBus in infrastructure layer.
 pub trait EventPublisher: Send + Sync {
-    fn publish(&self, event: DomainEvent);
+    fn publish(&self, event: &dyn PublishedEvent);
 }
 
 /// No-op publisher for tests and contexts where events aren't needed.
 pub struct NullEventPublisher;
 
 impl EventPublisher for NullEventPublisher {
-    fn publish(&self, _event: DomainEvent) {
+    fn publish(&self, _event: &dyn PublishedEvent) {
         // Intentionally empty.
     }
 }
@@ -936,7 +936,12 @@ mod tests {
     #[test]
     fn null_publisher_does_not_panic() {
         let pub_ = NullEventPublisher;
-        pub_.publish(DomainEvent::HistoryCleared);
+        pub_.publish(&DomainEvent::HistoryCleared);
+    }
+
+    #[test]
+    fn null_publisher_accepts_a_published_event() {
+        NullEventPublisher.publish(&DomainEvent::CollectionCreated { name: "a".into() });
     }
 
     #[test]
