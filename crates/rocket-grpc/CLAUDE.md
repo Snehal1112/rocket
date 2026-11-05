@@ -17,6 +17,7 @@ cargo test -j4 -p rocket-grpc <test_name>
 |---|---|
 | `registry.rs` | `ProtoRegistry` (descriptor pool, services, methods), `ProtoFileReader`, `ProtoLoader`, the `GrpcServiceInfo` and `GrpcMethodInfo` view types. |
 | `codec.rs` | `json_to_message`, `message_to_json`, `empty_message_json`. |
+| `events.rs` | `GrpcEvent` (four session variants, channels `grpc-session-started`, `-headers`, `-message`, `-finished`; implements `PublishedEvent`) and `GrpcMetadataPair`. Frozen JSON literals in the tests pin the wire format. |
 | `call.rs` | `GrpcCall`, `GrpcExecutor` (`unary`, `open_stream` and `reflect`), `GrpcStatus`, `GrpcUnaryResponse`, `GrpcStreamEvent` and `GrpcStreamHandle`. |
 
 ## Rules

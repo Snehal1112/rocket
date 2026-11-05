@@ -24,6 +24,7 @@ cargo check -p rocket-history
 | Type | Description |
 |---|---|
 | `HistoryEntry` | A single recorded HTTP execution: method, URL, status, duration, response size, timestamp, and optional collection/request name. |
+| `HistoryEvent` | `events.rs`. `HistoryCleared`, published on channel `history-changed`. Implements `PublishedEvent`. |
 | `HistoryFilter` | Optional filter criteria (method, URL substring, status range) passed to `HistoryRepository::search`. |
 | `Template` | A saved request template: name, `HttpMethod`, URL, headers, and optional body. Keyed by name, not UUID. |
 | `HistoryRepository` | Trait for persisting and querying `HistoryEntry` records (`list`, `get`, `save`, `clear`, `search`). |

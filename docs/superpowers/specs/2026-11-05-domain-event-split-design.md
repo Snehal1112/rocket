@@ -54,7 +54,7 @@ pub trait EventPublisher: Send + Sync {
 ### 2. Wire format
 
 - Every per-context enum keeps `#[serde(tag = "type", rename_all = "camelCase")]` with the same variant names, field names and field attributes as today, so the JSON of every event is byte-identical.
-- The contract tests in `events.rs` move with their variants. During the migration one extra test per moved context serializes each moved variant through the new enum and compares it with the old `DomainEvent` JSON (kept until the last context moves).
+- The contract tests in `events.rs` move with their variants. Amended in plan 1: instead of comparing old and new enums, each moved context pins frozen JSON literals (one per variant) captured from the old `DomainEvent` serialization before the variants were removed, plus a channel-name test. `DomainEvent` no longer needs to keep the moved variants.
 - `seq` and `tsMs` are still added by the bus only.
 
 ### 3. Who owns what
