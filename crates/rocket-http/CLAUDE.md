@@ -28,7 +28,7 @@ cargo test -p rocket-http <test_name>
 | `executor` | `HttpExecutor` async trait — single method `execute(&HttpRequest) -> DomainResult<HttpResponse>` |
 | `request` | `HttpRequest` (fully-resolved, ready-to-send) and `RequestOptions` (timeout, SSL, redirect flags) |
 | `response` | `HttpResponse` with status helpers (`is_success`, `is_redirect`, etc.) and case-insensitive `header_value()`. `body_from_bytes` splits a body into text or a base64 payload. |
-| `oauth2` | `OAuthConfig`, `OAuthToken` and the form helpers (`apply_params_to_url`, `apply_params_to_body`, `AdditionalParam`) |
+| `oauth2` | `OAuthToken` and the form helpers (`apply_params_to_url`, `apply_params_to_body`, `AdditionalParam`) |
 | `path_params` | `substitute_path_params()` replaces `:name` (segment start only, so a port is never a param) and `{name}` (never inside `{{var}}`) in the URL path with percent-encoded, already-resolved values. Called by `rocket-app` `resolve_request`; `applyPathParams` in `src/lib/url-params.ts` is its display-only mirror. |
 | `pkce` | `generate_pkce()` → `PkcePair` (verifier + challenge per RFC 7636) |
 | `oauth1_sig` | `sign()` → `oauth_*` params, `authorization_header()` — OAuth 1.0 (RFC 5849) signing for HMAC-SHA1/256/512 and PLAINTEXT. RSA-* returns an error. |

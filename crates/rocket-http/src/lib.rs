@@ -34,9 +34,7 @@ pub use load_test::{
     LoadTestProgress, LoadTestProgressEvent, LoadTestResult, PhaseKind, PhaseMarker, PhaseTarget,
     RequestLogEntry, SuccessRule, TargetUnit, TimeSeriesPoint,
 };
-pub use oauth2::{
-    apply_params_to_body, apply_params_to_url, AdditionalParam, OAuthConfig, OAuthToken,
-};
+pub use oauth2::{apply_params_to_body, apply_params_to_url, AdditionalParam, OAuthToken};
 pub use path_params::{encode_path_param_value, substitute_path_params};
 pub use pkce::{generate_pkce, PkcePair};
 pub use proxy::{

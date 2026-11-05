@@ -1,26 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-
-/// Configuration for an OAuth 2.0 token request.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OAuthConfig {
-    pub grant_type: String,
-    pub client_id: String,
-    pub client_secret: String,
-    pub token_url: String,
-    pub scope: Option<String>,
-    /// Required for the password grant type.
-    pub username: Option<String>,
-    /// Required for the password grant type.
-    pub password: Option<String>,
-    /// Required for the authorization_code grant type.
-    pub code: Option<String>,
-    /// Required for the authorization_code grant type.
-    pub redirect_uri: Option<String>,
-    /// PKCE code verifier for the authorization_code grant type.
-    pub code_verifier: Option<String>,
-}
-
 /// Represents a token response from an OAuth 2.0 provider.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OAuthToken {
