@@ -23,6 +23,7 @@
 ## DomainEvent Wire Format
 
 - `DomainEvent` tag is camelCase, variant fields are snake_case on purpose, nested helper DTOs are camelCase. Do not rename: it breaks frontend listeners and needs its own decision. Contract tests in `crates/rocket-shared/src/events.rs` pin the keys.
+- Events reach the bus through `PublishedEvent` (`channel` and `to_json`). `TauriEventBus` has no channel match any more.
 - `TauriEventBus` adds `seq` and `tsMs` to every emitted payload. Listeners must ignore unknown keys.
 
 ## Error Handling

@@ -24,7 +24,7 @@ No single global event enum in `rocket-shared`. Each context owns its events, in
 ### 1. The port, in rocket-shared
 
 ```rust
-pub trait PublishedEvent: Send + Sync {
+pub trait PublishedEvent: Send + Sync + 'static {
     /// The frontend channel this event is emitted on.
     fn channel(&self) -> &'static str;
     /// The event as JSON: the `type` tag plus the fields, without `seq` and `tsMs`.
@@ -33,6 +33,12 @@ pub trait PublishedEvent: Send + Sync {
     fn also_emit_on(&self) -> &'static [&'static str] { &[] }
     /// Collections this event says the app just wrote (for the file watcher echo). Default: none.
     fn written_collections(&self) -> Vec<&str> { Vec::new() }
+    /// The event as `Any`, so a listener can downcast it.
+    fn as_any(&self) -> &dyn std::any::Any;
+}
+
+impl dyn PublishedEvent {
+    pub fn downcast_ref<T: 'static>(&self) -> Option<&T> { self.as_any().downcast_ref::<T>() }
 }
 
 pub trait EventPublisher: Send + Sync {
@@ -41,6 +47,7 @@ pub trait EventPublisher: Send + Sync {
 ```
 
 - `EventPublisher` stays object-safe, so every `Arc<dyn EventPublisher>` and `Box<dyn EventPublisher>` keeps its type. `NullEventPublisher` stays.
+- `as_any` and `downcast_ref` exist because test recorders store `DomainEvent` values and need the concrete event back from the trait object.
 - A small `impl_published_event!`-style helper is not planned; each enum writes its own `channel()` match, which is the move of today's arms.
 - `DomainEvent` implements `PublishedEvent` during the migration, so old and new events go through one bus.
 
@@ -80,6 +87,7 @@ Rulings made in this design (change them in review if wrong):
 1. `written_collections()` goes to `RecentWrites` (replaces `RecentWrites::record(&DomainEvent)`).
 2. `channel()` and `to_json()` plus `seq` and `tsMs` make the payload.
 3. Emit on the channel, then on every `also_emit_on()` channel (replaces the `BranchSwitched`/`BranchMerged` special case; `GitEvent` returns `["collection-changed"]` for those two).
+   `to_json` costs nothing extra, because the bus already built a `serde_json::Value` before.
 4. `channel_for` and its giant `match` disappear; its arms move into each enum's `channel()`.
 
 ### 5. Migration

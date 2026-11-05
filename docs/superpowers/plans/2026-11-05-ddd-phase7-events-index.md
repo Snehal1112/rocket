@@ -4,7 +4,7 @@ Spec: `docs/superpowers/specs/2026-11-05-domain-event-split-design.md`. One plan
 
 | Plan | Scope | File | Status |
 |---|---|---|---|
-| 0 | `PublishedEvent` port, `EventPublisher` takes `&dyn PublishedEvent`, bus without `channel_for` | `2026-11-05-ddd-phase7-events-plan-0-publisher-port.md` | written |
+| 0 | `PublishedEvent` port, `EventPublisher` takes `&dyn PublishedEvent`, bus without `channel_for` | `2026-11-05-ddd-phase7-events-plan-0-publisher-port.md` | done (unmerged) |
 | 1 | `HistoryEvent`, `LoadTestEvent` (+ `load_test.rs` types), `GrpcEvent` (+ `grpc.rs` types) | | not written |
 | 2 | `EnvironmentEvent`, `WorkspaceEvent` | | not written |
 | 3 | `FlowEvent`, `GitEvent` | | not written |

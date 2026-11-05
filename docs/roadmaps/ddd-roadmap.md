@@ -135,6 +135,8 @@ Shrink `rocket-shared` to the real kernel (about 1,300 lines: errors, request vo
 | D-74 | Split `DomainEvent` (2,522-line file, 81 variants) into per-context enums in the owning crates, with a thin envelope and publisher port in shared. Keep the wire format byte-identical. Needs a spec (R-55). D-71 waits for it. | `rocket-shared/src/events.rs` | open |
 | D-75 | `rocket-http/src/load_test.rs` publishes into the global enum directly. Done on 2026-11-04: `rocket-http` has the `LoadTestProgress` port (`progress`, `complete`) and `run_load_test_v2` takes it; `LoadTestService` in `rocket-app` adapts it to `DomainEvent::LoadTestProgress` and `LoadTestComplete`, so the events are unchanged. `rocket-http` no longer imports `rocket_shared::events`. Moving `load_test.rs` out of shared (D-71) still waits for D-74. | `rocket-http/src/load_test.rs` | done |
 
+D-74 progress: plan 0 (the `PublishedEvent` port) is done on branch `refactor/ddd-phase7-events-plan-0`, not merged. Plans 1 to 7 follow `docs/superpowers/plans/2026-11-05-ddd-phase7-events-index.md`. D-74 and D-71 stay open.
+
 ## Phase 8: contexts and crate structure
 
 Larger moves, each with its own spec. Do not start before Phases 3, 4 and 6 are done for the same area.

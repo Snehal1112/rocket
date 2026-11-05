@@ -27,7 +27,8 @@ cargo check -p rocket-shared
 
 ### Events
 - `DomainEvent` — exhaustive enum of all domain events (collection, request, environment, workspace, HTTP execution, file-system, history, git). Tagged with `#[serde(tag = "type", rename_all = "camelCase")]` so variants serialize as `{"type": "collectionCreated", ...}` for Tauri's event bus.
-- `EventPublisher` — object-safe trait (`fn publish(&self, event: DomainEvent)`). Implemented by `TauriEventBus` in `rocket-infra`; `NullEventPublisher` is the no-op used in tests.
+- `PublishedEvent` (`published_event.rs`) — the port between event producers and the bus: `channel`, `to_json`, `also_emit_on`, `written_collections` and `as_any` (with `dyn PublishedEvent::downcast_ref`). `DomainEvent` implements it in `domain_event_port.rs`.
+- `EventPublisher` — object-safe trait (`fn publish(&self, event: &dyn PublishedEvent)`). Implemented by `TauriEventBus` in `rocket-infra`; `NullEventPublisher` is the no-op used in tests.
 
 ### Update settings
 - `UpdateSettings` (`update_settings.rs`) — `auto_check` (default on) and `skipped_version`. `UpdateSettingsRepository` is the load/save trait, implemented by `FsUpdateSettingsRepo` in `rocket-infra`.
@@ -61,7 +62,7 @@ The client certificate model lives in `rocket-environment` (`certificate.rs`) an
 - The `type` tag is camelCase (`collectionCreated`). Variant fields are deliberately snake_case (`session_id`). Nested helper DTOs (for example `FlowCallbackInfo`, `LoadTestProgressEvent`) are camelCase.
 - This mix is kept on purpose. Renaming any of it breaks the frontend listeners and needs its own decision.
 - The `wire_contract_*` tests in `events.rs` assert exact key sets, so an accidental rename fails the build.
-- `TauriEventBus` adds `seq` (process-wide counter) and `tsMs` (unix ms) at emit time. Do not add top-level fields with those names to a variant.
+- The bus reads each event through `PublishedEvent` (`channel`, `to_json`). `TauriEventBus` adds `seq` (process-wide counter) and `tsMs` (unix ms) at emit time. Do not add top-level fields with those names to a variant.
 
 ## Patterns and Conventions
 
@@ -75,4 +76,4 @@ The client certificate model lives in `rocket-environment` (`certificate.rs`) an
 
 ## Workspace Role
 
-Every other crate depends on `rocket-shared`. Domain crates (`rocket-collection`, `rocket-environment`, etc.) use `DomainResult` and `DomainError` as their return types. Services in `rocket-app` accept a `Box<dyn EventPublisher>` and publish `DomainEvent` values. The Tauri shell (`src-tauri`) wires in `TauriEventBus` from `rocket-infra` as the live publisher.
+Every other crate depends on `rocket-shared`. Domain crates (`rocket-collection`, `rocket-environment`, etc.) use `DomainResult` and `DomainError` as their return types. Services in `rocket-app` accept a `Box<dyn EventPublisher>` and publish `DomainEvent` values by reference (as `&dyn PublishedEvent`). The Tauri shell (`src-tauri`) wires in `TauriEventBus` from `rocket-infra` as the live publisher.
