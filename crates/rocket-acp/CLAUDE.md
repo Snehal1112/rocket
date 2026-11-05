@@ -31,7 +31,7 @@ cargo test -p rocket-acp -j4
 |---|---|
 | `agent_config.rs` | `AgentConfig` struct + `AgentKind` (Claude, Gemini, Generic; per-kind reserved env names and `validate_kind_env`) + `AgentConfigRepository` trait |
 | `session.rs` | `AcpSessionClient` trait (`start_session`, `send_prompt`, `cancel`, `set_config_option`, `end_session`, `end_all_sessions`) |
-| `session_info.rs` | `SessionInfo`, `PromptCapabilities`; `SessionInfo` carries `ConfigOption`/`ConfigChoice` (defined here, re-exported at the crate root) |
+| `session_info.rs` | `SessionInfo`, `PromptCapabilities`; `SessionInfo` carries `ConfigOption`/`ConfigChoice` (defined in `options.rs`, re-exported here and at the crate root) |
 | `events.rs` | `AcpEvent` (13 session and proposal events plus 3 assistant conversation events; implements `PublishedEvent`, same channels and JSON as the old `DomainEvent` variants). Published by `AcpSessionService`, `ProposalService`, `ConversationService` and `McpToolService` in `rocket-app`. |
 | `options.rs` | `ConfigOption`, `ConfigChoice`, `PermissionOption`, `PermissionOptionKind`: option types that `AcpEvent` and `SessionInfo` carry |
 | `update.rs` | `AcpUpdate` (typed agent updates) and `ToolCallStatus` |
