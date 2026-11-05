@@ -63,6 +63,7 @@ New for this roadmap:
 | CA-2 | Contracts from source code: check a spec generated from the code | CA-1 | open |
 | CA-3 | Consumer impact: who breaks, before the provider ships | CA-1 | open |
 | CA-4 | AI layer: MCP outside the app, PR explainer, failure debugging | CA-1, CA-3 for 4b | open |
+| CA-5 | Team network: AirDrop-style discovery and pairing, one node as hub | none | spec |
 
 Order: CA-1, then CA-3, then CA-2, then CA-4. CA-4c (failure debugging in the
 app) does not need the CLI and can start in parallel with CA-1.
@@ -239,6 +240,27 @@ reads that JSON. It never changes a result.
   observability tool's own MCP server and adds them to the CA-4c answer.
 
 Links: none yet.
+
+## CA-5. Team network (AirDrop-style)
+
+Why: teams on the same network should find each other's Rocket and work
+together without a git server or a cloud service.
+
+What:
+
+- MVP (spec written): every Rocket is a node. Nodes on the same network show
+  in a Network panel with a search box. Pairing uses the same 6-digit code on
+  both screens. Pairings last until removed. One node can pair with many
+  teammates and act as the team's hub. "Add by address" covers VPN and
+  Tailscale.
+- Later, each with its own spec: sending collections, contracts and pins as
+  sanitised snapshots (lands with zero trust), and contract checks between
+  nodes. Git history over the hub stays a separate spike.
+- This reverses "no Rocket server" for an opt-out local service only. No
+  hosted server.
+
+Links: `docs/superpowers/specs/2026-11-05-team-network-discovery-pairing-design.md`
+(MVP). Recommendations for after the MVP are in its section 11.
 
 ---
 

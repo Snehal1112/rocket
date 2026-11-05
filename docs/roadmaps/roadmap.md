@@ -76,6 +76,7 @@ Notes: `docs/features/rok-api-parity-notes.md` (its status table is current: A, 
 | R-80 | CA-2 contracts from source code: check a spec generated from the code | open | `docs/roadmaps/contracts-ci-ai-roadmap.md` | Needs R-79. Brainstorm and spec. |
 | R-81 | CA-3 consumer impact: pin files, shape check, later a behaviour check on a PR preview | open | `docs/roadmaps/contracts-ci-ai-roadmap.md` | Needs R-79 and the cross-repo consumers decision. |
 | R-82 | CA-4 AI layer: `rocket mcp`, PR explainer, failure debug bundle, trace links | open | `docs/roadmaps/contracts-ci-ai-roadmap.md` | CA-4c can start now. The rest needs R-79. |
+| R-83 | CA-5 team network MVP: AirDrop-style discovery, code pairing, presence, many peers per node (hub) | spec | `docs/superpowers/specs/2026-11-05-team-network-discovery-pairing-design.md` | User reviews the spec, then plans. Send and receive, and contract checks between nodes, get their own specs. |
 
 ## 6. Auth and import
 
