@@ -66,6 +66,10 @@ pub trait WorkspaceConfigRepository: Send + Sync {
 ```
 `load` returns a default config derived from the directory name if `workspace.yml` does not exist — callers must not assume the file is always present. Implemented by `FsWorkspaceConfigRepo` in `rocket-infra`.
 
+## Events
+
+`events.rs` holds `WorkspaceEvent` (created, switched, renamed, closed, deleted, pinned, unpinned, description updated; channels `workspace-created`, `workspace-switched` and so on; implements `PublishedEvent`). Frozen JSON literals in the tests pin the wire format. `WorkspaceService` in `rocket-app` publishes it.
+
 ## UI state and file watcher ports
 
 - `UiStateRepository` (`ui_state.rs`) loads and saves the window layout (`UiState`, no serde derives). `FsUiStateRepo` in `rocket-infra` keeps it in `ui-state.yml` of the app config folder. The persisted keys stay camelCase because files from earlier versions use them.
