@@ -1,5 +1,5 @@
 use rocket_infra::RecentWrites;
-use rocket_shared::events::{DomainEvent, EventPublisher};
+use rocket_shared::events::{EventPublisher, PublishedEvent};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -34,30 +34,25 @@ impl TauriEventBus {
 }
 
 impl EventPublisher for TauriEventBus {
-    fn publish(&self, event: DomainEvent) {
+    fn publish(&self, event: &dyn PublishedEvent) {
         // Record in-app collection writes first, so the file watcher can
         // drop its own report of the same write.
         if let Some(writes) = self.app.try_state::<Arc<RecentWrites>>() {
-            writes.record(&event);
+            writes.record(event);
         }
-        let event_name = channel_for(&event);
+        let channel = event.channel();
         let seq = next_seq();
-        let payload = match envelope(&event, seq, now_ms()) {
+        let payload = match envelope(event, seq, now_ms()) {
             Ok(value) => value,
             Err(err) => {
-                tracing::warn!(channel = event_name, error = %err, "event serialize failed");
+                tracing::warn!(channel, error = %err, "event serialize failed");
                 return;
             }
         };
-        self.emit_value(event_name, &payload);
-        // A branch switch replaces the working-tree content visible to the
-        // collection sidebar, so also fire "collection-changed" so that any
-        // expanded CollectionNode re-fetches its request tree.
-        if matches!(
-            &event,
-            DomainEvent::BranchSwitched { .. } | DomainEvent::BranchMerged { .. }
-        ) {
-            self.emit_value("collection-changed", &payload);
+        // A branch switch also fires "collection-changed", so an expanded
+        // CollectionNode re-fetches its request tree.
+        for name in emit_channels(event) {
+            self.emit_value(name, &payload);
         }
     }
 }
@@ -77,8 +72,8 @@ fn now_ms() -> u64 {
 
 /// The event as a JSON object plus the `seq` and `tsMs` envelope keys.
 /// A key the event already has is never overwritten.
-fn envelope(event: &DomainEvent, seq: u64, ts_ms: u64) -> Result<Value, serde_json::Error> {
-    Ok(add_envelope(serde_json::to_value(event)?, seq, ts_ms))
+fn envelope(event: &dyn PublishedEvent, seq: u64, ts_ms: u64) -> Result<Value, serde_json::Error> {
+    Ok(add_envelope(event.to_json()?, seq, ts_ms))
 }
 
 /// Adds `seq` and `tsMs` to a JSON object unless it has those keys already.
@@ -102,137 +97,71 @@ fn failure_to_log(
     (*count == 1 || count.is_multiple_of(100)).then_some(*count)
 }
 
-/// The frontend channel for each event.
-pub(crate) fn channel_for(event: &DomainEvent) -> &'static str {
-    match event {
-        // File watcher events are collection changes — the sidebar
-        // needs to refresh when files are created/modified/deleted.
-        DomainEvent::FileChanged { .. } => "collection-changed",
-        DomainEvent::RequestExecuted { .. } => "request-executed",
-        DomainEvent::FileWatcherFailed { .. } => "file-watcher-failed",
-        // Collection Runner events — each gets its own channel so the run
-        // view can append steps without re-reading the whole run.
-        DomainEvent::RunnerStarted { .. } => "runner-started",
-        DomainEvent::RunnerStepCompleted { .. } => "runner-step-completed",
-        DomainEvent::RunnerFinished { .. } => "runner-finished",
-        // Flow events — mirrors the Collection Runner events above.
-        DomainEvent::FlowRunStarted { .. } => "flow-run-started",
-        DomainEvent::FlowStepStarted { .. } => "flow-step-started",
-        DomainEvent::FlowStepProgress { .. } => "flow-step-progress",
-        DomainEvent::FlowStepCompleted { .. } => "flow-step-completed",
-        DomainEvent::FlowRunFinished { .. } => "flow-run-finished",
-        // ACP AI-assist session events — mirrors the Flow/Collection
-        // Runner events above: each variant gets its own frontend channel.
-        DomainEvent::AcpSessionStarted { .. } => "agent-session-started",
-        DomainEvent::AcpSessionChunk { .. } => "agent-session-chunk",
-        DomainEvent::AcpThoughtChunk { .. } => "agent-session-thought",
-        DomainEvent::AcpSessionFinished { .. } => "agent-session-finished",
-        DomainEvent::AcpSessionFailed { .. } => "agent-session-failed",
-        // gRPC session events — each variant gets its own channel, like the ACP and Flow events.
-        DomainEvent::GrpcSessionStarted { .. } => "grpc-session-started",
-        DomainEvent::GrpcSessionHeaders { .. } => "grpc-session-headers",
-        DomainEvent::GrpcSessionMessage { .. } => "grpc-session-message",
-        DomainEvent::GrpcSessionFinished { .. } => "grpc-session-finished",
-        // WebSocket sessions: one channel for frames, one for lifecycle.
-        DomainEvent::WebSocketMessage { .. } => "ws:message",
-        DomainEvent::WebSocketStatus { .. } => "ws:status",
-        // GraphQL subscriptions: one channel for results, one for lifecycle.
-        DomainEvent::GraphQlSubscriptionMessage { .. } => "graphql:subscription-message",
-        DomainEvent::GraphQlSubscriptionStatus { .. } => "graphql:subscription-status",
-        DomainEvent::AcpToolInvoked { .. } => "agent-tool-invoked",
-        DomainEvent::AcpProposalCreated { .. } => "agent-proposal-created",
-        DomainEvent::AcpProposalResolved { .. } => "agent-proposal-resolved",
-        DomainEvent::AcpToolActivity { .. } => "agent-session-tool-activity",
-        DomainEvent::AcpConfigOptionsChanged { .. } => "agent-session-config-options",
-        DomainEvent::AcpUsage { .. } => "agent-session-usage",
-        DomainEvent::AcpPermissionRequested { .. } => "agent-permission-requested",
-        DomainEvent::AcpPermissionResolved { .. } => "agent-permission-resolved",
-        // Stored assistant conversations. The payloads hold ids only.
-        DomainEvent::AssistantConversationSaved { .. } => "assistant-conversation-saved",
-        DomainEvent::AssistantConversationDeleted { .. } => "assistant-conversation-deleted",
-        DomainEvent::AssistantConversationsCleared => "assistant-conversations-cleared",
-        // A background OpenAPI sync check finished. The payload names the collection only.
-        DomainEvent::OpenApiSyncChecked { .. } => "openapi-sync-checked",
-        // An OpenAPI sync apply finished. The payload holds counts only.
-        DomainEvent::OpenApiSyncApplied { .. } => "openapi-sync-applied",
-        // Load test events keep the channel names the frontend listens on.
-        DomainEvent::LoadTestProgress(_) => "load_test_progress",
-        DomainEvent::LoadTestComplete(_) => "load_test_complete",
-        DomainEvent::CollectionCreated { .. }
-        | DomainEvent::CollectionDeleted { .. }
-        | DomainEvent::CollectionRenamed { .. } => "collection-changed",
-        DomainEvent::RequestSaved { .. } | DomainEvent::RequestDeleted { .. } => {
-            "collection-changed"
-        }
-        DomainEvent::ItemMoved { .. } => "collection-changed",
-        DomainEvent::FlowRequestPathsRewritten { .. } => "flow-request-paths-rewritten",
-        DomainEvent::FolderCreated { .. }
-        | DomainEvent::FolderDeleted { .. }
-        | DomainEvent::ItemsReordered { .. }
-        | DomainEvent::CollectionSettingsSaved { .. }
-        | DomainEvent::FolderVariablesSaved { .. }
-        | DomainEvent::FolderSettingsSaved { .. }
-        | DomainEvent::RequestVariablesSaved { .. } => "collection-changed",
-        DomainEvent::CollectionVariableWritten { .. } => "collection-changed",
-        DomainEvent::CollectionTrustChanged { .. } => "collection-trust-changed",
-        DomainEvent::EnvironmentSaved { .. } | DomainEvent::EnvironmentDeleted { .. } => {
-            "environment-changed"
-        }
-        DomainEvent::HistoryCleared => "history-changed",
-        // Workspace events — each variant gets its own channel so the
-        // frontend store can update the precise slice of state it needs.
-        DomainEvent::WorkspaceCreated { .. } => "workspace-created",
-        DomainEvent::WorkspaceSwitched { .. } => "workspace-switched",
-        DomainEvent::WorkspaceRenamed { .. } => "workspace-renamed",
-        DomainEvent::WorkspaceClosed { .. } => "workspace-closed",
-        DomainEvent::WorkspaceDeleted { .. } => "workspace-deleted",
-        DomainEvent::WorkspacePinned { .. } => "workspace-pinned",
-        DomainEvent::WorkspaceUnpinned { .. } => "workspace-unpinned",
-        DomainEvent::WorkspaceDescriptionUpdated { .. } => "workspace-description-updated",
-        // Git events
-        DomainEvent::GitStatusChanged { .. }
-        | DomainEvent::GitCommit { .. }
-        | DomainEvent::GitPush { .. }
-        | DomainEvent::GitPull { .. }
-        | DomainEvent::BranchSwitched { .. }
-        | DomainEvent::BranchMerged { .. }
-        | DomainEvent::GitStashChanged { .. }
-        | DomainEvent::GitConflictDetected { .. }
-        | DomainEvent::GitCloned { .. }
-        | DomainEvent::GitRemoteAdded { .. }
-        | DomainEvent::GitRemoteRemoved { .. } => "git-changed",
-        // Script events
-        DomainEvent::ConsoleOutput { .. } => "script-console",
-        DomainEvent::TestsCompleted { .. } => "script-tests",
-        DomainEvent::ScriptError { .. } => "script-error",
-        DomainEvent::ScriptVariableWritten { .. } => "script-variable-written",
-    }
+/// The channels an event is emitted on: its own first, then the extras.
+fn emit_channels(event: &dyn PublishedEvent) -> Vec<&'static str> {
+    let mut channels = vec![event.channel()];
+    channels.extend_from_slice(event.also_emit_on());
+    channels
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rocket_shared::events::DomainEvent;
+
+    #[test]
+    fn emit_channels_adds_collection_changed_for_branch_switch_and_merge() {
+        let switched = DomainEvent::BranchSwitched {
+            collection: "api".into(),
+            branch: "dev".into(),
+        };
+        assert_eq!(
+            emit_channels(&switched),
+            vec!["git-changed", "collection-changed"]
+        );
+        let merged = DomainEvent::BranchMerged {
+            collection: "api".into(),
+            branch: "dev".into(),
+        };
+        assert_eq!(
+            emit_channels(&merged),
+            vec!["git-changed", "collection-changed"]
+        );
+    }
+
+    #[test]
+    fn emit_channels_is_one_channel_for_other_events() {
+        let saved = DomainEvent::RequestSaved {
+            collection: "api".into(),
+            path: "r.yml".into(),
+        };
+        assert_eq!(emit_channels(&saved), vec![saved.channel()]);
+        assert_eq!(
+            emit_channels(&DomainEvent::HistoryCleared),
+            vec!["history-changed"]
+        );
+    }
 
     #[test]
     fn assistant_conversation_events_have_their_own_channels() {
         let id = || "c1".to_string();
         assert_eq!(
-            channel_for(&DomainEvent::AssistantConversationSaved {
+            PublishedEvent::channel(&DomainEvent::AssistantConversationSaved {
                 conversation_id: id()
             }),
             "assistant-conversation-saved"
         );
         assert_eq!(
-            channel_for(&DomainEvent::AssistantConversationDeleted {
+            PublishedEvent::channel(&DomainEvent::AssistantConversationDeleted {
                 conversation_id: id()
             }),
             "assistant-conversation-deleted"
         );
         assert_eq!(
-            channel_for(&DomainEvent::AssistantConversationsCleared),
+            DomainEvent::AssistantConversationsCleared.channel(),
             "assistant-conversations-cleared"
         );
-        assert_eq!(channel_for(&DomainEvent::HistoryCleared), "history-changed");
+        assert_eq!(DomainEvent::HistoryCleared.channel(), "history-changed");
     }
 
     #[test]
@@ -240,7 +169,7 @@ mod tests {
         let event = DomainEvent::FileWatcherFailed {
             message: "m".into(),
         };
-        assert_eq!(channel_for(&event), "file-watcher-failed");
+        assert_eq!(event.channel(), "file-watcher-failed");
     }
 
     #[test]
@@ -252,13 +181,13 @@ mod tests {
             flows: Vec::new(),
             failed: Vec::new(),
         };
-        assert_eq!(channel_for(&event), "flow-request-paths-rewritten");
+        assert_eq!(event.channel(), "flow-request-paths-rewritten");
     }
 
     #[test]
     fn permission_events_have_their_own_channels() {
         assert_eq!(
-            channel_for(&DomainEvent::AcpPermissionRequested {
+            PublishedEvent::channel(&DomainEvent::AcpPermissionRequested {
                 session_id: "s".into(),
                 request_id: "perm-1".into(),
                 call_id: "c".into(),
@@ -270,7 +199,7 @@ mod tests {
             "agent-permission-requested"
         );
         assert_eq!(
-            channel_for(&DomainEvent::AcpPermissionResolved {
+            PublishedEvent::channel(&DomainEvent::AcpPermissionResolved {
                 session_id: "s".into(),
                 request_id: "perm-1".into(),
                 option_id: None,
@@ -297,7 +226,7 @@ mod tests {
             recent_log: vec![],
         };
         assert_eq!(
-            channel_for(&DomainEvent::LoadTestProgress(progress)),
+            PublishedEvent::channel(&DomainEvent::LoadTestProgress(progress)),
             "load_test_progress"
         );
         let result = LoadTestResult {
@@ -319,7 +248,7 @@ mod tests {
             time_series: vec![],
         };
         assert_eq!(
-            channel_for(&DomainEvent::LoadTestComplete(result)),
+            PublishedEvent::channel(&DomainEvent::LoadTestComplete(result)),
             "load_test_complete"
         );
     }

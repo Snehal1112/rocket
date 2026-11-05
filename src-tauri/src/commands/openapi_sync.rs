@@ -1587,7 +1587,7 @@ pub async fn openapi_sync_check_now(
                 _ => "failed",
             };
             crate::tauri_event_bus::TauriEventBus::new(app).publish(
-                rocket_shared::events::DomainEvent::OpenApiSyncChecked {
+                &rocket_shared::events::DomainEvent::OpenApiSyncChecked {
                     collection,
                     status: status.to_string(),
                 },
@@ -1606,7 +1606,7 @@ fn publish_applied(
     result: &Result<ApplyReport, DomainError>,
 ) {
     if let Ok(report) = result {
-        events.publish(rocket_shared::events::DomainEvent::OpenApiSyncApplied {
+        events.publish(&rocket_shared::events::DomainEvent::OpenApiSyncApplied {
             collection: collection.to_string(),
             applied: report.applied.len(),
             stale: report.stale.len(),
@@ -2066,8 +2066,11 @@ mod tests {
     struct Recorded(Mutex<Vec<rocket_shared::events::DomainEvent>>);
 
     impl EventPublisher for Recorded {
-        fn publish(&self, event: rocket_shared::events::DomainEvent) {
-            self.0.lock().expect("lock").push(event);
+        fn publish(&self, event: &dyn rocket_shared::events::PublishedEvent) {
+            let Some(event) = event.downcast_ref::<rocket_shared::events::DomainEvent>() else {
+                return;
+            };
+            self.0.lock().expect("lock").push(event.clone());
         }
     }
 
