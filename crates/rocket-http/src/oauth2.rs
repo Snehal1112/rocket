@@ -25,6 +25,8 @@ pub struct OAuthConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OAuthToken {
     pub access_token: String,
+    /// Some providers leave it out, and the direct grants only need the access token.
+    #[serde(default)]
     pub token_type: String,
     pub expires_in: Option<u64>,
     pub refresh_token: Option<String>,

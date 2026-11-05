@@ -843,9 +843,10 @@ impl rocket_http::TokenClientProvider for ReqwestTokenClientProvider {
             )));
         }
         if !status.is_success() {
-            // A failed body read only shortens the message.
-            let body = read_capped_body(resp, TOKEN_BODY_CAP)
+            // A failed or oversized body read only shortens the message.
+            let body = read_body_prefix(resp, TOKEN_BODY_CAP)
                 .await
+                .map(|(bytes, _)| bytes)
                 .unwrap_or_default();
             let text = String::from_utf8_lossy(&body);
             let excerpt: String = text.chars().take(TOKEN_ERROR_EXCERPT_CHARS).collect();
@@ -869,22 +870,36 @@ fn token_request_error(e: reqwest::Error) -> DomainError {
 }
 
 /// Reads a response body chunk by chunk and fails once it passes `max` bytes.
-async fn read_capped_body(mut resp: reqwest::Response, max: usize) -> DomainResult<Vec<u8>> {
+async fn read_capped_body(resp: reqwest::Response, max: usize) -> DomainResult<Vec<u8>> {
     if resp.content_length().is_some_and(|len| len > max as u64) {
         return Err(DomainError::Internal(
             "Token response body is too large.".into(),
         ));
     }
+    let (body, truncated) = read_body_prefix(resp, max).await?;
+    if truncated {
+        return Err(DomainError::Internal(
+            "Token response body is too large.".into(),
+        ));
+    }
+    Ok(body)
+}
+
+/// Reads at most `max` bytes of a body. The flag says whether more bytes were left unread.
+async fn read_body_prefix(
+    mut resp: reqwest::Response,
+    max: usize,
+) -> DomainResult<(Vec<u8>, bool)> {
     let mut body = Vec::new();
     while let Some(chunk) = resp.chunk().await.map_err(token_request_error)? {
-        if body.len() + chunk.len() > max {
-            return Err(DomainError::Internal(
-                "Token response body is too large.".into(),
-            ));
+        let room = max - body.len();
+        if chunk.len() > room {
+            body.extend_from_slice(&chunk[..room]);
+            return Ok((body, true));
         }
         body.extend_from_slice(&chunk);
     }
-    Ok(body)
+    Ok((body, false))
 }
 
 /// Builds a client, presenting the identity as the TLS client certificate when there is one.
@@ -1483,15 +1498,30 @@ async fn fetch_direct_grant_token(
     certificates: &[ResolvedClientCertificate],
     proxy: rocket_http::ResolvedProxy,
 ) -> DomainResult<String> {
-    // Build a dedicated client for the token request. SSL setting here is independent
-    // from the cached executor client (see get_or_build_client). The certificate is matched
-    // against the token URL, which can be a different host than the request.
-    let identity = identity_for_url(certificates, access_token_url)?;
-    let mut spec = ClientBuild::plain(true, verify_ssl, None);
-    spec.identity = identity;
-    spec.proxy = proxy;
-    let client = build_client(spec)
-        .map_err(|e| DomainError::Http(format!("OAuth2 client build failed: {e}")))?;
+    let provider = ReqwestTokenClientProvider::new()
+        .with_proxy(std::sync::Arc::new(std::sync::RwLock::new(proxy)));
+    fetch_direct_grant_token_via(
+        &provider,
+        access_token_url,
+        credentials,
+        grant_params,
+        scope,
+        verify_ssl,
+        certificates,
+    )
+    .await
+}
+
+/// The grant fetch behind `fetch_direct_grant_token`, with the token client provider injected.
+async fn fetch_direct_grant_token_via(
+    provider: &ReqwestTokenClientProvider,
+    access_token_url: &str,
+    credentials: &rocket_shared::oauth2::OAuth2ClientCredentials,
+    grant_params: Vec<(String, String)>,
+    scope: Option<&str>,
+    verify_ssl: bool,
+    certificates: &[ResolvedClientCertificate],
+) -> DomainResult<String> {
     let mut params = grant_params;
     if let Some(s) = scope {
         params.push(("scope".to_string(), s.to_string()));
@@ -1501,51 +1531,42 @@ async fn fetch_direct_grant_token(
         .placement
         .as_deref()
         .unwrap_or("basic_auth_header");
-    let req = if credentials.client_id.is_empty() {
-        // A public client has no credentials to send.
-        client.post(access_token_url).form(&params)
-    } else {
-        match placement {
-            "body" => {
-                params.push(("client_id".to_string(), credentials.client_id.clone()));
-                params.push((
-                    "client_secret".to_string(),
-                    credentials.client_secret.clone(),
-                ));
-                client.post(access_token_url).form(&params)
-            }
-            _ => {
-                // Default: Basic Auth header.
-                client
-                    .post(access_token_url)
-                    .form(&params)
-                    .basic_auth(&credentials.client_id, Some(&credentials.client_secret))
-            }
+    let mut headers: Vec<(String, String)> = Vec::new();
+    // A public client has no credentials to send.
+    if !credentials.client_id.is_empty() {
+        if placement == "body" {
+            params.push(("client_id".to_string(), credentials.client_id.clone()));
+            params.push((
+                "client_secret".to_string(),
+                credentials.client_secret.clone(),
+            ));
+        } else {
+            // Default: Basic Auth header.
+            let pair = format!("{}:{}", credentials.client_id, credentials.client_secret);
+            let encoded = {
+                use base64::Engine;
+                base64::engine::general_purpose::STANDARD.encode(pair)
+            };
+            headers.push(("Authorization".to_string(), format!("Basic {encoded}")));
         }
-    };
-
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| DomainError::Http(format!("OAuth2 token request failed: {e}")))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(DomainError::Http(format!(
-            "OAuth2 token endpoint returned {status}: {body}"
-        )));
     }
 
-    let json: serde_json::Value = resp
-        .json()
-        .await
-        .map_err(|e| DomainError::Http(format!("OAuth2 token response parse error: {e}")))?;
-
-    json["access_token"]
-        .as_str()
-        .map(|s| s.to_string())
-        .ok_or_else(|| DomainError::Http("OAuth2 response missing access_token".into()))
+    // The certificate is matched against the token URL, which can be another host than the request.
+    let token = rocket_http::TokenClientProvider::post_form(
+        provider,
+        access_token_url,
+        verify_ssl,
+        certificates,
+        &params,
+        &headers,
+    )
+    .await
+    // A token failure stays an HTTP error for callers of the direct grants.
+    .map_err(|e| match e {
+        DomainError::Internal(message) => DomainError::Http(message),
+        other => other,
+    })?;
+    Ok(token.access_token)
 }
 
 #[cfg(test)]
@@ -1935,6 +1956,204 @@ mod oauth2_tests {
     use rocket_shared::oauth2::{OAuth2Flow, OAuth2ResourceOwner};
     use rocket_shared::types::HttpMethod;
     use wiremock::matchers::{body_string_contains, header};
+
+    fn direct_grant_credentials(placement: Option<&str>) -> OAuth2ClientCredentials {
+        OAuth2ClientCredentials {
+            client_id: "cid".into(),
+            client_secret: "csecret".into(),
+            placement: placement.map(String::from),
+        }
+    }
+
+    fn direct_grant_params() -> Vec<(String, String)> {
+        vec![("grant_type".to_string(), "client_credentials".to_string())]
+    }
+
+    async fn direct_grant(
+        server: &MockServer,
+        credentials: &OAuth2ClientCredentials,
+    ) -> DomainResult<String> {
+        fetch_direct_grant_token_via(
+            &ReqwestTokenClientProvider::new(),
+            &format!("{}/token", server.uri()),
+            credentials,
+            direct_grant_params(),
+            Some("read"),
+            true,
+            &[],
+        )
+        .await
+    }
+
+    fn token_ok() -> ResponseTemplate {
+        ResponseTemplate::new(200)
+            .set_body_json(serde_json::json!({"access_token": "tok", "token_type": "Bearer"}))
+    }
+
+    #[tokio::test]
+    async fn direct_grant_sends_credentials_in_the_body() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/token"))
+            .and(body_string_contains("client_id=cid"))
+            .and(body_string_contains("client_secret=csecret"))
+            .and(body_string_contains("scope=read"))
+            .and(body_string_contains("grant_type=client_credentials"))
+            .respond_with(token_ok())
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let token = direct_grant(&server, &direct_grant_credentials(Some("body")))
+            .await
+            .expect("token");
+
+        assert_eq!(token, "tok");
+    }
+
+    #[tokio::test]
+    async fn direct_grant_sends_a_basic_header_by_default() {
+        let server = MockServer::start().await;
+        // The value is base64 of cid:csecret.
+        Mock::given(method("POST"))
+            .and(header("Authorization", "Basic Y2lkOmNzZWNyZXQ="))
+            .respond_with(token_ok())
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        direct_grant(&server, &direct_grant_credentials(None))
+            .await
+            .expect("token");
+
+        let requests = server.received_requests().await.expect("requests");
+        let body = String::from_utf8_lossy(&requests[0].body).into_owned();
+        assert!(!body.contains("csecret"), "{body}");
+        assert!(!body.contains("client_id"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn direct_grant_public_client_sends_no_credentials() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(token_ok())
+            .expect(1)
+            .mount(&server)
+            .await;
+        let public = OAuth2ClientCredentials {
+            client_id: String::new(),
+            client_secret: String::new(),
+            placement: None,
+        };
+
+        direct_grant(&server, &public).await.expect("token");
+
+        let requests = server.received_requests().await.expect("requests");
+        assert!(requests[0].headers.get("authorization").is_none());
+        let body = String::from_utf8_lossy(&requests[0].body).into_owned();
+        assert!(!body.contains("client_id"), "{body}");
+        assert!(!body.contains("client_secret"), "{body}");
+    }
+
+    #[tokio::test]
+    async fn direct_grant_times_out_like_post_form() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(token_ok().set_delay(std::time::Duration::from_secs(5)))
+            .mount(&server)
+            .await;
+        let provider = ReqwestTokenClientProvider::new().with_timeouts(
+            std::time::Duration::from_secs(10),
+            std::time::Duration::from_millis(200),
+        );
+
+        let start = std::time::Instant::now();
+        let err = fetch_direct_grant_token_via(
+            &provider,
+            &format!("{}/token", server.uri()),
+            &direct_grant_credentials(None),
+            direct_grant_params(),
+            None,
+            true,
+            &[],
+        )
+        .await
+        .expect_err("error");
+
+        assert!(start.elapsed() < std::time::Duration::from_secs(2));
+        assert!(
+            err.to_string().to_lowercase().contains("timed out"),
+            "{err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn direct_grant_does_not_follow_a_redirect() {
+        let target = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(token_ok())
+            .expect(0)
+            .mount(&target)
+            .await;
+        let origin = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(
+                ResponseTemplate::new(307).insert_header("Location", target.uri().as_str()),
+            )
+            .mount(&origin)
+            .await;
+
+        let err = direct_grant(&origin, &direct_grant_credentials(Some("body")))
+            .await
+            .expect_err("error");
+
+        assert!(err.to_string().contains("307"), "{err}");
+        assert!(target
+            .received_requests()
+            .await
+            .expect("requests")
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn direct_grant_rejects_an_oversized_body() {
+        let server = MockServer::start().await;
+        let body = format!(
+            r#"{{"access_token":"{}","token_type":"Bearer"}}"#,
+            "a".repeat(2 * 1024 * 1024)
+        );
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .mount(&server)
+            .await;
+
+        let err = direct_grant(&server, &direct_grant_credentials(None))
+            .await
+            .expect_err("error");
+
+        assert!(err.to_string().contains("too large"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn direct_grant_error_has_no_url() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        drop(listener);
+
+        let err = fetch_direct_grant_token_via(
+            &ReqwestTokenClientProvider::new(),
+            &format!("http://127.0.0.1:{port}/token?key=secret"),
+            &direct_grant_credentials(None),
+            direct_grant_params(),
+            None,
+            true,
+            &[],
+        )
+        .await
+        .expect_err("error");
+
+        assert!(!err.to_string().contains("secret"), "{err}");
+    }
 
     fn password_auth(
         server: &MockServer,
@@ -4845,11 +5064,57 @@ mod token_post_tests {
 
         let err = post(&server, &[], &[]).await.expect_err("error");
 
-        assert!(
-            err.to_string().chars().count() < 400,
-            "{}",
-            err.to_string().len()
-        );
+        let text = err.to_string();
+        let excerpt = text.split(": ").last().unwrap_or_default();
+        assert_eq!(excerpt.chars().count(), 200, "{text}");
+    }
+
+    #[tokio::test]
+    async fn token_post_keeps_an_excerpt_of_an_oversized_error_body() {
+        let server = MockServer::start().await;
+        let body = format!("denied{}", "x".repeat(2 * 1024 * 1024));
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(500).set_body_string(body))
+            .mount(&server)
+            .await;
+
+        let err = post(&server, &[], &[]).await.expect_err("error");
+
+        assert!(err.to_string().contains("denied"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn token_post_rejects_an_oversized_chunked_body() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        tokio::spawn(async move {
+            while let Ok((mut stream, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 4096];
+                    let _ = stream.read(&mut buf).await;
+                    let head = "HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n";
+                    let _ = stream.write_all(head.as_bytes()).await;
+                    let chunk = "a".repeat(64 * 1024);
+                    for _ in 0..24 {
+                        let frame = format!("{:x}\r\n{chunk}\r\n", chunk.len());
+                        if stream.write_all(frame.as_bytes()).await.is_err() {
+                            return;
+                        }
+                    }
+                    let _ = stream.write_all(b"0\r\n\r\n").await;
+                });
+            }
+        });
+
+        let err = ReqwestTokenClientProvider::new()
+            .post_form(&format!("http://{addr}/token"), true, &[], &form(), &[])
+            .await
+            .expect_err("error");
+
+        assert!(err.to_string().contains("too large"), "{err}");
     }
 
     #[tokio::test]
