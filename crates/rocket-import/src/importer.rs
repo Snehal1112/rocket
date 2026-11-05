@@ -170,7 +170,7 @@ impl ImportService {
 
         // Import environments.
         let env_dir = path.join("environments");
-        if env_dir.is_dir() {
+        if is_real_dir(self.files.as_ref(), &env_dir) {
             self.import_environments(&env_dir, &resolved_name, &mut report)?;
         }
 
@@ -212,7 +212,7 @@ impl ImportService {
         }
 
         // Bruno workspaces may nest collections under a `collections/` directory.
-        let scan_root = if path.join("collections").is_dir() {
+        let scan_root = if is_real_dir(self.files.as_ref(), &path.join("collections")) {
             path.join("collections")
         } else {
             path.to_path_buf()
@@ -220,7 +220,11 @@ impl ImportService {
 
         for entry in self.files.list_dir(&scan_root)? {
             let p = entry.path;
-            if p.is_dir() && detect_collection(&p).is_some() {
+            if entry.kind == EntryKind::Symlink {
+                combined.skipped.push(symlinked_folder_skip(&p));
+                continue;
+            }
+            if entry.kind == EntryKind::Dir && detect_collection(&p).is_some() {
                 let id = target_workspace_id.unwrap_or("default");
                 match self.import_collection(&p, id) {
                     Ok(r) => {
@@ -336,7 +340,19 @@ impl ImportService {
         for entry in self.files.list_dir(dir)? {
             let p = entry.path;
 
-            if p.is_dir() {
+            // The port cannot tell a linked folder from a linked file, so a link whose
+            // name has no file extension that the walk reads is reported as a folder.
+            let reads_ext = matches!(
+                p.extension().and_then(|e| e.to_str()),
+                Some("bru" | "yml" | "yaml" | "proto" | "js")
+            );
+            if entry.kind == EntryKind::Symlink && !reads_ext {
+                // A cloned collection could point a link at a private folder.
+                let rel = p.strip_prefix(root).unwrap_or(&p);
+                report.skipped.push(symlinked_folder_skip(rel));
+                continue;
+            }
+            if entry.kind == EntryKind::Dir {
                 // Skip environments — handled separately.
                 if p.file_name().is_some_and(|n| n == "environments") {
                     continue;
@@ -1158,6 +1174,19 @@ impl ImportService {
     }
 }
 
+/// True only for a real directory. A symlink or an unreadable path is not one.
+fn is_real_dir(files: &dyn ImportFiles, path: &Path) -> bool {
+    matches!(files.kind(path), Ok(EntryKind::Dir))
+}
+
+/// The report entry for a symlinked folder that the import does not follow.
+fn symlinked_folder_skip(path: &Path) -> SkippedItem {
+    SkippedItem {
+        path: path.to_string_lossy().to_string(),
+        reason: SkipReason::ParseError("a symlinked folder is not copied".to_string()),
+    }
+}
+
 /// Collects the `.yml` and `.yaml` files under `dir` as `/`-separated paths relative to `root`.
 fn collect_yml_files(files: &dyn ImportFiles, root: &Path, dir: &Path, out: &mut Vec<String>) {
     let Ok(entries) = files.list_dir(dir) else {
@@ -1165,7 +1194,7 @@ fn collect_yml_files(files: &dyn ImportFiles, root: &Path, dir: &Path, out: &mut
     };
     for entry in entries {
         let path = entry.path;
-        if path.is_dir() {
+        if entry.kind == EntryKind::Dir {
             collect_yml_files(files, root, &path, out);
             continue;
         }
@@ -1609,6 +1638,75 @@ mod auto_tests {
             "should create MyCollection, got: {:?}",
             report.created_collections
         );
+    }
+
+    #[cfg(unix)]
+    const MINI_BRU: &str =
+        "meta {\n  name: R\n  type: http\n  seq: 1\n}\nget {\n  url: https://ex.com\n}\n";
+
+    #[cfg(unix)]
+    #[test]
+    fn legacy_walk_does_not_follow_a_folder_symlink() {
+        let root = TempDir::new().unwrap();
+        let src = root.path().join("my-collection");
+        let outside = root.path().join("outside-dir");
+        std::fs::create_dir_all(&src).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(src.join("bruno.json"), "{}").unwrap();
+        std::fs::write(src.join("a.bru"), MINI_BRU).unwrap();
+        std::fs::write(outside.join("outside.bru"), MINI_BRU).unwrap();
+        std::os::unix::fs::symlink(&outside, src.join("up")).unwrap();
+
+        let ws = TempDir::new().unwrap();
+        let service = ImportService::new_with_workspace_path(ws.path());
+        let report = service.import_auto(&src, "default", false).unwrap();
+
+        assert_eq!(report.imported, 1);
+        assert!(report.skipped.iter().any(|s| matches!(
+            &s.reason,
+            SkipReason::ParseError(m) if m == "a symlinked folder is not copied"
+        )));
+        assert!(!ws
+            .path()
+            .join("collections")
+            .join("my-collection")
+            .join("up")
+            .exists());
+        assert!(!ws
+            .path()
+            .join("collections")
+            .join("my-collection")
+            .join("outside.yml")
+            .exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn workspace_import_skips_a_symlinked_collection_folder() {
+        let root = TempDir::new().unwrap();
+        let ws_root = root.path().join("my-workspace");
+        let real = ws_root.join("collections").join("Real");
+        let elsewhere = root.path().join("elsewhere").join("Linked");
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::fs::write(ws_root.join("workspace.yml"), "name: test\n").unwrap();
+        std::fs::write(real.join("bruno.json"), "{}").unwrap();
+        std::fs::write(real.join("req.bru"), MINI_BRU).unwrap();
+        std::fs::write(elsewhere.join("bruno.json"), "{}").unwrap();
+        std::fs::write(elsewhere.join("req.bru"), MINI_BRU).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, ws_root.join("collections").join("Linked")).unwrap();
+
+        let ws = TempDir::new().unwrap();
+        let service = ImportService::new_with_workspace_path(ws.path());
+        let report = service
+            .import_workspace(&ws_root, false, Some("default"))
+            .unwrap();
+
+        assert_eq!(report.created_collections.len(), 1);
+        assert!(report.skipped.iter().any(|s| matches!(
+            &s.reason,
+            SkipReason::ParseError(m) if m == "a symlinked folder is not copied"
+        )));
     }
 
     #[test]
