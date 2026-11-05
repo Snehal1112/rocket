@@ -1253,7 +1253,9 @@ fn merge_root_defaults(
         });
     };
     let parse = |path: &Path| -> Result<serde_yaml::Value, String> {
-        let text = files.read_to_string(path).map_err(|e| e.to_string())?;
+        let text =
+            crate::limits::read_text_capped(files, path, crate::limits::MAX_IMPORT_FILE_BYTES)
+                .map_err(|e| e.to_string())?;
         serde_yaml::from_str(&text).map_err(|e| e.to_string())
     };
     let source = match parse(src) {
@@ -2790,11 +2792,14 @@ mod port_tests {
             self.written.lock().expect("lock").push(path.to_path_buf());
             Ok(())
         }
-        fn regular_file_len(&self, _path: &Path) -> io::Result<Option<u64>> {
-            Err(io::Error::other("unsupported"))
+        fn regular_file_len(&self, path: &Path) -> io::Result<Option<u64>> {
+            let text = self.read_to_string(path)?;
+            Ok(Some(text.len() as u64))
         }
-        fn read_up_to(&self, _path: &Path, _max: u64) -> io::Result<Vec<u8>> {
-            Err(io::Error::other("unsupported"))
+        fn read_up_to(&self, path: &Path, max: u64) -> io::Result<Vec<u8>> {
+            let text = self.read_to_string(path)?;
+            let n = usize::try_from(max).unwrap_or(usize::MAX);
+            Ok(text.into_bytes().into_iter().take(n).collect())
         }
         fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
             self.canon

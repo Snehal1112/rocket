@@ -7,15 +7,14 @@ pub(crate) mod zip_extractor;
 
 use crate::error::ImportResult;
 use crate::files::ImportFiles;
+use crate::limits::{read_text_capped, MAX_IMPORT_FILE_BYTES};
 use ast::BruDocument;
 use std::path::Path;
 
 /// Detect format from file extension and parse into a BruDocument.
 /// `.bru` → lexer/parser; `.yml`/`.yaml` → yml_adapter.
 pub(crate) fn parse_file(files: &dyn ImportFiles, path: &Path) -> ImportResult<BruDocument> {
-    let content = files
-        .read_to_string(path)
-        .map_err(crate::error::ImportError::IoError)?;
+    let content = read_text_capped(files, path, MAX_IMPORT_FILE_BYTES)?;
 
     match path.extension().and_then(|e| e.to_str()) {
         Some("bru") => parser::parse(&content),
@@ -29,9 +28,7 @@ pub(crate) fn parse_file(files: &dyn ImportFiles, path: &Path) -> ImportResult<B
 
 /// Parse a Bruno environment file (`.yml` or `.bru`) into a BruDocument.
 pub(crate) fn parse_env_file(files: &dyn ImportFiles, path: &Path) -> ImportResult<BruDocument> {
-    let content = files
-        .read_to_string(path)
-        .map_err(crate::error::ImportError::IoError)?;
+    let content = read_text_capped(files, path, MAX_IMPORT_FILE_BYTES)?;
 
     match path.extension().and_then(|e| e.to_str()) {
         Some("yml") | Some("yaml") => yml_adapter::bru_document_from_yml_env_str(&content),

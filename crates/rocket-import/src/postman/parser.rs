@@ -1,5 +1,6 @@
 use crate::error::{ImportError, ImportResult};
 use crate::files::ImportFiles;
+use crate::limits::{read_text_capped, MAX_IMPORT_FILE_BYTES};
 use crate::postman::ast::PostmanCollection;
 use std::path::Path;
 
@@ -10,7 +11,7 @@ pub(crate) fn parse_postman_json(
     files: &dyn ImportFiles,
     path: &Path,
 ) -> ImportResult<PostmanCollection> {
-    let content = files.read_to_string(path).map_err(ImportError::IoError)?;
+    let content = read_text_capped(files, path, MAX_IMPORT_FILE_BYTES)?;
 
     let col: PostmanCollection =
         serde_json::from_str(&content).map_err(|e| ImportError::JsonParseError {
