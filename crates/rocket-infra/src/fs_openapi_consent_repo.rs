@@ -226,6 +226,22 @@ mod openapi_consent_tests {
         assert!(store.get(&other_spelling, "s1").expect("get").is_some());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_to_the_root_shares_one_consent_record() {
+        let dir = TempDir::new().expect("dir");
+        let root = TempDir::new().expect("root");
+        let real = root.path().join("real");
+        fs::create_dir(&real).expect("real");
+        let link = root.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).expect("symlink");
+        let store = repo(&dir);
+
+        store.grant(&link, "s1", "one").expect("grant");
+
+        assert!(store.get(&real, "s1").expect("get").is_some());
+    }
+
     #[test]
     fn revoke_removes_the_record() {
         let dir = TempDir::new().expect("dir");

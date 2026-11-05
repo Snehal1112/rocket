@@ -3023,6 +3023,28 @@ mod port_tests {
     }
 
     #[test]
+    fn import_runs_without_a_disk() {
+        // The workspace path does not exist, and every file call goes to the fake.
+        let mut service = ImportService::new_with_workspace_path(Path::new("no-such-workspace"));
+        service.files = Arc::new(FakeFiles {
+            kinds: vec![(PathBuf::from("s/get-users.yml"), EntryKind::File)],
+            entries: vec![DirEntryInfo {
+                path: PathBuf::from("s/get-users.yml"),
+                kind: EntryKind::File,
+            }],
+            ..Default::default()
+        });
+        let mut report = ImportReport::default();
+
+        service
+            .copy_collection_files(Path::new("s"), Path::new("s"), Path::new("d"), &mut report)
+            .expect("copy");
+
+        assert_eq!(report.imported, 1);
+        assert!(report.skipped.is_empty(), "{:?}", report.skipped);
+    }
+
+    #[test]
     fn an_unparseable_root_file_is_reported_and_nothing_is_written() {
         let files = FakeFiles {
             texts: vec![
