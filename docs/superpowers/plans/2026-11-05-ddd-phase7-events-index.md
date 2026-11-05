@@ -6,8 +6,8 @@ Spec: `docs/superpowers/specs/2026-11-05-domain-event-split-design.md`. One plan
 |---|---|---|---|
 | 0 | `PublishedEvent` port, `EventPublisher` takes `&dyn PublishedEvent`, bus without `channel_for` | `2026-11-05-ddd-phase7-events-plan-0-publisher-port.md` | done, merged |
 | 1 | `HistoryEvent`, `LoadTestEvent` (+ `load_test.rs` types), `GrpcEvent` (+ `grpc.rs` types), loud recorders | `2026-11-05-ddd-phase7-events-plan-1-history-load-test-grpc.md` | done, merged |
-| 2 | `EnvironmentEvent`, `WorkspaceEvent` | `2026-11-05-ddd-phase7-events-plan-2-environment-workspace.md` | done, unmerged |
-| 3 | `FlowEvent`, `GitEvent` | | not written |
+| 2 | `EnvironmentEvent`, `WorkspaceEvent` | `2026-11-05-ddd-phase7-events-plan-2-environment-workspace.md` | done, merged |
+| 3 | `FlowEvent`, `GitEvent` | `2026-11-05-ddd-phase7-events-plan-3-flow-git.md` | written |
 | 4 | `AcpEvent` (+ `acp.rs` types) | | not written |
 | 5 | `OpenApiSyncEvent`, `ExecutionEvent` | | not written |
 | 6 | `CollectionEvent`, `RecentWrites`, file watcher | | not written |
