@@ -284,109 +284,7 @@ pub struct FlowRewriteFailure {
     pub message: String,
 }
 
-/// The collection events left after the split into per-context enums.
-/// Plan 6 moves them too.
-///
-/// Wire format, pinned by the `wire_contract_*` tests below:
-/// - The `type` tag is camelCase.
-/// - Variant fields are deliberately snake_case.
-/// - Nested helper DTOs (`FlowCallbackInfo` and similar) are camelCase.
-///
-/// Renaming any of these is a breaking change for the frontend listeners
-/// and needs its own decision. The bus adds `seq` and `tsMs` at emit time.
-// Only the back-compat unit tests below read events back, so Deserialize is test-only.
-#[derive(Debug, Clone, Serialize)]
-#[cfg_attr(test, derive(Deserialize))]
-#[serde(tag = "type", rename_all = "camelCase")]
-pub enum DomainEvent {
-    // Collection events
-    CollectionCreated {
-        name: String,
-    },
-    CollectionDeleted {
-        name: String,
-    },
-    CollectionRenamed {
-        old_name: String,
-        new_name: String,
-    },
-
-    // Request events
-    RequestSaved {
-        collection: String,
-        path: String,
-    },
-    RequestDeleted {
-        collection: String,
-        path: String,
-    },
-    ItemMoved {
-        src_collection: String,
-        src_path: String,
-        dst_collection: String,
-        dst_path: String,
-    },
-
-    // Folder events
-    FolderCreated {
-        collection: String,
-        path: String,
-    },
-    FolderDeleted {
-        collection: String,
-        path: String,
-    },
-    ItemsReordered {
-        collection: String,
-        folder_path: String,
-    },
-
-    // Collection settings/variable events
-    CollectionSettingsSaved {
-        collection: String,
-    },
-    /// A collection's trust grants changed on this computer (not a collection file edit).
-    CollectionTrustChanged {
-        collection: String,
-    },
-    FolderVariablesSaved {
-        collection: String,
-        folder_path: String,
-    },
-    RequestVariablesSaved {
-        collection: String,
-        request_path: String,
-    },
-    /// A folder's settings (folder.yml) were saved from the Folder Settings tab.
-    FolderSettingsSaved {
-        collection: String,
-        folder_path: String,
-    },
-
-    // File system events
-    FileChanged {
-        path: String,
-        event_type: FileChangeKind,
-        collection: Option<String>,
-    },
-
-    /// The file watcher could not start, so the sidebar will not refresh by itself.
-    /// The message holds the directory and the error text only.
-    FileWatcherFailed {
-        message: String,
-    },
-
-    /// Emitted when a collection-scoped variable is written (currently only via
-    /// `rok.setCollectionVar` / `runtime.actions` collection-scope writes; manual
-    /// collection-settings saves publish `CollectionSettingsSaved` instead, not
-    /// this variant).
-    CollectionVariableWritten {
-        collection: String,
-        key: String,
-    },
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum FileChangeKind {
     Create,
@@ -414,160 +312,37 @@ mod tests {
     use super::*;
 
     #[test]
-    fn domain_event_serialization() {
-        let event = DomainEvent::CollectionCreated {
-            name: "my-api".into(),
-        };
-        let json = serde_json::to_string(&event).unwrap();
-        assert!(json.contains("CollectionCreated") || json.contains("collectionCreated"));
-        assert!(json.contains("my-api"));
-    }
-
-    #[test]
-    fn file_watcher_failed_wire_shape() {
-        let event = DomainEvent::FileWatcherFailed {
-            message: "boom".into(),
-        };
-        let value = serde_json::to_value(&event).expect("serializes");
-        assert_eq!(
-            value,
-            serde_json::json!({ "type": "fileWatcherFailed", "message": "boom" })
-        );
-    }
-
-    #[test]
     fn event_publisher_trait_is_object_safe() {
         fn _assert_object_safe(_: Box<dyn EventPublisher>) {}
     }
 
+    #[derive(Debug, Serialize)]
+    #[serde(tag = "type", rename_all = "camelCase")]
+    enum Probe {
+        Ping,
+    }
+
+    impl PublishedEvent for Probe {
+        fn channel(&self) -> &'static str {
+            "probe"
+        }
+        fn to_json(&self) -> Result<serde_json::Value, serde_json::Error> {
+            serde_json::to_value(self)
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
     #[test]
     fn null_publisher_does_not_panic() {
-        let pub_ = NullEventPublisher;
-        pub_.publish(&DomainEvent::FileWatcherFailed {
-            message: "m".into(),
-        });
+        NullEventPublisher.publish(&Probe::Ping);
     }
 
     #[test]
     fn null_publisher_accepts_a_published_event() {
-        NullEventPublisher.publish(&DomainEvent::CollectionCreated { name: "a".into() });
-    }
-
-    #[test]
-    fn collection_variable_written_serializes() {
-        let event = DomainEvent::CollectionVariableWritten {
-            collection: "my-api".into(),
-            key: "BASE_URL".into(),
-        };
-        let json = serde_json::to_string(&event).expect("serialize");
-        assert!(
-            json.contains("collectionVariableWritten")
-                || json.contains("CollectionVariableWritten")
-        );
-        assert!(json.contains("my-api"));
-        assert!(json.contains("BASE_URL"));
-    }
-
-    #[test]
-    fn folder_created_wire_shape() {
-        let event = DomainEvent::FolderCreated {
-            collection: "my-api".into(),
-            path: "auth".into(),
-        };
-        let json = serde_json::to_string(&event).expect("serialize");
-        assert_eq!(
-            json,
-            r#"{"type":"folderCreated","collection":"my-api","path":"auth"}"#
-        );
-    }
-
-    #[test]
-    fn folder_deleted_wire_shape() {
-        let event = DomainEvent::FolderDeleted {
-            collection: "my-api".into(),
-            path: "auth".into(),
-        };
-        let json = serde_json::to_string(&event).expect("serialize");
-        assert_eq!(
-            json,
-            r#"{"type":"folderDeleted","collection":"my-api","path":"auth"}"#
-        );
-    }
-
-    #[test]
-    fn items_reordered_wire_shape() {
-        let event = DomainEvent::ItemsReordered {
-            collection: "my-api".into(),
-            folder_path: "auth".into(),
-        };
-        let json = serde_json::to_string(&event).expect("serialize");
-        assert_eq!(
-            json,
-            r#"{"type":"itemsReordered","collection":"my-api","folder_path":"auth"}"#
-        );
-    }
-
-    #[test]
-    fn collection_settings_saved_wire_shape() {
-        let event = DomainEvent::CollectionSettingsSaved {
-            collection: "my-api".into(),
-        };
-        let json = serde_json::to_string(&event).expect("serialize");
-        assert_eq!(
-            json,
-            r#"{"type":"collectionSettingsSaved","collection":"my-api"}"#
-        );
-    }
-
-    #[test]
-    fn collection_trust_changed_wire_shape() {
-        let event = DomainEvent::CollectionTrustChanged {
-            collection: "my-api".into(),
-        };
-        let json = serde_json::to_string(&event).expect("serialize");
-        assert_eq!(
-            json,
-            r#"{"type":"collectionTrustChanged","collection":"my-api"}"#
-        );
-    }
-
-    #[test]
-    fn folder_variables_saved_wire_shape() {
-        let event = DomainEvent::FolderVariablesSaved {
-            collection: "my-api".into(),
-            folder_path: "auth".into(),
-        };
-        let json = serde_json::to_string(&event).expect("serialize");
-        assert_eq!(
-            json,
-            r#"{"type":"folderVariablesSaved","collection":"my-api","folder_path":"auth"}"#
-        );
-    }
-
-    #[test]
-    fn request_variables_saved_wire_shape() {
-        let event = DomainEvent::RequestVariablesSaved {
-            collection: "my-api".into(),
-            request_path: "users.yml".into(),
-        };
-        let json = serde_json::to_string(&event).expect("serialize");
-        assert_eq!(
-            json,
-            r#"{"type":"requestVariablesSaved","collection":"my-api","request_path":"users.yml"}"#
-        );
-    }
-
-    #[test]
-    fn folder_settings_saved_wire_shape() {
-        let event = DomainEvent::FolderSettingsSaved {
-            collection: "my-api".into(),
-            folder_path: "auth/login".into(),
-        };
-        let json = serde_json::to_string(&event).expect("serialize");
-        assert_eq!(
-            json,
-            r#"{"type":"folderSettingsSaved","collection":"my-api","folder_path":"auth/login"}"#
-        );
+        let event: Box<dyn PublishedEvent> = Box::new(Probe::Ping);
+        NullEventPublisher.publish(event.as_ref());
     }
 
     #[test]
@@ -777,55 +552,6 @@ mod tests {
         assert_eq!(
             json,
             r#"{"wait":{"ignored":2,"timeoutMs":60000,"lastRejected":{"method":"POST","url":"/cb/…?x=1","headers":[],"body":"{}","reason":"Accept when returned false."}}}"#
-        );
-    }
-
-    fn sorted_keys(event: &DomainEvent) -> Vec<String> {
-        let value = serde_json::to_value(event).expect("serialize");
-        let mut keys: Vec<String> = value.as_object().expect("object").keys().cloned().collect();
-        keys.sort();
-        keys
-    }
-
-    fn assert_keys(event: &DomainEvent, expected: &[&str]) {
-        let mut want: Vec<String> = expected.iter().map(|k| k.to_string()).collect();
-        want.sort();
-        assert_eq!(sorted_keys(event), want);
-    }
-
-    // Wire contract: tag is camelCase, fields stay snake_case. A rename here
-    // breaks the frontend listeners and needs its own decision.
-    #[test]
-    fn wire_contract_collection_and_git_events() {
-        assert_keys(
-            &DomainEvent::CollectionRenamed {
-                old_name: "a".into(),
-                new_name: "b".into(),
-            },
-            &["type", "old_name", "new_name"],
-        );
-    }
-
-    // The envelope keys the bus adds must not collide with a top-level field.
-    #[test]
-    fn wire_contract_envelope_keys_are_free() {
-        for event in [DomainEvent::FileWatcherFailed {
-            message: "m".into(),
-        }] {
-            let keys = sorted_keys(&event);
-            for reserved in ["seq", "tsMs", "ts_ms", "workspaceId"] {
-                assert!(!keys.iter().any(|k| k == reserved));
-            }
-        }
-    }
-
-    #[test]
-    fn wire_contract_watcher_events() {
-        assert_keys(
-            &DomainEvent::FileWatcherFailed {
-                message: "m".into(),
-            },
-            &["type", "message"],
         );
     }
 }

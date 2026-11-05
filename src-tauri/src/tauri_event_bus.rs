@@ -110,9 +110,9 @@ mod tests {
     use rocket_acp::AcpEvent;
     use rocket_app::execution_events::ExecutionEvent;
     use rocket_app::openapi_sync_events::OpenApiSyncEvent;
+    use rocket_collection::CollectionEvent;
     use rocket_flow::FlowEvent;
     use rocket_git::GitEvent;
-    use rocket_shared::events::DomainEvent;
 
     #[test]
     fn emit_channels_adds_collection_changed_for_branch_switch_and_merge() {
@@ -136,7 +136,7 @@ mod tests {
 
     #[test]
     fn emit_channels_is_one_channel_for_other_events() {
-        let saved = DomainEvent::RequestSaved {
+        let saved = CollectionEvent::RequestSaved {
             collection: "api".into(),
             path: "r.yml".into(),
         };
@@ -262,7 +262,7 @@ mod tests {
 
     #[test]
     fn file_watcher_failed_has_its_own_channel() {
-        let event = DomainEvent::FileWatcherFailed {
+        let event = CollectionEvent::FileWatcherFailed {
             message: "m".into(),
         };
         assert_eq!(event.channel(), "file-watcher-failed");
@@ -390,7 +390,7 @@ mod tests {
 
     #[test]
     fn envelope_adds_seq_and_ts_ms_to_the_event_object() {
-        let event = DomainEvent::FileWatcherFailed {
+        let event = CollectionEvent::FileWatcherFailed {
             message: "m".into(),
         };
         let value = envelope(&event, 7, 1234).expect("envelope");

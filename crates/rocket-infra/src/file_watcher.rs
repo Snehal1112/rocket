@@ -245,20 +245,21 @@ impl rocket_workspace::FileWatcher for NotifyFileWatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rocket_collection::CollectionEvent;
     use rocket_shared::events::PublishedEvent;
-    use rocket_shared::events::{DomainEvent, FileChangeKind, NullEventPublisher};
+    use rocket_shared::events::{FileChangeKind, NullEventPublisher};
     use std::time::Duration;
     use tempfile::TempDir;
 
     /// Records published events.
     #[derive(Default)]
-    struct Recorder(Mutex<Vec<DomainEvent>>);
+    struct Recorder(Mutex<Vec<CollectionEvent>>);
 
     impl EventPublisher for Recorder {
         fn publish(&self, event: &dyn PublishedEvent) {
-            let Some(event) = event.downcast_ref::<DomainEvent>() else {
+            let Some(event) = event.downcast_ref::<CollectionEvent>() else {
                 panic!(
-                    "recorder got a non-DomainEvent on channel {}",
+                    "recorder got a non-CollectionEvent on channel {}",
                     event.channel()
                 );
             };
@@ -273,7 +274,7 @@ mod tests {
                 .expect("lock")
                 .iter()
                 .filter_map(|e| match e {
-                    DomainEvent::FileChanged {
+                    CollectionEvent::FileChanged {
                         path, event_type, ..
                     } => Some((path.clone(), format!("{event_type:?}"))),
                     _ => None,
@@ -425,7 +426,7 @@ mod tests {
 
         // An in-app save: the file is written, then the service event is recorded.
         std::fs::write(root.join("api").join("a.yml"), "a: 1\n").expect("write");
-        writes.record(&DomainEvent::RequestSaved {
+        writes.record(&CollectionEvent::RequestSaved {
             collection: "api".into(),
             path: "a.yml".into(),
         });
@@ -468,7 +469,7 @@ mod tests {
         let events = recorder.0.lock().expect("lock");
         assert_eq!(events.len(), 1);
         match &events[0] {
-            DomainEvent::FileChanged {
+            CollectionEvent::FileChanged {
                 path,
                 event_type,
                 collection,

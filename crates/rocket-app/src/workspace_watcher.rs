@@ -4,7 +4,9 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use rocket_shared::events::{DomainEvent, EventPublisher};
+use rocket_collection::CollectionEvent;
+
+use rocket_shared::events::EventPublisher;
 use rocket_workspace::FileWatcher;
 
 pub struct WorkspaceWatcher {
@@ -34,7 +36,7 @@ impl WorkspaceWatcher {
                     dir = %collections_dir.display(),
                     "file watcher failed to start"
                 );
-                self.publisher.publish(&DomainEvent::FileWatcherFailed {
+                self.publisher.publish(&CollectionEvent::FileWatcherFailed {
                     message: format!("{}: {e}", collections_dir.display()),
                 });
                 false
@@ -126,10 +128,10 @@ mod tests {
         assert!(!service.restart(Path::new("/ws/main")));
 
         let failures: Vec<String> = events
-            .events()
+            .collection_events()
             .into_iter()
             .filter_map(|e| match e {
-                DomainEvent::FileWatcherFailed { message } => Some(message),
+                CollectionEvent::FileWatcherFailed { message } => Some(message),
                 _ => None,
             })
             .collect();
@@ -146,6 +148,6 @@ mod tests {
 
         service.restart(Path::new("/ws/main"));
 
-        assert!(events.events().is_empty());
+        assert!(events.collection_events().is_empty());
     }
 }

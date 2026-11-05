@@ -2,11 +2,11 @@
 
 use std::sync::Arc;
 
+use rocket_collection::CollectionEvent;
 use rocket_collection::{CollectionRepository, Request};
 use rocket_infra::FsCollectionRepo;
 use rocket_shared::action::HttpRequestExample;
 use rocket_shared::error::DomainError;
-use rocket_shared::events::DomainEvent;
 use rocket_shared::types::HttpMethod;
 use tempfile::TempDir;
 
@@ -40,10 +40,10 @@ fn world() -> (TempDir, CollectionService, Arc<RecordingPublisher>) {
 
 fn saved_count(events: &RecordingPublisher) -> usize {
     events
-        .events()
+        .collection_events()
         .iter()
         .filter(|e| {
-            matches!(e, DomainEvent::RequestSaved { collection, path }
+            matches!(e, CollectionEvent::RequestSaved { collection, path }
                 if collection == "c" && path == "Login.yml")
         })
         .count()
@@ -63,7 +63,7 @@ fn add_example_publishes_request_saved() {
     svc.add_request_example("c", "Login.yml", example("200 OK"))
         .expect("add");
     assert_eq!(saved_count(&events), 1);
-    assert_eq!(events.events().len(), 1);
+    assert_eq!(events.collection_events().len(), 1);
 }
 
 #[test]
@@ -75,14 +75,14 @@ fn failed_add_publishes_nothing() {
         .add_request_example("c", "Login.yml", example("200 ok"))
         .expect_err("duplicate");
     assert!(matches!(err, DomainError::AlreadyExists(_)), "got {err:?}");
-    assert_eq!(events.events().len(), 1);
+    assert_eq!(events.collection_events().len(), 1);
 }
 
 #[test]
 fn list_publishes_nothing() {
     let (_dir, svc, events) = world();
     assert!(names(&svc).is_empty());
-    assert!(events.events().is_empty());
+    assert!(events.collection_events().is_empty());
 }
 
 #[test]
@@ -108,7 +108,7 @@ fn failed_rename_and_delete_publish_nothing() {
     assert!(svc
         .delete_request_example("c", "Login.yml", "missing")
         .is_err());
-    assert!(events.events().is_empty());
+    assert!(events.collection_events().is_empty());
 }
 
 const JWT: &str = "eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxIn0.c2ln";

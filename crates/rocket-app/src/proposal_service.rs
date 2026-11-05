@@ -1376,9 +1376,9 @@ mod tests {
     use std::sync::Mutex as StdMutex;
 
     use rocket_acp::proposal::ProposedVariable;
+    use rocket_collection::CollectionEvent;
     use rocket_collection::{CollectionRepository, RequestScriptPhase};
     use rocket_environment::{Environment, EnvironmentRepository};
-    use rocket_shared::events::DomainEvent;
     use rocket_shared::types::{Auth, Header, HttpMethod};
 
     use crate::test_doubles::{RecordingPublisher, SharedPublisher};
@@ -1642,11 +1642,9 @@ mod tests {
         let resolved = f.svc.accept("s1", &ids[0]).expect("accept");
         assert_eq!(resolved.status, ProposalStatus::Accepted);
         assert!(f._dir.path().join("demo").join("reports").is_dir());
-        assert!(f
-            .events
-            .events()
-            .iter()
-            .any(|e| matches!(e, DomainEvent::FolderCreated { path, .. } if path == "reports")));
+        assert!(f.events.collection_events().iter().any(
+            |e| matches!(e, CollectionEvent::FolderCreated { path, .. } if path == "reports")
+        ));
         assert_eq!(resolved_statuses(&f.events), vec!["accepted".to_string()]);
     }
 
@@ -1733,9 +1731,9 @@ mod tests {
         let saved = f.repo.get_request("demo", "get-users.yml").expect("load");
         assert_eq!(saved.tests.as_deref(), Some("rok.test('ok', () => {});"));
         assert_eq!(saved.pre_request_script, None);
-        assert!(f.events.events().iter().any(|e| matches!(
+        assert!(f.events.collection_events().iter().any(|e| matches!(
             e,
-            DomainEvent::RequestSaved { path, .. } if path == "get-users.yml"
+            CollectionEvent::RequestSaved { path, .. } if path == "get-users.yml"
         )));
     }
 
@@ -1813,7 +1811,7 @@ mod tests {
             .expect_err("the second change targets a missing request");
         assert!(matches!(err, DomainError::NotFound(_)));
         assert!(f.svc.list("s1").is_empty());
-        assert!(f.events.events().is_empty());
+        assert!(f.events.collection_events().is_empty());
         assert!(f.events.acp_events().is_empty());
     }
 
@@ -2843,9 +2841,9 @@ mod tests {
                 token: "folder-token-1".into()
             })
         );
-        assert!(f.events.events().iter().any(|e| matches!(
+        assert!(f.events.collection_events().iter().any(|e| matches!(
             e,
-            DomainEvent::FolderSettingsSaved { folder_path, .. } if folder_path == "reports"
+            CollectionEvent::FolderSettingsSaved { folder_path, .. } if folder_path == "reports"
         )));
     }
 

@@ -5,7 +5,7 @@ use tokio::sync::mpsc::UnboundedSender;
 /// Protocol-focused contract for driving one ACP agent session: spawning the
 /// process and handshaking, sending a prompt and streaming typed updates,
 /// changing session options, stopping a turn, and ending the session. Has no
-/// knowledge of `DomainEvent`, Tauri, or the `agent-client-protocol` crate.
+/// knowledge of the event enums, Tauri, or the `agent-client-protocol` crate.
 /// Those live in `rocket-infra`'s `AcpAgentClient` and `rocket-app`'s
 /// `AcpSessionService`.
 #[async_trait::async_trait]

@@ -13,6 +13,7 @@ use crate::callback_listener::{CallbackEndpoint, CallbackListener, ReceivedCall}
 use crate::execution_events::ExecutionEvent;
 use async_trait::async_trait;
 use rocket_acp::AcpEvent;
+use rocket_collection::CollectionEvent;
 use rocket_collection::{
     Collection, CollectionRepository, CollectionSettings, CollectionSummary, CollectionVariable,
     FolderSettings, GraphQlRequest, GrpcRequest, Request as CollectionRequest, RequestKind,
@@ -30,7 +31,7 @@ use rocket_history::{HistoryEntry, HistoryFilter, HistoryRepository};
 use rocket_http::{CookieJar, CookieRepository, HttpExecutor, HttpRequest, HttpResponse};
 use rocket_scripting::{ScriptContext, ScriptEngine, ScriptResult};
 use rocket_shared::error::{DomainError, DomainResult};
-use rocket_shared::events::{DomainEvent, EventPublisher};
+use rocket_shared::events::EventPublisher;
 use zeroize::Zeroizing;
 
 /// Identity of a fake collection: a fixed path under `/test` and no uid.
@@ -1669,7 +1670,7 @@ impl ScriptEngine for SharedEngine {
 
 /// Publisher that records every event it is handed.
 pub struct RecordingPublisher {
-    events: Mutex<Vec<DomainEvent>>,
+    collection_events: Mutex<Vec<CollectionEvent>>,
     flow_events: Mutex<Vec<FlowEvent>>,
     git_events: Mutex<Vec<GitEvent>>,
     acp_events: Mutex<Vec<AcpEvent>>,
@@ -1680,7 +1681,7 @@ pub struct RecordingPublisher {
 impl RecordingPublisher {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
-            events: Mutex::new(Vec::new()),
+            collection_events: Mutex::new(Vec::new()),
             flow_events: Mutex::new(Vec::new()),
             git_events: Mutex::new(Vec::new()),
             acp_events: Mutex::new(Vec::new()),
@@ -1688,8 +1689,9 @@ impl RecordingPublisher {
             others: Mutex::new(Vec::new()),
         })
     }
-    pub fn events(&self) -> Vec<DomainEvent> {
-        self.events.lock().expect("lock").clone()
+    /// Every published `CollectionEvent`, in order.
+    pub fn collection_events(&self) -> Vec<CollectionEvent> {
+        self.collection_events.lock().expect("lock").clone()
     }
     /// Every published `FlowEvent`, in order.
     pub fn flow_events(&self) -> Vec<FlowEvent> {
@@ -1708,7 +1710,7 @@ impl RecordingPublisher {
         self.execution_events.lock().expect("lock").clone()
     }
     /// The channel and JSON of every published event that is not a
-    /// `DomainEvent`, a `FlowEvent`, a `GitEvent`, an `AcpEvent` or an `ExecutionEvent`.
+    /// `CollectionEvent`, a `FlowEvent`, a `GitEvent`, an `AcpEvent` or an `ExecutionEvent`.
     pub fn others(&self) -> Vec<(String, serde_json::Value)> {
         self.others.lock().expect("lock").clone()
     }
@@ -1735,7 +1737,7 @@ impl EventPublisher for RecordingPublisher {
                 .push(execution.clone());
             return;
         }
-        let Some(domain) = event.downcast_ref::<DomainEvent>() else {
+        let Some(collection) = event.downcast_ref::<CollectionEvent>() else {
             let json = event.to_json().expect("event serializes");
             self.others
                 .lock()
@@ -1743,7 +1745,10 @@ impl EventPublisher for RecordingPublisher {
                 .push((event.channel().to_string(), json));
             return;
         };
-        self.events.lock().expect("lock").push(domain.clone());
+        self.collection_events
+            .lock()
+            .expect("lock")
+            .push(collection.clone());
     }
 }
 
@@ -2238,7 +2243,7 @@ mod tests {
     fn recording_publisher_keeps_events_of_other_types() {
         let publisher = RecordingPublisher::new();
         publisher.publish(&rocket_history::HistoryEvent::HistoryCleared);
-        assert!(publisher.events().is_empty());
+        assert!(publisher.collection_events().is_empty());
         assert_eq!(
             publisher.others(),
             [(
@@ -2252,7 +2257,7 @@ mod tests {
     fn recording_publisher_keeps_acp_events() {
         let publisher = RecordingPublisher::new();
         publisher.publish(&AcpEvent::AssistantConversationsCleared);
-        assert!(publisher.events().is_empty());
+        assert!(publisher.collection_events().is_empty());
         assert!(publisher.others().is_empty());
         assert_eq!(
             publisher.acp_events(),
@@ -2269,7 +2274,7 @@ mod tests {
             step_count: 1,
             failed_count: 0,
         });
-        assert!(publisher.events().is_empty());
+        assert!(publisher.collection_events().is_empty());
         assert!(publisher.others().is_empty());
         assert_eq!(
             publisher.execution_events(),
@@ -2289,7 +2294,7 @@ mod tests {
             run_id: "r1".to_string(),
             node_id: "n1".to_string(),
         });
-        assert!(publisher.events().is_empty());
+        assert!(publisher.collection_events().is_empty());
         assert!(publisher.others().is_empty());
         assert_eq!(
             publisher.flow_events(),

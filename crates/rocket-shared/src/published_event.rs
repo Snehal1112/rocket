@@ -37,7 +37,6 @@ impl dyn PublishedEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::DomainEvent;
     use serde::Serialize;
 
     #[derive(Debug, Serialize)]
@@ -58,6 +57,21 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Serialize)]
+    struct Other;
+
+    impl PublishedEvent for Other {
+        fn channel(&self) -> &'static str {
+            "other"
+        }
+        fn to_json(&self) -> Result<serde_json::Value, serde_json::Error> {
+            serde_json::to_value(self)
+        }
+        fn as_any(&self) -> &dyn std::any::Any {
+            self
+        }
+    }
+
     #[test]
     fn downcast_ref_returns_the_concrete_event() {
         let event: Box<dyn PublishedEvent> = Box::new(Probe::Ping);
@@ -67,7 +81,7 @@ mod tests {
     #[test]
     fn downcast_ref_is_none_for_another_type() {
         let event: Box<dyn PublishedEvent> = Box::new(Probe::Ping);
-        assert!(event.downcast_ref::<DomainEvent>().is_none());
+        assert!(event.downcast_ref::<Other>().is_none());
     }
 
     #[test]

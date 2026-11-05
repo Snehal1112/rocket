@@ -146,7 +146,7 @@ mod tests {
             Box::new(SharedPublisher(events.clone())),
         );
         svc.clear().expect("clear");
-        assert!(events.events().is_empty());
+        assert!(events.collection_events().is_empty());
         assert_eq!(
             events.others(),
             [(

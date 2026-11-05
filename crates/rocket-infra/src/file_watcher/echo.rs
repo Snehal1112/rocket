@@ -82,7 +82,8 @@ impl RecentWrites {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rocket_shared::events::{DomainEvent, FileChangeKind};
+    use rocket_collection::CollectionEvent;
+    use rocket_shared::events::FileChangeKind;
 
     const MS: Duration = Duration::from_millis(1);
 
@@ -138,11 +139,11 @@ mod tests {
     #[test]
     fn record_reads_the_collection_of_collection_change_events() {
         let writes = RecentWrites::new();
-        writes.record(&DomainEvent::RequestSaved {
+        writes.record(&CollectionEvent::RequestSaved {
             collection: "api".into(),
             path: "users/get.yml".into(),
         });
-        writes.record(&DomainEvent::ItemMoved {
+        writes.record(&CollectionEvent::ItemMoved {
             src_collection: "a".into(),
             src_path: "x".into(),
             dst_collection: "b".into(),
@@ -157,7 +158,7 @@ mod tests {
     #[test]
     fn file_changes_and_other_events_are_not_writes() {
         let writes = RecentWrites::new();
-        writes.record(&DomainEvent::FileChanged {
+        writes.record(&CollectionEvent::FileChanged {
             path: "/ws/collections/api/a.yml".into(),
             event_type: FileChangeKind::Modify,
             collection: Some("api".into()),

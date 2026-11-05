@@ -3,9 +3,9 @@
 use std::fs;
 use std::sync::Arc;
 
+use rocket_collection::CollectionEvent;
 use rocket_collection::{CollectionItem, CollectionRepository, Request};
 use rocket_infra::FsCollectionRepo;
-use rocket_shared::events::DomainEvent;
 use rocket_shared::types::HttpMethod;
 use tempfile::TempDir;
 
@@ -39,10 +39,10 @@ fn world() -> (TempDir, CollectionService, Arc<RecordingPublisher>) {
 
 fn saved_paths(events: &RecordingPublisher) -> Vec<String> {
     events
-        .events()
+        .collection_events()
         .into_iter()
         .filter_map(|e| match e {
-            DomainEvent::RequestSaved { path, .. } => Some(path),
+            CollectionEvent::RequestSaved { path, .. } => Some(path),
             _ => None,
         })
         .collect()

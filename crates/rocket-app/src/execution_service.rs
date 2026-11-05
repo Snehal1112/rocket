@@ -5,6 +5,7 @@ use rocket_audit::{
     event::AuditEventKind,
     publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher},
 };
+use rocket_collection::CollectionEvent;
 use rocket_collection::{
     effective_auth, inherited_headers, settings::SandboxMode as CollectionSandboxMode,
     CollectionRepository, CollectionSettings, FolderSettings, ScriptFlow,
@@ -23,7 +24,7 @@ use rocket_scripting::{
     ScriptEngine, ScriptFileScope, ScriptHost, ScriptResult, TestResult, TestStatus,
 };
 use rocket_shared::error::{DomainError, DomainResult};
-use rocket_shared::events::{DomainEvent, EventPublisher};
+use rocket_shared::events::EventPublisher;
 use rocket_shared::oauth2::{OAuth2AdditionalParameters, OAuth2ClientCredentials, OAuth2Flow};
 use rocket_shared::types::{Auth, Body, BodyMode, Header, HttpMethod, QueryParam};
 use serde::{Deserialize, Serialize};
@@ -2176,7 +2177,7 @@ impl RequestExecutionService {
                 .save_settings(collection, &settings)
         })?;
         self.events
-            .publish(&DomainEvent::CollectionVariableWritten {
+            .publish(&CollectionEvent::CollectionVariableWritten {
                 collection: collection.to_string(),
                 key: key.to_string(),
             });
@@ -2204,7 +2205,7 @@ impl RequestExecutionService {
             return Ok(());
         }
         self.events
-            .publish(&DomainEvent::CollectionVariableWritten {
+            .publish(&CollectionEvent::CollectionVariableWritten {
                 collection: collection.to_string(),
                 key: key.to_string(),
             });
@@ -8018,14 +8019,14 @@ mod tests {
 
     struct RecordingPublisher {
         events: Mutex<Vec<ExecutionEvent>>,
-        domain_events: Mutex<Vec<DomainEvent>>,
+        collection_events: Mutex<Vec<CollectionEvent>>,
         env_events: Mutex<Vec<rocket_environment::EnvironmentEvent>>,
     }
     impl RecordingPublisher {
         fn new() -> Self {
             Self {
                 events: Mutex::new(vec![]),
-                domain_events: Mutex::new(vec![]),
+                collection_events: Mutex::new(vec![]),
                 env_events: Mutex::new(vec![]),
             }
         }
@@ -8036,8 +8037,11 @@ mod tests {
                 self.env_events.lock().expect("lock").push(event.clone());
                 return;
             }
-            if let Some(event) = event.downcast_ref::<DomainEvent>() {
-                self.domain_events.lock().expect("lock").push(event.clone());
+            if let Some(event) = event.downcast_ref::<CollectionEvent>() {
+                self.collection_events
+                    .lock()
+                    .expect("lock")
+                    .push(event.clone());
                 return;
             }
             let Some(event) = event.downcast_ref::<ExecutionEvent>() else {
@@ -10065,12 +10069,12 @@ mod tests {
         input.post_response_script = Some("// post".into());
         svc.execute(input).await.expect("execute failed");
 
-        let domain_published = event_publisher.domain_events.lock().expect("lock");
+        let domain_published = event_publisher.collection_events.lock().expect("lock");
         let published = event_publisher.events.lock().expect("lock");
         assert!(
             domain_published.iter().any(|e| matches!(
                 e,
-                DomainEvent::CollectionVariableWritten { collection, key }
+                CollectionEvent::CollectionVariableWritten { collection, key }
                     if collection == "my-api" && key == "BASE_URL"
             )),
             "expected CollectionVariableWritten, got {:?}",
@@ -14424,7 +14428,7 @@ mod tests {
 
     impl rocket_shared::events::EventPublisher for UrlRecorder {
         fn publish(&self, event: &dyn PublishedEvent) {
-            if event.downcast_ref::<DomainEvent>().is_some() {
+            if event.downcast_ref::<CollectionEvent>().is_some() {
                 return;
             }
             let Some(event) = event.downcast_ref::<ExecutionEvent>() else {

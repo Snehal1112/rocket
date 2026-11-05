@@ -1,7 +1,6 @@
 pub mod action;
 pub mod assertion;
 pub mod description;
-pub mod domain_event_port;
 pub mod error;
 pub mod events;
 pub mod host_env;

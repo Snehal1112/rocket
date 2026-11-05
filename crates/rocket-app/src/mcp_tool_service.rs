@@ -1638,7 +1638,7 @@ mod tests {
             .with_host_env(Arc::new(rocket_infra::ProcessHostEnv)),
         );
         // `repo`/`publisher` stay bound to their concrete types above (this
-        // test still calls concrete-only methods on them, e.g. `.events()`
+        // test still calls concrete-only methods on them, e.g. `.collection_events()`
         // below), so the `dyn` coercion for `McpToolService::new` is done
         // here via separate explicitly-typed bindings instead. Method-call
         // syntax (`repo.clone()`), not the `Arc::clone(&repo)` associated-

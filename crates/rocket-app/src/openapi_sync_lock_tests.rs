@@ -3,10 +3,11 @@
 use crate::collection_lock::collection_lock;
 use crate::collection_service::CollectionService;
 use crate::test_doubles::{RecordingPublisher, SharedPublisher};
+use rocket_collection::CollectionEvent;
 use rocket_collection::{CollectionRepository, CollectionSettings, CollectionTrustStore, Request};
 use rocket_infra::{FsCollectionRepo, SharedPathCollectionRepo};
+use rocket_shared::events::EventPublisher;
 use rocket_shared::events::PublishedEvent;
-use rocket_shared::events::{DomainEvent, EventPublisher};
 use rocket_shared::types::HttpMethod;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -45,13 +46,13 @@ struct Gate {
 
 impl EventPublisher for Gate {
     fn publish(&self, event: &dyn PublishedEvent) {
-        let Some(event) = event.downcast_ref::<DomainEvent>() else {
+        let Some(event) = event.downcast_ref::<CollectionEvent>() else {
             panic!(
-                "recorder got a non-DomainEvent on channel {}",
+                "recorder got a non-CollectionEvent on channel {}",
                 event.channel()
             );
         };
-        if matches!(event, DomainEvent::RequestSaved { .. }) {
+        if matches!(event, CollectionEvent::RequestSaved { .. }) {
             self.inside.lock().expect("lock").send(()).expect("inside");
             let _ = self.release.lock().expect("lock").recv_timeout(LONG);
         }

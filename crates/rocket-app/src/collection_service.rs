@@ -5,6 +5,7 @@ use rocket_audit::{
     event::AuditEventKind,
     publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher},
 };
+use rocket_collection::CollectionEvent;
 use rocket_collection::{
     Collection, CollectionGrant, CollectionRepository, CollectionSummary, CollectionTrustStore,
     CollectionVariable, FolderSettings, GrantSource, GraphQlRequest, GrpcRequest, Request,
@@ -14,7 +15,7 @@ use rocket_flow::FlowEvent;
 use rocket_shared::action::HttpRequestExample;
 use rocket_shared::description::Documentation;
 use rocket_shared::error::{DomainError, DomainResult};
-use rocket_shared::events::{DomainEvent, EventPublisher, FlowRewriteFailure};
+use rocket_shared::events::{EventPublisher, FlowRewriteFailure};
 use std::sync::Arc;
 
 pub struct CollectionService {
@@ -215,7 +216,7 @@ impl CollectionService {
             let actual_path = self
                 .repo
                 .save_websocket_request(collection, path, request)?;
-            self.events.publish(&DomainEvent::RequestSaved {
+            self.events.publish(&CollectionEvent::RequestSaved {
                 collection: collection.to_string(),
                 path: actual_path.clone(),
             });
@@ -241,7 +242,7 @@ impl CollectionService {
     ) -> DomainResult<GraphQlRequest> {
         self.locked(collection, || {
             let actual_path = self.repo.save_graphql_request(collection, path, request)?;
-            self.events.publish(&DomainEvent::RequestSaved {
+            self.events.publish(&CollectionEvent::RequestSaved {
                 collection: collection.to_string(),
                 path: actual_path.clone(),
             });
@@ -263,7 +264,7 @@ impl CollectionService {
     ) -> DomainResult<GrpcRequest> {
         self.locked(collection, || {
             let actual_path = self.repo.save_grpc_request(collection, path, request)?;
-            self.events.publish(&DomainEvent::RequestSaved {
+            self.events.publish(&CollectionEvent::RequestSaved {
                 collection: collection.to_string(),
                 path: actual_path.clone(),
             });
@@ -289,7 +290,7 @@ impl CollectionService {
                 tracing::warn!(error = %e, "could not record the grant of a new collection");
             }
         }
-        self.events.publish(&DomainEvent::CollectionCreated {
+        self.events.publish(&CollectionEvent::CollectionCreated {
             name: name.to_string(),
         });
         Ok(collection)
@@ -311,7 +312,7 @@ impl CollectionService {
                 collection: name.to_string(),
             },
         );
-        self.events.publish(&DomainEvent::CollectionDeleted {
+        self.events.publish(&CollectionEvent::CollectionDeleted {
             name: name.to_string(),
         });
         Ok(())
@@ -332,7 +333,7 @@ impl CollectionService {
                 }
             }
         }
-        self.events.publish(&DomainEvent::CollectionRenamed {
+        self.events.publish(&CollectionEvent::CollectionRenamed {
             old_name: old_name.to_string(),
             new_name: new_name.to_string(),
         });
@@ -350,7 +351,7 @@ impl CollectionService {
             let actual_path = self.repo.save_request(collection, path, request)?;
             // Publish only after the follow-up read succeeds.
             let saved = self.repo.get_request(collection, &actual_path)?;
-            self.events.publish(&DomainEvent::RequestSaved {
+            self.events.publish(&CollectionEvent::RequestSaved {
                 collection: collection.to_string(),
                 path: actual_path,
             });
@@ -372,7 +373,7 @@ impl CollectionService {
                 let actual_path = self
                     .repo
                     .save_graphql_request(collection, old_path, &request)?;
-                self.events.publish(&DomainEvent::RequestSaved {
+                self.events.publish(&CollectionEvent::RequestSaved {
                     collection: collection.to_string(),
                     path: actual_path,
                 });
@@ -384,7 +385,7 @@ impl CollectionService {
                 let actual_path = self
                     .repo
                     .save_websocket_request(collection, old_path, &websocket)?;
-                self.events.publish(&DomainEvent::RequestSaved {
+                self.events.publish(&CollectionEvent::RequestSaved {
                     collection: collection.to_string(),
                     path: actual_path,
                 });
@@ -396,7 +397,7 @@ impl CollectionService {
                 let actual_path = self
                     .repo
                     .save_grpc_request(collection, old_path, &request)?;
-                self.events.publish(&DomainEvent::RequestSaved {
+                self.events.publish(&CollectionEvent::RequestSaved {
                     collection: collection.to_string(),
                     path: actual_path,
                 });
@@ -407,7 +408,7 @@ impl CollectionService {
             let mut request = self.repo.get_request(collection, old_path)?;
             request.name = new_name.to_string();
             let actual_path = self.repo.save_request(collection, old_path, &request)?;
-            self.events.publish(&DomainEvent::RequestSaved {
+            self.events.publish(&CollectionEvent::RequestSaved {
                 collection: collection.to_string(),
                 path: actual_path,
             });
@@ -427,7 +428,7 @@ impl CollectionService {
                 let mut request = self.repo.get_graphql_request(collection, path)?;
                 request.docs = docs.map(Documentation::text);
                 let actual_path = self.repo.save_graphql_request(collection, path, &request)?;
-                self.events.publish(&DomainEvent::RequestSaved {
+                self.events.publish(&CollectionEvent::RequestSaved {
                     collection: collection.to_string(),
                     path: actual_path,
                 });
@@ -439,7 +440,7 @@ impl CollectionService {
                 let actual_path = self
                     .repo
                     .save_websocket_request(collection, path, &websocket)?;
-                self.events.publish(&DomainEvent::RequestSaved {
+                self.events.publish(&CollectionEvent::RequestSaved {
                     collection: collection.to_string(),
                     path: actual_path,
                 });
@@ -449,7 +450,7 @@ impl CollectionService {
                 let mut request = self.repo.get_grpc_request(collection, path)?;
                 request.docs = docs;
                 let actual_path = self.repo.save_grpc_request(collection, path, &request)?;
-                self.events.publish(&DomainEvent::RequestSaved {
+                self.events.publish(&CollectionEvent::RequestSaved {
                     collection: collection.to_string(),
                     path: actual_path,
                 });
@@ -458,7 +459,7 @@ impl CollectionService {
             let mut request = self.repo.get_request(collection, path)?;
             request.docs = docs.map(Documentation::text);
             let actual_path = self.repo.save_request(collection, path, &request)?;
-            self.events.publish(&DomainEvent::RequestSaved {
+            self.events.publish(&CollectionEvent::RequestSaved {
                 collection: collection.to_string(),
                 path: actual_path,
             });
@@ -469,7 +470,7 @@ impl CollectionService {
     pub fn delete_request(&self, collection: &str, path: &str) -> DomainResult<()> {
         self.locked(collection, || {
             self.repo.delete_request(collection, path)?;
-            self.events.publish(&DomainEvent::RequestDeleted {
+            self.events.publish(&CollectionEvent::RequestDeleted {
                 collection: collection.to_string(),
                 path: path.to_string(),
             });
@@ -480,7 +481,7 @@ impl CollectionService {
     pub fn create_folder(&self, collection: &str, path: &str) -> DomainResult<()> {
         self.locked(collection, || {
             self.repo.create_folder(collection, path)?;
-            self.events.publish(&DomainEvent::FolderCreated {
+            self.events.publish(&CollectionEvent::FolderCreated {
                 collection: collection.to_string(),
                 path: path.to_string(),
             });
@@ -493,7 +494,7 @@ impl CollectionService {
     pub fn create_folder_exclusive(&self, collection: &str, path: &str) -> DomainResult<()> {
         self.locked(collection, || {
             self.repo.create_folder_exclusive(collection, path)?;
-            self.events.publish(&DomainEvent::FolderCreated {
+            self.events.publish(&CollectionEvent::FolderCreated {
                 collection: collection.to_string(),
                 path: path.to_string(),
             });
@@ -524,7 +525,7 @@ impl CollectionService {
         let actual_path = self
             .repo
             .create_request_exclusive(collection, path, request)?;
-        self.events.publish(&DomainEvent::RequestSaved {
+        self.events.publish(&CollectionEvent::RequestSaved {
             collection: collection.to_string(),
             path: actual_path.clone(),
         });
@@ -667,7 +668,7 @@ impl CollectionService {
         self.locked_pair(src_collection, dst_collection, || {
             self.repo
                 .move_item_no_replace(src_collection, src_path, dst_collection, dst_path)?;
-            self.events.publish(&DomainEvent::ItemMoved {
+            self.events.publish(&CollectionEvent::ItemMoved {
                 src_collection: src_collection.to_string(),
                 src_path: src_path.to_string(),
                 dst_collection: dst_collection.to_string(),
@@ -682,7 +683,7 @@ impl CollectionService {
     pub fn delete_folder(&self, collection: &str, path: &str) -> DomainResult<()> {
         self.locked(collection, || {
             self.repo.delete_folder(collection, path)?;
-            self.events.publish(&DomainEvent::FolderDeleted {
+            self.events.publish(&CollectionEvent::FolderDeleted {
                 collection: collection.to_string(),
                 path: path.to_string(),
             });
@@ -745,7 +746,7 @@ impl CollectionService {
         self.locked_pair(src_collection, dst_collection, || {
             self.repo
                 .move_item(src_collection, src_path, dst_collection, dst_path)?;
-            self.events.publish(&DomainEvent::ItemMoved {
+            self.events.publish(&CollectionEvent::ItemMoved {
                 src_collection: src_collection.to_string(),
                 src_path: src_path.to_string(),
                 dst_collection: dst_collection.to_string(),
@@ -769,7 +770,7 @@ impl CollectionService {
         self.locked(collection, || {
             self.repo
                 .save_request_script(collection, request_path, phase, body)?;
-            self.events.publish(&DomainEvent::RequestSaved {
+            self.events.publish(&CollectionEvent::RequestSaved {
                 collection: collection.to_string(),
                 path: request_path.to_string(),
             });
@@ -786,7 +787,7 @@ impl CollectionService {
         self.locked(collection, || {
             self.repo
                 .reorder_items(collection, folder_path, ordered_names)?;
-            self.events.publish(&DomainEvent::ItemsReordered {
+            self.events.publish(&CollectionEvent::ItemsReordered {
                 collection: collection.to_string(),
                 folder_path: folder_path.to_string(),
             });
@@ -813,9 +814,10 @@ impl CollectionService {
             merged.script_context_roots = on_disk.script_context_roots;
             merged.agent_autonomy_enabled = on_disk.agent_autonomy_enabled;
             self.repo.save_settings(name, &merged)?;
-            self.events.publish(&DomainEvent::CollectionSettingsSaved {
-                collection: name.to_string(),
-            });
+            self.events
+                .publish(&CollectionEvent::CollectionSettingsSaved {
+                    collection: name.to_string(),
+                });
             Ok(())
         })
     }
@@ -846,7 +848,7 @@ impl CollectionService {
         self.locked(collection, || {
             self.repo
                 .save_folder_variables(collection, folder_path, vars)?;
-            self.events.publish(&DomainEvent::FolderVariablesSaved {
+            self.events.publish(&CollectionEvent::FolderVariablesSaved {
                 collection: collection.to_string(),
                 folder_path: folder_path.to_string(),
             });
@@ -873,7 +875,7 @@ impl CollectionService {
         self.locked(collection, || {
             self.repo
                 .save_folder_settings(collection, folder_path, settings)?;
-            self.events.publish(&DomainEvent::FolderSettingsSaved {
+            self.events.publish(&CollectionEvent::FolderSettingsSaved {
                 collection: collection.to_string(),
                 folder_path: folder_path.to_string(),
             });
@@ -898,10 +900,11 @@ impl CollectionService {
         self.locked(collection, || {
             self.repo
                 .save_request_variables(collection, request_path, vars)?;
-            self.events.publish(&DomainEvent::RequestVariablesSaved {
-                collection: collection.to_string(),
-                request_path: request_path.to_string(),
-            });
+            self.events
+                .publish(&CollectionEvent::RequestVariablesSaved {
+                    collection: collection.to_string(),
+                    request_path: request_path.to_string(),
+                });
             Ok(())
         })
     }
@@ -962,7 +965,7 @@ impl CollectionService {
     }
 
     fn publish_request_saved(&self, collection: &str, request_path: &str) {
-        self.events.publish(&DomainEvent::RequestSaved {
+        self.events.publish(&CollectionEvent::RequestSaved {
             collection: collection.to_string(),
             path: request_path.to_string(),
         });
@@ -973,9 +976,10 @@ impl CollectionService {
 mod tests {
     use super::*;
     use crate::flow_references::FlowRewriteReport;
+    use rocket_collection::CollectionEvent;
     use rocket_shared::error::DomainError;
     use rocket_shared::events::PublishedEvent;
-    use rocket_shared::events::{DomainEvent, EventPublisher, NullEventPublisher};
+    use rocket_shared::events::{EventPublisher, NullEventPublisher};
     use rocket_shared::types::HttpMethod;
     use std::sync::{Arc, Mutex};
 
@@ -1164,7 +1168,7 @@ mod tests {
 
     #[derive(Default)]
     struct RecordingEventPublisher {
-        events: Mutex<Vec<DomainEvent>>,
+        events: Mutex<Vec<CollectionEvent>>,
         flow: Mutex<Vec<FlowEvent>>,
     }
     impl EventPublisher for RecordingEventPublisher {
@@ -1173,7 +1177,7 @@ mod tests {
                 self.flow.lock().expect("lock").push(flow.clone());
                 return;
             }
-            let Some(event) = event.downcast_ref::<DomainEvent>() else {
+            let Some(event) = event.downcast_ref::<CollectionEvent>() else {
                 panic!(
                     "recorder got an unknown event on channel {}",
                     event.channel()
@@ -1199,9 +1203,9 @@ mod tests {
         svc.create("my-api").expect("create");
         let published = publisher.events.lock().expect("lock");
         assert!(
-            published
-                .iter()
-                .any(|e| matches!(e, DomainEvent::CollectionCreated { name } if name == "my-api")),
+            published.iter().any(
+                |e| matches!(e, CollectionEvent::CollectionCreated { name } if name == "my-api")
+            ),
             "expected CollectionCreated, got {:?}",
             *published
         );
@@ -1218,9 +1222,9 @@ mod tests {
         svc.delete("temp").expect("delete");
         let published = publisher.events.lock().expect("lock");
         assert!(
-            published
-                .iter()
-                .any(|e| matches!(e, DomainEvent::CollectionDeleted { name } if name == "temp")),
+            published.iter().any(
+                |e| matches!(e, CollectionEvent::CollectionDeleted { name } if name == "temp")
+            ),
             "expected CollectionDeleted, got {:?}",
             *published
         );
@@ -1239,7 +1243,7 @@ mod tests {
         assert!(
             published.iter().any(|e| matches!(
                 e,
-                DomainEvent::CollectionRenamed { old_name, new_name } if old_name == "old" && new_name == "new"
+                CollectionEvent::CollectionRenamed { old_name, new_name } if old_name == "old" && new_name == "new"
             )),
             "expected CollectionRenamed, got {:?}", *published
         );
@@ -1263,7 +1267,7 @@ mod tests {
         assert!(
             published.iter().any(|e| matches!(
                 e,
-                DomainEvent::RequestSaved { collection, path } if collection == "my-api" && path == "users.yml"
+                CollectionEvent::RequestSaved { collection, path } if collection == "my-api" && path == "users.yml"
             )),
             "expected RequestSaved, got {:?}", *published
         );
@@ -1310,7 +1314,7 @@ mod tests {
         assert!(
             published.iter().any(|e| matches!(
                 e,
-                DomainEvent::RequestDeleted { collection, path } if collection == "my-api" && path == "users.yml"
+                CollectionEvent::RequestDeleted { collection, path } if collection == "my-api" && path == "users.yml"
             )),
             "expected RequestDeleted, got {:?}", *published
         );
@@ -1352,7 +1356,7 @@ mod tests {
         assert!(
             published.iter().any(|e| matches!(
                 e,
-                DomainEvent::RequestSaved { collection, path } if collection == "my-api" && path == "users.yml"
+                CollectionEvent::RequestSaved { collection, path } if collection == "my-api" && path == "users.yml"
             )),
             "expected RequestSaved, got {:?}", *published
         );
@@ -1407,7 +1411,7 @@ mod tests {
         assert!(
             published.iter().any(|e| matches!(
                 e,
-                DomainEvent::RequestSaved { collection, path } if collection == "my-api" && path == "users.yml"
+                CollectionEvent::RequestSaved { collection, path } if collection == "my-api" && path == "users.yml"
             )),
             "expected RequestSaved, got {:?}", *published
         );
@@ -1426,7 +1430,7 @@ mod tests {
         assert!(
             published.iter().any(|e| matches!(
                 e,
-                DomainEvent::ItemMoved { src_collection, src_path, dst_collection, dst_path }
+                CollectionEvent::ItemMoved { src_collection, src_path, dst_collection, dst_path }
                     if src_collection == "my-api" && src_path == "users.yml"
                         && dst_collection == "other-api" && dst_path == "users.yml"
             )),
@@ -1559,7 +1563,7 @@ mod tests {
                     let events = publisher.events.lock().expect("lock");
                     assert!(matches!(
                         events.as_slice(),
-                        [DomainEvent::RequestSaved { collection, path }]
+                        [CollectionEvent::RequestSaved { collection, path }]
                             if collection == "col" && path == "Fresh.yml"
                     ));
                 }
@@ -1682,7 +1686,7 @@ mod tests {
         assert_eq!(published.len(), 1);
         assert!(matches!(
             &published[0],
-            DomainEvent::RequestSaved { collection, path }
+            CollectionEvent::RequestSaved { collection, path }
                 if collection == "c" && path == "auth/Login copy.yml"
         ));
     }
@@ -1859,7 +1863,7 @@ mod tests {
         let events = publisher.events.lock().expect("lock");
         assert!(events
             .iter()
-            .any(|e| matches!(e, DomainEvent::ItemMoved { .. })));
+            .any(|e| matches!(e, CollectionEvent::ItemMoved { .. })));
         let flow = publisher.flow.lock().expect("lock");
         assert!(flow.iter().any(|e| matches!(
             e,
@@ -1928,7 +1932,7 @@ mod tests {
         svc.move_item("c", "auth", "c", "identity").expect("move");
         let events = publisher.events.lock().expect("lock");
         assert_eq!(events.len(), 1);
-        assert!(matches!(events[0], DomainEvent::ItemMoved { .. }));
+        assert!(matches!(events[0], CollectionEvent::ItemMoved { .. }));
     }
 
     #[test]
@@ -2020,7 +2024,7 @@ mod tests {
         assert!(
             published.iter().any(|e| matches!(
                 e,
-                DomainEvent::FolderCreated { collection, path } if collection == "my-api" && path == "auth"
+                CollectionEvent::FolderCreated { collection, path } if collection == "my-api" && path == "auth"
             )),
             "expected FolderCreated, got {:?}", *published
         );
@@ -2038,7 +2042,7 @@ mod tests {
         assert!(
             published.iter().any(|e| matches!(
                 e,
-                DomainEvent::FolderDeleted { collection, path } if collection == "my-api" && path == "auth"
+                CollectionEvent::FolderDeleted { collection, path } if collection == "my-api" && path == "auth"
             )),
             "expected FolderDeleted, got {:?}", *published
         );
@@ -2061,7 +2065,7 @@ mod tests {
         assert!(
             published.iter().any(|e| matches!(
                 e,
-                DomainEvent::ItemsReordered { collection, folder_path } if collection == "my-api" && folder_path == "auth"
+                CollectionEvent::ItemsReordered { collection, folder_path } if collection == "my-api" && folder_path == "auth"
             )),
             "expected ItemsReordered, got {:?}", *published
         );
@@ -2080,7 +2084,7 @@ mod tests {
         assert!(
             published.iter().any(|e| matches!(
                 e,
-                DomainEvent::CollectionSettingsSaved { collection } if collection == "my-api"
+                CollectionEvent::CollectionSettingsSaved { collection } if collection == "my-api"
             )),
             "expected CollectionSettingsSaved, got {:?}",
             *published
@@ -2100,7 +2104,7 @@ mod tests {
         assert!(
             published.iter().any(|e| matches!(
                 e,
-                DomainEvent::FolderVariablesSaved { collection, folder_path } if collection == "my-api" && folder_path == "auth"
+                CollectionEvent::FolderVariablesSaved { collection, folder_path } if collection == "my-api" && folder_path == "auth"
             )),
             "expected FolderVariablesSaved, got {:?}", *published
         );
@@ -2119,7 +2123,7 @@ mod tests {
         assert!(
             published.iter().any(|e| matches!(
                 e,
-                DomainEvent::RequestVariablesSaved { collection, request_path } if collection == "my-api" && request_path == "users.yml"
+                CollectionEvent::RequestVariablesSaved { collection, request_path } if collection == "my-api" && request_path == "users.yml"
             )),
             "expected RequestVariablesSaved, got {:?}", *published
         );
@@ -2247,7 +2251,7 @@ mod tests {
         assert_eq!(saved.file_name.as_deref(), Some("call.yml"));
         let events = publisher.events.lock().expect("lock");
         assert!(
-            matches!(events.as_slice(), [DomainEvent::RequestSaved { path, .. }] if path == "call.yml"),
+            matches!(events.as_slice(), [CollectionEvent::RequestSaved { path, .. }] if path == "call.yml"),
             "{events:?}"
         );
     }
@@ -2366,13 +2370,13 @@ mod folder_settings_tests {
     use std::sync::{Arc, Mutex};
 
     #[derive(Default)]
-    struct Recorder(Mutex<Vec<DomainEvent>>);
+    struct Recorder(Mutex<Vec<CollectionEvent>>);
 
     struct SharedRecorder(Arc<Recorder>);
 
     impl EventPublisher for SharedRecorder {
         fn publish(&self, event: &dyn PublishedEvent) {
-            let Some(event) = event.downcast_ref::<DomainEvent>() else {
+            let Some(event) = event.downcast_ref::<CollectionEvent>() else {
                 panic!(
                     "recorder got an unknown event on channel {}",
                     event.channel()
@@ -2421,7 +2425,7 @@ mod folder_settings_tests {
         assert!(
             matches!(
                 events.as_slice(),
-                [DomainEvent::FolderSettingsSaved { collection, folder_path }]
+                [CollectionEvent::FolderSettingsSaved { collection, folder_path }]
                     if collection == "api" && folder_path == "auth"
             ),
             "expected one FolderSettingsSaved, got {events:?}"

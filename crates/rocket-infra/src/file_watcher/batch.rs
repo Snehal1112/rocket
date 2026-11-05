@@ -6,7 +6,8 @@ use std::time::{Duration, Instant};
 
 use notify::event::{ModifyKind, RenameMode};
 use notify::{Event, EventKind};
-use rocket_shared::events::{DomainEvent, FileChangeKind};
+use rocket_collection::CollectionEvent;
+use rocket_shared::events::FileChangeKind;
 
 use super::echo::RecentWrites;
 use super::ignore::is_ignored;
@@ -178,7 +179,11 @@ impl Batch {
     /// A lost-events batch becomes one event with no collection, which every
     /// frontend listener treats as "reload everything". Otherwise one event
     /// is returned per path, minus the changes an in-app write owns.
-    pub fn take(&mut self, echo: Option<&RecentWrites>, echo_window: Duration) -> Vec<DomainEvent> {
+    pub fn take(
+        &mut self,
+        echo: Option<&RecentWrites>,
+        echo_window: Duration,
+    ) -> Vec<CollectionEvent> {
         let entries = std::mem::take(&mut self.entries);
         let refresh_all = std::mem::replace(&mut self.refresh_all, false);
         self.first_at = None;
@@ -190,7 +195,7 @@ impl Batch {
         entries
             .into_iter()
             .filter(|(path, entry)| !is_echo(&self.root, path, entry, echo, echo_window))
-            .map(|(path, entry)| DomainEvent::FileChanged {
+            .map(|(path, entry)| CollectionEvent::FileChanged {
                 path: path.to_string_lossy().to_string(),
                 event_type: entry.kind,
                 collection: entry.collection,
@@ -200,8 +205,8 @@ impl Batch {
 }
 
 /// The event that tells the UI to reload every collection.
-pub(crate) fn refresh_all_event(root: &Path) -> DomainEvent {
-    DomainEvent::FileChanged {
+pub(crate) fn refresh_all_event(root: &Path) -> CollectionEvent {
+    CollectionEvent::FileChanged {
         path: root.to_string_lossy().to_string(),
         event_type: FileChangeKind::Modify,
         collection: None,
@@ -260,11 +265,11 @@ mod tests {
             .fold(Event::new(kind), |e, p| e.add_path(root().join(p)))
     }
 
-    fn summary(events: &[DomainEvent]) -> Vec<(String, String, Option<String>)> {
+    fn summary(events: &[CollectionEvent]) -> Vec<(String, String, Option<String>)> {
         events
             .iter()
             .map(|e| match e {
-                DomainEvent::FileChanged {
+                CollectionEvent::FileChanged {
                     path,
                     event_type,
                     collection,
@@ -461,7 +466,7 @@ mod tests {
         let events = batch.take(None, timing().echo_window);
         assert_eq!(events.len(), 1);
         match &events[0] {
-            DomainEvent::FileChanged {
+            CollectionEvent::FileChanged {
                 path,
                 event_type,
                 collection,

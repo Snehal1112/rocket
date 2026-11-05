@@ -8712,7 +8712,7 @@ mod tests {
         );
         assert!(message.contains("port in use"), "got: {message}");
         assert!(
-            publisher.events().is_empty()
+            publisher.collection_events().is_empty()
                 && publisher.execution_events().is_empty()
                 && publisher.flow_events().is_empty(),
             "no FlowRunStarted or any other event for a run that never started"

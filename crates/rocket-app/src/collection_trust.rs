@@ -9,13 +9,14 @@ use crate::collection_lock::with_collection_lock;
 use std::sync::Arc;
 
 use rocket_collection::settings::SandboxMode;
+use rocket_collection::CollectionEvent;
 use rocket_collection::{
     normalize_root, request_fingerprint, resolve_effective, CollectionGrant, CollectionIdentity,
     CollectionRepository, CollectionTrustStore, EffectiveCapabilities, GrantSource,
     LegacyCollection, MigrationNoticeEntry, RequestedElevation,
 };
 use rocket_shared::error::{DomainError, DomainResult};
-use rocket_shared::events::{DomainEvent, EventPublisher};
+use rocket_shared::events::EventPublisher;
 
 /// Capability names used in the migration notice.
 pub const NOTICE_DEVELOPER_MODE: &str = "developerMode";
@@ -276,15 +277,17 @@ impl CollectionTrustService {
     }
 
     fn publish_trust_changed(&self, collection: &str) {
-        self.events.publish(&DomainEvent::CollectionTrustChanged {
-            collection: collection.to_string(),
-        });
+        self.events
+            .publish(&CollectionEvent::CollectionTrustChanged {
+                collection: collection.to_string(),
+            });
     }
 
     fn publish_settings_saved(&self, collection: &str) {
-        self.events.publish(&DomainEvent::CollectionSettingsSaved {
-            collection: collection.to_string(),
-        });
+        self.events
+            .publish(&CollectionEvent::CollectionSettingsSaved {
+                collection: collection.to_string(),
+            });
     }
 }
 
@@ -524,11 +527,11 @@ mod tests {
     /// Reduces the events to (kind, collection) pairs.
     fn kinds(events: &crate::test_doubles::RecordingPublisher) -> Vec<(&'static str, String)> {
         events
-            .events()
+            .collection_events()
             .into_iter()
             .map(|e| match e {
-                DomainEvent::CollectionSettingsSaved { collection } => ("settings", collection),
-                DomainEvent::CollectionTrustChanged { collection } => ("trust", collection),
+                CollectionEvent::CollectionSettingsSaved { collection } => ("settings", collection),
+                CollectionEvent::CollectionTrustChanged { collection } => ("trust", collection),
                 other => panic!("unexpected event: {other:?}"),
             })
             .collect()
@@ -592,7 +595,7 @@ mod tests {
         assert!(svc
             .set_capability("c", Capability::ContextRoots, true)
             .is_err());
-        assert!(events.events().is_empty());
+        assert!(events.collection_events().is_empty());
     }
 
     #[test]
@@ -617,7 +620,7 @@ mod tests {
         let fingerprint = svc.status("c").expect("status").fingerprint;
         svc.grant_requested("c", &[Capability::DeveloperMode], "stale")
             .expect_err("stale");
-        assert!(events.events().is_empty());
+        assert!(events.collection_events().is_empty());
         svc.grant_requested("c", &[Capability::DeveloperMode], &fingerprint)
             .expect("grant");
         assert_eq!(kinds(&events), vec![("trust", "c".to_string())]);
@@ -640,7 +643,7 @@ mod tests {
         let (svc, events) = recording_service(&repo, &store);
         svc.migrate_legacy(vec![legacy("plain", RequestedElevation::default())])
             .expect("migrate");
-        assert!(events.events().is_empty());
+        assert!(events.collection_events().is_empty());
     }
 
     fn legacy(name: &str, requested: RequestedElevation) -> LegacyCollection {
