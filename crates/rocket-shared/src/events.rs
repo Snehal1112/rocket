@@ -371,39 +371,6 @@ pub enum DomainEvent {
         folder_path: String,
     },
 
-    // Workspace events
-    WorkspaceCreated {
-        id: String,
-        name: String,
-        path: String,
-    },
-    WorkspaceSwitched {
-        id: String,
-        name: String,
-        path: String,
-    },
-    WorkspaceRenamed {
-        id: String,
-        old_name: String,
-        new_name: String,
-    },
-    WorkspaceClosed {
-        id: String,
-    },
-    WorkspaceDeleted {
-        id: String,
-    },
-    WorkspacePinned {
-        id: String,
-    },
-    WorkspaceUnpinned {
-        id: String,
-    },
-    WorkspaceDescriptionUpdated {
-        id: String,
-        description: Option<String>,
-    },
-
     // HTTP execution events
     RequestExecuted {
         method: String,
@@ -894,89 +861,6 @@ mod tests {
     #[test]
     fn null_publisher_accepts_a_published_event() {
         NullEventPublisher.publish(&DomainEvent::CollectionCreated { name: "a".into() });
-    }
-
-    #[test]
-    fn workspace_created_serializes() {
-        let event = DomainEvent::WorkspaceCreated {
-            id: "abc-123".into(),
-            name: "My API".into(),
-            path: "/home/user/my-api".into(),
-        };
-        let json = serde_json::to_string(&event).unwrap();
-        assert!(json.contains("workspaceCreated") || json.contains("WorkspaceCreated"));
-        assert!(json.contains("abc-123"));
-        assert!(json.contains("My API"));
-    }
-
-    #[test]
-    fn workspace_switched_serializes() {
-        let event = DomainEvent::WorkspaceSwitched {
-            id: "def-456".into(),
-            name: "Staging".into(),
-            path: "/home/user/staging".into(),
-        };
-        let json = serde_json::to_string(&event).unwrap();
-        assert!(json.contains("def-456"));
-    }
-
-    #[test]
-    fn workspace_renamed_serializes() {
-        let event = DomainEvent::WorkspaceRenamed {
-            id: "abc-123".into(),
-            old_name: "Old".into(),
-            new_name: "New".into(),
-        };
-        let json = serde_json::to_string(&event).unwrap();
-        assert!(json.contains("Old"));
-        assert!(json.contains("New"));
-    }
-
-    #[test]
-    fn workspace_closed_serializes() {
-        let event = DomainEvent::WorkspaceClosed {
-            id: "abc-123".into(),
-        };
-        let json = serde_json::to_string(&event).unwrap();
-        assert!(json.contains("abc-123"));
-    }
-
-    #[test]
-    fn workspace_deleted_serializes() {
-        let event = DomainEvent::WorkspaceDeleted {
-            id: "abc-123".into(),
-        };
-        let json = serde_json::to_string(&event).unwrap();
-        assert!(json.contains("abc-123"));
-    }
-
-    #[test]
-    fn workspace_pinned_serializes() {
-        let event = DomainEvent::WorkspacePinned {
-            id: "ws-123".into(),
-        };
-        let json = serde_json::to_string(&event).unwrap();
-        assert!(json.contains("ws-123"));
-    }
-
-    #[test]
-    fn workspace_unpinned_serializes() {
-        let event = DomainEvent::WorkspaceUnpinned {
-            id: "ws-123".into(),
-        };
-        let json = serde_json::to_string(&event).unwrap();
-        assert!(json.contains("ws-123"));
-    }
-
-    #[test]
-    fn workspace_description_updated_serializes() {
-        let event = DomainEvent::WorkspaceDescriptionUpdated {
-            id: "ws-123".into(),
-            description: Some("New desc".into()),
-        };
-        let json = serde_json::to_string(&event).unwrap();
-        assert!(json.contains("ws-123"));
-        assert!(json.contains("New desc"));
     }
 
     #[test]

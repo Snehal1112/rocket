@@ -6,5 +6,6 @@ edition.workspace = true
 [dependencies]
 rocket-shared = { path = "../rocket-shared" }
 serde.workspace = true
+serde_json.workspace = true
 serde_yaml.workspace = true
 uuid.workspace = true

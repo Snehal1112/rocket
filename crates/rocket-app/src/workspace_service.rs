@@ -2,10 +2,11 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use rocket_shared::error::{DomainError, DomainResult};
-use rocket_shared::events::{DomainEvent, EventPublisher};
+use rocket_shared::events::EventPublisher;
 use rocket_workspace::{
     RepositoryId, RepositoryPathResolver, RepositorySelector, ResolvedRepository, Workspace,
-    WorkspaceConfig, WorkspaceConfigRepository, WorkspaceRegistry, WorkspaceRepository,
+    WorkspaceConfig, WorkspaceConfigRepository, WorkspaceEvent, WorkspaceRegistry,
+    WorkspaceRepository,
 };
 
 pub struct WorkspaceService {
@@ -109,7 +110,7 @@ impl WorkspaceService {
         let workspace = Workspace::new(name, path.clone());
         registry.add(workspace.clone())?;
         self.repo.save(&registry)?;
-        self.publisher.publish(&DomainEvent::WorkspaceCreated {
+        self.publisher.publish(&WorkspaceEvent::WorkspaceCreated {
             id: workspace.id.clone(),
             name: workspace.name.clone(),
             path: path.to_string_lossy().to_string(),
@@ -142,7 +143,7 @@ impl WorkspaceService {
             return Err(e);
         }
 
-        self.publisher.publish(&DomainEvent::WorkspaceSwitched {
+        self.publisher.publish(&WorkspaceEvent::WorkspaceSwitched {
             id: workspace.id.clone(),
             name: workspace.name.clone(),
             path: workspace.path.to_string_lossy().to_string(),
@@ -154,7 +155,7 @@ impl WorkspaceService {
         let mut registry = self.repo.load()?;
         let old_name = registry.rename(id, new_name)?;
         self.repo.save(&registry)?;
-        self.publisher.publish(&DomainEvent::WorkspaceRenamed {
+        self.publisher.publish(&WorkspaceEvent::WorkspaceRenamed {
             id: id.to_string(),
             old_name,
             new_name: new_name.to_string(),
@@ -173,7 +174,7 @@ impl WorkspaceService {
         let new_active = self.repoint_if_active(&mut registry, id)?;
         self.repo.save(&registry)?;
         self.publisher
-            .publish(&DomainEvent::WorkspaceClosed { id: id.to_string() });
+            .publish(&WorkspaceEvent::WorkspaceClosed { id: id.to_string() });
         self.publish_switched(new_active.as_ref());
         Ok(())
     }
@@ -186,7 +187,7 @@ impl WorkspaceService {
         workspace.pinned = true;
         self.repo.save(&registry)?;
         self.publisher
-            .publish(&DomainEvent::WorkspacePinned { id: id.to_string() });
+            .publish(&WorkspaceEvent::WorkspacePinned { id: id.to_string() });
         Ok(())
     }
 
@@ -198,7 +199,7 @@ impl WorkspaceService {
         workspace.pinned = false;
         self.repo.save(&registry)?;
         self.publisher
-            .publish(&DomainEvent::WorkspaceUnpinned { id: id.to_string() });
+            .publish(&WorkspaceEvent::WorkspaceUnpinned { id: id.to_string() });
         Ok(())
     }
 
@@ -219,7 +220,7 @@ impl WorkspaceService {
         self.repo.save(&registry)?;
 
         self.publisher
-            .publish(&DomainEvent::WorkspaceDescriptionUpdated {
+            .publish(&WorkspaceEvent::WorkspaceDescriptionUpdated {
                 id: id.to_string(),
                 description: description.map(|s| s.to_string()),
             });
@@ -270,7 +271,7 @@ impl WorkspaceService {
 
         registry.add(workspace.clone())?;
         self.repo.save(&registry)?;
-        self.publisher.publish(&DomainEvent::WorkspaceCreated {
+        self.publisher.publish(&WorkspaceEvent::WorkspaceCreated {
             id: workspace.id.clone(),
             name: workspace.name.clone(),
             path: path.to_string_lossy().to_string(),
@@ -362,7 +363,7 @@ impl WorkspaceService {
         let new_active = self.repoint_if_active(&mut registry, id)?;
         self.repo.save(&registry)?;
         self.publisher
-            .publish(&DomainEvent::WorkspaceDeleted { id: id.to_string() });
+            .publish(&WorkspaceEvent::WorkspaceDeleted { id: id.to_string() });
         self.publish_switched(new_active.as_ref());
         Ok(())
     }
@@ -398,7 +399,7 @@ impl WorkspaceService {
     /// event a switch sends, so they reload exactly as they do for a switch.
     fn publish_switched(&self, workspace: Option<&Workspace>) {
         if let Some(workspace) = workspace {
-            self.publisher.publish(&DomainEvent::WorkspaceSwitched {
+            self.publisher.publish(&WorkspaceEvent::WorkspaceSwitched {
                 id: workspace.id.clone(),
                 name: workspace.name.clone(),
                 path: workspace.path.to_string_lossy().to_string(),
@@ -905,24 +906,24 @@ mod tests {
     struct EventNames(Arc<Mutex<Vec<String>>>);
     impl EventPublisher for EventNames {
         fn publish(&self, event: &dyn PublishedEvent) {
-            let Some(event) = event.downcast_ref::<DomainEvent>() else {
+            let Some(event) = event.downcast_ref::<WorkspaceEvent>() else {
                 panic!(
-                    "recorder got a non-DomainEvent on channel {}",
+                    "recorder got a non-WorkspaceEvent on channel {}",
                     event.channel()
                 );
             };
             let name = match event {
-                DomainEvent::WorkspaceSwitched { id, .. } => format!("switched:{id}"),
-                DomainEvent::WorkspaceClosed { id } => format!("closed:{id}"),
-                DomainEvent::WorkspaceDeleted { id } => format!("deleted:{id}"),
-                DomainEvent::WorkspaceRenamed {
+                WorkspaceEvent::WorkspaceSwitched { id, .. } => format!("switched:{id}"),
+                WorkspaceEvent::WorkspaceClosed { id } => format!("closed:{id}"),
+                WorkspaceEvent::WorkspaceDeleted { id } => format!("deleted:{id}"),
+                WorkspaceEvent::WorkspaceRenamed {
                     id,
                     old_name,
                     new_name,
                 } => format!("renamed:{id}:{old_name}:{new_name}"),
-                DomainEvent::WorkspacePinned { id } => format!("pinned:{id}"),
-                DomainEvent::WorkspaceUnpinned { id } => format!("unpinned:{id}"),
-                DomainEvent::WorkspaceDescriptionUpdated { id, description } => {
+                WorkspaceEvent::WorkspacePinned { id } => format!("pinned:{id}"),
+                WorkspaceEvent::WorkspaceUnpinned { id } => format!("unpinned:{id}"),
+                WorkspaceEvent::WorkspaceDescriptionUpdated { id, description } => {
                     format!("description:{id}:{description:?}")
                 }
                 _ => return,

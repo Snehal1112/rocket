@@ -58,14 +58,6 @@ impl PublishedEvent for DomainEvent {
             | DomainEvent::CollectionVariableWritten { .. } => "collection-changed",
             DomainEvent::FlowRequestPathsRewritten { .. } => "flow-request-paths-rewritten",
             DomainEvent::CollectionTrustChanged { .. } => "collection-trust-changed",
-            DomainEvent::WorkspaceCreated { .. } => "workspace-created",
-            DomainEvent::WorkspaceSwitched { .. } => "workspace-switched",
-            DomainEvent::WorkspaceRenamed { .. } => "workspace-renamed",
-            DomainEvent::WorkspaceClosed { .. } => "workspace-closed",
-            DomainEvent::WorkspaceDeleted { .. } => "workspace-deleted",
-            DomainEvent::WorkspacePinned { .. } => "workspace-pinned",
-            DomainEvent::WorkspaceUnpinned { .. } => "workspace-unpinned",
-            DomainEvent::WorkspaceDescriptionUpdated { .. } => "workspace-description-updated",
             DomainEvent::GitStatusChanged { .. }
             | DomainEvent::GitCommit { .. }
             | DomainEvent::GitPush { .. }
@@ -201,29 +193,6 @@ mod tests {
             DomainEvent::FolderSettingsSaved {
                 collection: s(),
                 folder_path: s(),
-            },
-            DomainEvent::WorkspaceCreated {
-                id: s(),
-                name: s(),
-                path: s(),
-            },
-            DomainEvent::WorkspaceSwitched {
-                id: s(),
-                name: s(),
-                path: s(),
-            },
-            DomainEvent::WorkspaceRenamed {
-                id: s(),
-                old_name: s(),
-                new_name: s(),
-            },
-            DomainEvent::WorkspaceClosed { id: s() },
-            DomainEvent::WorkspaceDeleted { id: s() },
-            DomainEvent::WorkspacePinned { id: s() },
-            DomainEvent::WorkspaceUnpinned { id: s() },
-            DomainEvent::WorkspaceDescriptionUpdated {
-                id: s(),
-                description: None,
             },
             DomainEvent::RequestExecuted {
                 method: s(),
@@ -479,7 +448,7 @@ mod tests {
     }
 
     /// The channel of each variant, keyed by its JSON  tag.
-    const CHANNELS: [(&str, &str); 72] = [
+    const CHANNELS: [(&str, &str); 64] = [
         ("fileChanged", "collection-changed"),
         ("requestExecuted", "request-executed"),
         ("fileWatcherFailed", "file-watcher-failed"),
@@ -535,17 +504,6 @@ mod tests {
         ("requestVariablesSaved", "collection-changed"),
         ("collectionVariableWritten", "collection-changed"),
         ("collectionTrustChanged", "collection-trust-changed"),
-        ("workspaceCreated", "workspace-created"),
-        ("workspaceSwitched", "workspace-switched"),
-        ("workspaceRenamed", "workspace-renamed"),
-        ("workspaceClosed", "workspace-closed"),
-        ("workspaceDeleted", "workspace-deleted"),
-        ("workspacePinned", "workspace-pinned"),
-        ("workspaceUnpinned", "workspace-unpinned"),
-        (
-            "workspaceDescriptionUpdated",
-            "workspace-description-updated",
-        ),
         ("gitStatusChanged", "git-changed"),
         ("gitCommit", "git-changed"),
         ("gitPush", "git-changed"),
@@ -571,9 +529,9 @@ mod tests {
     #[test]
     fn one_of_each_covers_every_variant() {
         let events = one_of_each();
-        assert_eq!(events.len(), 72);
+        assert_eq!(events.len(), 64);
         let tags: BTreeSet<String> = events.iter().map(tag).collect();
-        assert_eq!(tags.len(), 72);
+        assert_eq!(tags.len(), 64);
     }
 
     #[test]

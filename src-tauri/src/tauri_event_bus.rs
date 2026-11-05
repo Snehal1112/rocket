@@ -156,6 +156,26 @@ mod tests {
     }
 
     #[test]
+    fn emit_channels_is_one_channel_for_workspace_events() {
+        use rocket_workspace::WorkspaceEvent;
+        assert_eq!(
+            emit_channels(&WorkspaceEvent::WorkspaceCreated {
+                id: "w1".into(),
+                name: "n".into(),
+                path: "/p".into(),
+            }),
+            vec!["workspace-created"]
+        );
+        assert_eq!(
+            emit_channels(&WorkspaceEvent::WorkspaceDescriptionUpdated {
+                id: "w1".into(),
+                description: None,
+            }),
+            vec!["workspace-description-updated"]
+        );
+    }
+
+    #[test]
     fn assistant_conversation_events_have_their_own_channels() {
         let id = || "c1".to_string();
         assert_eq!(
