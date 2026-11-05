@@ -2068,7 +2068,10 @@ mod tests {
     impl EventPublisher for Recorded {
         fn publish(&self, event: &dyn rocket_shared::events::PublishedEvent) {
             let Some(event) = event.downcast_ref::<rocket_shared::events::DomainEvent>() else {
-                return;
+                panic!(
+                    "recorder got a non-DomainEvent on channel {}",
+                    event.channel()
+                );
             };
             self.0.lock().expect("lock").push(event.clone());
         }
