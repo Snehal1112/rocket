@@ -201,7 +201,7 @@ impl GrpcService {
             );
             handle.events
         };
-        self.events.publish(DomainEvent::GrpcSessionStarted {
+        self.events.publish(&DomainEvent::GrpcSessionStarted {
             session_id: session_id.clone(),
             method_type: method_type.as_str().to_string(),
         });
@@ -304,7 +304,7 @@ impl GrpcService {
         if let Some(abort) = abort {
             abort.abort();
         }
-        self.events.publish(DomainEvent::GrpcSessionFinished {
+        self.events.publish(&DomainEvent::GrpcSessionFinished {
             session_id: session_id.to_string(),
             code: 1,
             code_name: "CANCELLED".into(),
@@ -642,7 +642,7 @@ fn publish_while_open(
     if !sessions.contains_key(session_id) {
         return false;
     }
-    events.publish(event());
+    events.publish(&event());
     true
 }
 
@@ -659,7 +659,7 @@ fn finish(
     let Some(entry) = lock(sessions).remove(session_id) else {
         return;
     };
-    events.publish(DomainEvent::GrpcSessionFinished {
+    events.publish(&DomainEvent::GrpcSessionFinished {
         session_id: session_id.to_string(),
         code,
         code_name: code_name.to_string(),
@@ -723,6 +723,7 @@ fn expand_home_prefix(raw: &str, home: Option<&Path>) -> DomainResult<Option<Pat
 
 #[cfg(test)]
 mod tests {
+    use rocket_shared::events::PublishedEvent;
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Mutex;
@@ -840,8 +841,11 @@ message Rep { string message = 1; }
     struct Recorder(Mutex<Vec<DomainEvent>>);
 
     impl EventPublisher for Recorder {
-        fn publish(&self, event: DomainEvent) {
-            lock(&self.0).push(event);
+        fn publish(&self, event: &dyn PublishedEvent) {
+            let Some(event) = event.downcast_ref::<DomainEvent>() else {
+                return;
+            };
+            lock(&self.0).push(event.clone());
         }
     }
 

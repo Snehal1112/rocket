@@ -17,7 +17,7 @@ use rocket_collection::{
 use rocket_environment::{Environment, EnvironmentRepositoryFactory, Variable};
 use rocket_shared::description::Documentation;
 use rocket_shared::error::{DomainError, DomainResult};
-use rocket_shared::events::{DomainEvent, EventPublisher};
+use rocket_shared::events::{DomainEvent, EventPublisher, PublishedEvent};
 use rocket_shared::types::BodyMode;
 use sha2::{Digest, Sha256};
 
@@ -101,7 +101,7 @@ enum Target {
 struct ForwardEvents(Arc<dyn EventPublisher>);
 
 impl EventPublisher for ForwardEvents {
-    fn publish(&self, event: DomainEvent) {
+    fn publish(&self, event: &dyn PublishedEvent) {
         self.0.publish(event);
     }
 }
@@ -212,7 +212,7 @@ impl ProposalService {
 
         let mut ids = Vec::with_capacity(created.len());
         for (proposal_id, summary) in created {
-            self.events.publish(DomainEvent::AcpProposalCreated {
+            self.events.publish(&DomainEvent::AcpProposalCreated {
                 session_id: session.clone(),
                 proposal_id: proposal_id.clone(),
                 summary,
@@ -306,7 +306,7 @@ impl ProposalService {
     }
 
     fn publish_resolved(&self, proposal: &AgentProposal) {
-        self.events.publish(DomainEvent::AcpProposalResolved {
+        self.events.publish(&DomainEvent::AcpProposalResolved {
             session_id: proposal.session_id.clone(),
             proposal_id: proposal.id.clone(),
             status: proposal.status.as_str().to_string(),

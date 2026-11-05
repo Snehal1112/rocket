@@ -323,7 +323,7 @@ impl McpToolService {
     }
 
     fn publish_tool_invoked(&self, session_id: &str, tool: &str, summary: String) {
-        self.event_publisher.publish(DomainEvent::AcpToolInvoked {
+        self.event_publisher.publish(&DomainEvent::AcpToolInvoked {
             session_id: session_id.to_string(),
             tool: tool.to_string(),
             summary,

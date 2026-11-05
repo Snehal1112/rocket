@@ -278,7 +278,7 @@ fn publish_status(
     dialect: Option<&str>,
     reason: Option<String>,
 ) {
-    events.publish(DomainEvent::GraphQlSubscriptionStatus {
+    events.publish(&DomainEvent::GraphQlSubscriptionStatus {
         session_id: session_id.to_string(),
         state,
         dialect: dialect.map(str::to_string),
@@ -295,7 +295,7 @@ fn publish_message(
     // A huge result is cut for the live event. The marker says how much was left out.
     let (data, _) =
         crate::event_caps::cap_with_marker(data, crate::event_caps::MAX_STREAM_MESSAGE_BYTES);
-    events.publish(DomainEvent::GraphQlSubscriptionMessage {
+    events.publish(&DomainEvent::GraphQlSubscriptionMessage {
         session_id: session_id.to_string(),
         event,
         data,
@@ -1452,13 +1452,20 @@ mod session_tests {
 #[cfg(test)]
 mod event_cap_tests {
     use super::*;
+    use rocket_shared::events::PublishedEvent;
     use std::sync::Mutex;
 
     #[derive(Default)]
     struct Recorder(Mutex<Vec<DomainEvent>>);
     impl EventPublisher for Recorder {
-        fn publish(&self, event: DomainEvent) {
-            self.0.lock().unwrap_or_else(|e| e.into_inner()).push(event);
+        fn publish(&self, event: &dyn PublishedEvent) {
+            let Some(event) = event.downcast_ref::<DomainEvent>() else {
+                return;
+            };
+            self.0
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(event.clone());
         }
     }
 

@@ -112,7 +112,7 @@ impl EnvironmentService {
 
     pub fn delete(&self, name: &str) -> DomainResult<()> {
         self.repo.delete(name)?;
-        self.events.publish(DomainEvent::EnvironmentDeleted {
+        self.events.publish(&DomainEvent::EnvironmentDeleted {
             name: name.to_string(),
         });
         Ok(())

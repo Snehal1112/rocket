@@ -299,7 +299,7 @@ impl AcpSessionService {
             .unwrap_or_else(PoisonError::into_inner)
             .insert(info.session_id.clone(), own_secrets);
         self.event_publisher
-            .publish(DomainEvent::AcpSessionStarted {
+            .publish(&DomainEvent::AcpSessionStarted {
                 session_id: info.session_id.clone(),
             });
         Ok(info)
@@ -446,7 +446,7 @@ impl AcpSessionService {
         match outcome {
             Some(Ok(stop_reason)) => {
                 self.event_publisher
-                    .publish(DomainEvent::AcpSessionFinished {
+                    .publish(&DomainEvent::AcpSessionFinished {
                         session_id: session_id.to_string(),
                         stop_reason: stop_reason.clone(),
                     });
@@ -459,10 +459,11 @@ impl AcpSessionService {
                 if !matches!(e, DomainError::InvalidInput(_)) {
                     let _ = self.session_client.end_session(session_id).await;
                     self.release(session_id);
-                    self.event_publisher.publish(DomainEvent::AcpSessionFailed {
-                        session_id: session_id.to_string(),
-                        error: e.to_string(),
-                    });
+                    self.event_publisher
+                        .publish(&DomainEvent::AcpSessionFailed {
+                            session_id: session_id.to_string(),
+                            error: e.to_string(),
+                        });
                 }
                 Err(e)
             }
@@ -511,7 +512,7 @@ impl AcpSessionService {
             .await?;
         let options = mask_config_options(options, &forms);
         self.event_publisher
-            .publish(DomainEvent::AcpConfigOptionsChanged {
+            .publish(&DomainEvent::AcpConfigOptionsChanged {
                 session_id: session_id.to_string(),
                 options: options.clone(),
             });
@@ -522,7 +523,7 @@ impl AcpSessionService {
     fn publish_chunks(&self, session_id: &str, chunks: Vec<(ChunkKind, String)>) {
         for (kind, text) in chunks {
             let session_id = session_id.to_string();
-            self.event_publisher.publish(match kind {
+            self.event_publisher.publish(&match kind {
                 ChunkKind::Text => DomainEvent::AcpSessionChunk { session_id, text },
                 ChunkKind::Thought => DomainEvent::AcpThoughtChunk { session_id, text },
             });
@@ -625,7 +626,7 @@ impl AcpSessionService {
                 option_id,
             },
         };
-        self.event_publisher.publish(event);
+        self.event_publisher.publish(&event);
     }
 
     /// Kills a session whose turn sent nothing for the idle limit, publishes
@@ -635,10 +636,11 @@ impl AcpSessionService {
     async fn end_idle_session(&self, session_id: &str, message: String) -> DomainError {
         let _ = self.session_client.end_session(session_id).await;
         self.release(session_id);
-        self.event_publisher.publish(DomainEvent::AcpSessionFailed {
-            session_id: session_id.to_string(),
-            error: message.clone(),
-        });
+        self.event_publisher
+            .publish(&DomainEvent::AcpSessionFailed {
+                session_id: session_id.to_string(),
+                error: message.clone(),
+            });
         DomainError::Internal(message)
     }
 
@@ -825,6 +827,7 @@ fn cap_title(title: String) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rocket_shared::events::PublishedEvent;
     use std::collections::VecDeque;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Mutex;
@@ -1294,11 +1297,14 @@ mod tests {
         }
     }
     impl EventPublisher for FakeEventPublisher {
-        fn publish(&self, event: DomainEvent) {
+        fn publish(&self, event: &dyn PublishedEvent) {
+            let Some(event) = event.downcast_ref::<DomainEvent>() else {
+                return;
+            };
             self.events
                 .lock()
                 .expect("lock FakeEventPublisher")
-                .push(event);
+                .push(event.clone());
         }
     }
 
@@ -1309,7 +1315,7 @@ mod tests {
     /// `collection_service.rs`'s `SharedEventPublisher`.
     struct SharedEventPublisher(Arc<FakeEventPublisher>);
     impl EventPublisher for SharedEventPublisher {
-        fn publish(&self, event: DomainEvent) {
+        fn publish(&self, event: &dyn PublishedEvent) {
             self.0.publish(event);
         }
     }

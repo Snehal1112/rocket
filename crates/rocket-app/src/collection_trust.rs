@@ -276,13 +276,13 @@ impl CollectionTrustService {
     }
 
     fn publish_trust_changed(&self, collection: &str) {
-        self.events.publish(DomainEvent::CollectionTrustChanged {
+        self.events.publish(&DomainEvent::CollectionTrustChanged {
             collection: collection.to_string(),
         });
     }
 
     fn publish_settings_saved(&self, collection: &str) {
-        self.events.publish(DomainEvent::CollectionSettingsSaved {
+        self.events.publish(&DomainEvent::CollectionSettingsSaved {
             collection: collection.to_string(),
         });
     }

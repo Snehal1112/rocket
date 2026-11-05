@@ -42,7 +42,7 @@ fn publish_status(
     subprotocol: Option<String>,
     close: Option<&WebSocketClose>,
 ) {
-    events.publish(DomainEvent::WebSocketStatus {
+    events.publish(&DomainEvent::WebSocketStatus {
         session_id: session_id.to_string(),
         state,
         subprotocol,
@@ -58,7 +58,7 @@ fn publish_frame(
     frame: &WebSocketFrame,
 ) {
     let (kind, data, truncated) = frame_event_data(frame, MAX_STREAM_MESSAGE_BYTES);
-    events.publish(DomainEvent::WebSocketMessage {
+    events.publish(&DomainEvent::WebSocketMessage {
         session_id: session_id.to_string(),
         direction,
         kind,

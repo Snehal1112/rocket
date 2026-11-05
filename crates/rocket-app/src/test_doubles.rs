@@ -4,6 +4,7 @@
 //! not migrate those, their byte-for-byte stability is what proves the
 //! phase-split refactor changed no behaviour.
 
+use rocket_shared::events::PublishedEvent;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -1679,8 +1680,11 @@ impl RecordingPublisher {
 }
 
 impl EventPublisher for RecordingPublisher {
-    fn publish(&self, event: DomainEvent) {
-        self.events.lock().expect("lock").push(event);
+    fn publish(&self, event: &dyn PublishedEvent) {
+        let Some(event) = event.downcast_ref::<DomainEvent>() else {
+            return;
+        };
+        self.events.lock().expect("lock").push(event.clone());
     }
 }
 
@@ -1688,7 +1692,7 @@ impl EventPublisher for RecordingPublisher {
 pub struct SharedPublisher(pub Arc<RecordingPublisher>);
 
 impl EventPublisher for SharedPublisher {
-    fn publish(&self, event: DomainEvent) {
+    fn publish(&self, event: &dyn PublishedEvent) {
         self.0.publish(event);
     }
 }

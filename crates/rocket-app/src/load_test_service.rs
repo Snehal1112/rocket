@@ -14,11 +14,11 @@ struct EventProgress(Arc<dyn EventPublisher>);
 
 impl LoadTestProgress for EventProgress {
     fn progress(&self, event: LoadTestProgressEvent) {
-        self.0.publish(DomainEvent::LoadTestProgress(event));
+        self.0.publish(&DomainEvent::LoadTestProgress(event));
     }
 
     fn complete(&self, result: LoadTestResult) {
-        self.0.publish(DomainEvent::LoadTestComplete(result));
+        self.0.publish(&DomainEvent::LoadTestComplete(result));
     }
 }
 

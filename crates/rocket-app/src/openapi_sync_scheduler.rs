@@ -187,7 +187,7 @@ impl OpenApiSyncScheduler {
                     "failed"
                 }
             };
-            self.events.publish(DomainEvent::OpenApiSyncChecked {
+            self.events.publish(&DomainEvent::OpenApiSyncChecked {
                 collection: target.collection,
                 status: status.to_string(),
             });

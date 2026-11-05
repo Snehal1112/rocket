@@ -19,7 +19,7 @@ pub fn publish_env_write_events(
     before: &Environment,
     after: &Environment,
 ) {
-    events.publish(DomainEvent::EnvironmentSaved {
+    events.publish(&DomainEvent::EnvironmentSaved {
         name: env_name.to_string(),
     });
 
@@ -50,14 +50,18 @@ pub fn publish_env_write_events(
 mod tests {
     use super::*;
     use rocket_environment::Variable;
+    use rocket_shared::events::PublishedEvent;
     use std::sync::Mutex;
 
     struct RecordingPublisher {
         events: Mutex<Vec<DomainEvent>>,
     }
     impl EventPublisher for RecordingPublisher {
-        fn publish(&self, event: DomainEvent) {
-            self.events.lock().expect("lock").push(event);
+        fn publish(&self, event: &dyn PublishedEvent) {
+            let Some(event) = event.downcast_ref::<DomainEvent>() else {
+                return;
+            };
+            self.events.lock().expect("lock").push(event.clone());
         }
     }
 

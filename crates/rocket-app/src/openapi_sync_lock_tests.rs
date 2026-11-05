@@ -5,6 +5,7 @@ use crate::collection_service::CollectionService;
 use crate::test_doubles::{RecordingPublisher, SharedPublisher};
 use rocket_collection::{CollectionRepository, CollectionSettings, CollectionTrustStore, Request};
 use rocket_infra::{FsCollectionRepo, SharedPathCollectionRepo};
+use rocket_shared::events::PublishedEvent;
 use rocket_shared::events::{DomainEvent, EventPublisher};
 use rocket_shared::types::HttpMethod;
 use std::path::PathBuf;
@@ -43,7 +44,10 @@ struct Gate {
 }
 
 impl EventPublisher for Gate {
-    fn publish(&self, event: DomainEvent) {
+    fn publish(&self, event: &dyn PublishedEvent) {
+        let Some(event) = event.downcast_ref::<DomainEvent>() else {
+            return;
+        };
         if matches!(event, DomainEvent::RequestSaved { .. }) {
             self.inside.lock().expect("lock").send(()).expect("inside");
             let _ = self.release.lock().expect("lock").recv_timeout(LONG);

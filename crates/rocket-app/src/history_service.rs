@@ -22,7 +22,7 @@ impl HistoryService {
 
     pub fn clear(&self) -> DomainResult<()> {
         self.repo.clear()?;
-        self.events.publish(DomainEvent::HistoryCleared);
+        self.events.publish(&DomainEvent::HistoryCleared);
         Ok(())
     }
 

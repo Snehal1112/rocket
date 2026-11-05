@@ -14,6 +14,7 @@ use rocket_environment::SecretStore;
 use rocket_http::spec_fetch::{SpecFetchFailure, SpecFetchOutcome, SpecFetchRequest, SpecFetcher};
 use rocket_infra::{FsFileTxFactory, FsOpenApiLocalRepo, FsOpenApiSourceRepo};
 use rocket_shared::error::{DomainError, DomainResult};
+use rocket_shared::events::PublishedEvent;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -168,9 +169,15 @@ impl CollectionFileTxFactory for PickyTx {
 struct Recorder(Mutex<Vec<(String, String)>>);
 
 impl EventPublisher for Recorder {
-    fn publish(&self, event: DomainEvent) {
+    fn publish(&self, event: &dyn PublishedEvent) {
+        let Some(event) = event.downcast_ref::<DomainEvent>() else {
+            return;
+        };
         if let DomainEvent::OpenApiSyncChecked { collection, status } = event {
-            self.0.lock().expect("lock").push((collection, status));
+            self.0
+                .lock()
+                .expect("lock")
+                .push((collection.clone(), status.clone()));
         }
     }
 }

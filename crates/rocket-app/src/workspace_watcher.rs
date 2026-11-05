@@ -34,7 +34,7 @@ impl WorkspaceWatcher {
                     dir = %collections_dir.display(),
                     "file watcher failed to start"
                 );
-                self.publisher.publish(DomainEvent::FileWatcherFailed {
+                self.publisher.publish(&DomainEvent::FileWatcherFailed {
                     message: format!("{}: {e}", collections_dir.display()),
                 });
                 false

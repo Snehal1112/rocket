@@ -47,7 +47,7 @@ impl GitAppService {
         creds: &GitCredentials,
     ) -> DomainResult<()> {
         self.git.clone_repo(url, dest_path, creds)?;
-        self.events.publish(DomainEvent::GitCloned {
+        self.events.publish(&DomainEvent::GitCloned {
             url: strip_url_credentials(url),
             dest: dest_path.to_string(),
         });
@@ -61,7 +61,7 @@ impl GitAppService {
 
     pub fn add_remote(&self, path: &str, name: &str, url: &str) -> DomainResult<()> {
         self.git.add_remote(path, name, url)?;
-        self.events.publish(DomainEvent::GitRemoteAdded {
+        self.events.publish(&DomainEvent::GitRemoteAdded {
             collection: path.to_string(),
             name: name.to_string(),
             url: strip_url_credentials(url),
@@ -71,7 +71,7 @@ impl GitAppService {
 
     pub fn remove_remote(&self, path: &str, name: &str) -> DomainResult<()> {
         self.git.remove_remote(path, name)?;
-        self.events.publish(DomainEvent::GitRemoteRemoved {
+        self.events.publish(&DomainEvent::GitRemoteRemoved {
             collection: path.to_string(),
             name: name.to_string(),
         });
@@ -102,7 +102,7 @@ impl GitAppService {
     // Staging
     pub fn stage(&self, path: &str, files: &[&str]) -> DomainResult<()> {
         self.git.stage(path, files)?;
-        self.events.publish(DomainEvent::GitStatusChanged {
+        self.events.publish(&DomainEvent::GitStatusChanged {
             collection: path.to_string(),
         });
         Ok(())
@@ -110,7 +110,7 @@ impl GitAppService {
 
     pub fn unstage(&self, path: &str, files: &[&str]) -> DomainResult<()> {
         self.git.unstage(path, files)?;
-        self.events.publish(DomainEvent::GitStatusChanged {
+        self.events.publish(&DomainEvent::GitStatusChanged {
             collection: path.to_string(),
         });
         Ok(())
@@ -118,7 +118,7 @@ impl GitAppService {
 
     pub fn discard(&self, path: &str, files: &[&str]) -> DomainResult<()> {
         self.git.discard(path, files)?;
-        self.events.publish(DomainEvent::GitStatusChanged {
+        self.events.publish(&DomainEvent::GitStatusChanged {
             collection: path.to_string(),
         });
         Ok(())
@@ -127,7 +127,7 @@ impl GitAppService {
     // Commit
     pub fn commit(&self, path: &str, message: &str) -> DomainResult<CommitInfo> {
         let info = self.git.commit(path, message)?;
-        self.events.publish(DomainEvent::GitCommit {
+        self.events.publish(&DomainEvent::GitCommit {
             collection: path.to_string(),
             message: message.to_string(),
             sha: info.id.clone(),
@@ -150,7 +150,7 @@ impl GitAppService {
         force: bool,
     ) -> DomainResult<()> {
         self.git.push(path, remote, creds, force)?;
-        self.events.publish(DomainEvent::GitPush {
+        self.events.publish(&DomainEvent::GitPush {
             collection: path.to_string(),
             remote: remote.to_string(),
         });
@@ -159,7 +159,7 @@ impl GitAppService {
 
     pub fn pull(&self, path: &str, remote: &str, creds: &GitCredentials) -> DomainResult<()> {
         self.git.pull(path, remote, creds)?;
-        self.events.publish(DomainEvent::GitPull {
+        self.events.publish(&DomainEvent::GitPull {
             collection: path.to_string(),
             remote: remote.to_string(),
         });
@@ -182,7 +182,7 @@ impl GitAppService {
 
     pub fn switch_branch(&self, path: &str, name: &str) -> DomainResult<()> {
         self.git.switch_branch(path, name)?;
-        self.events.publish(DomainEvent::BranchSwitched {
+        self.events.publish(&DomainEvent::BranchSwitched {
             collection: path.to_string(),
             branch: name.to_string(),
         });
@@ -198,7 +198,7 @@ impl GitAppService {
     ) -> DomainResult<()> {
         self.git
             .checkout_remote_branch(path, name, force, as_name)?;
-        self.events.publish(DomainEvent::BranchSwitched {
+        self.events.publish(&DomainEvent::BranchSwitched {
             collection: path.to_string(),
             branch: name.to_string(),
         });
@@ -208,7 +208,7 @@ impl GitAppService {
     pub fn create_branch(&self, path: &str, name: &str) -> DomainResult<()> {
         self.git.create_branch(path, name)?;
         // Publish a switch event so the frontend updates its branch indicator.
-        self.events.publish(DomainEvent::BranchSwitched {
+        self.events.publish(&DomainEvent::BranchSwitched {
             collection: path.to_string(),
             branch: name.to_string(),
         });
@@ -221,7 +221,7 @@ impl GitAppService {
 
     pub fn merge_branch(&self, path: &str, name: &str) -> DomainResult<()> {
         self.git.merge_branch(path, name)?;
-        self.events.publish(DomainEvent::BranchMerged {
+        self.events.publish(&DomainEvent::BranchMerged {
             collection: path.to_string(),
             branch: name.to_string(),
         });
@@ -235,7 +235,7 @@ impl GitAppService {
 
     pub fn stash_save(&self, path: &str, message: &str) -> DomainResult<()> {
         self.git.stash_save(path, message)?;
-        self.events.publish(DomainEvent::GitStashChanged {
+        self.events.publish(&DomainEvent::GitStashChanged {
             collection: path.to_string(),
         });
         Ok(())
@@ -243,7 +243,7 @@ impl GitAppService {
 
     pub fn stash_pop(&self, path: &str, index: usize) -> DomainResult<()> {
         self.git.stash_pop(path, index)?;
-        self.events.publish(DomainEvent::GitStashChanged {
+        self.events.publish(&DomainEvent::GitStashChanged {
             collection: path.to_string(),
         });
         Ok(())
@@ -251,7 +251,7 @@ impl GitAppService {
 
     pub fn stash_apply(&self, path: &str, index: usize) -> DomainResult<()> {
         self.git.stash_apply(path, index)?;
-        self.events.publish(DomainEvent::GitStashChanged {
+        self.events.publish(&DomainEvent::GitStashChanged {
             collection: path.to_string(),
         });
         Ok(())
@@ -259,7 +259,7 @@ impl GitAppService {
 
     pub fn stash_drop(&self, path: &str, index: usize) -> DomainResult<()> {
         self.git.stash_drop(path, index)?;
-        self.events.publish(DomainEvent::GitStashChanged {
+        self.events.publish(&DomainEvent::GitStashChanged {
             collection: path.to_string(),
         });
         Ok(())
@@ -285,7 +285,7 @@ impl GitAppService {
 
     pub fn abort_merge(&self, path: &str) -> DomainResult<()> {
         self.git.abort_merge(path)?;
-        self.events.publish(DomainEvent::GitStatusChanged {
+        self.events.publish(&DomainEvent::GitStatusChanged {
             collection: path.to_string(),
         });
         Ok(())

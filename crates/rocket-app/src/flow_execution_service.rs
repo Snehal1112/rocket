@@ -1360,7 +1360,7 @@ impl FlowExecutionService {
         let run_order: &[String] = prepared
             .as_ref()
             .map_or(order.as_slice(), |p| p.plan.run_order.as_slice());
-        self.events.publish(DomainEvent::FlowRunStarted {
+        self.events.publish(&DomainEvent::FlowRunStarted {
             run_id: run_id.clone(),
             flow_name: input.flow_name.clone(),
             collection: input.collection.clone(),
@@ -1520,7 +1520,7 @@ impl FlowExecutionService {
                         captured.insert(node_id.clone(), executed.output);
                     }
                     if cancelled_now {
-                        self.events.publish(step_completed_event(&run_id, &step));
+                        self.events.publish(&step_completed_event(&run_id, &step));
                         steps.push(step);
                         stopped_reason = "cancelled".to_string();
                         break;
@@ -1529,7 +1529,7 @@ impl FlowExecutionService {
                 }
             };
 
-            self.events.publish(step_completed_event(&run_id, &step));
+            self.events.publish(&step_completed_event(&run_id, &step));
             outcomes.insert(node_id.clone(), outcome);
             steps.push(step);
         }
@@ -1588,7 +1588,7 @@ impl FlowExecutionService {
             .iter()
             .filter(|s| s.skip_reason == Some(FlowSkipReason::BranchNotTaken))
             .count();
-        self.events.publish(DomainEvent::FlowRunFinished {
+        self.events.publish(&DomainEvent::FlowRunFinished {
             run_id: run_id.clone(),
             stopped_reason: stopped_reason.clone(),
             node_count: steps.len(),
@@ -1688,7 +1688,7 @@ impl FlowExecutionService {
     }
 
     fn publish_started(&self, run_id: &str, node_id: &str) {
-        self.events.publish(DomainEvent::FlowStepStarted {
+        self.events.publish(&DomainEvent::FlowStepStarted {
             run_id: run_id.to_string(),
             node_id: node_id.to_string(),
         });
@@ -1727,7 +1727,7 @@ impl FlowExecutionService {
         message: String,
         live: Option<Box<FlowLiveProgress>>,
     ) {
-        self.events.publish(DomainEvent::FlowStepProgress {
+        self.events.publish(&DomainEvent::FlowStepProgress {
             run_id: ctx.run_id.clone(),
             node_id: ctx.node_id.clone(),
             attempt,
@@ -2634,6 +2634,7 @@ fn failed_step(node_id: &str, message: String) -> FlowStepResult {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rocket_shared::events::PublishedEvent;
 
     const HOST_A_VALUE: &str = "host-flow-value-a-5521";
     const HOST_B_VALUE: &str = "host-flow-value-b-7734";
@@ -2826,7 +2827,7 @@ mod tests {
 
     struct NullEventPublisher;
     impl EventPublisher for NullEventPublisher {
-        fn publish(&self, _event: DomainEvent) {}
+        fn publish(&self, _event: &dyn PublishedEvent) {}
     }
 
     struct EmptySecretManagerRepo;
@@ -5051,7 +5052,10 @@ mod tests {
         cancelled: Arc<Mutex<HashSet<String>>>,
     }
     impl EventPublisher for CancelAfterSteps {
-        fn publish(&self, event: DomainEvent) {
+        fn publish(&self, event: &dyn PublishedEvent) {
+            let Some(event) = event.downcast_ref::<DomainEvent>() else {
+                return;
+            };
             if let DomainEvent::FlowStepCompleted { run_id, .. } = event {
                 let mut seen = self.seen.lock().expect("lock seen");
                 *seen += 1;
@@ -5059,7 +5063,7 @@ mod tests {
                     self.cancelled
                         .lock()
                         .expect("lock cancelled")
-                        .insert(run_id);
+                        .insert(run_id.clone());
                 }
             }
         }
@@ -5161,10 +5165,13 @@ mod tests {
         handles: Arc<Mutex<HashMap<String, CancelHandle>>>,
     }
     impl EventPublisher for CancelOnStart {
-        fn publish(&self, event: DomainEvent) {
+        fn publish(&self, event: &dyn PublishedEvent) {
+            let Some(event) = event.downcast_ref::<DomainEvent>() else {
+                return;
+            };
             if let DomainEvent::FlowStepStarted { run_id, node_id } = event {
                 if node_id == self.node_id {
-                    if let Some(handle) = self.handles.lock().expect("lock handles").get(&run_id) {
+                    if let Some(handle) = self.handles.lock().expect("lock handles").get(run_id) {
                         handle.cancel();
                     }
                 }
@@ -9242,7 +9249,10 @@ mod tests {
         events: Arc<RecordingPublisher>,
     }
     impl EventPublisher for ProbeUrlsOnStart {
-        fn publish(&self, event: DomainEvent) {
+        fn publish(&self, event: &dyn PublishedEvent) {
+            let Some(event) = event.downcast_ref::<DomainEvent>() else {
+                return;
+            };
             if let DomainEvent::FlowRunStarted { run_id, .. } = &event {
                 let found = self
                     .urls

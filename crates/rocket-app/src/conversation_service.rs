@@ -232,7 +232,7 @@ impl ConversationService {
         record.apply_caps();
         pin.conversations.save(&record)?;
         self.events
-            .publish(DomainEvent::AssistantConversationSaved {
+            .publish(&DomainEvent::AssistantConversationSaved {
                 conversation_id: record.id.clone(),
             });
         Ok(record.summary())
@@ -242,7 +242,7 @@ impl ConversationService {
         validate_conversation_id(id)?;
         self.conversations.delete(id)?;
         self.events
-            .publish(DomainEvent::AssistantConversationDeleted {
+            .publish(&DomainEvent::AssistantConversationDeleted {
                 conversation_id: id.to_string(),
             });
         Ok(())
@@ -251,7 +251,7 @@ impl ConversationService {
     pub fn clear(&self) -> DomainResult<()> {
         self.conversations.clear()?;
         self.events
-            .publish(DomainEvent::AssistantConversationsCleared);
+            .publish(&DomainEvent::AssistantConversationsCleared);
         Ok(())
     }
 }

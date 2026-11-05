@@ -12,7 +12,7 @@ use rocket_audit::actor::AuditActor;
 use rocket_audit::publisher::SecurityAuditPublisher;
 use rocket_environment::{EnvironmentRepository, EnvironmentRepositoryFactory};
 use rocket_shared::error::{DomainError, DomainResult};
-use rocket_shared::events::{DomainEvent, EventPublisher};
+use rocket_shared::events::{EventPublisher, PublishedEvent};
 
 use crate::environment_service::EnvironmentService;
 
@@ -24,7 +24,7 @@ pub type GlobalEnvironmentRepoFactory =
 struct ForwardEvents(Arc<dyn EventPublisher>);
 
 impl EventPublisher for ForwardEvents {
-    fn publish(&self, event: DomainEvent) {
+    fn publish(&self, event: &dyn PublishedEvent) {
         self.0.publish(event);
     }
 }
@@ -93,6 +93,7 @@ mod tests {
     use crate::test_doubles::RecordingPublisher;
     use rocket_audit::publisher::NullSecurityAuditPublisher;
     use rocket_environment::Environment;
+    use rocket_shared::events::DomainEvent;
     use std::sync::Mutex;
 
     /// In-memory repository.

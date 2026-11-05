@@ -2174,11 +2174,12 @@ impl RequestExecutionService {
             self.send_collection_repo()
                 .save_settings(collection, &settings)
         })?;
-        self.events.publish(DomainEvent::CollectionVariableWritten {
-            collection: collection.to_string(),
-            key: key.to_string(),
-        });
-        self.events.publish(DomainEvent::ScriptVariableWritten {
+        self.events
+            .publish(&DomainEvent::CollectionVariableWritten {
+                collection: collection.to_string(),
+                key: key.to_string(),
+            });
+        self.events.publish(&DomainEvent::ScriptVariableWritten {
             scope: "collection".to_string(),
             environment: None,
             collection: Some(collection.to_string()),
@@ -2201,11 +2202,12 @@ impl RequestExecutionService {
         if !removed {
             return Ok(());
         }
-        self.events.publish(DomainEvent::CollectionVariableWritten {
-            collection: collection.to_string(),
-            key: key.to_string(),
-        });
-        self.events.publish(DomainEvent::ScriptVariableWritten {
+        self.events
+            .publish(&DomainEvent::CollectionVariableWritten {
+                collection: collection.to_string(),
+                key: key.to_string(),
+            });
+        self.events.publish(&DomainEvent::ScriptVariableWritten {
             scope: "collection".to_string(),
             environment: None,
             collection: Some(collection.to_string()),
@@ -2310,7 +2312,7 @@ impl RequestExecutionService {
                     &env,
                 );
                 for write in persist_writes.iter() {
-                    self.events.publish(DomainEvent::ScriptVariableWritten {
+                    self.events.publish(&DomainEvent::ScriptVariableWritten {
                         scope: "environment".to_string(),
                         environment: Some(env_name.to_string()),
                         collection: None,
@@ -2430,7 +2432,7 @@ impl RequestExecutionService {
                 if let Some(err) = result.error.take() {
                     let message =
                         script.attribute(phase, &crate::redaction::redact_secrets(&err, &secrets));
-                    self.events.publish(DomainEvent::ScriptError {
+                    self.events.publish(&DomainEvent::ScriptError {
                         request_name: request_name.to_string(),
                         phase: phase.to_string(),
                         message: message.clone(),
@@ -2445,7 +2447,7 @@ impl RequestExecutionService {
                     phase,
                     &crate::redaction::redact_secrets(&e.to_string(), &secrets),
                 );
-                self.events.publish(DomainEvent::ScriptError {
+                self.events.publish(&DomainEvent::ScriptError {
                     request_name: request_name.to_string(),
                     phase: phase.to_string(),
                     message: message.clone(),
@@ -2529,7 +2531,7 @@ impl RequestExecutionService {
             let result = match engine.execute(ctx).await {
                 Ok(r) => r,
                 Err(e) => {
-                    self.events.publish(DomainEvent::ScriptError {
+                    self.events.publish(&DomainEvent::ScriptError {
                         request_name: request_name.to_string(),
                         phase: format!("action:{phase_str}"),
                         message: crate::redaction::redact_secrets(
@@ -2541,7 +2543,7 @@ impl RequestExecutionService {
                 }
             };
             if let Some(err) = result.error {
-                self.events.publish(DomainEvent::ScriptError {
+                self.events.publish(&DomainEvent::ScriptError {
                     request_name: request_name.to_string(),
                     phase: format!("action:{phase_str}"),
                     message: crate::redaction::redact_secrets(&err, &var_ctx.secret_values),
@@ -3448,7 +3450,7 @@ impl RequestExecutionService {
             })
             .collect();
         // The live event is capped; the request's output keeps every entry.
-        self.events.publish(DomainEvent::ConsoleOutput {
+        self.events.publish(&DomainEvent::ConsoleOutput {
             request_name: request_name.to_string(),
             entries: crate::event_caps::cap_console_entries(entries),
         });
@@ -3511,7 +3513,7 @@ impl RequestExecutionService {
                 })
                 .collect();
             // The live event is capped; the request's output keeps every result.
-            self.events.publish(DomainEvent::TestsCompleted {
+            self.events.publish(&DomainEvent::TestsCompleted {
                 request_name: request_name.clone(),
                 results: crate::event_caps::cap_test_results(results),
             });
@@ -3541,7 +3543,7 @@ impl RequestExecutionService {
         };
 
         // Publish domain event.
-        self.events.publish(DomainEvent::RequestExecuted {
+        self.events.publish(&DomainEvent::RequestExecuted {
             method: input.method.to_string(),
             url: redacted_url,
             status: response.status,
@@ -4522,6 +4524,7 @@ fn absolutize_upload_paths(mut body: Body, base: Option<&std::path::Path>) -> Bo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rocket_shared::events::PublishedEvent;
 
     /// Sets a unique host variable to a fixed value and returns the value. It is
     /// never removed, so parallel tests cannot race on it.
@@ -5941,7 +5944,7 @@ mod tests {
 
         struct SharedPublisher(Arc<RecordingPublisher>);
         impl rocket_shared::events::EventPublisher for SharedPublisher {
-            fn publish(&self, event: DomainEvent) {
+            fn publish(&self, event: &dyn PublishedEvent) {
                 self.0.publish(event);
             }
         }
@@ -6004,7 +6007,7 @@ mod tests {
 
         struct SharedPublisher(Arc<RecordingPublisher>);
         impl rocket_shared::events::EventPublisher for SharedPublisher {
-            fn publish(&self, event: DomainEvent) {
+            fn publish(&self, event: &dyn PublishedEvent) {
                 self.0.publish(event);
             }
         }
@@ -7650,7 +7653,7 @@ mod tests {
 
         struct SharedPublisher(Arc<RecordingPublisher>);
         impl rocket_shared::events::EventPublisher for SharedPublisher {
-            fn publish(&self, event: DomainEvent) {
+            fn publish(&self, event: &dyn PublishedEvent) {
                 self.0.publish(event);
             }
         }
@@ -8028,8 +8031,11 @@ mod tests {
         events: Mutex<Vec<DomainEvent>>,
     }
     impl rocket_shared::events::EventPublisher for RecordingPublisher {
-        fn publish(&self, event: DomainEvent) {
-            self.events.lock().expect("lock").push(event);
+        fn publish(&self, event: &dyn PublishedEvent) {
+            let Some(event) = event.downcast_ref::<DomainEvent>() else {
+                return;
+            };
+            self.events.lock().expect("lock").push(event.clone());
         }
     }
 
@@ -8037,7 +8043,7 @@ mod tests {
     fn the_console_event_is_capped_but_the_entries_passed_in_are_not() {
         struct SharedPub(Arc<RecordingPublisher>);
         impl rocket_shared::events::EventPublisher for SharedPub {
-            fn publish(&self, event: DomainEvent) {
+            fn publish(&self, event: &dyn PublishedEvent) {
                 self.0.publish(event);
             }
         }
@@ -9855,7 +9861,7 @@ mod tests {
         });
         struct SharedPub(Arc<RecordingPublisher>);
         impl rocket_shared::events::EventPublisher for SharedPub {
-            fn publish(&self, event: DomainEvent) {
+            fn publish(&self, event: &dyn PublishedEvent) {
                 self.0.publish(event);
             }
         }
@@ -10028,7 +10034,7 @@ mod tests {
         });
         struct SharedPub(Arc<RecordingPublisher>);
         impl rocket_shared::events::EventPublisher for SharedPub {
-            fn publish(&self, event: DomainEvent) {
+            fn publish(&self, event: &dyn PublishedEvent) {
                 self.0.publish(event);
             }
         }
@@ -11928,7 +11934,7 @@ mod tests {
     fn service_recording_events() -> (RequestExecutionService, Arc<RecordingPublisher>) {
         struct SharedPub(Arc<RecordingPublisher>);
         impl rocket_shared::events::EventPublisher for SharedPub {
-            fn publish(&self, event: DomainEvent) {
+            fn publish(&self, event: &dyn PublishedEvent) {
                 self.0.publish(event);
             }
         }
@@ -13226,7 +13232,7 @@ mod tests {
     async fn run_leaky_script(as_err: bool) -> (ExecuteRequestOutput, Vec<String>) {
         struct SharedPub(Arc<RecordingPublisher>);
         impl rocket_shared::events::EventPublisher for SharedPub {
-            fn publish(&self, event: DomainEvent) {
+            fn publish(&self, event: &dyn PublishedEvent) {
                 self.0.publish(event);
             }
         }
@@ -14413,9 +14419,12 @@ mod tests {
     struct UrlRecorder(Arc<Mutex<Vec<String>>>);
 
     impl rocket_shared::events::EventPublisher for UrlRecorder {
-        fn publish(&self, event: DomainEvent) {
+        fn publish(&self, event: &dyn PublishedEvent) {
+            let Some(event) = event.downcast_ref::<DomainEvent>() else {
+                return;
+            };
             if let DomainEvent::RequestExecuted { url, .. } = event {
-                self.0.lock().expect("lock").push(url);
+                self.0.lock().expect("lock").push(url.clone());
             }
         }
     }

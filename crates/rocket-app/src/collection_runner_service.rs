@@ -247,7 +247,7 @@ impl CollectionRunnerService {
             set.insert(run_id.clone());
         }
 
-        self.events.publish(DomainEvent::RunnerStarted {
+        self.events.publish(&DomainEvent::RunnerStarted {
             run_id: run_id.clone(),
             collection: input.collection.clone(),
             folder_path: input.folder_path.clone(),
@@ -336,7 +336,7 @@ impl CollectionRunnerService {
         }
 
         let failed_count = steps.iter().filter(|s| s.is_failure()).count();
-        self.events.publish(DomainEvent::RunnerFinished {
+        self.events.publish(&DomainEvent::RunnerFinished {
             run_id: run_id.clone(),
             stopped_reason: stopped_reason.as_str().to_string(),
             step_count: steps.len(),
@@ -513,7 +513,7 @@ impl CollectionRunnerService {
     }
 
     fn publish_step(&self, run_id: &str, result: &RunStepResult) {
-        self.events.publish(DomainEvent::RunnerStepCompleted {
+        self.events.publish(&DomainEvent::RunnerStepCompleted {
             run_id: run_id.to_string(),
             index: result.index,
             item_name: result.item_name.clone(),
@@ -570,6 +570,7 @@ mod tests {
     };
     use rocket_collection::{Collection, Request};
     use rocket_scripting::ScriptResult;
+    use rocket_shared::events::PublishedEvent;
     use rocket_shared::types::HttpMethod;
     use std::sync::Arc;
 
@@ -1601,7 +1602,10 @@ mod tests {
     }
 
     impl EventPublisher for CancelAfterSteps {
-        fn publish(&self, event: DomainEvent) {
+        fn publish(&self, event: &dyn PublishedEvent) {
+            let Some(event) = event.downcast_ref::<DomainEvent>() else {
+                return;
+            };
             if let DomainEvent::RunnerStepCompleted { run_id, .. } = &event {
                 let mut seen = self.seen.lock().expect("lock");
                 *seen += 1;
@@ -1778,7 +1782,10 @@ mod tests {
     }
 
     impl EventPublisher for CancelViaRealMethod {
-        fn publish(&self, event: DomainEvent) {
+        fn publish(&self, event: &dyn PublishedEvent) {
+            let Some(event) = event.downcast_ref::<DomainEvent>() else {
+                return;
+            };
             if let DomainEvent::RunnerStepCompleted { run_id, .. } = &event {
                 let mut seen = self.seen.lock().expect("lock");
                 *seen += 1;
@@ -1793,7 +1800,7 @@ mod tests {
 
     struct SharedCancelViaRealMethod(Arc<CancelViaRealMethod>);
     impl EventPublisher for SharedCancelViaRealMethod {
-        fn publish(&self, event: DomainEvent) {
+        fn publish(&self, event: &dyn PublishedEvent) {
             self.0.publish(event);
         }
     }
