@@ -4,10 +4,10 @@
 //! trail — see docs/superpowers/specs/2026-09-16-env-var-write-audit-spec.md §3.2.
 
 use rocket_audit::{actor::AuditActor, event::AuditEventKind, publisher::SecurityAuditPublisher};
-use rocket_environment::Environment;
-use rocket_shared::events::{DomainEvent, EventPublisher};
+use rocket_environment::{Environment, EnvironmentEvent};
+use rocket_shared::events::EventPublisher;
 
-/// Publishes `DomainEvent::EnvironmentSaved` unconditionally, then one
+/// Publishes `EnvironmentEvent::EnvironmentSaved` unconditionally, then one
 /// `AuditEventKind::SecretVariableWritten` per secret variable in `after` whose
 /// value changed (or is new) relative to `before`. Non-secret variables and
 /// empty-valued secrets never emit the audit event.
@@ -19,7 +19,7 @@ pub fn publish_env_write_events(
     before: &Environment,
     after: &Environment,
 ) {
-    events.publish(&DomainEvent::EnvironmentSaved {
+    events.publish(&EnvironmentEvent::EnvironmentSaved {
         name: env_name.to_string(),
     });
 
@@ -54,13 +54,13 @@ mod tests {
     use std::sync::Mutex;
 
     struct RecordingPublisher {
-        events: Mutex<Vec<DomainEvent>>,
+        events: Mutex<Vec<EnvironmentEvent>>,
     }
     impl EventPublisher for RecordingPublisher {
         fn publish(&self, event: &dyn PublishedEvent) {
-            let Some(event) = event.downcast_ref::<DomainEvent>() else {
+            let Some(event) = event.downcast_ref::<EnvironmentEvent>() else {
                 panic!(
-                    "recorder got a non-DomainEvent on channel {}",
+                    "recorder got a non-EnvironmentEvent on channel {}",
                     event.channel()
                 );
             };
@@ -102,7 +102,7 @@ mod tests {
         let published = events.events.lock().expect("lock");
         assert!(published
             .iter()
-            .any(|e| matches!(e, DomainEvent::EnvironmentSaved { name } if name == "prod")));
+            .any(|e| matches!(e, EnvironmentEvent::EnvironmentSaved { name } if name == "prod")));
     }
 
     #[test]

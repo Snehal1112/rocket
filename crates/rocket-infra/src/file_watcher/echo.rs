@@ -162,7 +162,8 @@ mod tests {
             event_type: FileChangeKind::Modify,
             collection: Some("api".into()),
         });
-        writes.record(&DomainEvent::EnvironmentSaved { name: "api".into() });
+        writes
+            .record(&rocket_environment::EnvironmentEvent::EnvironmentSaved { name: "api".into() });
         writes.record(&DomainEvent::GitStatusChanged {
             collection: "api".into(),
         });

@@ -6,6 +6,7 @@ pub mod context;
 pub mod dot_env;
 pub mod dynamic_vars;
 pub mod environment;
+pub mod events;
 pub mod external_secret;
 pub mod flatten;
 mod invalid;
@@ -27,6 +28,7 @@ pub use dot_env::{
     DotEnvValues,
 };
 pub use environment::{Environment, Extensions};
+pub use events::EnvironmentEvent;
 pub use external_secret::{ExternalSecretBinding, ExternalSecretRef};
 pub use flatten::{
     find_extends_cycle, flatten_environment, flatten_with_repo, FlatBinding, FlatCertificate,

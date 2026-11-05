@@ -1,8 +1,10 @@
 use rocket_audit::actor::AuditActor;
 use rocket_audit::publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher};
-use rocket_environment::{Environment, EnvironmentRepository, ExternalSecretBinding};
+use rocket_environment::{
+    Environment, EnvironmentEvent, EnvironmentRepository, ExternalSecretBinding,
+};
 use rocket_shared::error::DomainResult;
-use rocket_shared::events::{DomainEvent, EventPublisher};
+use rocket_shared::events::EventPublisher;
 use std::sync::Arc;
 
 pub struct EnvironmentService {
@@ -112,7 +114,7 @@ impl EnvironmentService {
 
     pub fn delete(&self, name: &str) -> DomainResult<()> {
         self.repo.delete(name)?;
-        self.events.publish(&DomainEvent::EnvironmentDeleted {
+        self.events.publish(&EnvironmentEvent::EnvironmentDeleted {
             name: name.to_string(),
         });
         Ok(())
@@ -293,11 +295,12 @@ mod tests {
         let (svc, rec) = recording_service();
         svc.save(&Environment::new("prod"))?;
         assert!(
-            rec.events()
-                .iter()
-                .any(|e| matches!(e, DomainEvent::EnvironmentSaved { name } if name == "prod")),
+            rec.others().contains(&(
+                "environment-changed".to_string(),
+                serde_json::json!({"type": "environmentSaved", "name": "prod"})
+            )),
             "got {:?}",
-            rec.events()
+            rec.others()
         );
         Ok(())
     }
@@ -308,11 +311,12 @@ mod tests {
         svc.save(&Environment::new("temp"))?;
         svc.delete("temp")?;
         assert!(
-            rec.events()
-                .iter()
-                .any(|e| matches!(e, DomainEvent::EnvironmentDeleted { name } if name == "temp")),
+            rec.others().contains(&(
+                "environment-changed".to_string(),
+                serde_json::json!({"type": "environmentDeleted", "name": "temp"})
+            )),
             "got {:?}",
-            rec.events()
+            rec.others()
         );
         Ok(())
     }

@@ -371,14 +371,6 @@ pub enum DomainEvent {
         folder_path: String,
     },
 
-    // Environment events
-    EnvironmentSaved {
-        name: String,
-    },
-    EnvironmentDeleted {
-        name: String,
-    },
-
     // Workspace events
     WorkspaceCreated {
         id: String,

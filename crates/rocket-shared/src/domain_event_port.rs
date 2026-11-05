@@ -58,9 +58,6 @@ impl PublishedEvent for DomainEvent {
             | DomainEvent::CollectionVariableWritten { .. } => "collection-changed",
             DomainEvent::FlowRequestPathsRewritten { .. } => "flow-request-paths-rewritten",
             DomainEvent::CollectionTrustChanged { .. } => "collection-trust-changed",
-            DomainEvent::EnvironmentSaved { .. } | DomainEvent::EnvironmentDeleted { .. } => {
-                "environment-changed"
-            }
             DomainEvent::WorkspaceCreated { .. } => "workspace-created",
             DomainEvent::WorkspaceSwitched { .. } => "workspace-switched",
             DomainEvent::WorkspaceRenamed { .. } => "workspace-renamed",
@@ -205,8 +202,6 @@ mod tests {
                 collection: s(),
                 folder_path: s(),
             },
-            DomainEvent::EnvironmentSaved { name: s() },
-            DomainEvent::EnvironmentDeleted { name: s() },
             DomainEvent::WorkspaceCreated {
                 id: s(),
                 name: s(),
@@ -484,7 +479,7 @@ mod tests {
     }
 
     /// The channel of each variant, keyed by its JSON  tag.
-    const CHANNELS: [(&str, &str); 74] = [
+    const CHANNELS: [(&str, &str); 72] = [
         ("fileChanged", "collection-changed"),
         ("requestExecuted", "request-executed"),
         ("fileWatcherFailed", "file-watcher-failed"),
@@ -540,8 +535,6 @@ mod tests {
         ("requestVariablesSaved", "collection-changed"),
         ("collectionVariableWritten", "collection-changed"),
         ("collectionTrustChanged", "collection-trust-changed"),
-        ("environmentSaved", "environment-changed"),
-        ("environmentDeleted", "environment-changed"),
         ("workspaceCreated", "workspace-created"),
         ("workspaceSwitched", "workspace-switched"),
         ("workspaceRenamed", "workspace-renamed"),
@@ -578,9 +571,9 @@ mod tests {
     #[test]
     fn one_of_each_covers_every_variant() {
         let events = one_of_each();
-        assert_eq!(events.len(), 74);
+        assert_eq!(events.len(), 72);
         let tags: BTreeSet<String> = events.iter().map(tag).collect();
-        assert_eq!(tags.len(), 74);
+        assert_eq!(tags.len(), 72);
     }
 
     #[test]
@@ -642,9 +635,6 @@ mod tests {
             collection: Some("api".into()),
         };
         assert!(changed.written_collections().is_empty());
-        assert!(DomainEvent::EnvironmentSaved { name: "e".into() }
-            .written_collections()
-            .is_empty());
         assert!(DomainEvent::GitStatusChanged {
             collection: "api".into()
         }

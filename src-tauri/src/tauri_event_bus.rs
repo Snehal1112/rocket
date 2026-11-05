@@ -143,6 +143,19 @@ mod tests {
     }
 
     #[test]
+    fn emit_channels_is_one_channel_for_environment_events() {
+        use rocket_environment::EnvironmentEvent;
+        assert_eq!(
+            emit_channels(&EnvironmentEvent::EnvironmentSaved { name: "dev".into() }),
+            vec!["environment-changed"]
+        );
+        assert_eq!(
+            emit_channels(&EnvironmentEvent::EnvironmentDeleted { name: "dev".into() }),
+            vec!["environment-changed"]
+        );
+    }
+
+    #[test]
     fn assistant_conversation_events_have_their_own_channels() {
         let id = || "c1".to_string();
         assert_eq!(

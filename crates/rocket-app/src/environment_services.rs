@@ -93,7 +93,6 @@ mod tests {
     use crate::test_doubles::RecordingPublisher;
     use rocket_audit::publisher::NullSecurityAuditPublisher;
     use rocket_environment::Environment;
-    use rocket_shared::events::DomainEvent;
     use std::sync::Mutex;
 
     /// In-memory repository.
@@ -213,11 +212,15 @@ mod tests {
             .expect("save");
 
         let names: Vec<String> = events
-            .events()
+            .others()
             .into_iter()
-            .filter_map(|e| match e {
-                DomainEvent::EnvironmentSaved { name } => Some(name),
-                _ => None,
+            .filter(|(channel, _)| channel == "environment-changed")
+            .filter_map(|(_, json)| {
+                if json["type"] == "environmentSaved" {
+                    json["name"].as_str().map(str::to_string)
+                } else {
+                    None
+                }
             })
             .collect();
         assert_eq!(names, vec!["dev".to_string(), "shared".to_string()]);

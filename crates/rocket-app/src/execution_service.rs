@@ -2236,7 +2236,7 @@ impl RequestExecutionService {
     /// within one script still finds the original metadata. A script can never
     /// promote a variable to `secret: true`; only the user can do that via the
     /// environment editor UI. On a successful save, publishes the same
-    /// `DomainEvent::EnvironmentSaved` / `AuditEventKind::SecretVariableWritten`
+    /// `EnvironmentEvent::EnvironmentSaved` / `AuditEventKind::SecretVariableWritten`
     /// audit trail a manual save produces (via `env_audit::publish_env_write_events`),
     /// plus one `DomainEvent::ScriptVariableWritten` per write actually applied.
     fn apply_env_writes(
@@ -5959,6 +5959,7 @@ mod tests {
 
         let publisher = Arc::new(RecordingPublisher {
             events: Mutex::new(vec![]),
+            env_events: Mutex::new(vec![]),
         });
         let pub_arc = Arc::clone(&publisher);
         let svc = RequestExecutionService::new(
@@ -6014,6 +6015,7 @@ mod tests {
 
         let publisher = Arc::new(RecordingPublisher {
             events: Mutex::new(vec![]),
+            env_events: Mutex::new(vec![]),
         });
         let pub_arc = Arc::clone(&publisher);
         let svc = RequestExecutionService::new(
@@ -7649,6 +7651,7 @@ mod tests {
 
         let publisher = Arc::new(RecordingPublisher {
             events: Mutex::new(vec![]),
+            env_events: Mutex::new(vec![]),
         });
 
         struct SharedPublisher(Arc<RecordingPublisher>);
@@ -8029,12 +8032,17 @@ mod tests {
 
     struct RecordingPublisher {
         events: Mutex<Vec<DomainEvent>>,
+        env_events: Mutex<Vec<rocket_environment::EnvironmentEvent>>,
     }
     impl rocket_shared::events::EventPublisher for RecordingPublisher {
         fn publish(&self, event: &dyn PublishedEvent) {
+            if let Some(event) = event.downcast_ref::<rocket_environment::EnvironmentEvent>() {
+                self.env_events.lock().expect("lock").push(event.clone());
+                return;
+            }
             let Some(event) = event.downcast_ref::<DomainEvent>() else {
                 panic!(
-                    "recorder got a non-DomainEvent on channel {}",
+                    "recorder got an unknown event on channel {}",
                     event.channel()
                 );
             };
@@ -8052,6 +8060,7 @@ mod tests {
         }
         let publisher = Arc::new(RecordingPublisher {
             events: Mutex::new(vec![]),
+            env_events: Mutex::new(vec![]),
         });
         let svc = RequestExecutionService::new(
             Box::new(MockEnvRepo::empty()),
@@ -9861,6 +9870,7 @@ mod tests {
 
         let event_publisher = Arc::new(RecordingPublisher {
             events: Mutex::new(vec![]),
+            env_events: Mutex::new(vec![]),
         });
         struct SharedPub(Arc<RecordingPublisher>);
         impl rocket_shared::events::EventPublisher for SharedPub {
@@ -9892,12 +9902,14 @@ mod tests {
         svc.execute(input).await.expect("execute failed");
 
         let published = event_publisher.events.lock().expect("lock");
+        let env_events = event_publisher.env_events.lock().expect("lock");
         assert!(
-            published
-                .iter()
-                .any(|e| matches!(e, DomainEvent::EnvironmentSaved { name } if name == "prod")),
+            env_events.iter().any(|e| matches!(
+                e,
+                rocket_environment::EnvironmentEvent::EnvironmentSaved { name } if name == "prod"
+            )),
             "expected EnvironmentSaved, got {:?}",
-            *published
+            *env_events
         );
         assert!(
             published.iter().any(|e| matches!(
@@ -10034,6 +10046,7 @@ mod tests {
 
         let event_publisher = Arc::new(RecordingPublisher {
             events: Mutex::new(vec![]),
+            env_events: Mutex::new(vec![]),
         });
         struct SharedPub(Arc<RecordingPublisher>);
         impl rocket_shared::events::EventPublisher for SharedPub {
@@ -11943,6 +11956,7 @@ mod tests {
         }
         let publisher = Arc::new(RecordingPublisher {
             events: Mutex::new(vec![]),
+            env_events: Mutex::new(vec![]),
         });
         let svc = RequestExecutionService::new(
             Box::new(MockEnvRepo::empty()),
@@ -13243,6 +13257,7 @@ mod tests {
         env.set_variable(Variable::secret("API_KEY", "sk-live-abcdef123"));
         let publisher = Arc::new(RecordingPublisher {
             events: Mutex::new(vec![]),
+            env_events: Mutex::new(vec![]),
         });
         let svc = RequestExecutionService::new(
             Box::new(MockEnvRepo::with_env(env)),
