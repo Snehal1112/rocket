@@ -68,7 +68,6 @@ impl PublishedEvent for DomainEvent {
             DomainEvent::EnvironmentSaved { .. } | DomainEvent::EnvironmentDeleted { .. } => {
                 "environment-changed"
             }
-            DomainEvent::HistoryCleared => "history-changed",
             DomainEvent::WorkspaceCreated { .. } => "workspace-created",
             DomainEvent::WorkspaceSwitched { .. } => "workspace-switched",
             DomainEvent::WorkspaceRenamed { .. } => "workspace-renamed",
@@ -479,7 +478,6 @@ mod tests {
                 collection: None,
             },
             DomainEvent::FileWatcherFailed { message: s() },
-            DomainEvent::HistoryCleared,
             DomainEvent::GitStatusChanged { collection: s() },
             DomainEvent::GitCommit {
                 collection: s(),
@@ -547,7 +545,7 @@ mod tests {
     }
 
     /// The channel of each variant, keyed by its JSON  tag.
-    const CHANNELS: [(&str, &str); 81] = [
+    const CHANNELS: [(&str, &str); 80] = [
         ("fileChanged", "collection-changed"),
         ("requestExecuted", "request-executed"),
         ("fileWatcherFailed", "file-watcher-failed"),
@@ -611,7 +609,6 @@ mod tests {
         ("collectionTrustChanged", "collection-trust-changed"),
         ("environmentSaved", "environment-changed"),
         ("environmentDeleted", "environment-changed"),
-        ("historyCleared", "history-changed"),
         ("workspaceCreated", "workspace-created"),
         ("workspaceSwitched", "workspace-switched"),
         ("workspaceRenamed", "workspace-renamed"),
@@ -648,9 +645,9 @@ mod tests {
     #[test]
     fn one_of_each_covers_every_variant() {
         let events = one_of_each();
-        assert_eq!(events.len(), 81);
+        assert_eq!(events.len(), 80);
         let tags: BTreeSet<String> = events.iter().map(tag).collect();
-        assert_eq!(tags.len(), 81);
+        assert_eq!(tags.len(), 80);
     }
 
     #[test]

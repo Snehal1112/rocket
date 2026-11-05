@@ -1666,25 +1666,36 @@ impl ScriptEngine for SharedEngine {
 /// Publisher that records every event it is handed.
 pub struct RecordingPublisher {
     events: Mutex<Vec<DomainEvent>>,
+    others: Mutex<Vec<(String, serde_json::Value)>>,
 }
 
 impl RecordingPublisher {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             events: Mutex::new(Vec::new()),
+            others: Mutex::new(Vec::new()),
         })
     }
     pub fn events(&self) -> Vec<DomainEvent> {
         self.events.lock().expect("lock").clone()
     }
+    /// The channel and JSON of every published event that is not a `DomainEvent`.
+    pub fn others(&self) -> Vec<(String, serde_json::Value)> {
+        self.others.lock().expect("lock").clone()
+    }
 }
 
 impl EventPublisher for RecordingPublisher {
     fn publish(&self, event: &dyn PublishedEvent) {
-        let Some(event) = event.downcast_ref::<DomainEvent>() else {
+        let Some(domain) = event.downcast_ref::<DomainEvent>() else {
+            let json = event.to_json().expect("event serializes");
+            self.others
+                .lock()
+                .expect("lock")
+                .push((event.channel().to_string(), json));
             return;
         };
-        self.events.lock().expect("lock").push(event.clone());
+        self.events.lock().expect("lock").push(domain.clone());
     }
 }
 
@@ -2174,6 +2185,20 @@ impl CallbackListener for Arc<FakeCallbackListener> {
 mod tests {
     use super::*;
     use rocket_shared::types::HttpMethod;
+
+    #[test]
+    fn recording_publisher_keeps_events_of_other_types() {
+        let publisher = RecordingPublisher::new();
+        publisher.publish(&rocket_history::HistoryEvent::HistoryCleared);
+        assert!(publisher.events().is_empty());
+        assert_eq!(
+            publisher.others(),
+            [(
+                "history-changed".to_string(),
+                serde_json::json!({"type": "historyCleared"})
+            )]
+        );
+    }
 
     #[tokio::test]
     async fn recording_executor_reports_registered_status_and_records_urls() {

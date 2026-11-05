@@ -770,9 +770,6 @@ pub enum DomainEvent {
         message: String,
     },
 
-    // History events
-    HistoryCleared,
-
     // Git events
     GitStatusChanged {
         collection: String,
@@ -936,7 +933,7 @@ mod tests {
     #[test]
     fn null_publisher_does_not_panic() {
         let pub_ = NullEventPublisher;
-        pub_.publish(&DomainEvent::HistoryCleared);
+        pub_.publish(&DomainEvent::AssistantConversationsCleared);
     }
 
     #[test]
@@ -2374,7 +2371,7 @@ mod tests {
             },
             &["type", "collection", "branch"],
         );
-        assert_keys(&DomainEvent::HistoryCleared, &["type"]);
+        assert_keys(&DomainEvent::AssistantConversationsCleared, &["type"]);
     }
 
     #[test]
@@ -2515,7 +2512,7 @@ mod tests {
     #[test]
     fn wire_contract_envelope_keys_are_free() {
         for event in [
-            DomainEvent::HistoryCleared,
+            DomainEvent::AssistantConversationsCleared,
             DomainEvent::FileWatcherFailed {
                 message: "m".into(),
             },

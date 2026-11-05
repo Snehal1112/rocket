@@ -137,7 +137,7 @@ mod tests {
         };
         assert_eq!(emit_channels(&saved), vec![saved.channel()]);
         assert_eq!(
-            emit_channels(&DomainEvent::HistoryCleared),
+            emit_channels(&rocket_history::HistoryEvent::HistoryCleared),
             vec!["history-changed"]
         );
     }
@@ -161,7 +161,6 @@ mod tests {
             DomainEvent::AssistantConversationsCleared.channel(),
             "assistant-conversations-cleared"
         );
-        assert_eq!(DomainEvent::HistoryCleared.channel(), "history-changed");
     }
 
     #[test]
@@ -272,8 +271,8 @@ mod tests {
 
     #[test]
     fn envelope_keeps_unit_variants_as_objects() {
-        let value = envelope(&DomainEvent::HistoryCleared, 1, 2).expect("envelope");
-        assert_eq!(value["type"], "historyCleared");
+        let value = envelope(&DomainEvent::AssistantConversationsCleared, 1, 2).expect("envelope");
+        assert_eq!(value["type"], "assistantConversationsCleared");
         assert_eq!(value["seq"], 1);
     }
 

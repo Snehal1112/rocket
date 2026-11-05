@@ -1,6 +1,6 @@
-use rocket_history::{HistoryEntry, HistoryFilter, HistoryRepository};
+use rocket_history::{HistoryEntry, HistoryEvent, HistoryFilter, HistoryRepository};
 use rocket_shared::error::DomainResult;
-use rocket_shared::events::{DomainEvent, EventPublisher};
+use rocket_shared::events::EventPublisher;
 
 pub struct HistoryService {
     repo: Box<dyn HistoryRepository>,
@@ -22,7 +22,7 @@ impl HistoryService {
 
     pub fn clear(&self) -> DomainResult<()> {
         self.repo.clear()?;
-        self.events.publish(&DomainEvent::HistoryCleared);
+        self.events.publish(&HistoryEvent::HistoryCleared);
         Ok(())
     }
 
@@ -146,10 +146,14 @@ mod tests {
             Box::new(SharedPublisher(events.clone())),
         );
         svc.clear().expect("clear");
-        assert!(matches!(
-            events.events().as_slice(),
-            [DomainEvent::HistoryCleared]
-        ));
+        assert!(events.events().is_empty());
+        assert_eq!(
+            events.others(),
+            [(
+                "history-changed".to_string(),
+                serde_json::json!({"type": "historyCleared"})
+            )]
+        );
     }
 
     #[test]
