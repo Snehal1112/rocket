@@ -9,8 +9,8 @@ Spec: `docs/superpowers/specs/2026-11-05-domain-event-split-design.md`. One plan
 | 2 | `EnvironmentEvent`, `WorkspaceEvent` | `2026-11-05-ddd-phase7-events-plan-2-environment-workspace.md` | done, merged |
 | 3 | `FlowEvent`, `GitEvent` | `2026-11-05-ddd-phase7-events-plan-3-flow-git.md` | done, merged |
 | 4 | `AcpEvent` (+ `acp.rs` types) | `2026-11-05-ddd-phase7-events-plan-4-acp.md` | done, merged |
-| 5 | `OpenApiSyncEvent`, `ExecutionEvent` | `2026-11-05-ddd-phase7-events-plan-5-openapi-execution.md` | done, unmerged |
-| 6 | `CollectionEvent`, `RecentWrites`, file watcher | | not written |
-| 7 | Delete `DomainEvent` and the temporary `domain_event_port.rs` | | not written |
+| 5 | `OpenApiSyncEvent`, `ExecutionEvent` | `2026-11-05-ddd-phase7-events-plan-5-openapi-execution.md` | done, merged |
+| 6 | `CollectionEvent`, `RecentWrites`, file watcher; deletes the then-empty `DomainEvent` and `domain_event_port.rs` | `2026-11-05-ddd-phase7-events-plan-6-collection.md` | written |
+| 7 | Move the helper types left in `rocket-shared/src/events.rs` (Flow DTOs, WebSocket and GraphQL payload enums) to their contexts; final docs | | not written |
 
 A context with many call sites may take two plans.
