@@ -1,5 +1,6 @@
 use crate::error::{ImportError, ImportResult};
 use crate::files::ImportFiles;
+use crate::limits::{read_text_capped, MAX_IMPORT_FILE_BYTES};
 use serde::Deserialize;
 use std::path::Path;
 
@@ -27,7 +28,7 @@ pub(crate) fn parse_postman_environment(
     files: &dyn ImportFiles,
     path: &Path,
 ) -> ImportResult<PostmanEnvironment> {
-    let content = files.read_to_string(path).map_err(ImportError::IoError)?;
+    let content = read_text_capped(files, path, MAX_IMPORT_FILE_BYTES)?;
 
     serde_json::from_str(&content).map_err(|e| ImportError::JsonParseError {
         path: path.to_path_buf(),
@@ -40,6 +41,22 @@ mod tests {
     use super::*;
     use crate::importer::test_files::StdFiles;
     use std::path::PathBuf;
+
+    #[test]
+    fn parse_postman_environment_refuses_an_oversized_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("big.json");
+        let file = std::fs::File::create(&path).expect("create");
+        file.set_len(crate::limits::MAX_IMPORT_FILE_BYTES + 1)
+            .expect("set_len");
+
+        let result = parse_postman_environment(&StdFiles, &path);
+
+        assert!(matches!(
+            result,
+            Err(ImportError::IoError(ref e)) if e.kind() == std::io::ErrorKind::InvalidInput
+        ));
+    }
 
     fn fixture(name: &str) -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))

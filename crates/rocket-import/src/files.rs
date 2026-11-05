@@ -36,6 +36,7 @@ pub trait ImportFiles: Send + Sync {
     fn kind(&self, path: &Path) -> io::Result<EntryKind>;
     fn create_dir_all(&self, dir: &Path) -> io::Result<()>;
     fn copy(&self, src: &Path, dest: &Path) -> io::Result<()>;
+    /// Reads the whole file with no size cap. Imported files go through `read_text_capped`.
     fn read_to_string(&self, path: &Path) -> io::Result<String>;
     fn write(&self, path: &Path, text: &str) -> io::Result<()>;
     /// The length of the file at `path`, following symlinks. `None` when it is not a regular
