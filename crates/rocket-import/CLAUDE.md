@@ -8,6 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 All file access in the importer goes through the `ImportFiles` port (`files.rs`, implemented by `rocket_infra::FsImportFiles` and passed to `ImportService::new`): the writers, the directory scanners, the Bruno, Postman, WSDL and OpenAPI file readers, and the zip extractor (`open_read`, `temp_dir` and `write_stream`). Production code has no `std::fs` call and no path predicate (`exists()`, `is_dir()`, `is_file()`, `canonicalize()`): detection (`detect_collection`, `detect_workspace`) and `rebase_proto_path` use `ImportFiles::kind` and `ImportFiles::canonicalize` (D-51 in `docs/roadmaps/ddd-roadmap.md`). Unit tests in `importer.rs` use a local `std::fs` port (`test_files::StdFiles`), because `rocket-infra` implements the port of the non-test build of this crate.
 
+`limits.rs` caps what an import reads: a text file (`.bru`, `.yml`, Postman and environment JSON) at 32 MiB (`MAX_IMPORT_FILE_BYTES`), a zip archive at 20,000 entries (`MAX_ZIP_ENTRIES`) and 512 MiB of expanded bytes (`MAX_ZIP_TOTAL_BYTES`). Symlinks are never followed in walks or copies; they are skipped and reported.
+
 ## Commands
 
 ```bash
@@ -69,7 +71,7 @@ service.import_workspace(path, create_new, target_id) -> ImportResult<ImportRepo
 
 ### Key Design Rules
 
-- **No raw YAML writes.** All disk I/O goes through `FsCollectionRepo` and `FsEnvironmentRepo` from `rocket-infra`. This ensures the written files conform to the OpenCollection format.
+- **No raw YAML writes.** Collection and environment writes go through the `CollectionRepository` and `EnvironmentRepository` traits (the callers inject `FsCollectionRepo` and `FsEnvironmentRepo` from `rocket-infra`), and all other file access goes through the `ImportFiles` port. This ensures the written files conform to the OpenCollection format.
 - **Unified AST.** Both `.bru` (DSL) and `.yml` (YAML) Bruno formats produce a `BruDocument`. Converters only see `BruDocument`, never the raw source format.
 - **Non-fatal skips.** Unsupported auth types (e.g. OAuth2) produce a `SkipReason::UnsupportedAuthType` entry in the report but still import the request with `auth: None`. Unsupported request types produce `SkipReason::UnsupportedRequestType` and skip the entire request. A `.bru` file whose `meta.type` is neither `http` nor a type that imports is skipped too, instead of becoming an empty GET. WebSocket requests (`.bru` `meta.type: ws` with `ws {}` and `body:ws {}`, or YAML `ws:`/`websocket:`) import as `Converted::WebSocket` and are saved with `save_websocket_request`. gRPC requests (`.bru` `meta.type: grpc` with `grpc {}`, `metadata {}` and `body:grpc {}`, or the YAML `grpc:` block) import as `Converted::Grpc` and are saved with `save_grpc_request`. `.proto` files are copied next to the requests in both import paths, and a gRPC proto path is rebased to the collection root when the file can be found. Shared `.js` files are copied verbatim to the same relative path in both import paths (via `copy_support_file`), so scripts' `require('./shared-scripts/x')` keeps resolving; they are not counted as requests, symlinks are skipped and reported, and `node_modules` directories are never walked.
 - **Name conflict resolution.** If a collection with the target name already exists, the importer appends `-1`, `-2`, etc. until a free name is found. Checked by directory existence, not by querying the repo.
@@ -269,11 +271,11 @@ import_wsdl(path: String, target_workspace_id: String) -> Result<ImportReport, S
 - `rocket-collection` — `Request`, `CollectionRepository`, `CollectionVariable`
 - `rocket-environment` — `Environment`, `Variable`, `EnvironmentRepository`
 - `rocket-workspace` — workspace types
-- `rocket-infra` — `FsCollectionRepo`, `FsEnvironmentRepo` (concrete I/O)
+- `rocket-infra` (dev only) — `FsCollectionRepo`, `FsEnvironmentRepo` and `FsImportFiles` for integration tests
 - `serde` / `serde_yaml` — YAML deserialization for `.yml` format
 - `roxmltree` — WSDL and XSD XML parsing
 - `thiserror` — `ImportError` derive
-- `tempfile` (dev) — integration test fixtures
+- `tempfile` (dev only) — integration test fixtures
 
 ### Non-Obvious Gotchas
 
