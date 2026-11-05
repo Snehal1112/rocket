@@ -21,10 +21,10 @@ pub(crate) enum BrunoFormat {
 }
 
 /// Returns the Bruno format if `path` is a workspace root, or `None`.
-pub(crate) fn detect_workspace(path: &Path) -> Option<BrunoFormat> {
-    if path.join("workspace.yml").exists() {
+pub(crate) fn detect_workspace(files: &dyn ImportFiles, path: &Path) -> Option<BrunoFormat> {
+    if files.kind(&path.join("workspace.yml")).is_ok() {
         Some(BrunoFormat::Modern)
-    } else if path.join("bruno.json").exists() {
+    } else if files.kind(&path.join("bruno.json")).is_ok() {
         Some(BrunoFormat::Legacy)
     } else {
         None
@@ -32,10 +32,10 @@ pub(crate) fn detect_workspace(path: &Path) -> Option<BrunoFormat> {
 }
 
 /// Returns the Bruno format if `path` is a collection root, or `None`.
-pub(crate) fn detect_collection(path: &Path) -> Option<BrunoFormat> {
-    if path.join("opencollection.yml").exists() {
+pub(crate) fn detect_collection(files: &dyn ImportFiles, path: &Path) -> Option<BrunoFormat> {
+    if files.kind(&path.join("opencollection.yml")).is_ok() {
         Some(BrunoFormat::Modern)
-    } else if path.join("bruno.json").exists() {
+    } else if files.kind(&path.join("bruno.json")).is_ok() {
         Some(BrunoFormat::Legacy)
     } else {
         None
@@ -123,7 +123,7 @@ impl ImportService {
         workspace_id: &str,
         name_hint: Option<&str>,
     ) -> ImportResult<ImportReport> {
-        match detect_collection(path) {
+        match detect_collection(&*self.files, path) {
             None => Err(ImportError::NotABrunoDirectory(path.to_path_buf())),
             Some(BrunoFormat::Modern) => {
                 self.import_modern_collection(path, workspace_id, name_hint)
@@ -194,7 +194,7 @@ impl ImportService {
         target_workspace_id: Option<&str>,
         name_hint: Option<&str>,
     ) -> ImportResult<ImportReport> {
-        if detect_workspace(path).is_none() {
+        if detect_workspace(&*self.files, path).is_none() {
             return Err(ImportError::NotABrunoDirectory(path.to_path_buf()));
         }
 
@@ -224,7 +224,7 @@ impl ImportService {
                 combined.skipped.push(symlink_skip(&p));
                 continue;
             }
-            if entry.kind == EntryKind::Dir && detect_collection(&p).is_some() {
+            if entry.kind == EntryKind::Dir && detect_collection(&*self.files, &p).is_some() {
                 let id = target_workspace_id.unwrap_or("default");
                 match self.import_collection(&p, id) {
                     Ok(r) => {
@@ -281,9 +281,9 @@ impl ImportService {
         create_new_workspace: bool,
         name_hint: Option<&str>,
     ) -> ImportResult<ImportReport> {
-        if detect_collection(path).is_some() {
+        if detect_collection(&*self.files, path).is_some() {
             self.import_collection_with_name(path, workspace_id, name_hint)
-        } else if detect_workspace(path).is_some() {
+        } else if detect_workspace(&*self.files, path).is_some() {
             self.import_workspace_with_name(
                 path,
                 create_new_workspace,
@@ -435,7 +435,9 @@ impl ImportService {
                             // Point the proto path at the copy inside the new collection.
                             if let Some(raw) = grpc.proto_file_path.clone() {
                                 let bru_dir = p.parent().unwrap_or(root);
-                                if let Some(rebased) = rebase_proto_path(root, bru_dir, &raw) {
+                                if let Some(rebased) =
+                                    rebase_proto_path(self.files.as_ref(), root, bru_dir, &raw)
+                                {
                                     grpc.proto_file_path = Some(rebased);
                                 }
                             }
@@ -1330,16 +1332,23 @@ fn copy_support_file(
 /// request file or to the collection root, so both are tried. Returns `None` for an
 /// absolute path, a missing file, or a file outside the collection, and the caller
 /// keeps the path as written.
-fn rebase_proto_path(root: &Path, request_dir: &Path, raw: &str) -> Option<String> {
+fn rebase_proto_path(
+    files: &dyn ImportFiles,
+    root: &Path,
+    request_dir: &Path,
+    raw: &str,
+) -> Option<String> {
     let raw_path = Path::new(raw);
     if raw_path.is_absolute() {
         return None;
     }
-    let canonical_root = root.canonicalize().ok()?;
+    let canonical_root = files.canonicalize(root).ok()?;
     [request_dir.join(raw_path), root.join(raw_path)]
         .iter()
-        .filter_map(|candidate| candidate.canonicalize().ok())
-        .find(|real| real.is_file() && real.starts_with(&canonical_root))
+        .filter_map(|candidate| files.canonicalize(candidate).ok())
+        .find(|real| {
+            matches!(files.kind(real), Ok(EntryKind::File)) && real.starts_with(&canonical_root)
+        })
         .and_then(|real| {
             real.strip_prefix(&canonical_root).ok().map(|rel| {
                 rel.components()
@@ -1793,7 +1802,7 @@ mod detection_tests {
         let d = TempDir::new().unwrap();
         std::fs::write(d.path().join("workspace.yml"), "").unwrap();
         assert!(matches!(
-            detect_workspace(d.path()),
+            detect_workspace(&test_files::StdFiles, d.path()),
             Some(BrunoFormat::Modern)
         ));
     }
@@ -1803,7 +1812,7 @@ mod detection_tests {
         let d = TempDir::new().unwrap();
         std::fs::write(d.path().join("bruno.json"), "{}").unwrap();
         assert!(matches!(
-            detect_workspace(d.path()),
+            detect_workspace(&test_files::StdFiles, d.path()),
             Some(BrunoFormat::Legacy)
         ));
     }
@@ -1811,7 +1820,7 @@ mod detection_tests {
     #[test]
     fn detect_workspace_none() {
         let d = TempDir::new().unwrap();
-        assert!(detect_workspace(d.path()).is_none());
+        assert!(detect_workspace(&test_files::StdFiles, d.path()).is_none());
     }
 
     #[test]
@@ -1819,7 +1828,7 @@ mod detection_tests {
         let d = TempDir::new().unwrap();
         std::fs::write(d.path().join("opencollection.yml"), "").unwrap();
         assert!(matches!(
-            detect_collection(d.path()),
+            detect_collection(&test_files::StdFiles, d.path()),
             Some(BrunoFormat::Modern)
         ));
     }
@@ -1829,7 +1838,7 @@ mod detection_tests {
         let d = TempDir::new().unwrap();
         std::fs::write(d.path().join("bruno.json"), "{}").unwrap();
         assert!(matches!(
-            detect_collection(d.path()),
+            detect_collection(&test_files::StdFiles, d.path()),
             Some(BrunoFormat::Legacy)
         ));
     }
@@ -1837,7 +1846,7 @@ mod detection_tests {
     #[test]
     fn detect_collection_none() {
         let d = TempDir::new().unwrap();
-        assert!(detect_collection(d.path()).is_none());
+        assert!(detect_collection(&test_files::StdFiles, d.path()).is_none());
     }
 }
 
@@ -2545,6 +2554,7 @@ mod proto_path_tests {
     fn a_path_relative_to_the_request_file_is_rebased_to_the_collection_root() {
         let dir = layout();
         let rebased = rebase_proto_path(
+            &test_files::StdFiles,
             dir.path(),
             &dir.path().join("calls"),
             "../protos/greeter.proto",
@@ -2556,6 +2566,7 @@ mod proto_path_tests {
     fn a_path_relative_to_the_collection_root_is_found_too() {
         let dir = layout();
         let rebased = rebase_proto_path(
+            &test_files::StdFiles,
             dir.path(),
             &dir.path().join("calls"),
             "protos/greeter.proto",
@@ -2571,11 +2582,17 @@ mod proto_path_tests {
             .expect("write");
         let calls = dir.path().join("calls");
         assert_eq!(
-            rebase_proto_path(dir.path(), &calls, "protos/missing.proto"),
+            rebase_proto_path(
+                &test_files::StdFiles,
+                dir.path(),
+                &calls,
+                "protos/missing.proto"
+            ),
             None
         );
         assert_eq!(
             rebase_proto_path(
+                &test_files::StdFiles,
                 dir.path(),
                 &calls,
                 &outside.path().join("other.proto").to_string_lossy()
@@ -2586,7 +2603,10 @@ mod proto_path_tests {
             "../../{}/other.proto",
             outside.path().file_name().expect("name").to_string_lossy()
         );
-        assert_eq!(rebase_proto_path(dir.path(), &calls, &escaping), None);
+        assert_eq!(
+            rebase_proto_path(&test_files::StdFiles, dir.path(), &calls, &escaping),
+            None
+        );
     }
 }
 
@@ -2730,6 +2750,7 @@ mod port_tests {
         kinds: Vec<(PathBuf, EntryKind)>,
         entries: Vec<DirEntryInfo>,
         texts: Vec<(PathBuf, String)>,
+        canon: Vec<(PathBuf, PathBuf)>,
         fail_copy: bool,
         fail_list: bool,
         written: Mutex<Vec<PathBuf>>,
@@ -2775,8 +2796,12 @@ mod port_tests {
         fn read_up_to(&self, _path: &Path, _max: u64) -> io::Result<Vec<u8>> {
             Err(io::Error::other("unsupported"))
         }
-        fn canonicalize(&self, _path: &Path) -> io::Result<PathBuf> {
-            Err(io::Error::other("unsupported"))
+        fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
+            self.canon
+                .iter()
+                .find(|(p, _)| p == path)
+                .map(|(_, c)| c.clone())
+                .ok_or_else(|| io::Error::other("unsupported"))
         }
         fn open_read(&self, _path: &Path) -> io::Result<Box<dyn crate::files::ReadSeek>> {
             Err(io::Error::other("unsupported"))
@@ -2787,6 +2812,66 @@ mod port_tests {
         fn write_stream(&self, _path: &Path, _from: &mut dyn std::io::Read) -> io::Result<u64> {
             Err(io::Error::other("unsupported"))
         }
+    }
+
+    fn proto_files(real: &str) -> FakeFiles {
+        FakeFiles {
+            kinds: vec![(PathBuf::from(real), EntryKind::File)],
+            canon: vec![
+                (PathBuf::from("root"), PathBuf::from("r")),
+                (PathBuf::from("root/a.proto"), PathBuf::from(real)),
+            ],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn rebase_proto_path_uses_the_port() {
+        let files = proto_files("r/a.proto");
+        let got = rebase_proto_path(
+            &files,
+            Path::new("root"),
+            Path::new("root/calls"),
+            "a.proto",
+        );
+        assert_eq!(got.as_deref(), Some("a.proto"));
+    }
+
+    #[test]
+    fn rebase_proto_path_refuses_a_path_outside_the_root() {
+        let files = proto_files("/etc/x");
+        let got = rebase_proto_path(
+            &files,
+            Path::new("root"),
+            Path::new("root/calls"),
+            "a.proto",
+        );
+        assert_eq!(got, None);
+    }
+
+    #[test]
+    fn detect_collection_reads_through_the_port() {
+        let files = FakeFiles {
+            kinds: vec![(PathBuf::from("c/opencollection.yml"), EntryKind::File)],
+            ..Default::default()
+        };
+        assert_eq!(
+            detect_collection(&files, Path::new("c")),
+            Some(BrunoFormat::Modern)
+        );
+        assert_eq!(detect_collection(&files, Path::new("other")), None);
+    }
+
+    #[test]
+    fn detect_workspace_reads_through_the_port() {
+        let files = FakeFiles {
+            kinds: vec![(PathBuf::from("w/workspace.yml"), EntryKind::File)],
+            ..Default::default()
+        };
+        assert_eq!(
+            detect_workspace(&files, Path::new("w")),
+            Some(BrunoFormat::Modern)
+        );
     }
 
     fn reasons(report: &ImportReport) -> Vec<String> {

@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::error::ImportResult;
-use crate::files::{ImportFiles, WorkDir};
+use crate::files::{EntryKind, ImportFiles, WorkDir};
 
 /// Extract a Bruno ZIP to a temp directory.
 ///
@@ -42,10 +42,10 @@ pub(crate) fn extract_to_temp(
 
     // Some ZIPs have no wrapper folder — workspace.yml sits directly at the archive root.
     let root = temp_dir.path().to_path_buf();
-    if root.join("workspace.yml").exists()
-        || root.join("opencollection.yml").exists()
-        || root.join("bruno.json").exists()
-    {
+    let has_marker = ["workspace.yml", "opencollection.yml", "bruno.json"]
+        .iter()
+        .any(|name| files.kind(&root.join(name)).is_ok());
+    if has_marker {
         return Ok((temp_dir, root));
     }
 
@@ -53,7 +53,7 @@ pub(crate) fn extract_to_temp(
     let inner = files
         .list_dir(temp_dir.path())?
         .into_iter()
-        .find(|e| e.path.is_dir())
+        .find(|e| e.kind == EntryKind::Dir)
         .map(|e| e.path)
         .ok_or(ImportError::EmptyZip)?;
 
