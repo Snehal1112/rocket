@@ -23,6 +23,7 @@ use rocket_environment::{
     VaultCertificateSummary, VaultSecretFetcher,
 };
 use rocket_flow::FlowEvent;
+use rocket_git::GitEvent;
 use rocket_history::{HistoryEntry, HistoryFilter, HistoryRepository};
 use rocket_http::{CookieJar, CookieRepository, HttpExecutor, HttpRequest, HttpResponse};
 use rocket_scripting::{ScriptContext, ScriptEngine, ScriptResult};
@@ -1668,6 +1669,7 @@ impl ScriptEngine for SharedEngine {
 pub struct RecordingPublisher {
     events: Mutex<Vec<DomainEvent>>,
     flow_events: Mutex<Vec<FlowEvent>>,
+    git_events: Mutex<Vec<GitEvent>>,
     others: Mutex<Vec<(String, serde_json::Value)>>,
 }
 
@@ -1676,6 +1678,7 @@ impl RecordingPublisher {
         Arc::new(Self {
             events: Mutex::new(Vec::new()),
             flow_events: Mutex::new(Vec::new()),
+            git_events: Mutex::new(Vec::new()),
             others: Mutex::new(Vec::new()),
         })
     }
@@ -1686,8 +1689,12 @@ impl RecordingPublisher {
     pub fn flow_events(&self) -> Vec<FlowEvent> {
         self.flow_events.lock().expect("lock").clone()
     }
+    /// Every published `GitEvent`, in order.
+    pub fn git_events(&self) -> Vec<GitEvent> {
+        self.git_events.lock().expect("lock").clone()
+    }
     /// The channel and JSON of every published event that is not a
-    /// `DomainEvent` or a `FlowEvent`.
+    /// `DomainEvent`, a `FlowEvent` or a `GitEvent`.
     pub fn others(&self) -> Vec<(String, serde_json::Value)> {
         self.others.lock().expect("lock").clone()
     }
@@ -1697,6 +1704,10 @@ impl EventPublisher for RecordingPublisher {
     fn publish(&self, event: &dyn PublishedEvent) {
         if let Some(flow) = event.downcast_ref::<FlowEvent>() {
             self.flow_events.lock().expect("lock").push(flow.clone());
+            return;
+        }
+        if let Some(git) = event.downcast_ref::<GitEvent>() {
+            self.git_events.lock().expect("lock").push(git.clone());
             return;
         }
         let Some(domain) = event.downcast_ref::<DomainEvent>() else {

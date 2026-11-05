@@ -22,6 +22,7 @@ rocket-import.workspace = true
 rocket-environment.workspace = true
 rocket-acp.workspace = true
 rocket-flow.workspace = true
+rocket-git.workspace = true
 rocket-grpc = { path = "../rocket-grpc" }
 prost = "0.14"
 tokio-stream = "0.1"

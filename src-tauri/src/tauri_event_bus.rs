@@ -108,11 +108,12 @@ fn emit_channels(event: &dyn PublishedEvent) -> Vec<&'static str> {
 mod tests {
     use super::*;
     use rocket_flow::FlowEvent;
+    use rocket_git::GitEvent;
     use rocket_shared::events::DomainEvent;
 
     #[test]
     fn emit_channels_adds_collection_changed_for_branch_switch_and_merge() {
-        let switched = DomainEvent::BranchSwitched {
+        let switched = GitEvent::BranchSwitched {
             collection: "api".into(),
             branch: "dev".into(),
         };
@@ -120,7 +121,7 @@ mod tests {
             emit_channels(&switched),
             vec!["git-changed", "collection-changed"]
         );
-        let merged = DomainEvent::BranchMerged {
+        let merged = GitEvent::BranchMerged {
             collection: "api".into(),
             branch: "dev".into(),
         };
@@ -137,6 +138,12 @@ mod tests {
             path: "r.yml".into(),
         };
         assert_eq!(emit_channels(&saved), vec![saved.channel()]);
+        let committed = GitEvent::GitCommit {
+            collection: "api".into(),
+            message: "m".into(),
+            sha: "s".into(),
+        };
+        assert_eq!(emit_channels(&committed), vec!["git-changed"]);
         assert_eq!(
             emit_channels(&rocket_history::HistoryEvent::HistoryCleared),
             vec!["history-changed"]

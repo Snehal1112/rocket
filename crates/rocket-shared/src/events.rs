@@ -590,52 +590,6 @@ pub enum DomainEvent {
         message: String,
     },
 
-    // Git events
-    GitStatusChanged {
-        collection: String,
-    },
-    GitCommit {
-        collection: String,
-        message: String,
-        sha: String,
-    },
-    GitPush {
-        collection: String,
-        remote: String,
-    },
-    GitPull {
-        collection: String,
-        remote: String,
-    },
-    BranchSwitched {
-        collection: String,
-        branch: String,
-    },
-    BranchMerged {
-        collection: String,
-        branch: String,
-    },
-    GitStashChanged {
-        collection: String,
-    },
-    GitConflictDetected {
-        collection: String,
-        files: Vec<String>,
-    },
-    GitCloned {
-        url: String,
-        dest: String,
-    },
-    GitRemoteAdded {
-        collection: String,
-        name: String,
-        url: String,
-    },
-    GitRemoteRemoved {
-        collection: String,
-        name: String,
-    },
-
     // Script events
     /// Emitted after all script phases complete. Carries combined console output.
     ConsoleOutput {
@@ -1476,21 +1430,6 @@ mod tests {
                 new_name: "b".into(),
             },
             &["type", "old_name", "new_name"],
-        );
-        assert_keys(
-            &DomainEvent::GitCommit {
-                collection: "c".into(),
-                message: "m".into(),
-                sha: "s".into(),
-            },
-            &["type", "collection", "message", "sha"],
-        );
-        assert_keys(
-            &DomainEvent::BranchSwitched {
-                collection: "c".into(),
-                branch: "b".into(),
-            },
-            &["type", "collection", "branch"],
         );
         assert_keys(&DomainEvent::AssistantConversationsCleared, &["type"]);
     }

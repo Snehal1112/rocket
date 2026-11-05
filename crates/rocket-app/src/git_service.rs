@@ -1,10 +1,10 @@
 use rocket_git::service::GitService;
 use rocket_git::{
     BranchList, CommitInfo, ConflictFile, ConflictResolution, FetchResult, FileDiff,
-    GitCredentials, GitIdentity, RemoteInfo, RepoStatus, StashEntry,
+    GitCredentials, GitEvent, GitIdentity, RemoteInfo, RepoStatus, StashEntry,
 };
 use rocket_shared::error::DomainResult;
-use rocket_shared::events::{DomainEvent, EventPublisher};
+use rocket_shared::events::EventPublisher;
 
 /// Removes the user and password from a URL so it is safe to publish.
 /// Input without `scheme://` userinfo, such as scp-style `git@host:repo`, is returned as is.
@@ -47,7 +47,7 @@ impl GitAppService {
         creds: &GitCredentials,
     ) -> DomainResult<()> {
         self.git.clone_repo(url, dest_path, creds)?;
-        self.events.publish(&DomainEvent::GitCloned {
+        self.events.publish(&GitEvent::GitCloned {
             url: strip_url_credentials(url),
             dest: dest_path.to_string(),
         });
@@ -61,7 +61,7 @@ impl GitAppService {
 
     pub fn add_remote(&self, path: &str, name: &str, url: &str) -> DomainResult<()> {
         self.git.add_remote(path, name, url)?;
-        self.events.publish(&DomainEvent::GitRemoteAdded {
+        self.events.publish(&GitEvent::GitRemoteAdded {
             collection: path.to_string(),
             name: name.to_string(),
             url: strip_url_credentials(url),
@@ -71,7 +71,7 @@ impl GitAppService {
 
     pub fn remove_remote(&self, path: &str, name: &str) -> DomainResult<()> {
         self.git.remove_remote(path, name)?;
-        self.events.publish(&DomainEvent::GitRemoteRemoved {
+        self.events.publish(&GitEvent::GitRemoteRemoved {
             collection: path.to_string(),
             name: name.to_string(),
         });
@@ -102,7 +102,7 @@ impl GitAppService {
     // Staging
     pub fn stage(&self, path: &str, files: &[&str]) -> DomainResult<()> {
         self.git.stage(path, files)?;
-        self.events.publish(&DomainEvent::GitStatusChanged {
+        self.events.publish(&GitEvent::GitStatusChanged {
             collection: path.to_string(),
         });
         Ok(())
@@ -110,7 +110,7 @@ impl GitAppService {
 
     pub fn unstage(&self, path: &str, files: &[&str]) -> DomainResult<()> {
         self.git.unstage(path, files)?;
-        self.events.publish(&DomainEvent::GitStatusChanged {
+        self.events.publish(&GitEvent::GitStatusChanged {
             collection: path.to_string(),
         });
         Ok(())
@@ -118,7 +118,7 @@ impl GitAppService {
 
     pub fn discard(&self, path: &str, files: &[&str]) -> DomainResult<()> {
         self.git.discard(path, files)?;
-        self.events.publish(&DomainEvent::GitStatusChanged {
+        self.events.publish(&GitEvent::GitStatusChanged {
             collection: path.to_string(),
         });
         Ok(())
@@ -127,7 +127,7 @@ impl GitAppService {
     // Commit
     pub fn commit(&self, path: &str, message: &str) -> DomainResult<CommitInfo> {
         let info = self.git.commit(path, message)?;
-        self.events.publish(&DomainEvent::GitCommit {
+        self.events.publish(&GitEvent::GitCommit {
             collection: path.to_string(),
             message: message.to_string(),
             sha: info.id.clone(),
@@ -150,7 +150,7 @@ impl GitAppService {
         force: bool,
     ) -> DomainResult<()> {
         self.git.push(path, remote, creds, force)?;
-        self.events.publish(&DomainEvent::GitPush {
+        self.events.publish(&GitEvent::GitPush {
             collection: path.to_string(),
             remote: remote.to_string(),
         });
@@ -159,7 +159,7 @@ impl GitAppService {
 
     pub fn pull(&self, path: &str, remote: &str, creds: &GitCredentials) -> DomainResult<()> {
         self.git.pull(path, remote, creds)?;
-        self.events.publish(&DomainEvent::GitPull {
+        self.events.publish(&GitEvent::GitPull {
             collection: path.to_string(),
             remote: remote.to_string(),
         });
@@ -182,7 +182,7 @@ impl GitAppService {
 
     pub fn switch_branch(&self, path: &str, name: &str) -> DomainResult<()> {
         self.git.switch_branch(path, name)?;
-        self.events.publish(&DomainEvent::BranchSwitched {
+        self.events.publish(&GitEvent::BranchSwitched {
             collection: path.to_string(),
             branch: name.to_string(),
         });
@@ -198,7 +198,7 @@ impl GitAppService {
     ) -> DomainResult<()> {
         self.git
             .checkout_remote_branch(path, name, force, as_name)?;
-        self.events.publish(&DomainEvent::BranchSwitched {
+        self.events.publish(&GitEvent::BranchSwitched {
             collection: path.to_string(),
             branch: name.to_string(),
         });
@@ -208,7 +208,7 @@ impl GitAppService {
     pub fn create_branch(&self, path: &str, name: &str) -> DomainResult<()> {
         self.git.create_branch(path, name)?;
         // Publish a switch event so the frontend updates its branch indicator.
-        self.events.publish(&DomainEvent::BranchSwitched {
+        self.events.publish(&GitEvent::BranchSwitched {
             collection: path.to_string(),
             branch: name.to_string(),
         });
@@ -221,7 +221,7 @@ impl GitAppService {
 
     pub fn merge_branch(&self, path: &str, name: &str) -> DomainResult<()> {
         self.git.merge_branch(path, name)?;
-        self.events.publish(&DomainEvent::BranchMerged {
+        self.events.publish(&GitEvent::BranchMerged {
             collection: path.to_string(),
             branch: name.to_string(),
         });
@@ -235,7 +235,7 @@ impl GitAppService {
 
     pub fn stash_save(&self, path: &str, message: &str) -> DomainResult<()> {
         self.git.stash_save(path, message)?;
-        self.events.publish(&DomainEvent::GitStashChanged {
+        self.events.publish(&GitEvent::GitStashChanged {
             collection: path.to_string(),
         });
         Ok(())
@@ -243,7 +243,7 @@ impl GitAppService {
 
     pub fn stash_pop(&self, path: &str, index: usize) -> DomainResult<()> {
         self.git.stash_pop(path, index)?;
-        self.events.publish(&DomainEvent::GitStashChanged {
+        self.events.publish(&GitEvent::GitStashChanged {
             collection: path.to_string(),
         });
         Ok(())
@@ -251,7 +251,7 @@ impl GitAppService {
 
     pub fn stash_apply(&self, path: &str, index: usize) -> DomainResult<()> {
         self.git.stash_apply(path, index)?;
-        self.events.publish(&DomainEvent::GitStashChanged {
+        self.events.publish(&GitEvent::GitStashChanged {
             collection: path.to_string(),
         });
         Ok(())
@@ -259,7 +259,7 @@ impl GitAppService {
 
     pub fn stash_drop(&self, path: &str, index: usize) -> DomainResult<()> {
         self.git.stash_drop(path, index)?;
-        self.events.publish(&DomainEvent::GitStashChanged {
+        self.events.publish(&GitEvent::GitStashChanged {
             collection: path.to_string(),
         });
         Ok(())
@@ -285,7 +285,7 @@ impl GitAppService {
 
     pub fn abort_merge(&self, path: &str) -> DomainResult<()> {
         self.git.abort_merge(path)?;
-        self.events.publish(&DomainEvent::GitStatusChanged {
+        self.events.publish(&GitEvent::GitStatusChanged {
             collection: path.to_string(),
         });
         Ok(())
@@ -556,8 +556,8 @@ mod tests {
         svc.clone_repo(url, "/dest", &GitCredentials::SshAgent)
             .expect("clone");
         assert_eq!(urls.lock().expect("lock").as_slice(), [url]);
-        match events.events().as_slice() {
-            [DomainEvent::GitCloned { url, dest }] => {
+        match events.git_events().as_slice() {
+            [GitEvent::GitCloned { url, dest }] => {
                 assert_eq!(url, "https://host/org/repo.git");
                 assert_eq!(dest, "/dest");
             }
@@ -571,8 +571,8 @@ mod tests {
         let url = "https://user:token@host/org/repo.git";
         svc.add_remote("/repo", "origin", url).expect("add");
         assert_eq!(urls.lock().expect("lock").as_slice(), [url]);
-        match events.events().as_slice() {
-            [DomainEvent::GitRemoteAdded {
+        match events.git_events().as_slice() {
+            [GitEvent::GitRemoteAdded {
                 collection,
                 name,
                 url,
@@ -590,8 +590,8 @@ mod tests {
         let (svc, events, _) = service();
         let info = svc.commit("/repo", "add things")?;
         assert_eq!(info.id, "abc1234");
-        match events.events().as_slice() {
-            [DomainEvent::GitCommit {
+        match events.git_events().as_slice() {
+            [GitEvent::GitCommit {
                 collection,
                 message,
                 sha,
@@ -609,8 +609,8 @@ mod tests {
     fn push_publishes_git_push() -> DomainResult<()> {
         let (svc, events, _) = service();
         svc.push("/repo", "origin", &GitCredentials::SshAgent, false)?;
-        match events.events().as_slice() {
-            [DomainEvent::GitPush { collection, remote }] => {
+        match events.git_events().as_slice() {
+            [GitEvent::GitPush { collection, remote }] => {
                 assert_eq!(collection, "/repo");
                 assert_eq!(remote, "origin");
             }
@@ -623,8 +623,8 @@ mod tests {
     fn pull_publishes_git_pull() -> DomainResult<()> {
         let (svc, events, _) = service();
         svc.pull("/repo", "upstream", &GitCredentials::SshAgent)?;
-        match events.events().as_slice() {
-            [DomainEvent::GitPull { collection, remote }] => {
+        match events.git_events().as_slice() {
+            [GitEvent::GitPull { collection, remote }] => {
                 assert_eq!(collection, "/repo");
                 assert_eq!(remote, "upstream");
             }
@@ -640,10 +640,10 @@ mod tests {
         svc.create_branch("/repo", "feature")?;
         svc.checkout_remote_branch("/repo", "origin/dev", false, None)?;
         let got: Vec<(String, String)> = events
-            .events()
+            .git_events()
             .into_iter()
             .map(|e| match e {
-                DomainEvent::BranchSwitched { collection, branch } => (collection, branch),
+                GitEvent::BranchSwitched { collection, branch } => (collection, branch),
                 other => panic!("unexpected event: {other:?}"),
             })
             .collect();
@@ -656,8 +656,8 @@ mod tests {
     fn merge_publishes_branch_merged() -> DomainResult<()> {
         let (svc, events, _) = service();
         svc.merge_branch("/repo", "feature")?;
-        match events.events().as_slice() {
-            [DomainEvent::BranchMerged { collection, branch }] => {
+        match events.git_events().as_slice() {
+            [GitEvent::BranchMerged { collection, branch }] => {
                 assert_eq!(collection, "/repo");
                 assert_eq!(branch, "feature");
             }
@@ -673,11 +673,11 @@ mod tests {
         svc.stash_pop("/repo", 0)?;
         svc.stash_apply("/repo", 0)?;
         svc.stash_drop("/repo", 0)?;
-        let recorded = events.events();
+        let recorded = events.git_events();
         assert_eq!(recorded.len(), 4);
         for event in recorded {
             match event {
-                DomainEvent::GitStashChanged { collection } => assert_eq!(collection, "/repo"),
+                GitEvent::GitStashChanged { collection } => assert_eq!(collection, "/repo"),
                 other => panic!("unexpected event: {other:?}"),
             }
         }
@@ -691,11 +691,11 @@ mod tests {
         svc.unstage("/repo", &["a.yml"])?;
         svc.discard("/repo", &["a.yml"])?;
         svc.abort_merge("/repo")?;
-        let recorded = events.events();
+        let recorded = events.git_events();
         assert_eq!(recorded.len(), 4);
         for event in recorded {
             match event {
-                DomainEvent::GitStatusChanged { collection } => assert_eq!(collection, "/repo"),
+                GitEvent::GitStatusChanged { collection } => assert_eq!(collection, "/repo"),
                 other => panic!("unexpected event: {other:?}"),
             }
         }
@@ -706,8 +706,8 @@ mod tests {
     fn remove_remote_publishes_git_remote_removed() -> DomainResult<()> {
         let (svc, events, _) = service();
         svc.remove_remote("/repo", "origin")?;
-        match events.events().as_slice() {
-            [DomainEvent::GitRemoteRemoved { collection, name }] => {
+        match events.git_events().as_slice() {
+            [GitEvent::GitRemoteRemoved { collection, name }] => {
                 assert_eq!(collection, "/repo");
                 assert_eq!(name, "origin");
             }
@@ -721,7 +721,7 @@ mod tests {
         let (svc, events, _) = build(false, vec!["a.yml".into(), "b.yml".into()]);
         let files = svc.conflicts("/repo")?;
         assert_eq!(files.len(), 2);
-        assert!(events.events().is_empty());
+        assert!(events.git_events().is_empty());
         Ok(())
     }
 
@@ -729,7 +729,7 @@ mod tests {
     fn conflicts_publishes_nothing_when_list_is_empty() -> DomainResult<()> {
         let (svc, events, _) = service();
         assert!(svc.conflicts("/repo")?.is_empty());
-        assert!(events.events().is_empty());
+        assert!(events.git_events().is_empty());
         Ok(())
     }
 
@@ -737,7 +737,7 @@ mod tests {
     fn failed_commit_publishes_no_event() {
         let (svc, events) = failing_service();
         assert!(svc.commit("/repo", "msg").is_err());
-        assert!(events.events().is_empty());
+        assert!(events.git_events().is_empty());
     }
 
     #[test]
@@ -746,7 +746,7 @@ mod tests {
         assert!(svc
             .push("/repo", "origin", &GitCredentials::SshAgent, false)
             .is_err());
-        assert!(events.events().is_empty());
+        assert!(events.git_events().is_empty());
     }
 
     #[test]
@@ -755,7 +755,7 @@ mod tests {
         assert!(svc
             .clone_repo("https://host/r.git", "/dest", &GitCredentials::SshAgent)
             .is_err());
-        assert!(events.events().is_empty());
+        assert!(events.git_events().is_empty());
     }
 
     #[test]
@@ -769,6 +769,6 @@ mod tests {
         assert!(svc.stage("/repo", &["a"]).is_err());
         assert!(svc.remove_remote("/repo", "origin").is_err());
         assert!(svc.switch_branch("/repo", "x").is_err());
-        assert!(events.events().is_empty());
+        assert!(events.git_events().is_empty());
     }
 }

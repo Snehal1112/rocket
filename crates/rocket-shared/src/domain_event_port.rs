@@ -52,17 +52,6 @@ impl PublishedEvent for DomainEvent {
             | DomainEvent::RequestVariablesSaved { .. }
             | DomainEvent::CollectionVariableWritten { .. } => "collection-changed",
             DomainEvent::CollectionTrustChanged { .. } => "collection-trust-changed",
-            DomainEvent::GitStatusChanged { .. }
-            | DomainEvent::GitCommit { .. }
-            | DomainEvent::GitPush { .. }
-            | DomainEvent::GitPull { .. }
-            | DomainEvent::BranchSwitched { .. }
-            | DomainEvent::BranchMerged { .. }
-            | DomainEvent::GitStashChanged { .. }
-            | DomainEvent::GitConflictDetected { .. }
-            | DomainEvent::GitCloned { .. }
-            | DomainEvent::GitRemoteAdded { .. }
-            | DomainEvent::GitRemoteRemoved { .. } => "git-changed",
             DomainEvent::ConsoleOutput { .. } => "script-console",
             DomainEvent::TestsCompleted { .. } => "script-tests",
             DomainEvent::ScriptError { .. } => "script-error",
@@ -74,20 +63,9 @@ impl PublishedEvent for DomainEvent {
         serde_json::to_value(self)
     }
 
-    /// A branch switch replaces the working-tree content the collection
-    /// sidebar shows, so it also fires `collection-changed`.
-    fn also_emit_on(&self) -> &'static [&'static str] {
-        match self {
-            DomainEvent::BranchSwitched { .. } | DomainEvent::BranchMerged { .. } => {
-                &["collection-changed"]
-            }
-            _ => &[],
-        }
-    }
-
     /// Only events that the bus also sends on the `collection-changed`
     /// channel count, so a dropped watcher event is always covered by a
-    /// service event. Git events are left out.
+    /// service event.
     fn written_collections(&self) -> Vec<&str> {
         match self {
             DomainEvent::CollectionCreated { name } | DomainEvent::CollectionDeleted { name } => {
@@ -324,46 +302,6 @@ mod tests {
                 collection: None,
             },
             DomainEvent::FileWatcherFailed { message: s() },
-            DomainEvent::GitStatusChanged { collection: s() },
-            DomainEvent::GitCommit {
-                collection: s(),
-                message: s(),
-                sha: s(),
-            },
-            DomainEvent::GitPush {
-                collection: s(),
-                remote: s(),
-            },
-            DomainEvent::GitPull {
-                collection: s(),
-                remote: s(),
-            },
-            DomainEvent::BranchSwitched {
-                collection: s(),
-                branch: s(),
-            },
-            DomainEvent::BranchMerged {
-                collection: s(),
-                branch: s(),
-            },
-            DomainEvent::GitStashChanged { collection: s() },
-            DomainEvent::GitConflictDetected {
-                collection: s(),
-                files: Vec::new(),
-            },
-            DomainEvent::GitCloned {
-                url: s(),
-                dest: s(),
-            },
-            DomainEvent::GitRemoteAdded {
-                collection: s(),
-                name: s(),
-                url: s(),
-            },
-            DomainEvent::GitRemoteRemoved {
-                collection: s(),
-                name: s(),
-            },
             DomainEvent::ConsoleOutput {
                 request_name: s(),
                 entries: Vec::new(),
@@ -391,7 +329,7 @@ mod tests {
     }
 
     /// The channel of each variant, keyed by its JSON  tag.
-    const CHANNELS: [(&str, &str); 58] = [
+    const CHANNELS: [(&str, &str); 47] = [
         ("fileChanged", "collection-changed"),
         ("requestExecuted", "request-executed"),
         ("fileWatcherFailed", "file-watcher-failed"),
@@ -441,17 +379,6 @@ mod tests {
         ("requestVariablesSaved", "collection-changed"),
         ("collectionVariableWritten", "collection-changed"),
         ("collectionTrustChanged", "collection-trust-changed"),
-        ("gitStatusChanged", "git-changed"),
-        ("gitCommit", "git-changed"),
-        ("gitPush", "git-changed"),
-        ("gitPull", "git-changed"),
-        ("branchSwitched", "git-changed"),
-        ("branchMerged", "git-changed"),
-        ("gitStashChanged", "git-changed"),
-        ("gitConflictDetected", "git-changed"),
-        ("gitCloned", "git-changed"),
-        ("gitRemoteAdded", "git-changed"),
-        ("gitRemoteRemoved", "git-changed"),
         ("consoleOutput", "script-console"),
         ("testsCompleted", "script-tests"),
         ("scriptError", "script-error"),
@@ -466,9 +393,9 @@ mod tests {
     #[test]
     fn one_of_each_covers_every_variant() {
         let events = one_of_each();
-        assert_eq!(events.len(), 58);
+        assert_eq!(events.len(), 47);
         let tags: BTreeSet<String> = events.iter().map(tag).collect();
-        assert_eq!(tags.len(), 58);
+        assert_eq!(tags.len(), 47);
     }
 
     #[test]
@@ -489,19 +416,6 @@ mod tests {
         for event in one_of_each() {
             let expected = serde_json::to_value(&event).expect("event serializes");
             assert_eq!(event.to_json().expect("event serializes"), expected);
-        }
-    }
-
-    #[test]
-    fn only_branch_events_emit_on_a_second_channel() {
-        for event in one_of_each() {
-            let expected: &[&str] = match event {
-                DomainEvent::BranchSwitched { .. } | DomainEvent::BranchMerged { .. } => {
-                    &["collection-changed"]
-                }
-                _ => &[],
-            };
-            assert_eq!(event.also_emit_on(), expected, "{}", tag(&event));
         }
     }
 
@@ -530,10 +444,12 @@ mod tests {
             collection: Some("api".into()),
         };
         assert!(changed.written_collections().is_empty());
-        assert!(DomainEvent::GitStatusChanged {
-            collection: "api".into()
+    }
+
+    #[test]
+    fn domain_events_emit_on_one_channel_only() {
+        for event in one_of_each() {
+            assert!(event.also_emit_on().is_empty(), "{}", tag(&event));
         }
-        .written_collections()
-        .is_empty());
     }
 }

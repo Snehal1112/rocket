@@ -5871,6 +5871,7 @@ dependencies = [
  "rocket-environment",
  "rocket-export",
  "rocket-flow",
+ "rocket-git",
  "rocket-grpc",
  "rocket-history",
  "rocket-http",

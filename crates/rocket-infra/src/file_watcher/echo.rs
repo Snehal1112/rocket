@@ -164,7 +164,7 @@ mod tests {
         });
         writes
             .record(&rocket_environment::EnvironmentEvent::EnvironmentSaved { name: "api".into() });
-        writes.record(&DomainEvent::GitStatusChanged {
+        writes.record(&rocket_git::GitEvent::GitStatusChanged {
             collection: "api".into(),
         });
         assert!(!writes.owns("api", Instant::now(), ECHO_WINDOW));
