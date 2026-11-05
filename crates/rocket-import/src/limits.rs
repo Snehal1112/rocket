@@ -7,12 +7,9 @@ use std::path::Path;
 
 /// The most bytes the importer reads from one text file.
 pub(crate) const MAX_IMPORT_FILE_BYTES: u64 = 32 * 1024 * 1024;
-// The zip extractor uses the two zip limits in the next task.
 /// The most entries a zip archive may hold.
-#[allow(dead_code)]
 pub(crate) const MAX_ZIP_ENTRIES: usize = 20_000;
 /// The most bytes a zip archive may expand to.
-#[allow(dead_code)]
 pub(crate) const MAX_ZIP_TOTAL_BYTES: u64 = 512 * 1024 * 1024;
 
 fn invalid(kind: io::ErrorKind, message: String) -> crate::error::ImportError {
