@@ -58,6 +58,8 @@ struct ClientBuild {
     proxy: rocket_http::ResolvedProxy,
     /// One idle connection and HTTP/1 only, for handshakes that belong to a connection (NTLM).
     single_connection: bool,
+    /// Limit for opening a connection. `None` keeps reqwest's default (no limit).
+    connect_timeout: Option<Duration>,
 }
 
 impl ClientBuild {
@@ -70,6 +72,7 @@ impl ClientBuild {
             cookies: None,
             proxy: rocket_http::ResolvedProxy::default(),
             single_connection: false,
+            connect_timeout: None,
         }
     }
 }
@@ -201,6 +204,7 @@ impl ReqwestExecutor {
             cookies,
             proxy,
             single_connection: false,
+            connect_timeout: None,
         })?;
         cache.insert(key, client.clone());
         Ok(client)
@@ -397,6 +401,7 @@ impl HttpExecutor for ReqwestExecutor {
                 cookies,
                 proxy: proxy.clone(),
                 single_connection,
+                connect_timeout: None,
             })?
         } else {
             self.get_or_build_client(key, cookies, proxy.clone())?
@@ -741,15 +746,44 @@ pub(crate) fn read_proxy(shared: Option<&rocket_http::SharedProxy>) -> rocket_ht
 ///
 /// A client is built per call and never cached, so a saved proxy change reaches the next token
 /// request without a restart.
-#[derive(Default)]
 pub struct ReqwestTokenClientProvider {
     /// The app-level proxy setting. `None` means reqwest's default (the system proxy).
     proxy: Option<rocket_http::SharedProxy>,
+    /// How long a token connection may take to open.
+    connect_timeout: Duration,
+    /// How long a whole token request may take.
+    total_timeout: Duration,
+}
+
+/// The longest a token connection may take to open.
+const TOKEN_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// The longest a whole token request may take.
+const TOKEN_TOTAL_TIMEOUT: Duration = Duration::from_secs(30);
+/// The largest token response body that is read.
+const TOKEN_BODY_CAP: usize = 1024 * 1024;
+/// The most characters of an error body that go into an error message.
+const TOKEN_ERROR_EXCERPT_CHARS: usize = 200;
+
+impl Default for ReqwestTokenClientProvider {
+    fn default() -> Self {
+        Self {
+            proxy: None,
+            connect_timeout: TOKEN_CONNECT_TIMEOUT,
+            total_timeout: TOKEN_TOTAL_TIMEOUT,
+        }
+    }
 }
 
 impl ReqwestTokenClientProvider {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Replaces the connect and total timeouts of token requests. Tests use this to shorten them.
+    pub fn with_timeouts(mut self, connect: Duration, total: Duration) -> Self {
+        self.connect_timeout = connect;
+        self.total_timeout = total;
+        self
     }
 
     /// Reads token clients' proxy from `shared`, which the proxy service updates on save.
@@ -769,9 +803,11 @@ impl ReqwestTokenClientProvider {
         certificates: &[ResolvedClientCertificate],
     ) -> DomainResult<Client> {
         let identity = identity_for_url(certificates, token_url)?;
-        let mut spec = ClientBuild::plain(true, verify_ssl, None);
+        // A token POST never follows a redirect, so the form secrets stay with the first host.
+        let mut spec = ClientBuild::plain(false, verify_ssl, None);
         spec.identity = identity;
         spec.proxy = read_proxy(self.proxy.as_ref());
+        spec.connect_timeout = Some(self.connect_timeout);
         build_client(spec)
     }
 }
@@ -795,22 +831,60 @@ impl rocket_http::TokenClientProvider for ReqwestTokenClientProvider {
         }
 
         let resp = request
+            .timeout(self.total_timeout)
             .send()
             .await
-            .map_err(|e| DomainError::Internal(format!("Token request failed: {e}")))?;
+            .map_err(token_request_error)?;
 
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
+        let status = resp.status();
+        if status.is_redirection() {
             return Err(DomainError::Internal(format!(
-                "Token endpoint returned {status}: {body}"
+                "Token endpoint returned 3xx ({status}), a redirect is not followed."
+            )));
+        }
+        if !status.is_success() {
+            // A failed body read only shortens the message.
+            let body = read_capped_body(resp, TOKEN_BODY_CAP)
+                .await
+                .unwrap_or_default();
+            let text = String::from_utf8_lossy(&body);
+            let excerpt: String = text.chars().take(TOKEN_ERROR_EXCERPT_CHARS).collect();
+            return Err(DomainError::Internal(format!(
+                "Token endpoint returned {status}: {excerpt}"
             )));
         }
 
-        resp.json::<rocket_http::OAuthToken>()
-            .await
+        let body = read_capped_body(resp, TOKEN_BODY_CAP).await?;
+        serde_json::from_slice::<rocket_http::OAuthToken>(&body)
             .map_err(|e| DomainError::Internal(format!("Failed to parse token response: {e}")))
     }
+}
+
+/// Maps a send or read failure to an error that never carries the request URL.
+fn token_request_error(e: reqwest::Error) -> DomainError {
+    if e.is_timeout() {
+        return DomainError::Internal("Token request timed out.".into());
+    }
+    DomainError::Internal(format!("Token request failed: {}", e.without_url()))
+}
+
+/// Reads a response body chunk by chunk and fails once it passes `max` bytes.
+async fn read_capped_body(mut resp: reqwest::Response, max: usize) -> DomainResult<Vec<u8>> {
+    if resp.content_length().is_some_and(|len| len > max as u64) {
+        return Err(DomainError::Internal(
+            "Token response body is too large.".into(),
+        ));
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(token_request_error)? {
+        if body.len() + chunk.len() > max {
+            return Err(DomainError::Internal(
+                "Token response body is too large.".into(),
+            ));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(body)
 }
 
 /// Builds a client, presenting the identity as the TLS client certificate when there is one.
@@ -825,6 +899,7 @@ fn build_client(spec: ClientBuild) -> DomainResult<Client> {
         cookies,
         proxy,
         single_connection,
+        connect_timeout,
     } = spec;
     let limit = key.max_redirects.unwrap_or(10) as usize;
     // A limit of zero would turn the first redirect into an error, so it returns the 3xx as is.
@@ -856,6 +931,9 @@ fn build_client(spec: ClientBuild) -> DomainResult<Client> {
     }
     if single_connection {
         builder = builder.pool_max_idle_per_host(1).http1_only();
+    }
+    if let Some(limit) = connect_timeout {
+        builder = builder.connect_timeout(limit);
     }
     builder = apply_proxy(builder, &proxy)?;
     builder
@@ -4695,5 +4773,114 @@ mod token_post_tests {
         let err = post(&server, &bad, &[]).await.expect_err("error");
 
         assert!(!err.to_string().is_empty());
+    }
+
+    fn provider_with_timeout(total: std::time::Duration) -> ReqwestTokenClientProvider {
+        ReqwestTokenClientProvider::new().with_timeouts(std::time::Duration::from_secs(10), total)
+    }
+
+    #[tokio::test]
+    async fn token_post_times_out() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(TOKEN_BODY)
+                    .set_delay(std::time::Duration::from_secs(5)),
+            )
+            .mount(&server)
+            .await;
+        let provider = provider_with_timeout(std::time::Duration::from_millis(200));
+
+        let start = std::time::Instant::now();
+        let err = provider
+            .post_form(&server.uri(), true, &[], &form(), &[])
+            .await
+            .expect_err("error");
+
+        assert!(start.elapsed() < std::time::Duration::from_secs(2));
+        assert!(
+            err.to_string().to_lowercase().contains("timed out"),
+            "{err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn token_post_does_not_follow_a_redirect() {
+        let target = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(TOKEN_BODY))
+            .expect(0)
+            .mount(&target)
+            .await;
+        let origin = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(
+                ResponseTemplate::new(307).insert_header("Location", target.uri().as_str()),
+            )
+            .mount(&origin)
+            .await;
+
+        let err = post(&origin, &[], &[]).await.expect_err("error");
+
+        assert!(err.to_string().contains("307"), "{err}");
+        assert!(
+            err.to_string().contains("Token endpoint returned 3xx"),
+            "{err}"
+        );
+        assert!(target
+            .received_requests()
+            .await
+            .expect("requests")
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn token_post_error_body_is_short() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(500).set_body_string("é".repeat(5000)))
+            .mount(&server)
+            .await;
+
+        let err = post(&server, &[], &[]).await.expect_err("error");
+
+        assert!(
+            err.to_string().chars().count() < 400,
+            "{}",
+            err.to_string().len()
+        );
+    }
+
+    #[tokio::test]
+    async fn token_post_rejects_an_oversized_success_body() {
+        let server = MockServer::start().await;
+        let body = format!(
+            r#"{{"access_token":"{}","token_type":"Bearer"}}"#,
+            "a".repeat(2 * 1024 * 1024)
+        );
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .mount(&server)
+            .await;
+
+        let err = post(&server, &[], &[]).await.expect_err("error");
+
+        assert!(err.to_string().contains("too large"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn token_post_error_has_no_url() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        drop(listener);
+        let url = format!("http://127.0.0.1:{port}/token?key=secret");
+
+        let err = ReqwestTokenClientProvider::new()
+            .post_form(&url, true, &[], &form(), &[])
+            .await
+            .expect_err("error");
+
+        assert!(!err.to_string().contains("secret"), "{err}");
     }
 }
