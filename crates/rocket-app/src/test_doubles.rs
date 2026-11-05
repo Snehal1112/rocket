@@ -22,6 +22,7 @@ use rocket_environment::{
     SecretManagerConnection, SecretManagerRepository, SecretStore, VaultCertificateMaterial,
     VaultCertificateSummary, VaultSecretFetcher,
 };
+use rocket_flow::FlowEvent;
 use rocket_history::{HistoryEntry, HistoryFilter, HistoryRepository};
 use rocket_http::{CookieJar, CookieRepository, HttpExecutor, HttpRequest, HttpResponse};
 use rocket_scripting::{ScriptContext, ScriptEngine, ScriptResult};
@@ -1666,6 +1667,7 @@ impl ScriptEngine for SharedEngine {
 /// Publisher that records every event it is handed.
 pub struct RecordingPublisher {
     events: Mutex<Vec<DomainEvent>>,
+    flow_events: Mutex<Vec<FlowEvent>>,
     others: Mutex<Vec<(String, serde_json::Value)>>,
 }
 
@@ -1673,13 +1675,19 @@ impl RecordingPublisher {
     pub fn new() -> Arc<Self> {
         Arc::new(Self {
             events: Mutex::new(Vec::new()),
+            flow_events: Mutex::new(Vec::new()),
             others: Mutex::new(Vec::new()),
         })
     }
     pub fn events(&self) -> Vec<DomainEvent> {
         self.events.lock().expect("lock").clone()
     }
-    /// The channel and JSON of every published event that is not a `DomainEvent`.
+    /// Every published `FlowEvent`, in order.
+    pub fn flow_events(&self) -> Vec<FlowEvent> {
+        self.flow_events.lock().expect("lock").clone()
+    }
+    /// The channel and JSON of every published event that is not a
+    /// `DomainEvent` or a `FlowEvent`.
     pub fn others(&self) -> Vec<(String, serde_json::Value)> {
         self.others.lock().expect("lock").clone()
     }
@@ -1687,6 +1695,10 @@ impl RecordingPublisher {
 
 impl EventPublisher for RecordingPublisher {
     fn publish(&self, event: &dyn PublishedEvent) {
+        if let Some(flow) = event.downcast_ref::<FlowEvent>() {
+            self.flow_events.lock().expect("lock").push(flow.clone());
+            return;
+        }
         let Some(domain) = event.downcast_ref::<DomainEvent>() else {
             let json = event.to_json().expect("event serializes");
             self.others
@@ -2197,6 +2209,24 @@ mod tests {
                 "history-changed".to_string(),
                 serde_json::json!({"type": "historyCleared"})
             )]
+        );
+    }
+
+    #[test]
+    fn recording_publisher_keeps_flow_events() {
+        let publisher = RecordingPublisher::new();
+        publisher.publish(&FlowEvent::FlowStepStarted {
+            run_id: "r1".to_string(),
+            node_id: "n1".to_string(),
+        });
+        assert!(publisher.events().is_empty());
+        assert!(publisher.others().is_empty());
+        assert_eq!(
+            publisher.flow_events(),
+            [FlowEvent::FlowStepStarted {
+                run_id: "r1".to_string(),
+                node_id: "n1".to_string(),
+            }]
         );
     }
 

@@ -107,6 +107,7 @@ fn emit_channels(event: &dyn PublishedEvent) -> Vec<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rocket_flow::FlowEvent;
     use rocket_shared::events::DomainEvent;
 
     #[test]
@@ -206,7 +207,7 @@ mod tests {
 
     #[test]
     fn flow_request_paths_rewritten_has_its_own_channel() {
-        let event = DomainEvent::FlowRequestPathsRewritten {
+        let event = FlowEvent::FlowRequestPathsRewritten {
             collection: "c".into(),
             from: "a".into(),
             to: "b".into(),
@@ -214,6 +215,7 @@ mod tests {
             failed: Vec::new(),
         };
         assert_eq!(event.channel(), "flow-request-paths-rewritten");
+        assert_eq!(emit_channels(&event), vec!["flow-request-paths-rewritten"]);
     }
 
     #[test]

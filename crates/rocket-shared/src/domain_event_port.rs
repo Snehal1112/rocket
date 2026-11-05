@@ -15,11 +15,6 @@ impl PublishedEvent for DomainEvent {
             DomainEvent::RunnerStarted { .. } => "runner-started",
             DomainEvent::RunnerStepCompleted { .. } => "runner-step-completed",
             DomainEvent::RunnerFinished { .. } => "runner-finished",
-            DomainEvent::FlowRunStarted { .. } => "flow-run-started",
-            DomainEvent::FlowStepStarted { .. } => "flow-step-started",
-            DomainEvent::FlowStepProgress { .. } => "flow-step-progress",
-            DomainEvent::FlowStepCompleted { .. } => "flow-step-completed",
-            DomainEvent::FlowRunFinished { .. } => "flow-run-finished",
             DomainEvent::AcpSessionStarted { .. } => "agent-session-started",
             DomainEvent::AcpSessionChunk { .. } => "agent-session-chunk",
             DomainEvent::AcpThoughtChunk { .. } => "agent-session-thought",
@@ -56,7 +51,6 @@ impl PublishedEvent for DomainEvent {
             | DomainEvent::FolderSettingsSaved { .. }
             | DomainEvent::RequestVariablesSaved { .. }
             | DomainEvent::CollectionVariableWritten { .. } => "collection-changed",
-            DomainEvent::FlowRequestPathsRewritten { .. } => "flow-request-paths-rewritten",
             DomainEvent::CollectionTrustChanged { .. } => "collection-trust-changed",
             DomainEvent::GitStatusChanged { .. }
             | DomainEvent::GitCommit { .. }
@@ -161,13 +155,6 @@ mod tests {
                 dst_collection: "b".into(),
                 dst_path: s(),
             },
-            DomainEvent::FlowRequestPathsRewritten {
-                collection: s(),
-                from: s(),
-                to: s(),
-                flows: Vec::new(),
-                failed: Vec::new(),
-            },
             DomainEvent::FolderCreated {
                 collection: s(),
                 path: s(),
@@ -224,50 +211,6 @@ mod tests {
                 stopped_reason: s(),
                 step_count: 1,
                 failed_count: 0,
-            },
-            DomainEvent::FlowRunStarted {
-                run_id: s(),
-                flow_name: s(),
-                collection: s(),
-                total_nodes: 1,
-                callbacks: Vec::new(),
-                partial: None,
-            },
-            DomainEvent::FlowStepStarted {
-                run_id: s(),
-                node_id: s(),
-            },
-            DomainEvent::FlowStepProgress {
-                run_id: s(),
-                node_id: s(),
-                attempt: None,
-                max_attempts: None,
-                message: s(),
-                live: None,
-            },
-            DomainEvent::FlowStepCompleted {
-                run_id: s(),
-                node_id: s(),
-                status: FlowNodeStatus::Success,
-                status_code: None,
-                duration_ms: None,
-                error: None,
-                value: None,
-                skip_reason: None,
-                branch: None,
-                logs: Vec::new(),
-                debug_request: None,
-                attempts: None,
-                exchange: None,
-                trace: None,
-            },
-            DomainEvent::FlowRunFinished {
-                run_id: s(),
-                stopped_reason: s(),
-                node_count: 1,
-                failed_count: 0,
-                skipped_count: 0,
-                not_taken_count: 0,
             },
             DomainEvent::AcpSessionStarted { session_id: s() },
             DomainEvent::AcpSessionChunk {
@@ -448,18 +391,13 @@ mod tests {
     }
 
     /// The channel of each variant, keyed by its JSON  tag.
-    const CHANNELS: [(&str, &str); 64] = [
+    const CHANNELS: [(&str, &str); 58] = [
         ("fileChanged", "collection-changed"),
         ("requestExecuted", "request-executed"),
         ("fileWatcherFailed", "file-watcher-failed"),
         ("runnerStarted", "runner-started"),
         ("runnerStepCompleted", "runner-step-completed"),
         ("runnerFinished", "runner-finished"),
-        ("flowRunStarted", "flow-run-started"),
-        ("flowStepStarted", "flow-step-started"),
-        ("flowStepProgress", "flow-step-progress"),
-        ("flowStepCompleted", "flow-step-completed"),
-        ("flowRunFinished", "flow-run-finished"),
         ("acpSessionStarted", "agent-session-started"),
         ("acpSessionChunk", "agent-session-chunk"),
         ("acpThoughtChunk", "agent-session-thought"),
@@ -494,7 +432,6 @@ mod tests {
         ("requestSaved", "collection-changed"),
         ("requestDeleted", "collection-changed"),
         ("itemMoved", "collection-changed"),
-        ("flowRequestPathsRewritten", "flow-request-paths-rewritten"),
         ("folderCreated", "collection-changed"),
         ("folderDeleted", "collection-changed"),
         ("itemsReordered", "collection-changed"),
@@ -529,9 +466,9 @@ mod tests {
     #[test]
     fn one_of_each_covers_every_variant() {
         let events = one_of_each();
-        assert_eq!(events.len(), 64);
+        assert_eq!(events.len(), 58);
         let tags: BTreeSet<String> = events.iter().map(tag).collect();
-        assert_eq!(tags.len(), 64);
+        assert_eq!(tags.len(), 58);
     }
 
     #[test]

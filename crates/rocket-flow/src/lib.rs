@@ -1,4 +1,5 @@
 pub mod describe;
+pub mod events;
 pub mod flow;
 pub mod graph;
 pub mod handle;
@@ -11,6 +12,7 @@ pub mod validate;
 
 pub use request_refs::{path_is_within, rewrite_saved_paths, uses_saved_path};
 
+pub use events::FlowEvent;
 pub use flow::{Flow, FlowEdge, FlowListEntry, FlowNode, FlowRepository};
 pub use graph::{topological_sort, FlowGraphError};
 pub use lint::{

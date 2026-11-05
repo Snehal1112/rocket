@@ -709,9 +709,10 @@ fn apply_header_override(
 
 use std::sync::{Arc, Mutex};
 
+use rocket_flow::FlowEvent;
 use rocket_scripting::{ConsoleEntry, ConsoleLevel};
 use rocket_shared::events::{
-    DomainEvent, FlowDebugRequest, FlowLiveProgress, FlowLogEntry, FlowLogLevel, FlowNodeStatus,
+    FlowDebugRequest, FlowLiveProgress, FlowLogEntry, FlowLogLevel, FlowNodeStatus,
     FlowPartialRunInfo, FlowSkipReason, FlowStepTrace,
 };
 
@@ -794,8 +795,8 @@ pub struct FlowStepResult {
 
 /// Builds the `FlowStepCompleted` event for one recorded step, so the live
 /// event and the returned summary can never disagree.
-fn step_completed_event(run_id: &str, step: &FlowStepResult) -> DomainEvent {
-    DomainEvent::FlowStepCompleted {
+fn step_completed_event(run_id: &str, step: &FlowStepResult) -> FlowEvent {
+    FlowEvent::FlowStepCompleted {
         run_id: run_id.to_string(),
         node_id: step.node_id.clone(),
         status: step.status,
@@ -1360,7 +1361,7 @@ impl FlowExecutionService {
         let run_order: &[String] = prepared
             .as_ref()
             .map_or(order.as_slice(), |p| p.plan.run_order.as_slice());
-        self.events.publish(&DomainEvent::FlowRunStarted {
+        self.events.publish(&FlowEvent::FlowRunStarted {
             run_id: run_id.clone(),
             flow_name: input.flow_name.clone(),
             collection: input.collection.clone(),
@@ -1588,7 +1589,7 @@ impl FlowExecutionService {
             .iter()
             .filter(|s| s.skip_reason == Some(FlowSkipReason::BranchNotTaken))
             .count();
-        self.events.publish(&DomainEvent::FlowRunFinished {
+        self.events.publish(&FlowEvent::FlowRunFinished {
             run_id: run_id.clone(),
             stopped_reason: stopped_reason.clone(),
             node_count: steps.len(),
@@ -1688,7 +1689,7 @@ impl FlowExecutionService {
     }
 
     fn publish_started(&self, run_id: &str, node_id: &str) {
-        self.events.publish(&DomainEvent::FlowStepStarted {
+        self.events.publish(&FlowEvent::FlowStepStarted {
             run_id: run_id.to_string(),
             node_id: node_id.to_string(),
         });
@@ -1727,7 +1728,7 @@ impl FlowExecutionService {
         message: String,
         live: Option<Box<FlowLiveProgress>>,
     ) {
-        self.events.publish(&DomainEvent::FlowStepProgress {
+        self.events.publish(&FlowEvent::FlowStepProgress {
             run_id: ctx.run_id.clone(),
             node_id: ctx.node_id.clone(),
             attempt,
@@ -2670,7 +2671,7 @@ mod tests {
     use rocket_history::{HistoryEntry, HistoryFilter, HistoryRepository};
     use rocket_http::{CookieJar, CookieRepository, HttpExecutor, HttpRequest, HttpResponse};
     use rocket_scripting::{ScriptContext, ScriptEngine, ScriptResult};
-    use rocket_shared::events::{DomainEvent, EventPublisher};
+    use rocket_shared::events::EventPublisher;
     use std::sync::Arc;
 
     #[test]
@@ -2691,7 +2692,7 @@ mod tests {
         };
 
         match step_completed_event("run-1", &step) {
-            DomainEvent::FlowStepCompleted {
+            FlowEvent::FlowStepCompleted {
                 debug_request,
                 exchange,
                 ..
@@ -3813,7 +3814,7 @@ mod tests {
             .expect_err("over the limit");
 
         assert!(err.to_string().contains("more than the limit"), "{err}");
-        assert!(publisher.events().is_empty());
+        assert!(publisher.flow_events().is_empty());
     }
 
     #[tokio::test]
@@ -4280,7 +4281,7 @@ mod tests {
             "got: {err}"
         );
         assert!(
-            publisher.events().is_empty(),
+            publisher.flow_events().is_empty(),
             "a run that cannot start emits no events"
         );
     }
@@ -4310,9 +4311,9 @@ mod tests {
             .expect("a supplied token lets the run start");
 
         assert!(publisher
-            .events()
+            .flow_events()
             .iter()
-            .any(|e| matches!(e, DomainEvent::FlowRunStarted { .. })));
+            .any(|e| matches!(e, FlowEvent::FlowRunStarted { .. })));
     }
 
     #[tokio::test]
@@ -4365,7 +4366,7 @@ mod tests {
             "got: {err}"
         );
         assert!(
-            publisher.events().is_empty(),
+            publisher.flow_events().is_empty(),
             "a run whose token fetch times out emits no events"
         );
     }
@@ -4946,10 +4947,10 @@ mod tests {
     /// `FlowRunFinished` event.
     fn finished_counts(publisher: &RecordingPublisher) -> (usize, usize, usize) {
         let finished: Vec<(usize, usize, usize)> = publisher
-            .events()
+            .flow_events()
             .into_iter()
             .filter_map(|e| match e {
-                DomainEvent::FlowRunFinished {
+                FlowEvent::FlowRunFinished {
                     node_count,
                     failed_count,
                     skipped_count,
@@ -4989,11 +4990,11 @@ mod tests {
         let summary = service.run(&exec, run_input("empty")).await.expect("run");
 
         assert_eq!(summary.stopped_reason, "completed");
-        let events = publisher.events();
+        let events = publisher.flow_events();
         assert_eq!(events.len(), 2);
         assert!(matches!(
             events[0],
-            DomainEvent::FlowRunStarted { total_nodes: 0, .. }
+            FlowEvent::FlowRunStarted { total_nodes: 0, .. }
         ));
         assert_eq!(finished_counts(&publisher), (0, 0, 0));
     }
@@ -5022,10 +5023,10 @@ mod tests {
 
         service.publish_progress(&ctx, Some(3), Some(30), "attempt 3/30".to_string());
 
-        let events = publisher.events();
+        let events = publisher.flow_events();
         assert_eq!(events.len(), 1);
         match &events[0] {
-            DomainEvent::FlowStepProgress {
+            FlowEvent::FlowStepProgress {
                 run_id,
                 node_id,
                 attempt,
@@ -5053,13 +5054,13 @@ mod tests {
     }
     impl EventPublisher for CancelAfterSteps {
         fn publish(&self, event: &dyn PublishedEvent) {
-            let Some(event) = event.downcast_ref::<DomainEvent>() else {
+            let Some(event) = event.downcast_ref::<FlowEvent>() else {
                 panic!(
-                    "recorder got a non-DomainEvent on channel {}",
+                    "recorder got a non-FlowEvent on channel {}",
                     event.channel()
                 );
             };
-            if let DomainEvent::FlowStepCompleted { run_id, .. } = event {
+            if let FlowEvent::FlowStepCompleted { run_id, .. } = event {
                 let mut seen = self.seen.lock().expect("lock seen");
                 *seen += 1;
                 if *seen == self.cancel_after {
@@ -5169,13 +5170,13 @@ mod tests {
     }
     impl EventPublisher for CancelOnStart {
         fn publish(&self, event: &dyn PublishedEvent) {
-            let Some(event) = event.downcast_ref::<DomainEvent>() else {
+            let Some(event) = event.downcast_ref::<FlowEvent>() else {
                 panic!(
-                    "recorder got a non-DomainEvent on channel {}",
+                    "recorder got a non-FlowEvent on channel {}",
                     event.channel()
                 );
             };
-            if let DomainEvent::FlowStepStarted { run_id, node_id } = event {
+            if let FlowEvent::FlowStepStarted { run_id, node_id } = event {
                 if node_id == self.node_id {
                     if let Some(handle) = self.handles.lock().expect("lock handles").get(run_id) {
                         handle.cancel();
@@ -5455,10 +5456,10 @@ mod tests {
         assert_eq!(b.branch, None);
 
         let b_event = publisher
-            .events()
+            .flow_events()
             .into_iter()
             .find_map(|e| match e {
-                DomainEvent::FlowStepCompleted {
+                FlowEvent::FlowStepCompleted {
                     node_id,
                     status,
                     error,
@@ -5528,10 +5529,10 @@ mod tests {
         service.run(&exec, run_input("chain")).await.expect("run");
 
         let not_taken: Vec<usize> = publisher
-            .events()
+            .flow_events()
             .into_iter()
             .filter_map(|e| match e {
-                DomainEvent::FlowRunFinished {
+                FlowEvent::FlowRunFinished {
                     not_taken_count, ..
                 } => Some(not_taken_count),
                 _ => None,
@@ -5586,7 +5587,7 @@ mod tests {
         let json = serde_json::to_value(&step).expect("serialize");
         assert_eq!(json["attempts"], 3);
         match step_completed_event("run", &step) {
-            DomainEvent::FlowStepCompleted { attempts, .. } => assert_eq!(attempts, Some(3)),
+            FlowEvent::FlowStepCompleted { attempts, .. } => assert_eq!(attempts, Some(3)),
             other => panic!("unexpected event {other:?}"),
         }
     }
@@ -5885,11 +5886,11 @@ mod tests {
             .await
             .expect("run must complete even with a failed node");
 
-        let events = publisher.events();
+        let events = publisher.flow_events();
         let started_ids: Vec<String> = events
             .iter()
             .filter_map(|e| match e {
-                DomainEvent::FlowStepStarted { node_id, .. } => Some(node_id.clone()),
+                FlowEvent::FlowStepStarted { node_id, .. } => Some(node_id.clone()),
                 _ => None,
             })
             .collect();
@@ -5901,14 +5902,12 @@ mod tests {
 
         let started_idx = events
             .iter()
-            .position(
-                |e| matches!(e, DomainEvent::FlowStepStarted { node_id, .. } if node_id == "a"),
-            )
+            .position(|e| matches!(e, FlowEvent::FlowStepStarted { node_id, .. } if node_id == "a"))
             .expect("started event for a must exist");
         let completed_idx = events
             .iter()
             .position(
-                |e| matches!(e, DomainEvent::FlowStepCompleted { node_id, .. } if node_id == "a"),
+                |e| matches!(e, FlowEvent::FlowStepCompleted { node_id, .. } if node_id == "a"),
             )
             .expect("completed event for a must exist");
         assert!(
@@ -5945,10 +5944,10 @@ mod tests {
 
     fn not_taken_count(publisher: &RecordingPublisher) -> usize {
         publisher
-            .events()
+            .flow_events()
             .into_iter()
             .find_map(|e| match e {
-                DomainEvent::FlowRunFinished {
+                FlowEvent::FlowRunFinished {
                     not_taken_count, ..
                 } => Some(not_taken_count),
                 _ => None,
@@ -6214,8 +6213,8 @@ mod tests {
         );
         assert_eq!(finished_counts(&publisher), (4, 0, 1));
         assert_eq!(not_taken_count(&publisher), 1);
-        let completed_branch = publisher.events().into_iter().find_map(|e| match e {
-            DomainEvent::FlowStepCompleted {
+        let completed_branch = publisher.flow_events().into_iter().find_map(|e| match e {
+            FlowEvent::FlowStepCompleted {
                 node_id, branch, ..
             } if node_id == "check" => branch,
             _ => None,
@@ -6805,10 +6804,10 @@ mod tests {
             .expect("run");
 
         let started: Vec<String> = publisher
-            .events()
+            .flow_events()
             .into_iter()
             .filter_map(|e| match e {
-                DomainEvent::FlowStepStarted { node_id, .. } => Some(node_id),
+                FlowEvent::FlowStepStarted { node_id, .. } => Some(node_id),
                 _ => None,
             })
             .collect();
@@ -7311,7 +7310,7 @@ mod tests {
 
     /// Builds `hello -> out` whose edge carries `expression`, runs it with
     /// the real engine, and returns the summary plus the recorded events.
-    async fn run_scripted_output(expression: &str) -> (FlowRunSummary, Vec<DomainEvent>) {
+    async fn run_scripted_output(expression: &str) -> (FlowRunSummary, Vec<FlowEvent>) {
         let mut edge = wire("e1", "hello", "out");
         edge.expression = expression.to_string();
         let flow = Flow {
@@ -7324,7 +7323,7 @@ mod tests {
         let service = service_with_publisher(flow, &publisher);
         let exec = real_engine_service();
         let summary = service.run(&exec, run_input("logs")).await.expect("run");
-        (summary, publisher.events())
+        (summary, publisher.flow_events())
     }
 
     #[tokio::test]
@@ -7368,11 +7367,11 @@ mod tests {
         assert!(step.logs[0].message.contains("••••••"));
     }
 
-    fn completed_logs(events: &[DomainEvent], node: &str) -> Vec<FlowLogEntry> {
+    fn completed_logs(events: &[FlowEvent], node: &str) -> Vec<FlowLogEntry> {
         events
             .iter()
             .find_map(|e| match e {
-                DomainEvent::FlowStepCompleted { node_id, logs, .. } if node_id == node => {
+                FlowEvent::FlowStepCompleted { node_id, logs, .. } if node_id == node => {
                     Some(logs.clone())
                 }
                 _ => None,
@@ -7434,7 +7433,7 @@ mod tests {
         debug: bool,
         base: &str,
         status: u16,
-    ) -> (FlowRunSummary, Vec<DomainEvent>) {
+    ) -> (FlowRunSummary, Vec<FlowEvent>) {
         let mut env = rocket_environment::Environment::new("dev");
         env.set_variable(rocket_environment::Variable::new("base", base));
         let mut secret = rocket_environment::Variable::new("secret", "sekret-value");
@@ -7465,14 +7464,14 @@ mod tests {
         let mut input = run_input("dbg");
         input.environment_name = Some("dev".to_string());
         let summary = service.run(&exec, input).await.expect("run");
-        (summary, publisher.events())
+        (summary, publisher.flow_events())
     }
 
-    fn completed_debug(events: &[DomainEvent], node: &str) -> Option<Box<FlowDebugRequest>> {
+    fn completed_debug(events: &[FlowEvent], node: &str) -> Option<Box<FlowDebugRequest>> {
         events
             .iter()
             .find_map(|e| match e {
-                DomainEvent::FlowStepCompleted {
+                FlowEvent::FlowStepCompleted {
                     node_id,
                     debug_request,
                     ..
@@ -7529,7 +7528,7 @@ mod tests {
         assert_eq!(exchange.body.as_deref(), Some(r#"{"k":"••••••"}"#));
         assert_eq!(exchange.response.as_ref().map(|r| r.status), Some(200));
         let event_exchange = events.iter().find_map(|e| match e {
-            DomainEvent::FlowStepCompleted {
+            FlowEvent::FlowStepCompleted {
                 node_id, exchange, ..
             } if node_id == "r" => Some(exchange.clone()),
             _ => None,
@@ -7719,8 +7718,8 @@ mod tests {
             step_of(&summary, "in").value.as_deref(),
             Some(crate::redaction::REDACTED)
         );
-        let event_value = publisher.events().iter().find_map(|e| match e {
-            DomainEvent::FlowStepCompleted { node_id, value, .. } if node_id == "in" => {
+        let event_value = publisher.flow_events().iter().find_map(|e| match e {
+            FlowEvent::FlowStepCompleted { node_id, value, .. } if node_id == "in" => {
                 Some(value.clone())
             }
             _ => None,
@@ -8113,10 +8112,10 @@ mod tests {
         service.run(&exec, run_input("poll")).await.expect("run");
 
         let progress: Vec<(Option<u32>, String)> = publisher
-            .events()
+            .flow_events()
             .into_iter()
             .filter_map(|e| match e {
-                DomainEvent::FlowStepProgress {
+                FlowEvent::FlowStepProgress {
                     node_id,
                     attempt,
                     message,
@@ -8137,14 +8136,12 @@ mod tests {
 
         // Started comes first, then every progress event, then Completed.
         let order: Vec<&'static str> = publisher
-            .events()
+            .flow_events()
             .into_iter()
             .filter_map(|e| match e {
-                DomainEvent::FlowStepStarted { node_id, .. } if node_id == "job" => Some("started"),
-                DomainEvent::FlowStepProgress { node_id, .. } if node_id == "job" => {
-                    Some("progress")
-                }
-                DomainEvent::FlowStepCompleted { node_id, .. } if node_id == "job" => {
+                FlowEvent::FlowStepStarted { node_id, .. } if node_id == "job" => Some("started"),
+                FlowEvent::FlowStepProgress { node_id, .. } if node_id == "job" => Some("progress"),
+                FlowEvent::FlowStepCompleted { node_id, .. } if node_id == "job" => {
                     Some("completed")
                 }
                 _ => None,
@@ -8180,11 +8177,11 @@ mod tests {
 
         service.run(&exec, run_input("poll")).await.expect("run");
 
-        let events = publisher.events();
+        let events = publisher.flow_events();
         let live: Vec<FlowLiveProgress> = events
             .iter()
             .filter_map(|e| match e {
-                DomainEvent::FlowStepProgress {
+                FlowEvent::FlowStepProgress {
                     node_id,
                     live: Some(live),
                     ..
@@ -8209,13 +8206,13 @@ mod tests {
         let completed_at = events
             .iter()
             .position(
-                |e| matches!(e, DomainEvent::FlowStepCompleted { node_id, .. } if node_id == "job"),
+                |e| matches!(e, FlowEvent::FlowStepCompleted { node_id, .. } if node_id == "job"),
             )
             .expect("completed");
         let last_progress = events
             .iter()
             .rposition(
-                |e| matches!(e, DomainEvent::FlowStepProgress { node_id, .. } if node_id == "job"),
+                |e| matches!(e, FlowEvent::FlowStepProgress { node_id, .. } if node_id == "job"),
             )
             .expect("progress");
         assert!(
@@ -8335,13 +8332,13 @@ mod tests {
         let run = service.run(&exec, run_input("poll"));
         let stop = async {
             loop {
-                let events = publisher.events();
+                let events = publisher.flow_events();
                 let run_id = events.iter().find_map(|e| match e {
-                    DomainEvent::FlowRunStarted { run_id, .. } => Some(run_id.clone()),
+                    FlowEvent::FlowRunStarted { run_id, .. } => Some(run_id.clone()),
                     _ => None,
                 });
                 let polling = events.iter().any(|e| {
-                    matches!(e, DomainEvent::FlowStepProgress { node_id, .. } if node_id == "job")
+                    matches!(e, FlowEvent::FlowStepProgress { node_id, .. } if node_id == "job")
                 });
                 if let (Some(id), true) = (run_id, polling) {
                     service.cancel(&id);
@@ -8364,10 +8361,10 @@ mod tests {
         assert!(step.duration_ms.is_some(), "a stopped poll has a duration");
         assert_eq!(step.attempts, Some(1));
         let completed = publisher
-            .events()
+            .flow_events()
             .into_iter()
             .find_map(|e| match e {
-                DomainEvent::FlowStepCompleted {
+                FlowEvent::FlowStepCompleted {
                     node_id,
                     status_code,
                     duration_ms,
@@ -8441,7 +8438,9 @@ mod tests {
             .events()
             .into_iter()
             .filter_map(|e| match e {
-                DomainEvent::ScriptError { phase, message, .. } if phase == "before-request" => {
+                rocket_shared::events::DomainEvent::ScriptError { phase, message, .. }
+                    if phase == "before-request" =>
+                {
                     Some(message)
                 }
                 _ => None,
@@ -8714,14 +8713,14 @@ mod tests {
         );
         assert!(message.contains("port in use"), "got: {message}");
         assert!(
-            publisher.events().is_empty(),
+            publisher.events().is_empty() && publisher.flow_events().is_empty(),
             "no FlowRunStarted or any other event for a run that never started"
         );
         assert!(
             !publisher
-                .events()
+                .flow_events()
                 .iter()
-                .any(|e| matches!(e, DomainEvent::FlowRunStarted { .. })),
+                .any(|e| matches!(e, FlowEvent::FlowRunStarted { .. })),
             "a run that never started must not publish FlowRunStarted"
         );
         assert!(service.in_flight.lock().expect("lock").is_empty());
@@ -8774,10 +8773,10 @@ mod tests {
 
         assert_eq!(status_of(&summary, "w"), FlowNodeStatus::Success);
         let progress: Vec<String> = publisher
-            .events()
+            .flow_events()
             .into_iter()
             .filter_map(|e| match e {
-                DomainEvent::FlowStepProgress {
+                FlowEvent::FlowStepProgress {
                     node_id, message, ..
                 } if node_id == "w" => Some(message),
                 _ => None,
@@ -8907,11 +8906,11 @@ mod tests {
         );
         assert!(rejected.body.contains(crate::redaction::REDACTED));
 
-        let events = publisher.events();
+        let events = publisher.flow_events();
         let live = events
             .iter()
             .find_map(|e| match e {
-                DomainEvent::FlowStepProgress {
+                FlowEvent::FlowStepProgress {
                     node_id,
                     live: Some(live),
                     ..
@@ -8950,10 +8949,10 @@ mod tests {
         service.run(&exec, run_input("cb")).await.expect("run");
 
         let live: Vec<rocket_shared::events::FlowLiveProgress> = publisher
-            .events()
+            .flow_events()
             .into_iter()
             .filter_map(|e| match e {
-                DomainEvent::FlowStepProgress {
+                FlowEvent::FlowStepProgress {
                     node_id,
                     live: Some(live),
                     ..
@@ -8996,10 +8995,10 @@ mod tests {
         let summary = service.run(&exec, run_input("cb")).await.expect("run");
 
         let with_call = publisher
-            .events()
+            .flow_events()
             .into_iter()
             .filter(|e| {
-                matches!(e, DomainEvent::FlowStepProgress { node_id, live: Some(l), .. }
+                matches!(e, FlowEvent::FlowStepProgress { node_id, live: Some(l), .. }
                     if node_id == "w" && l.last_rejected.is_some())
             })
             .count();
@@ -9095,10 +9094,10 @@ mod tests {
         service.run(&exec, run_input("cb")).await.expect("run");
 
         let with_call = publisher
-            .events()
+            .flow_events()
             .into_iter()
             .filter(|e| {
-                matches!(e, DomainEvent::FlowStepProgress { node_id, live: Some(l), .. }
+                matches!(e, FlowEvent::FlowStepProgress { node_id, live: Some(l), .. }
                     if node_id == "w" && l.last_rejected.is_some())
             })
             .count();
@@ -9149,11 +9148,11 @@ mod tests {
         let json = serde_json::to_string(&summary).expect("serialize");
         assert!(!json.contains("tok-secret-0"), "{json}");
         let mut live_seen = false;
-        for event in publisher.events() {
-            if matches!(event, DomainEvent::FlowRunStarted { .. }) {
+        for event in publisher.flow_events() {
+            if matches!(event, FlowEvent::FlowRunStarted { .. }) {
                 continue;
             }
-            if let DomainEvent::FlowStepProgress { live: Some(l), .. } = &event {
+            if let FlowEvent::FlowStepProgress { live: Some(l), .. } = &event {
                 live_seen |= l.last_rejected.is_some();
             }
             let json = serde_json::to_string(&event).expect("serialize");
@@ -9194,7 +9193,7 @@ mod tests {
         );
         let json = serde_json::to_string(&summary).expect("serialize");
         assert!(!json.contains("tok-secret-0"), "{json}");
-        for event in publisher.events() {
+        for event in publisher.flow_events() {
             let json = serde_json::to_string(&event).expect("serialize");
             assert!(!json.contains("tok-secret-0"), "{json}");
         }
@@ -9220,11 +9219,11 @@ mod tests {
 
         let summary = service.run(&exec, run_input("cb-urls")).await.expect("run");
 
-        let events = publisher.events();
+        let events = publisher.flow_events();
         let callbacks = events
             .iter()
             .find_map(|e| match e {
-                DomainEvent::FlowRunStarted { callbacks, .. } => Some(callbacks.clone()),
+                FlowEvent::FlowRunStarted { callbacks, .. } => Some(callbacks.clone()),
                 _ => None,
             })
             .expect("run started");
@@ -9256,13 +9255,13 @@ mod tests {
     }
     impl EventPublisher for ProbeUrlsOnStart {
         fn publish(&self, event: &dyn PublishedEvent) {
-            let Some(event) = event.downcast_ref::<DomainEvent>() else {
+            let Some(event) = event.downcast_ref::<FlowEvent>() else {
                 panic!(
-                    "recorder got a non-DomainEvent on channel {}",
+                    "recorder got a non-FlowEvent on channel {}",
                     event.channel()
                 );
             };
-            if let DomainEvent::FlowRunStarted { run_id, .. } = &event {
+            if let FlowEvent::FlowRunStarted { run_id, .. } = &event {
                 let found = self
                     .urls
                     .lock()
@@ -9277,8 +9276,8 @@ mod tests {
     }
 
     fn run_id_of(publisher: &RecordingPublisher) -> Option<String> {
-        publisher.events().into_iter().find_map(|e| match e {
-            DomainEvent::FlowRunStarted { run_id, .. } => Some(run_id),
+        publisher.flow_events().into_iter().find_map(|e| match e {
+            FlowEvent::FlowRunStarted { run_id, .. } => Some(run_id),
             _ => None,
         })
     }
@@ -9509,10 +9508,10 @@ mod tests {
             fake.wait_opened(1).await;
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             let run_id = publisher
-                .events()
+                .flow_events()
                 .into_iter()
                 .find_map(|e| match e {
-                    DomainEvent::FlowRunStarted { run_id, .. } => Some(run_id),
+                    FlowEvent::FlowRunStarted { run_id, .. } => Some(run_id),
                     _ => None,
                 })
                 .expect("the run started");
@@ -9567,10 +9566,10 @@ mod tests {
                 .expect("send");
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             let run_id = publisher
-                .events()
+                .flow_events()
                 .into_iter()
                 .find_map(|e| match e {
-                    DomainEvent::FlowRunStarted { run_id, .. } => Some(run_id),
+                    FlowEvent::FlowRunStarted { run_id, .. } => Some(run_id),
                     _ => None,
                 })
                 .expect("the run started");
@@ -9902,8 +9901,8 @@ mod tests {
             step_of(&summary, "t").value.as_deref(),
             Some(crate::redaction::REDACTED)
         );
-        let event_value = publisher.events().iter().find_map(|e| match e {
-            DomainEvent::FlowStepCompleted { node_id, value, .. } if node_id == "t" => {
+        let event_value = publisher.flow_events().iter().find_map(|e| match e {
+            FlowEvent::FlowStepCompleted { node_id, value, .. } if node_id == "t" => {
                 Some(value.clone())
             }
             _ => None,
@@ -10189,7 +10188,7 @@ mod tests {
         assert_eq!(step.value.as_deref(), Some("pro"));
         assert_eq!(step.logs.len(), 1);
         assert!(step.logs[0].message.contains("seen"));
-        assert_eq!(completed_logs(&publisher.events(), "t"), step.logs);
+        assert_eq!(completed_logs(&publisher.flow_events(), "t"), step.logs);
         assert_eq!(step_of(&summary, "out").value.as_deref(), Some("pro"));
     }
 
@@ -10393,7 +10392,7 @@ mod tests {
             "a request header leaked the token: {:?}",
             debug.headers
         );
-        let events = publisher.events();
+        let events = publisher.flow_events();
         // Without events the event half of the check below passes vacuously.
         assert!(!events.is_empty(), "the run must publish events");
         let everything = format!(
@@ -11936,7 +11935,7 @@ mod tests {
         let json = serde_json::to_string(&summary).expect("json");
         assert!(json.contains("api.example.com"), "{json}");
         assert!(!json.contains(UP_VALUE), "{json}");
-        let events = format!("{:?}", publisher.events());
+        let events = format!("{:?}", publisher.flow_events());
         assert!(!events.contains(UP_VALUE), "{events}");
     }
 
@@ -13637,8 +13636,8 @@ mod tests {
             recorded.expression_hash.is_some(),
             "an ordinary data wire keeps its hash"
         );
-        let event_trace = publisher.events().iter().find_map(|e| match e {
-            DomainEvent::FlowStepCompleted { node_id, trace, .. } if node_id == "out" => {
+        let event_trace = publisher.flow_events().iter().find_map(|e| match e {
+            FlowEvent::FlowStepCompleted { node_id, trace, .. } if node_id == "out" => {
                 trace.clone()
             }
             _ => None,

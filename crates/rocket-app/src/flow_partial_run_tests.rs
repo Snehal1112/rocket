@@ -304,10 +304,10 @@ async fn run_this_node_reuses_the_cached_upstream_response() {
     assert_eq!(info.node_ids, vec!["b".to_string()]);
     let started = h
         .events
-        .events()
+        .flow_events()
         .into_iter()
         .find_map(|e| match e {
-            DomainEvent::FlowRunStarted {
+            FlowEvent::FlowRunStarted {
                 run_id,
                 total_nodes,
                 partial,
@@ -319,10 +319,10 @@ async fn run_this_node_reuses_the_cached_upstream_response() {
     assert_eq!(started, (1, Some(info)));
     let finished = h
         .events
-        .events()
+        .flow_events()
         .into_iter()
         .find_map(|e| match e {
-            DomainEvent::FlowRunFinished {
+            FlowEvent::FlowRunFinished {
                 run_id, node_count, ..
             } if run_id == summary.run_id => Some(node_count),
             _ => None,
@@ -338,7 +338,7 @@ async fn an_upstream_edit_since_the_base_run_refuses_with_no_events() {
     let base = h.service.run(&h.exec, input()).await.expect("base run");
     h.flows
         .edit(|f| f.nodes[0] = request("a", "https://api.example.com/login?v=2"));
-    let events_before = h.events.events().len();
+    let events_before = h.events.flow_events().len();
     let sent_before = h.http.sent_urls().len();
 
     let err = h
@@ -356,7 +356,7 @@ async fn an_upstream_edit_since_the_base_run_refuses_with_no_events() {
     assert!(text.contains("'a' changed since the earlier run"), "{text}");
     assert!(text.ends_with("node(s): a; edge(s): "), "{text}");
     assert_eq!(
-        h.events.events().len(),
+        h.events.flow_events().len(),
         events_before,
         "a refused run sends no events"
     );
@@ -548,16 +548,16 @@ async fn a_cancelled_partial_run_marks_unreached_nodes_stale() {
     let base_id = base.run_id.clone();
     let stop = async {
         loop {
-            let events = h.events.events();
+            let events = h.events.flow_events();
             let partial_id = events.iter().find_map(|e| match e {
-                DomainEvent::FlowRunStarted { run_id, .. } if *run_id != base_id => {
+                FlowEvent::FlowRunStarted { run_id, .. } if *run_id != base_id => {
                     Some(run_id.clone())
                 }
                 _ => None,
             });
             if let Some(id) = partial_id {
                 let waiting = events.iter().any(|e| {
-                    matches!(e, DomainEvent::FlowStepStarted { run_id, node_id } if *run_id == id && node_id == "w")
+                    matches!(e, FlowEvent::FlowStepStarted { run_id, node_id } if *run_id == id && node_id == "w")
                 });
                 if waiting {
                     h.service.cancel(&id);
@@ -673,14 +673,14 @@ fn with_id(id: &str) -> FlowRunOptions {
 /// The run id of every Flow event, in order.
 fn flow_event_run_ids(events: &RecordingPublisher) -> Vec<String> {
     events
-        .events()
+        .flow_events()
         .into_iter()
         .filter_map(|e| match e {
-            DomainEvent::FlowRunStarted { run_id, .. }
-            | DomainEvent::FlowStepStarted { run_id, .. }
-            | DomainEvent::FlowStepProgress { run_id, .. }
-            | DomainEvent::FlowStepCompleted { run_id, .. }
-            | DomainEvent::FlowRunFinished { run_id, .. } => Some(run_id),
+            FlowEvent::FlowRunStarted { run_id, .. }
+            | FlowEvent::FlowStepStarted { run_id, .. }
+            | FlowEvent::FlowStepProgress { run_id, .. }
+            | FlowEvent::FlowStepCompleted { run_id, .. }
+            | FlowEvent::FlowRunFinished { run_id, .. } => Some(run_id),
             _ => None,
         })
         .collect()
@@ -743,7 +743,10 @@ async fn client_run_id_that_is_malformed_is_refused_before_any_event() {
         );
     }
 
-    assert!(h.events.events().is_empty(), "a refused id sends no event");
+    assert!(
+        h.events.flow_events().is_empty(),
+        "a refused id sends no event"
+    );
     assert!(
         h.http.sent_urls().is_empty(),
         "a refused id sends no request"
@@ -763,7 +766,10 @@ async fn client_run_id_of_a_run_in_flight_is_refused_and_free_after_it_ends() {
         .expect_err("an id in flight must be refused");
 
     assert!(matches!(err, DomainError::AlreadyExists(_)), "{err:?}");
-    assert!(h.events.events().is_empty(), "a refused id sends no event");
+    assert!(
+        h.events.flow_events().is_empty(),
+        "a refused id sends no event"
+    );
     assert!(
         h.service.in_flight.lock().expect("lock").contains("live-1"),
         "a refused duplicate must not unregister the run that owns the id"
@@ -786,7 +792,7 @@ async fn client_run_id_of_a_kept_run_is_refused_and_the_kept_run_is_untouched() 
         .run_with_options(&h.exec, input(), FlowAuthTokens::new(), with_id("kept-1"))
         .await
         .expect("first run");
-    let events_before = h.events.events().len();
+    let events_before = h.events.flow_events().len();
     let ids_before = flow_event_run_ids(&h.events).len();
 
     let err = h
@@ -796,7 +802,7 @@ async fn client_run_id_of_a_kept_run_is_refused_and_the_kept_run_is_untouched() 
         .expect_err("the id of a kept run must be refused");
     assert!(matches!(err, DomainError::AlreadyExists(_)), "{err:?}");
     assert_eq!(
-        h.events.events().len(),
+        h.events.flow_events().len(),
         events_before,
         "no event for a refused id"
     );

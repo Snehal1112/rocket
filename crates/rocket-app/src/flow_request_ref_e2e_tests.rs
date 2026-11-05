@@ -6,9 +6,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use rocket_collection::{CollectionRepository, Request};
-use rocket_flow::{Flow, FlowNodeKind, RequestSource};
+use rocket_flow::{Flow, FlowEvent, FlowNodeKind, RequestSource};
 use rocket_infra::{FsCollectionRepo, FsFlowRepo};
-use rocket_shared::events::DomainEvent;
 use rocket_shared::types::HttpMethod;
 use tempfile::TempDir;
 
@@ -79,11 +78,11 @@ fn saved_paths(flow: &Flow) -> Vec<String> {
         .collect()
 }
 
-fn rewrite_events(events: &RecordingPublisher) -> Vec<DomainEvent> {
+fn rewrite_events(events: &RecordingPublisher) -> Vec<FlowEvent> {
     events
-        .events()
+        .flow_events()
         .into_iter()
-        .filter(|e| matches!(e, DomainEvent::FlowRequestPathsRewritten { .. }))
+        .filter(|e| matches!(e, FlowEvent::FlowRequestPathsRewritten { .. }))
         .collect()
 }
 
@@ -107,7 +106,7 @@ fn moving_a_request_rewrites_the_saved_flow_on_disk() {
         .get_request("c", "identity/login.yml")
         .expect("the new path resolves to a saved request");
     match rewrite_events(&events).as_slice() {
-        [DomainEvent::FlowRequestPathsRewritten { flows, failed, .. }] => {
+        [FlowEvent::FlowRequestPathsRewritten { flows, failed, .. }] => {
             assert_eq!(flows, &vec!["Checkout".to_string()]);
             assert!(failed.is_empty());
         }
@@ -137,7 +136,7 @@ fn renaming_a_folder_rewrites_every_flow_below_it() {
         ]
     );
     match rewrite_events(&events).as_slice() {
-        [DomainEvent::FlowRequestPathsRewritten { flows, .. }] => {
+        [FlowEvent::FlowRequestPathsRewritten { flows, .. }] => {
             let mut names = flows.clone();
             names.sort();
             assert_eq!(names, vec!["A".to_string(), "B".to_string()]);
@@ -198,7 +197,7 @@ fn a_move_between_collections_reports_the_dangling_flow() {
 
     assert_eq!(fs::read(&file).expect("read flow file"), before);
     match rewrite_events(&events).as_slice() {
-        [DomainEvent::FlowRequestPathsRewritten { flows, failed, .. }] => {
+        [FlowEvent::FlowRequestPathsRewritten { flows, failed, .. }] => {
             assert!(flows.is_empty());
             assert_eq!(failed.len(), 1);
             assert_eq!(failed[0].flow, "Checkout");
