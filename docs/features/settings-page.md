@@ -16,9 +16,9 @@ sub-projects R-73 to R-77). Plans: `docs/superpowers/plans/settings-page-shell/`
 
 ## Sections
 
-Order follows Bruno: Proxy, Secret Managers, AI Agents, Support, About. The list is
+Order follows Bruno, with Team network (not in Bruno) after AI Agents: Proxy, Secret Managers, AI Agents, Team network, Support, About. The list is
 `SETTINGS_SECTIONS` in `src/components/settings/settings-sections.ts`; section components live in
-`src/components/settings/sections/`. Secret Managers and AI Agents use the wide panel.
+`src/components/settings/sections/`. Secret Managers, AI Agents and Team network use the wide panel. Team network is described in `docs/features/team-network.md`.
 
 To add a section: add its id to `SettingsSection` in `src/stores/settings-store.ts`, add a row to
 `SETTINGS_SECTIONS` at its Bruno position (General, Themes and Display before Proxy; Client
