@@ -13,6 +13,7 @@ pub mod server;
 pub(crate) mod socket;
 pub mod tls_config;
 pub mod tls_identity;
+pub mod transport;
 
 pub use client::RustlsPeerConnector;
 pub use identity_store::KeychainDeviceIdentity;
@@ -23,3 +24,4 @@ pub use repos::{
 pub use server::RustlsPeerServer;
 pub use tls_config::{client_config, peer_identity_from_certs, server_config};
 pub use tls_identity::{build_tls_identity, spki_from_cert, TlsIdentity};
+pub use transport::RustlsPeerTransportFactory;
