@@ -2846,9 +2846,10 @@ export type AuditEventKind =
   | { kind: 'sensitive_auth_used'; authType: string; collection: string; requestPath: string }
   | { kind: 'audit_evidence_exported'; rangeStart: string; rangeEnd: string; count: number }
   | { kind: 'audit_chain_broken'; atEventId: string; expectedHash: string; actualHash: string }
-  | { kind: 'network_device_paired'; deviceId: string }
-  | { kind: 'network_device_unpaired'; deviceId: string; byPeer: boolean }
-  | { kind: 'network_device_blocked'; deviceId: string };
+  // The network kinds use the wire names (snake_case): the Rust enum does not rename fields.
+  | { kind: 'network_device_paired'; device_id: string }
+  | { kind: 'network_device_unpaired'; device_id: string; by_peer: boolean }
+  | { kind: 'network_device_blocked'; device_id: string };
 
 export interface SecurityAuditEvent {
   id: string;

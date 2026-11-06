@@ -45,13 +45,13 @@ function summarize(event: SecurityAuditEvent): string {
     case 'audit_chain_broken':
       return `Audit chain broken at event ${k.atEventId}`;
     case 'network_device_paired':
-      return `Paired with device ${shortDeviceId(k.deviceId)}`;
+      return `Paired with device ${shortDeviceId(k.device_id)}`;
     case 'network_device_unpaired':
-      return k.byPeer
-        ? `Device ${shortDeviceId(k.deviceId)} removed the pairing`
-        : `Removed the pairing with device ${shortDeviceId(k.deviceId)}`;
+      return k.by_peer
+        ? `Device ${shortDeviceId(k.device_id)} removed the pairing`
+        : `Removed the pairing with device ${shortDeviceId(k.device_id)}`;
     case 'network_device_blocked':
-      return `Blocked device ${shortDeviceId(k.deviceId)}`;
+      return `Blocked device ${shortDeviceId(k.device_id)}`;
   }
 }
 
