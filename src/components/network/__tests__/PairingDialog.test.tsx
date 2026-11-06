@@ -186,4 +186,55 @@ describe('PairingDialog', () => {
       expect(store().dialogPairingId).toBeNull();
     });
   });
+
+  describe('late responses', () => {
+    it('a late cancel does not close the dialog of another pairing', async () => {
+      const cancel = createDeferred<void>();
+      mocks.api.cancelNetworkPairing.mockReturnValue(cancel.promise);
+      openStarted();
+      await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
+      // The pairing finishes, then the user opens another request.
+      act(() => {
+        store().setActivePairing(null);
+        store().addIncoming(request({ pairingId: 'p2' }));
+        store().openPairingDialog('p2');
+      });
+      await act(async () => {
+        cancel.resolve();
+      });
+      expect(store().dialogPairingId).toBe('p2');
+    });
+
+    it('a late decline does not close the dialog of another pairing', async () => {
+      const respond = createDeferred<void>();
+      mocks.api.respondNetworkPairing.mockReturnValue(respond.promise);
+      openRequest();
+      await userEvent.click(await screen.findByRole('button', { name: 'Decline' }));
+      act(() => {
+        store().removeIncoming('p1');
+        store().addIncoming(request({ pairingId: 'p2' }));
+        store().openPairingDialog('p2');
+      });
+      await act(async () => {
+        respond.resolve();
+      });
+      expect(store().dialogPairingId).toBe('p2');
+      expect(store().incoming.map((i) => i.pairingId)).toEqual(['p2']);
+    });
+
+    it('a late accept does not bring a finished request back', async () => {
+      const respond = createDeferred<void>();
+      mocks.api.respondNetworkPairing.mockReturnValue(respond.promise);
+      openRequest();
+      await userEvent.click(await screen.findByRole('button', { name: 'Accept' }));
+      act(() => {
+        store().removeIncoming('p1');
+        store().closePairingDialog();
+      });
+      await act(async () => {
+        respond.resolve();
+      });
+      expect(store().incoming).toEqual([]);
+    });
+  });
 });

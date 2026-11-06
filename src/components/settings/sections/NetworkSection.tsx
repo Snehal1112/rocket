@@ -32,6 +32,8 @@ function Block({ title, children }: { title: string; children: ReactNode }) {
 export function NetworkSection() {
   const status = useNetworkStore((s) => s.status);
   const error = useNetworkStore((s) => s.error);
+  // The lists reload when the node list changes, for example after a Block elsewhere.
+  const nodes = useNetworkStore((s) => s.nodes);
   const displayName = status?.displayName ?? '';
   const [name, setName] = useState(displayName);
   const [blocked, setBlocked] = useState<NetworkBlockedDevice[]>([]);
@@ -51,6 +53,7 @@ export function NetworkSection() {
     setName(displayName);
   }, [displayName]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: nodes is the reload trigger.
   useEffect(() => {
     let disposed = false;
     Promise.all([listNetworkBlocked(), listNetworkAddresses()]).then(
@@ -58,6 +61,7 @@ export function NetworkSection() {
         if (disposed) return;
         setBlocked(blockedList);
         setAddresses(addressList);
+        setListError(null);
       },
       (err) => {
         if (!disposed) setListError(errorText(err));
@@ -66,7 +70,7 @@ export function NetworkSection() {
     return () => {
       disposed = true;
     };
-  }, []);
+  }, [nodes]);
 
   // The switch shows the stored value, so a failed call leaves it where it was.
   const toggleHidden = (hidden: boolean) =>
@@ -180,7 +184,8 @@ export function NetworkSection() {
                   <Button
                     size='sm'
                     variant='outline'
-                    aria-label={`Unblock ${device.name}`}
+                    aria-label={`Unblock ${device.name} (${device.shortId})`}
+                    disabled={rowAction.busy}
                     onClick={() => void unblock(device)}
                   >
                     Unblock
@@ -191,6 +196,7 @@ export function NetworkSection() {
           </Block>
 
           <Block title='Saved addresses'>
+            {listError && <StateBlock tone='error'>{listError}</StateBlock>}
             {!listError && addresses.length === 0 && (
               <StateBlock tone='empty'>No saved addresses.</StateBlock>
             )}
@@ -204,6 +210,7 @@ export function NetworkSection() {
                       size='sm'
                       variant='outline'
                       aria-label={`Remove ${text}`}
+                      disabled={rowAction.busy}
                       onClick={() => void removeAddress(address)}
                     >
                       Remove

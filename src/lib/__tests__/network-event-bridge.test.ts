@@ -1,6 +1,7 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useNetworkEventBridge } from '@/lib/network-event-bridge';
+import { PAIRING_FAILED_TOAST_ID } from '@/lib/network-utils';
 import { useNetworkStore } from '@/stores/network-store';
 import { createDeferred } from '@/test/deferred';
 import { makeIncoming, makeNode, makeStatus } from '@/test/network-fixtures';
@@ -122,10 +123,33 @@ describe('useNetworkEventBridge', () => {
     expect(store().incoming).toEqual([makeIncoming()]);
   });
 
+  it('shows a failed pairing under the shared id, so a second report replaces it', async () => {
+    await mountBridge();
+    emit('pairing', finished('failed'));
+    expect(mocks.toast.error).toHaveBeenCalledWith('Pairing failed. Try again.', {
+      id: PAIRING_FAILED_TOAST_ID,
+    });
+  });
+
+  it('tells a responder who accepted that the other side backed out', async () => {
+    await mountBridge();
+    emit('pairing', incomingEvent());
+    store().markIncomingAccepted('p1');
+    emit('pairing', finished('declined'));
+    expect(mocks.toast.info).toHaveBeenCalledWith('Dana Roy did not pair.');
+  });
+
+  it('tells a responder who accepted that the request was cancelled', async () => {
+    await mountBridge();
+    emit('pairing', incomingEvent());
+    store().markIncomingAccepted('p1');
+    emit('pairing', finished('cancelled'));
+    expect(mocks.toast.info).toHaveBeenCalledWith('Dana Roy did not pair.');
+  });
+
   it.each([
     ['accepted', 'success', 'Paired with Dana Roy.'],
     ['expired', 'info', 'The request expired.'],
-    ['failed', 'error', 'Pairing failed. Try again.'],
   ] as const)('announces the %s outcome', async (outcome, method, message) => {
     await mountBridge();
     emit('pairing', finished(outcome));

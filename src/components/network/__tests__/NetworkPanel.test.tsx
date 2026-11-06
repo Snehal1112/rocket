@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NetworkPanel } from '@/components/network/NetworkPanel';
+import { PAIRING_FAILED_TOAST_ID } from '@/lib/network-utils';
 import { useNetworkStore } from '@/stores/network-store';
 import { makeIncoming, makeNode, makeStatus } from '@/test/network-fixtures';
 
@@ -199,6 +200,7 @@ describe('NetworkPanel', () => {
     await waitFor(() =>
       expect(mocks.toast.error).toHaveBeenCalledWith(
         "You've reached the limit of 200 paired devices. Remove one to pair.",
+        { id: PAIRING_FAILED_TOAST_ID },
       ),
     );
     expect(useNetworkStore.getState().dialogPairingId).toBeNull();

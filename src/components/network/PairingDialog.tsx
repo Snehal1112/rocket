@@ -52,8 +52,9 @@ export function PairingDialog() {
   const cancelStarted = () =>
     run(async () => {
       await cancelNetworkPairing(id);
-      store().setActivePairing(null);
-      store().closePairingDialog();
+      // A finish event may have ended this pairing already. Do not touch a newer one.
+      if (store().activePairing?.pairingId === id) store().setActivePairing(null);
+      if (store().dialogPairingId === id) store().closePairingDialog();
     });
 
   const acceptRequest = () =>
@@ -66,7 +67,7 @@ export function PairingDialog() {
     run(async () => {
       await respondNetworkPairing(id, decision);
       store().removeIncoming(id);
-      store().closePairingDialog();
+      if (store().dialogPairingId === id) store().closePairingDialog();
       if (decision === 'block') toast.info(`${name} is blocked.`);
     });
 

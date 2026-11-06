@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { errorText, toastError } from '@/lib/error-text';
 
 export type ErrorReport = 'toast' | 'inline';
@@ -19,26 +19,31 @@ export interface AsyncAction {
 export function useAsyncAction(report: ErrorReport = 'toast'): AsyncAction {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A reset starts a new generation, so a call that began before it cannot touch the state.
+  const generation = useRef(0);
 
   const run = useCallback(
     async (action: () => Promise<unknown>) => {
+      const mine = generation.current;
       setBusy(true);
       setError(null);
       try {
         await action();
         return true;
       } catch (err) {
+        if (mine !== generation.current) return false;
         if (report === 'inline') setError(errorText(err));
         else toastError(err);
         return false;
       } finally {
-        setBusy(false);
+        if (mine === generation.current) setBusy(false);
       }
     },
     [report],
   );
 
   const reset = useCallback(() => {
+    generation.current += 1;
     setBusy(false);
     setError(null);
   }, []);

@@ -7,3 +7,6 @@ export function formatPairingCode(code: string): string {
 export function shortDeviceId(full: string): string {
   return full.length > 9 ? `${full.slice(0, 4)}-${full.slice(4, 8)}` : full;
 }
+
+// One toast slot for pairing failures, so the event and the rejected command show it once.
+export const PAIRING_FAILED_TOAST_ID = 'network-pairing-failed';

@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { toast } from 'sonner';
 import { createListenerScope } from '@/lib/listen-scope';
+import { PAIRING_FAILED_TOAST_ID } from '@/lib/network-utils';
 import {
   type NetworkChangedEvent,
   type NetworkPairingEvent,
@@ -42,6 +43,7 @@ export function handleNetworkPairing(event: NetworkPairingEvent): void {
 
   // Read the state before it changes below.
   const started = store.activePairing?.pairingId === event.pairing_id;
+  const acceptedHere = store.incoming.some((i) => i.pairingId === event.pairing_id && i.accepted);
   store.removeIncoming(event.pairing_id);
   if (started) store.setActivePairing(null);
   if (store.dialogPairingId === event.pairing_id) store.closePairingDialog();
@@ -55,15 +57,20 @@ export function handleNetworkPairing(event: NetworkPairingEvent): void {
     case 'declined':
       // The user who pressed Decline or Block already knows.
       if (started) toast.info(`${name} declined.`);
+      else if (acceptedHere) toast.info(`${name} did not pair.`);
       break;
     case 'expired':
       toast.info('The request expired.');
       break;
     case 'failed':
-      toast.error('Pairing failed. Try again.');
+      toast.error('Pairing failed. Try again.', { id: PAIRING_FAILED_TOAST_ID });
+      break;
+    case 'cancelled':
+      // The other side backed out after this user accepted.
+      if (acceptedHere) toast.info(`${name} did not pair.`);
       break;
     default:
-      // A cancelled pairing and any outcome added later stay quiet.
+      // Any outcome added later stays quiet.
       break;
   }
 }

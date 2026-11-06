@@ -92,4 +92,20 @@ describe('useAsyncAction', () => {
     expect(result.current.run).toBe(run);
     expect(result.current.reset).toBe(reset);
   });
+
+  it('ignores the result of a call that was reset while it was in flight', async () => {
+    const pending = createDeferred<void>();
+    const { result } = renderHook(() => useAsyncAction('inline'));
+    let outcome: Promise<boolean> = Promise.resolve(true);
+    act(() => {
+      outcome = result.current.run(() => pending.promise);
+    });
+    act(() => result.current.reset());
+    await act(async () => {
+      pending.reject('Internal error: old call failed');
+    });
+    await expect(outcome).resolves.toBe(false);
+    expect(result.current.error).toBeNull();
+    expect(result.current.busy).toBe(false);
+  });
 });

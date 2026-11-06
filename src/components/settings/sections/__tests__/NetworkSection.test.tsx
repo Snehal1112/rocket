@@ -1,9 +1,10 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NetworkSection } from '@/components/settings/sections/NetworkSection';
 import type { NetworkStatus } from '@/lib/tauri-api';
 import { useNetworkStore } from '@/stores/network-store';
+import { createDeferred } from '@/test/deferred';
 import { makeStatus } from '@/test/network-fixtures';
 
 const mocks = vi.hoisted(() => ({
@@ -134,7 +135,11 @@ describe('NetworkSection', () => {
     const row = (await screen.findByText('Mallory')).closest('li');
     if (!row) throw new Error('no blocked row');
     expect(within(row).getByText('BBBB-0001')).toBeInTheDocument();
-    await userEvent.click(within(row).getByRole('button', { name: 'Unblock Mallory' }));
+    // The backend list is empty once the device is unblocked.
+    mocks.api.unblockNetworkDevice.mockImplementation(async () => {
+      mocks.api.listNetworkBlocked.mockResolvedValue([]);
+    });
+    await userEvent.click(within(row).getByRole('button', { name: 'Unblock Mallory (BBBB-0001)' }));
     await waitFor(() => expect(mocks.api.unblockNetworkDevice).toHaveBeenCalledWith('B1'));
     await waitFor(() => expect(screen.queryByText('Mallory')).not.toBeInTheDocument());
     expect(screen.getByText('No blocked devices.')).toBeInTheDocument();
@@ -143,6 +148,9 @@ describe('NetworkSection', () => {
   it('lists saved addresses and removes one', async () => {
     setup();
     expect(await screen.findByText('10.0.0.5:47821')).toBeInTheDocument();
+    mocks.api.removeNetworkAddress.mockImplementation(async () => {
+      mocks.api.listNetworkAddresses.mockResolvedValue([]);
+    });
     await userEvent.click(screen.getByRole('button', { name: 'Remove 10.0.0.5:47821' }));
     await waitFor(() =>
       expect(mocks.api.removeNetworkAddress).toHaveBeenCalledWith('10.0.0.5', 47821),
@@ -155,6 +163,29 @@ describe('NetworkSection', () => {
   it('shows the error when the lists cannot load', async () => {
     mocks.api.listNetworkBlocked.mockRejectedValue('Internal error: repo down');
     setup();
-    expect(await screen.findByText('repo down')).toBeInTheDocument();
+    expect(await screen.findAllByText('repo down')).toHaveLength(2);
+  });
+
+  it('disables the row buttons while one call is in flight', async () => {
+    const pending = createDeferred<void>();
+    mocks.api.unblockNetworkDevice.mockReturnValue(pending.promise);
+    setup();
+    await userEvent.click(await screen.findByRole('button', { name: 'Unblock Mallory (BBBB-0001)' }));
+    expect(screen.getByRole('button', { name: 'Unblock Mallory (BBBB-0001)' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Remove 10.0.0.5:47821' })).toBeDisabled();
+    await act(async () => {
+      pending.resolve();
+    });
+  });
+
+  it('reloads the lists when the node list changes', async () => {
+    setup();
+    await screen.findByText('Mallory');
+    mocks.api.listNetworkBlocked.mockResolvedValue([
+      { ...mallory, deviceId: 'B2', shortId: 'BBBB-0002', name: 'Trent' },
+    ]);
+    act(() => useNetworkStore.setState({ nodes: [] }));
+    expect(await screen.findByText('Trent')).toBeInTheDocument();
+    expect(screen.queryByText('Mallory')).not.toBeInTheDocument();
   });
 });

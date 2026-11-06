@@ -1,5 +1,6 @@
 import { Plus, Radar } from 'lucide-react';
 import { type ReactNode, useMemo, useState } from 'react';
+import { toast } from 'sonner';
 import { ListRow } from '@/components/network/ListRow';
 import { NetworkIdentity } from '@/components/network/NetworkIdentity';
 import { NodeRow } from '@/components/network/NodeRow';
@@ -10,8 +11,8 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { InitialsAvatar } from '@/components/ui/initials-avatar';
 import { SearchInput } from '@/components/ui/search-input';
 import { StateBlock } from '@/components/ui/state-block';
-import { toastError } from '@/lib/error-text';
-import { formatPairingCode } from '@/lib/network-utils';
+import { errorText } from '@/lib/error-text';
+import { formatPairingCode, PAIRING_FAILED_TOAST_ID } from '@/lib/network-utils';
 import type { NetworkNode } from '@/lib/tauri-api';
 import { startNetworkPairing, useNetworkStore } from '@/stores/network-store';
 
@@ -80,7 +81,7 @@ export function NetworkPanel({ onAddAddress, onRemove }: NetworkPanelProps) {
     try {
       await startNetworkPairing(node);
     } catch (err) {
-      toastError(err);
+      toast.error(errorText(err), { id: PAIRING_FAILED_TOAST_ID });
     } finally {
       setPairingDeviceId(null);
     }
