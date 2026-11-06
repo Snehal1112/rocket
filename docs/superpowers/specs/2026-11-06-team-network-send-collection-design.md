@@ -121,7 +121,9 @@ An offer over a limit is refused with `TransferAbort { busy }` and the sender se
 | Connection drops mid-transfer | "Sending failed. Try again." | "Receiving failed." (staged file deleted) |
 | Hash or size mismatch | "Sending failed. Try again." | "The collection arrived damaged and was not imported." |
 | Unsafe ZIP | "Sending failed. Try again." | "The collection was rejected because it is not safe to import." |
-| Import fails | "<name> could not import it." | The failure text. Nothing is created |
+| Import fails | "Sending failed. Try again." (the abort reason is only `failed`, so the sender cannot tell an import failure from another failure) | The failure text. Nothing is created |
+| Sender cancels a pending offer | n/a | "<name> cancelled the transfer." The pending offer and its dialog are closed |
+| Too big (event on the receiving or sending side) | "This collection is too big to send (X MiB, limit 10)." as an inline error in the send dialog. A later `too_big` event carries no size, so its toast says "(limit 10 MiB)". | n/a |
 
 The import happens in a temp folder and moves into place only when it succeeds, so a failure never leaves a half-written collection.
 
