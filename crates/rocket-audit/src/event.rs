@@ -51,6 +51,16 @@ pub enum AuditEventKind {
         expected_hash: String,
         actual_hash: String,
     },
+    NetworkDevicePaired {
+        device_id: String,
+    },
+    NetworkDeviceUnpaired {
+        device_id: String,
+        by_peer: bool,
+    },
+    NetworkDeviceBlocked {
+        device_id: String,
+    },
 }
 
 impl AuditEventKind {
@@ -65,6 +75,9 @@ impl AuditEventKind {
             Self::SensitiveAuthUsed { .. } => "sensitive_auth_used",
             Self::AuditEvidenceExported { .. } => "audit_evidence_exported",
             Self::AuditChainBroken { .. } => "audit_chain_broken",
+            Self::NetworkDevicePaired { .. } => "network_device_paired",
+            Self::NetworkDeviceUnpaired { .. } => "network_device_unpaired",
+            Self::NetworkDeviceBlocked { .. } => "network_device_blocked",
         }
     }
 }
@@ -148,5 +161,60 @@ mod tests {
         );
         let json = serde_json::to_string(&ev).unwrap();
         assert!(json.contains("\"kind\":\"collection_deleted\""));
+    }
+
+    #[test]
+    fn network_kinds_have_stable_tags() {
+        let paired = AuditEventKind::NetworkDevicePaired {
+            device_id: "ABCD".into(),
+        };
+        let unpaired = AuditEventKind::NetworkDeviceUnpaired {
+            device_id: "ABCD".into(),
+            by_peer: true,
+        };
+        let blocked = AuditEventKind::NetworkDeviceBlocked {
+            device_id: "ABCD".into(),
+        };
+        assert_eq!(paired.tag(), "network_device_paired");
+        assert_eq!(unpaired.tag(), "network_device_unpaired");
+        assert_eq!(blocked.tag(), "network_device_blocked");
+    }
+
+    #[test]
+    fn network_kinds_map_to_soc2_cc6_1() {
+        let kinds = [
+            AuditEventKind::NetworkDevicePaired {
+                device_id: "ABCD".into(),
+            },
+            AuditEventKind::NetworkDeviceUnpaired {
+                device_id: "ABCD".into(),
+                by_peer: false,
+            },
+            AuditEventKind::NetworkDeviceBlocked {
+                device_id: "ABCD".into(),
+            },
+        ];
+        for kind in kinds {
+            let tag = kind.tag();
+            let ev = SecurityAuditEvent::new("user", None, kind, "");
+            assert!(
+                ev.controls.iter().any(|c| c.code == "CC6.1"),
+                "{tag} is not under CC6.1"
+            );
+        }
+    }
+
+    #[test]
+    fn network_unpaired_serializes_with_snake_case_fields() {
+        let kind = AuditEventKind::NetworkDeviceUnpaired {
+            device_id: "ABCD".into(),
+            by_peer: true,
+        };
+        let value = serde_json::to_value(&kind).expect("kind serializes");
+        assert_eq!(value["kind"], "network_device_unpaired");
+        assert_eq!(value["device_id"], "ABCD");
+        assert_eq!(value["by_peer"], true);
+        let back: AuditEventKind = serde_json::from_value(value).expect("kind round trips");
+        assert_eq!(back, kind);
     }
 }

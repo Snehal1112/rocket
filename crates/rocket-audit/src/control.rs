@@ -23,7 +23,13 @@ pub static CONTROL_CATALOG: &[ControlEntry] = &[
         framework: Framework::Soc2,
         code: "CC6.1",
         title: "Logical access controls",
-        kinds: &["sensitive_auth_used", "secret_variable_written"],
+        kinds: &[
+            "sensitive_auth_used",
+            "secret_variable_written",
+            "network_device_paired",
+            "network_device_unpaired",
+            "network_device_blocked",
+        ],
     },
     ControlEntry {
         framework: Framework::Soc2,
@@ -155,5 +161,22 @@ mod tests {
     fn framework_serializes_snake_case() {
         let s = serde_json::to_string(&Framework::Soc2).unwrap();
         assert_eq!(s, "\"soc2\"");
+    }
+
+    #[test]
+    fn cc6_1_lists_the_network_kinds() {
+        for tag in [
+            "network_device_paired",
+            "network_device_unpaired",
+            "network_device_blocked",
+        ] {
+            let controls = controls_for_kind(tag);
+            assert!(
+                controls
+                    .iter()
+                    .any(|c| c.framework == Framework::Soc2 && c.code == "CC6.1"),
+                "{tag} missing from CC6.1"
+            );
+        }
     }
 }
