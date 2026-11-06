@@ -1,0 +1,36 @@
+{
+	# Railway terminates TLS, so Caddy serves plain HTTP.
+	auto_https off
+	admin off
+}
+
+:{$PORT:8080} {
+	root * /srv
+	encode zstd gzip
+
+	# Vite hashes its own build assets, so cache them for a year.
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+
+	# The HTML shell must always be revalidated.
+	@shell {
+		not path /assets/*
+		not path /screenshots/*
+	}
+	header @shell Cache-Control "no-cache"
+
+	# Files in public/ are not hashed, so keep their cache short.
+	@static path /screenshots/* /favicon.png /rocket.png
+	header @static Cache-Control "public, max-age=3600"
+
+	header {
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "DENY"
+	}
+
+	# A client-routed SPA: every route not matching a real file falls back to
+	# index.html, same as rocket-landing.
+	try_files {path} /index.html
+	file_server
+}

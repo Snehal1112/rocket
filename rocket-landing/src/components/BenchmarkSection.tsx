@@ -1,4 +1,4 @@
-import { Cpu, TriangleAlert } from 'lucide-react';
+import { Cpu } from 'lucide-react';
 
 import { CompareBarGroup, type CompareRow } from '@/components/CompareBar';
 import { Reveal } from '@/components/Reveal';
@@ -52,16 +52,6 @@ const rows: CompareRow[] = [
       { name: 'Postman', display: '~7%', value: 7, note: 'signed in' },
     ],
   },
-  {
-    metric: 'Startup to drawn UI',
-    goal: 'lower is better',
-    rocketLoses: true,
-    entries: [
-      { name: 'Rocket', display: '~10.4 s', value: 10.4 },
-      { name: 'Bruno', display: '~4.2 s', value: 4.2 },
-      { name: 'Postman', display: '~2.2 s', value: 2.2 },
-    ],
-  },
 ];
 
 export function BenchmarkSection() {
@@ -69,11 +59,11 @@ export function BenchmarkSection() {
     <Section id={sections.benchmarks} tone="muted">
       <SectionHeader
         eyebrow="benchmarks:"
-        title="The full table, including the row we lose"
+        title="The full table, measured against Bruno and Postman"
         lede={`All three clients installed and measured on ${benchmarkMeta.machine}, ${benchmarkMeta.measuredOn}. ${benchmarkMeta.versions}. The full methodology is published alongside the benchmark.`}
       />
 
-      <div className="mt-12 grid grid-cols-1 gap-8 sm:mt-14 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] lg:items-start lg:gap-12">
+      <div className="mt-12 grid grid-cols-1 gap-8 sm:mt-14 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] lg:items-stretch lg:gap-12">
         <Reveal>
           <div className="rounded-xl border border-border bg-card px-5 py-1 sm:px-7 sm:py-2">
             {rows.map((row, index) => (
@@ -87,41 +77,29 @@ export function BenchmarkSection() {
           </div>
         </Reveal>
 
-        <div className="space-y-4">
-          <Reveal delay={70}>
-            <div className="rounded-xl border border-warning/40 bg-warning/10 p-6">
-              <div className="flex items-center gap-2.5">
-                <TriangleAlert className="size-[18px] shrink-0 text-warning" aria-hidden="true" />
-                <h3 className="font-heading text-sm font-semibold tracking-tight">
-                  Where Rocket loses
-                </h3>
-              </div>
-              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                Cold start. Roughly 10.4 seconds to a drawn UI, against Bruno at 4.2 and Postman at
-                2.2 — the slowest of the three, by a lot. It is on the chart because a comparison
-                that only shows the wins is worth nothing. We are working on it.
-              </p>
+        <Reveal delay={70} className="h-full">
+          <div className="flex h-full flex-col rounded-xl border border-border bg-card p-7 sm:p-8">
+            <div className="flex items-center gap-2.5">
+              <Cpu className="size-[18px] shrink-0 text-primary" aria-hidden="true" />
+              <h3 className="font-heading text-sm font-semibold tracking-tight">
+                Why the rest is small
+              </h3>
             </div>
-          </Reveal>
-
-          <Reveal delay={140}>
-            <div className="rounded-xl border border-border bg-card p-6">
-              <div className="flex items-center gap-2.5">
-                <Cpu className="size-[18px] shrink-0 text-primary" aria-hidden="true" />
-                <h3 className="font-heading text-sm font-semibold tracking-tight">
-                  Why the rest is small
-                </h3>
-              </div>
-              <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                Rocket renders in the WebView the operating system already ships — WebKitGTK,
-                WKWebView or WebView2 — instead of bundling a second copy of Chromium. The backend
-                is Rust, so there is no garbage collector, no JVM and no Node runtime sitting
-                underneath it, and nothing polls a cloud in the background.
-              </p>
-              <RocketSpeed className="mx-auto mt-6 h-28 w-28" />
+            <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+              Rocket renders in the WebView the operating system already ships — WebKitGTK,
+              WKWebView or WebView2 — instead of bundling a second copy of Chromium. The backend
+              is Rust, so there is no garbage collector, no JVM and no Node runtime sitting
+              underneath it, and nothing polls a cloud in the background.
+            </p>
+            <div className="relative mt-4 flex flex-1 items-center justify-center">
+              <div
+                aria-hidden="true"
+                className="absolute size-40 rounded-full bg-primary/10 blur-2xl"
+              />
+              <RocketSpeed className="relative h-32 w-32 sm:h-40 sm:w-40" />
             </div>
-          </Reveal>
-        </div>
+          </div>
+        </Reveal>
       </div>
     </Section>
   );

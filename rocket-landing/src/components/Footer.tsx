@@ -6,6 +6,7 @@ const resources = [
   { href: links.github, label: 'GitHub' },
   { href: links.benchmarks, label: 'Benchmarks' },
   { href: links.license, label: 'MIT License' },
+  { href: `mailto:${links.contactEmail}`, label: 'Contact' },
 ];
 
 // Read once at load. A static page has no reason to re-read the clock per render.

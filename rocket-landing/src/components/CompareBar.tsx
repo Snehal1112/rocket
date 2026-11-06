@@ -16,15 +16,9 @@ export interface CompareRow {
   /** What "good" looks like, spelled out rather than implied by an arrow. */
   goal: string;
   entries: CompareEntry[];
-  /** `true` when Rocket is the one that loses this row. */
-  rocketLoses?: boolean;
 }
 
-/**
- * One metric, drawn as three proportional bars.
- * The same component renders the rows Rocket wins and the row it loses — the
- * comparison is only worth reading if it uses one visual language throughout.
- */
+/** One metric, drawn as three proportional bars. */
 export function CompareBarGroup({ row }: { row: CompareRow }) {
   const max = Math.max(...row.entries.map((entry) => entry.value ?? 0), 1);
 
@@ -61,11 +55,7 @@ export function CompareBarGroup({ row }: { row: CompareRow }) {
                     <div
                       className={cn(
                         'h-full rounded-full',
-                        isRocket
-                          ? row.rocketLoses
-                            ? 'bg-warning'
-                            : 'bg-primary'
-                          : 'bg-muted-foreground/35',
+                        isRocket ? 'bg-primary' : 'bg-muted-foreground/35',
                       )}
                       style={{ width: `${width}%` }}
                     />

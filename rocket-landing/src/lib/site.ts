@@ -1,9 +1,10 @@
 // Outbound links for the landing page, pointed at the real project repository.
 export const links = {
   github: 'https://github.com/Snehal1112/rocket',
-  docs: 'https://github.com/Snehal1112/rocket/tree/main/docs',
+  docs: 'https://docs.rocket.numericlabs.io',
   license: 'https://github.com/Snehal1112/rocket/blob/main/LICENSE',
   benchmarks: 'https://github.com/Snehal1112/rocket/blob/main/docs/engineering/benchmarks.md',
+  contactEmail: 'snehal.dangroshiya@numericlabs.io',
 } as const;
 
 // Anchor targets used by the nav and the in-page links.

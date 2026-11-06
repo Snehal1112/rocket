@@ -78,6 +78,7 @@ See `docs/features/settings-page.md` for the global Settings page (sections, loc
 See `docs/features/elevation.md` for the four elevation levels (VS Code colours, shadows, which surface uses which, borders).
 See `docs/features/update-notification.md` for the update notice (schedule, install kinds, settings, manual checks).
 See `rocket-landing/.claude/deploy-railway.md` for hosting the landing page on Railway (project `rocket-app`, Dockerfile, manual deploy).
+See `rocket-docs/.claude/deploy-railway.md` for hosting the user manual (Vite + React, same stack as rocket-landing) on Railway — not deployed yet, first-deploy steps included.
 See `docs/engineering/ddd-decisions.md` for the DDD rulings (mixed crates, `rocket-app` size, events direction, domain model depth, assistant naming).
 See `docs/roadmaps/roadmap.md` for the master roadmap of unimplemented work, and `docs/roadmaps/flow-roadmap.md` for Flow (item IDs, status, batches). Update them when work ships.
 

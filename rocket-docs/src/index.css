@@ -1,0 +1,206 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@fontsource-variable/noto-sans";
+@import "@fontsource-variable/jetbrains-mono";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.148 0.004 228.8);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.148 0.004 228.8);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.148 0.004 228.8);
+  /* Brand deep teal #0A6B62, shared with RocketVault, for white text on a filled control. */
+  --primary: oklch(0.476 0.081 184.6);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.967 0.001 286.375);
+  --secondary-foreground: oklch(0.21 0.006 285.885);
+  --muted: oklch(0.963 0.002 197.1);
+  --muted-foreground: oklch(0.56 0.021 213.5);
+  --accent: oklch(0.963 0.002 197.1);
+  --accent-foreground: oklch(0.218 0.008 223.9);
+  --destructive: oklch(0.577 0.245 27.325);
+  --success: oklch(0.627 0.17 149.2);
+  --success-foreground: oklch(0.985 0 0);
+  --warning: oklch(0.666 0.157 58.3);
+  --warning-foreground: oklch(0.148 0.004 228.8);
+  --border: oklch(0.925 0.005 214.3);
+  --input: oklch(0.925 0.005 214.3);
+  --ring: oklch(0.723 0.014 214.4);
+  --radius: 0.625rem;
+}
+
+.dark {
+  --background: oklch(0.148 0.004 228.8);
+  --foreground: oklch(0.987 0.002 197.1);
+  --card: oklch(0.218 0.008 223.9);
+  --card-foreground: oklch(0.987 0.002 197.1);
+  --popover: oklch(0.218 0.008 223.9);
+  --popover-foreground: oklch(0.987 0.002 197.1);
+  /* Brand teal #0FA89A, carrying ink text the way the mark does. */
+  --primary: oklch(0.659 0.114 184.3);
+  --primary-foreground: oklch(0.208 0.04 265.8);
+  --secondary: oklch(0.274 0.006 286.033);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.275 0.011 216.9);
+  --muted-foreground: oklch(0.723 0.014 214.4);
+  --accent: oklch(0.275 0.011 216.9);
+  --accent-foreground: oklch(0.987 0.002 197.1);
+  --destructive: oklch(0.704 0.191 22.216);
+  --success: oklch(0.8 0.182 151.7);
+  --success-foreground: oklch(0.208 0.04 265.8);
+  --warning: oklch(0.837 0.164 84.4);
+  --warning-foreground: oklch(0.148 0.004 228.8);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.56 0.021 213.5);
+}
+
+@theme inline {
+  --font-sans: "Noto Sans Variable", sans-serif;
+  --font-heading: "JetBrains Mono Variable", monospace;
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  html {
+    @apply font-sans;
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3, h4 {
+    @apply font-heading tracking-tight;
+  }
+}
+
+@layer utilities {
+  /* Scroll reveal. `.reveal` hides; `.reveal-in` lands it once the element is seen. */
+  .reveal {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  .reveal-in {
+    opacity: 1;
+    transform: none;
+    transition:
+      opacity 600ms cubic-bezier(0.22, 1, 0.36, 1),
+      transform 600ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  /* A screenshot inside the manual's content column, before it's zoomed. */
+  .doc-img {
+    @apply block rounded-[10px] border border-border;
+  }
+
+  /* Hand-rolled prose for rendered markdown — no typography plugin in this stack. */
+  .doc-content :where(h1) {
+    @apply mt-0 mb-5 text-3xl font-semibold;
+  }
+  .doc-content :where(h2) {
+    @apply mt-10 mb-4 border-t border-border pt-8 text-xl font-semibold first:mt-0 first:border-t-0 first:pt-0;
+  }
+  .doc-content :where(h3) {
+    @apply mt-7 mb-3 text-base font-semibold;
+  }
+  .doc-content :where(p) {
+    @apply my-4 leading-relaxed text-foreground/90;
+  }
+  .doc-content :where(ul) {
+    @apply my-4 list-disc space-y-1.5 pl-6;
+  }
+  .doc-content :where(ol) {
+    @apply my-4 list-decimal space-y-2 pl-6;
+  }
+  .doc-content :where(li) {
+    @apply leading-relaxed text-foreground/90;
+  }
+  .doc-content :where(li > p) {
+    @apply my-1;
+  }
+  .doc-content :where(a) {
+    @apply text-primary underline underline-offset-3 hover:text-primary/80;
+  }
+  .doc-content :where(strong) {
+    @apply font-semibold text-foreground;
+  }
+  .doc-content :where(code) {
+    @apply rounded bg-muted px-1.5 py-0.5 font-heading text-[0.85em];
+  }
+  .doc-content :where(pre) {
+    @apply my-4 overflow-x-auto rounded-lg border border-border bg-muted p-4;
+  }
+  .doc-content :where(pre code) {
+    @apply bg-transparent p-0;
+  }
+  .doc-content :where(blockquote) {
+    @apply my-4 border-l-2 border-primary/40 pl-4 text-muted-foreground italic;
+  }
+  .doc-content :where(table) {
+    @apply my-4 w-full border-collapse text-sm;
+  }
+  .doc-content :where(th, td) {
+    @apply border border-border px-3 py-2 text-left;
+  }
+  .doc-content :where(th) {
+    @apply bg-muted font-heading text-xs tracking-wide uppercase;
+  }
+  .doc-content :where(hr) {
+    @apply my-8 border-border;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal,
+  .reveal-in {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

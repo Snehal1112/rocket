@@ -1,23 +1,23 @@
 {
-  "version": "2.1.4",
-  "tag": "v2.1.4",
-  "publishedAt": "2026-11-03T20:44:47Z",
-  "htmlUrl": "https://github.com/Snehal1112/rocket/releases/tag/v2.1.4",
+  "version": "2.1.6",
+  "tag": "v2.1.6",
+  "publishedAt": "2026-11-06T03:55:10Z",
+  "htmlUrl": "https://github.com/Snehal1112/rocket/releases/tag/v2.1.6",
   "assets": {
     "linux": {
-      "name": "rocket_2.1.4_amd64.deb",
-      "url": "https://github.com/Snehal1112/rocket/releases/download/v2.1.4/rocket_2.1.4_amd64.deb",
-      "size": 50955186
+      "name": "rocket_2.1.6_amd64.deb",
+      "url": "https://github.com/Snehal1112/rocket/releases/download/v2.1.6/rocket_2.1.6_amd64.deb",
+      "size": 51110118
     },
     "macos": {
-      "name": "rocket_2.1.4_aarch64.dmg",
-      "url": "https://github.com/Snehal1112/rocket/releases/download/v2.1.4/rocket_2.1.4_aarch64.dmg",
-      "size": 45075531
+      "name": "rocket_2.1.6_aarch64.dmg",
+      "url": "https://github.com/Snehal1112/rocket/releases/download/v2.1.6/rocket_2.1.6_aarch64.dmg",
+      "size": 45219002
     },
     "windows": {
-      "name": "rocket_2.1.4_x64-setup.exe",
-      "url": "https://github.com/Snehal1112/rocket/releases/download/v2.1.4/rocket_2.1.4_x64-setup.exe",
-      "size": 31337585
+      "name": "rocket_2.1.6_x64-setup.exe",
+      "url": "https://github.com/Snehal1112/rocket/releases/download/v2.1.6/rocket_2.1.6_x64-setup.exe",
+      "size": 31550042
     }
   }
 }
