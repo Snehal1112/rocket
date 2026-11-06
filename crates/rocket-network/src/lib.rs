@@ -3,11 +3,16 @@
 pub mod device;
 pub mod identity;
 pub mod limits;
+pub mod pairing;
 pub mod profile;
 pub mod records;
 
 pub use device::DeviceId;
 pub use identity::{DeviceKeyMaterial, PeerIdentity};
+pub use pairing::{
+    commitment, commitment_from_base64, commitment_to_base64, pairing_code, Nonce, PairingCode,
+    PairingId, PairingOutcome, PairingRole, PairingSession, PairingState, PairingStatus,
+};
 pub use profile::{default_display_name, initials_for, NodeProfile};
 pub use records::{
     BlockedDevice, DiscoveredNode, DiscoverySource, ManualAddress, NetworkSettings, PairedDevice,
