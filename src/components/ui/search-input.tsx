@@ -17,14 +17,14 @@ export function SearchInput({ value, onChange, label, placeholder, className }: 
   return (
     <div className={cn('relative', className)}>
       <Search
-        className='pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground'
+        className='pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground'
         aria-hidden='true'
       />
       <Input
-        type='search'
+        role='searchbox'
         aria-label={label}
         placeholder={placeholder}
-        className='h-8 pl-8 text-xs'
+        className='h-8 pl-7 text-sm'
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />

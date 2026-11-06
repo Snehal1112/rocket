@@ -2,13 +2,13 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Plan 5 of 5.** Previous plan: `docs/superpowers/plans/team-network/2026-11-06-team-network-plan-04-service-tauri.md` (must be merged and green).
+**Plan 5 of 5.** Previous plan: `docs/superpowers/plans/team-network/2026-11-06-team-network-plan-04b-end-to-end.md` (must be merged and green; it follows `2026-11-06-team-network-plan-04-service-tauri.md`).
 **Next plan to run: none. This is the last plan of the series. Stop and show the user the whole change.**
 **Recommended model: Sonnet.**
 
 **Goal:** A Rocket user sees how many paired teammates are online in the status bar, opens a Network panel with a search box, pairs with a nearby node by comparing a 6-digit code, removes a pairing, adds a node by address, and manages visibility, name, blocked devices and saved addresses in Settings. A first-launch card says who the user is visible as. The feature has a developer doc and a manual test file.
 
-**Architecture:** The backend (Plans 1 to 4) owns all network state. The frontend keeps a thin mirror in `network-store` (status, node list, open incoming requests, the pairing the user started, and two UI flags). The mirror is refilled by calling the IPC commands, never patched from event fields: `nodesChanged` and `statusChanged` trigger a refetch, and a sequence counter drops a stale response. Events about pairings (`pairingIncoming`, `pairingFinished`) feed `incoming` and `activePairing` directly because they carry data the commands do not return. One bridge hook (`useNetworkEventBridge`) subscribes once, like the assistant bridge. Components read the store with narrow selectors. Dialogs that must outlive the panel (Add by address, Remove, Pairing) are mounted outside the Popover, so closing the Popover never destroys them.
+**Architecture:** The backend (Plans 1 to 4) owns all network state. The frontend keeps a thin mirror in `network-store` (status, node list, open incoming requests, the pairing the user started, and two UI flags). The mirror is refilled by calling the IPC commands, never patched from event fields: `nodesChanged` and `statusChanged` trigger a refetch, and a sequence counter drops a stale response. Events about pairings (`pairingIncoming`, `pairingFinished`) feed `incoming` and `activePairing` directly because they carry data the commands do not return. One bridge hook (`useNetworkEventBridge`) subscribes once, like the assistant bridge. Components read the store with narrow selectors. Mutations (`removePaired`, `addAddress`, `setHidden`, ...) are store actions that call the IPC wrapper and then reload what they changed, so a component never calls `refresh()` itself. Repeated UI parts are shared pieces (`StatusBarItem`, `SearchInput`, `InitialsAvatar`, `StateBlock`, `ListRow`, `useAsyncAction`, `createListenerScope`). Dialogs that must outlive the panel (Add by address, Remove, Pairing) are mounted outside the Popover, so closing the Popover never destroys them.
 
 **Tech Stack:** React 18, TypeScript, Zustand, shadcn/ui, lucide-react, sonner, Vitest + Testing Library, Bun.
 
@@ -18,7 +18,7 @@
 
 ## Global Constraints
 
-- shadcn/ui primitives only. No raw `<button>`, `<input>`, `<dialog>`, `<select>`, `<form>`. The initials circle is a styled `<span>` because `src/components/ui/` has no avatar. Enter-to-submit is an `onKeyDown` on the `Input`, not a `<form>`.
+- shadcn/ui primitives only. No raw `<button>`, `<input>`, `<dialog>`, `<select>`, `<form>`. The initials circle is the new `InitialsAvatar` (a styled `<span>`) because `src/components/ui/` has no avatar primitive. Enter-to-submit is an `onKeyDown` on the `Input`, not a `<form>`.
 - Icons from `lucide-react` only. No inline SVG.
 - Single-line variable-aware fields use `SingleLineEditor`; these inputs are not variable-aware, so plain `Input` is correct. No Monaco or CodeMirror is added.
 - Zustand: narrow selectors only. Never destructure the whole store at the top of a component. Selectors return primitives or stable references (`find` on an array returns an element that is already in the store).
@@ -27,6 +27,7 @@
 - Code comments are short full sentences that end with a period.
 - No commit during the plan. The user reviews the whole plan at the end. Then commit through `dev-workflow-skills:1-git-commit`, staging explicit paths only, conventional subjects (`feat(network): ...`, `test(network): ...`, `docs(network): ...`).
 - Never log or show the full device id, a nonce or a key. The UI shows the short id (`K7QF-2M9X`) and the 6-digit code only.
+- Reuse before copying. Listener lifecycle goes through `createListenerScope`, backend error text through `errorText` and `toastError`, status bar buttons through `StatusBarItem`, search boxes through `SearchInput`, text-only loading, empty and error lines through `StateBlock`, and the busy flag plus toast or inline error around one call through `useAsyncAction`. Components call store actions that reload what they changed, never `refresh()` after an IPC call. Do not move other existing call sites onto the new pieces in this plan.
 - Verification per task: `bun run tsc --noEmit`, `bun run check` (if it reports format or import-order findings, run `bun run lint`, then `bun run check` again), and the task's `bunx vitest run <path>`.
 
 ## Review Focus
@@ -35,7 +36,7 @@
 2. **Search with no matches** (Task 2 panel test): shows `No nodes match "<query>".`, keeps the open incoming requests visible, and never shows the "No Rocket nodes found" empty state, which is only for an empty list.
 3. **Two nodes with the same display name** (Task 2 panel test): each row shows its own short id and has its own Pair button named with the short id. Search by short id (with or without the dash) finds exactly one.
 4. **Incoming request expires while its dialog is open** (Task 1 store test for the timer, Task 3 dialog test): the dialog switches to "The request expired." with a Close button and no Accept button, instead of staying open on a dead code.
-5. **Listener event after unmount** (Task 1 bridge test): an event delivered after unmount changes nothing, the unlisten functions are called, and a listener that registers after unmount is unlistened at once.
+5. **Listener event after unmount** (Task 1 bridge test and `listen-scope` test): an event delivered after unmount changes nothing, the unlisten functions are called, and a listener that registers after unmount is unlistened at once.
 6. **Out-of-order refetch** (Task 1 store test): two `listNetworkNodes` calls that resolve in reverse order leave the newer result in the store.
 7. **Decision response races a finish event** (Task 3 dialog test): if `PairingFinished` clears the pairing while `respondNetworkPairing` is still in flight, the late response must not bring the pairing back.
 8. **Who gets the "declined" toast** (Task 1 bridge test): only the node that started the pairing. The user who pressed Decline or Block gets no "<name> declined." toast about their own choice.
@@ -49,17 +50,30 @@
 | File | Change | Responsibility |
 |---|---|---|
 | `src/lib/tauri-api.ts` | modify | "Team network" section: types, 14 wrappers, 2 listener wrappers |
-| `src/lib/network-utils.ts` | create | `errorText`, `formatPairingCode` |
-| `src/stores/network-store.ts` | create | Mirror of backend state, incoming expiry, `startNetworkPairing`, `selectOnlinePairedCount` |
+| `src/lib/tauri-api.ts` (`AuditEventKind` union) | modify | Add the three network audit kinds from Plan 04 |
+| `src/components/audit/AuditEventRow.tsx` | modify | Summary text for the three kinds (its `switch` has no default, so `tsc` fails without them) |
+| `src/components/audit/__tests__/AuditEventRow.network.test.tsx` | create | Row text for each kind |
+| `src/lib/network-utils.ts` | create | `formatPairingCode` |
+| `src/lib/error-text.ts` | create | `errorText` (generic backend error text) and `toastError` |
+| `src/lib/listen-scope.ts` | create | `createListenerScope` (keep, dispose and late registration of Tauri listeners) |
+| `src/hooks/useUpdateNotice.tsx` | modify | Use `createListenerScope` instead of its own `disposed`, `unlisteners` and `keep` code |
+| `src/stores/network-store.ts` | create | Mirror of backend state, incoming expiry, mutation actions that reload what they change, `startNetworkPairing`, `selectOnlinePairedCount` |
 | `src/lib/network-event-bridge.ts` | create | `useNetworkEventBridge`, `handleNetworkChanged`, `handleNetworkPairing` |
-| `src/test/network-fixtures.ts` | create | `makeStatus`, `makeNode` |
+| `src/test/network-fixtures.ts` | create | `makeStatus`, `makeNode`, `makeIncoming` |
 | `src/App.tsx` | modify | Mount the bridge, notice hook, `PairingDialog`, `NetworkIntroCard` |
 | `src/components/network/network-helpers.ts` | create | `filterNodes`, `sortNodes`, `groupNodes`, `validateAddress`, `validateDisplayName` |
-| `src/components/network/NodeRow.tsx` | create | One node row: initials, name, short id, chip, Pair or menu |
+| `src/components/network/NodeRow.tsx` | create | One node row: avatar, name, short id, chip, Pair or menu |
+| `src/components/network/ListRow.tsx`, `NetworkIdentity.tsx`, `SectionLabel.tsx` | create | Row, name-and-short-id block and small heading shared by the panel, the requests list and the Settings section |
 | `src/components/network/NetworkPanel.tsx` | create | Panel body: search, requests, groups, empty and error states |
 | `src/components/network/AddAddressDialog.tsx` | create | Host and port form |
 | `src/components/network/RemovePairedDialog.tsx` | create | Remove confirmation |
 | `src/components/status-bar/NetworkStatusItem.tsx` | create | Status bar button, Popover, hosts the dialogs |
+| `src/components/status-bar/StatusBarItem.tsx`, `StatusBarCount.tsx` | create | Framed ghost button and count pill for status bar items |
+| `src/components/status-bar/ContractsStatusItem.tsx` | modify | Use `StatusBarItem` instead of its own frame and button class |
+| `src/hooks/useAsyncAction.ts` | create | Busy flag plus toast or inline error around one async call |
+| `src/components/ui/search-input.tsx` | create | `SearchInput`: magnifier icon and `type='search'` Input |
+| `src/components/ui/initials-avatar.tsx` | create | `InitialsAvatar`: coloured initials circle (uses `avatarColorForName`) |
+| `src/components/ui/badge.tsx` | modify | `success` variant for the Online chip |
 | `src/components/layout/StatusBar.tsx` | modify | Render `NetworkStatusItem` |
 | `src/components/network/PairingDialog.tsx` | create | Code, Accept, Cancel, Decline, Block, waiting and expired views |
 | `src/components/network/IncomingPairingToast.tsx` | create | Body of the incoming toast |
@@ -74,16 +88,16 @@
 | `docs/features/settings-page.md` | modify | Section list |
 | `CLAUDE.md` | modify | One-line pointer |
 | `docs/roadmaps/roadmap.md`, `docs/roadmaps/contracts-ci-ai-roadmap.md` | modify | R-83 and CA-5 status |
-| Tests | create | `src/lib/__tests__/tauri-api.network.test.ts`, `src/lib/__tests__/network-utils.test.ts`, `src/stores/__tests__/network-store.test.ts`, `src/lib/__tests__/network-event-bridge.test.ts`, and the component, hook and section tests named in each task |
+| Tests | create | `src/lib/__tests__/tauri-api.network.test.ts`, `src/lib/__tests__/network-utils.test.ts`, `src/stores/__tests__/network-store.test.ts`, `src/lib/__tests__/network-event-bridge.test.ts`, `src/lib/__tests__/error-text.test.ts`, `src/lib/__tests__/listen-scope.test.ts`, and the component, hook and section tests named in each task |
 
 ---
 
 ### Task 1: Types, wrappers, store and event bridge
 
 **Files:**
-- Modify: `src/lib/tauri-api.ts`, `src/App.tsx`
-- Create: `src/lib/network-utils.ts`, `src/stores/network-store.ts`, `src/lib/network-event-bridge.ts`, `src/test/network-fixtures.ts`
-- Test: `src/lib/__tests__/tauri-api.network.test.ts`, `src/lib/__tests__/network-utils.test.ts`, `src/stores/__tests__/network-store.test.ts`, `src/lib/__tests__/network-event-bridge.test.ts`
+- Modify: `src/lib/tauri-api.ts`, `src/App.tsx`, `src/hooks/useUpdateNotice.tsx`
+- Create: `src/lib/network-utils.ts`, `src/lib/error-text.ts`, `src/lib/listen-scope.ts`, `src/stores/network-store.ts`, `src/lib/network-event-bridge.ts`, `src/test/network-fixtures.ts`
+- Test: `src/lib/__tests__/tauri-api.network.test.ts`, `src/lib/__tests__/network-utils.test.ts`, `src/lib/__tests__/error-text.test.ts`, `src/lib/__tests__/listen-scope.test.ts`, `src/stores/__tests__/network-store.test.ts`, `src/lib/__tests__/network-event-bridge.test.ts` (and the existing `src/hooks/__tests__/useUpdateNotice.test.tsx`, which must stay green)
 
 **Interfaces:**
 - Consumes: Tauri commands and event channels from the plan index (Plan 4 delivered them).
@@ -131,8 +145,19 @@ export const onNetworkChanged: (h: (e: NetworkChangedEvent) => void) => Promise<
 export const onNetworkPairing: (h: (e: NetworkPairingEvent) => void) => Promise<UnlistenFn>;
 
 // src/lib/network-utils.ts
-export function errorText(error: unknown): string;          // strips "Invalid input: " and "Internal error: "
 export function formatPairingCode(code: string): string;    // "482913" -> "482 913"
+
+// src/lib/error-text.ts
+export function errorText(err: unknown, fallback?: string): string;   // strips "Invalid input: " and "Internal error: ", trims; default fallback "Something went wrong. Try again."
+export function toastError(err: unknown, prefix?: string): void;      // toast.error(`${prefix} ${errorText(err)}`)
+
+// src/lib/listen-scope.ts
+export interface ListenerScope {
+  keep(registration: Promise<() => void>): void;   // A failed registration is swallowed. A late one is unlistened at once after dispose.
+  isDisposed(): boolean;
+  dispose(): void;                                 // Calls every kept unlisten function.
+}
+export function createListenerScope(): ListenerScope;
 
 // src/stores/network-store.ts
 export const INCOMING_TTL_MS = 120_000;
@@ -149,6 +174,14 @@ export interface NetworkState {
   activePairing: ActivePairing | null; panelOpen: boolean; dialogPairingId: string | null;
   error: string | null;
   refresh(): Promise<void>; refreshNodes(): Promise<void>;
+  // Mutations reject with the backend error and reload what they changed.
+  removePaired(deviceId: string): Promise<void>;           // Reloads the nodes also after a failure.
+  addAddress(host: string, port: number): Promise<void>;   // Reloads the nodes.
+  removeAddress(host: string, port: number): Promise<void>; // Reloads the nodes.
+  unblock(deviceId: string): Promise<void>;                // Reloads the nodes.
+  setHidden(hidden: boolean): Promise<void>;               // Reloads the status.
+  saveName(displayName: string): Promise<void>;            // Reloads the status.
+  markIntroSeen(): Promise<void>;                          // Reloads the status.
   addIncoming(i: PairingIncoming): void; removeIncoming(pairingId: string): void;
   markIncomingAccepted(pairingId: string): void;
   setActivePairing(p: ActivePairing | null): void;
@@ -167,6 +200,7 @@ export function useNetworkEventBridge(): void;
 // src/test/network-fixtures.ts
 export function makeStatus(patch?: Partial<NetworkStatus>): NetworkStatus;
 export function makeNode(patch?: Partial<NetworkNode>): NetworkNode;
+export function makeIncoming(patch?: Partial<PairingIncoming>): PairingIncoming;
 ```
 
 - [ ] **Step 1: Write the failing wrapper tests**
@@ -272,8 +306,8 @@ describe('team network commands', () => {
     expect(listen).toHaveBeenNthCalledWith(1, 'network-changed', expect.any(Function));
     expect(listen).toHaveBeenNthCalledWith(2, 'network-pairing', expect.any(Function));
 
-    const [, changedCallback] = vi.mocked(listen).mock.calls[0] ?? [];
-    const [, pairingCallback] = vi.mocked(listen).mock.calls[1] ?? [];
+    const changedCallback = vi.mocked(listen).mock.calls[0]?.[1];
+    const pairingCallback = vi.mocked(listen).mock.calls[1]?.[1];
     if (!changedCallback || !pairingCallback) throw new Error('listeners were not registered');
     const deliver = (cb: unknown, payload: unknown) =>
       (cb as (event: { payload: unknown }) => void)({ payload });
@@ -285,29 +319,13 @@ describe('team network commands', () => {
 });
 ```
 
-- [ ] **Step 2: Write the failing util and fixture tests**
+- [ ] **Step 2: Write the failing util, error text and listener scope tests**
 
 Create `src/lib/__tests__/network-utils.test.ts`:
 
 ```ts
 import { describe, expect, it } from 'vitest';
-import { errorText, formatPairingCode } from '@/lib/network-utils';
-
-describe('errorText', () => {
-  it('drops the backend error type prefix', () => {
-    expect(errorText(new Error('Invalid input: Port is taken'))).toBe('Port is taken');
-    expect(errorText('Internal error: boom')).toBe('boom');
-  });
-
-  it('keeps other messages as they are', () => {
-    expect(errorText('Could not reach 10.0.0.5')).toBe('Could not reach 10.0.0.5');
-  });
-
-  it('falls back to a generic line when there is no text', () => {
-    expect(errorText(42)).toBe('Something went wrong. Try again.');
-    expect(errorText('')).toBe('Something went wrong. Try again.');
-  });
-});
+import { formatPairingCode } from '@/lib/network-utils';
 
 describe('formatPairingCode', () => {
   it('splits six digits into two groups of three', () => {
@@ -325,6 +343,119 @@ describe('formatPairingCode', () => {
 });
 ```
 
+Create `src/lib/__tests__/error-text.test.ts`:
+
+```ts
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { errorText, toastError } from '@/lib/error-text';
+
+const mocks = vi.hoisted(() => ({ toast: { error: vi.fn() } }));
+
+vi.mock('sonner', () => ({ toast: mocks.toast }));
+
+describe('errorText', () => {
+  it('drops the backend error type prefix', () => {
+    expect(errorText(new Error('Invalid input: Port is taken'))).toBe('Port is taken');
+    expect(errorText('Internal error: boom')).toBe('boom');
+  });
+
+  it('keeps other messages as they are', () => {
+    expect(errorText('Could not reach 10.0.0.5')).toBe('Could not reach 10.0.0.5');
+  });
+
+  it('trims the text', () => {
+    expect(errorText('Invalid input:   spaced out  ')).toBe('spaced out');
+  });
+
+  it('falls back to a generic line when there is no text', () => {
+    expect(errorText(42)).toBe('Something went wrong. Try again.');
+    expect(errorText('')).toBe('Something went wrong. Try again.');
+    expect(errorText(null)).toBe('Something went wrong. Try again.');
+  });
+
+  it('uses the given fallback instead of the generic line', () => {
+    expect(errorText(42, 'Could not load.')).toBe('Could not load.');
+    expect(errorText('Invalid input: ', 'Could not load.')).toBe('Could not load.');
+  });
+});
+
+describe('toastError', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('shows the cleaned text as an error toast', () => {
+    toastError('Internal error: disk full');
+    expect(mocks.toast.error).toHaveBeenCalledWith('disk full');
+  });
+
+  it('puts the prefix in front of the text', () => {
+    toastError(new Error('Invalid input: Port is taken'), 'Could not add the address.');
+    expect(mocks.toast.error).toHaveBeenCalledWith('Could not add the address. Port is taken');
+  });
+
+  it('shows the generic line for an unknown error', () => {
+    toastError(undefined);
+    expect(mocks.toast.error).toHaveBeenCalledWith('Something went wrong. Try again.');
+  });
+});
+```
+
+Create `src/lib/__tests__/listen-scope.test.ts`:
+
+```ts
+import { describe, expect, it, vi } from 'vitest';
+import { createListenerScope } from '@/lib/listen-scope';
+import { createDeferred } from '@/test/deferred';
+
+const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+describe('createListenerScope', () => {
+  it('keeps listeners until dispose, then calls each one once', async () => {
+    const scope = createListenerScope();
+    const first = vi.fn();
+    const second = vi.fn();
+    scope.keep(Promise.resolve(first));
+    scope.keep(Promise.resolve(second));
+    await settle();
+    expect(first).not.toHaveBeenCalled();
+    scope.dispose();
+    scope.dispose();
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports whether it was disposed', () => {
+    const scope = createListenerScope();
+    expect(scope.isDisposed()).toBe(false);
+    scope.dispose();
+    expect(scope.isDisposed()).toBe(true);
+  });
+
+  it('unlistens a listener that registers after dispose, at once', async () => {
+    const scope = createListenerScope();
+    const late = createDeferred<() => void>();
+    const unlisten = vi.fn();
+    scope.keep(late.promise);
+    scope.dispose();
+    expect(unlisten).not.toHaveBeenCalled();
+    late.resolve(unlisten);
+    await settle();
+    expect(unlisten).toHaveBeenCalledTimes(1);
+  });
+
+  it('swallows a failed registration and keeps the others', async () => {
+    const scope = createListenerScope();
+    const ok = vi.fn();
+    scope.keep(Promise.reject(new Error('no event bridge')));
+    scope.keep(Promise.resolve(ok));
+    await settle();
+    expect(() => scope.dispose()).not.toThrow();
+    expect(ok).toHaveBeenCalledTimes(1);
+  });
+});
+```
+
 - [ ] **Step 3: Write the failing store tests**
 
 Create `src/stores/__tests__/network-store.test.ts`:
@@ -334,19 +465,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NetworkNode } from '@/lib/tauri-api';
 import {
   INCOMING_TTL_MS,
-  type PairingIncoming,
   selectOnlinePairedCount,
   startNetworkPairing,
   useNetworkStore,
 } from '@/stores/network-store';
 import { createDeferred } from '@/test/deferred';
-import { makeNode, makeStatus } from '@/test/network-fixtures';
+import { makeIncoming, makeNode, makeStatus } from '@/test/network-fixtures';
 
 const mocks = vi.hoisted(() => ({
   api: {
     getNetworkStatus: vi.fn(),
     listNetworkNodes: vi.fn(),
     requestNetworkPairing: vi.fn(),
+    removeNetworkPaired: vi.fn(),
+    addNetworkAddress: vi.fn(),
+    removeNetworkAddress: vi.fn(),
+    unblockNetworkDevice: vi.fn(),
+    setNetworkVisibility: vi.fn(),
+    setNetworkProfile: vi.fn(),
+    markNetworkIntroSeen: vi.fn(),
   },
 }));
 
@@ -354,14 +491,7 @@ vi.mock('@/lib/tauri-api', () => mocks.api);
 
 const store = () => useNetworkStore.getState();
 
-const incoming = (pairingId = 'p1'): PairingIncoming => ({
-  pairingId,
-  deviceId: 'DEV9',
-  shortId: 'ZZZZ-9999',
-  displayName: 'Cleo Park',
-  code: '482913',
-  accepted: false,
-});
+const incoming = (pairingId = 'p1') => makeIncoming({ pairingId });
 
 describe('network-store', () => {
   beforeEach(() => {
@@ -484,6 +614,83 @@ describe('network-store', () => {
     expect(selectOnlinePairedCount(store())).toBe(2);
   });
 
+  describe('mutation actions', () => {
+    beforeEach(() => {
+      mocks.api.listNetworkNodes.mockResolvedValue([makeNode({ deviceId: 'A' })]);
+      mocks.api.getNetworkStatus.mockResolvedValue(makeStatus({ displayName: 'Fresh' }));
+    });
+
+    it('removePaired calls the backend and reloads the nodes', async () => {
+      mocks.api.removeNetworkPaired.mockResolvedValue(undefined);
+      await store().removePaired('DEV1');
+      expect(mocks.api.removeNetworkPaired).toHaveBeenCalledWith('DEV1');
+      expect(store().nodes.map((n) => n.deviceId)).toEqual(['A']);
+    });
+
+    it('removePaired reloads the nodes after a failure and rethrows', async () => {
+      mocks.api.removeNetworkPaired.mockRejectedValue('Internal error: disk full');
+      await expect(store().removePaired('DEV1')).rejects.toBe('Internal error: disk full');
+      expect(mocks.api.listNetworkNodes).toHaveBeenCalledTimes(1);
+      expect(store().nodes.map((n) => n.deviceId)).toEqual(['A']);
+    });
+
+    it('addAddress sends the address and reloads the nodes', async () => {
+      mocks.api.addNetworkAddress.mockResolvedValue(undefined);
+      await store().addAddress('10.0.0.5', 47821);
+      expect(mocks.api.addNetworkAddress).toHaveBeenCalledWith('10.0.0.5', 47821);
+      expect(store().nodes.map((n) => n.deviceId)).toEqual(['A']);
+    });
+
+    it('addAddress rejects with the backend error and does not reload', async () => {
+      mocks.api.addNetworkAddress.mockRejectedValue('Invalid input: Port is taken');
+      await expect(store().addAddress('h', 1)).rejects.toBe('Invalid input: Port is taken');
+      expect(mocks.api.listNetworkNodes).not.toHaveBeenCalled();
+    });
+
+    it('removeAddress sends the address and reloads the nodes', async () => {
+      mocks.api.removeNetworkAddress.mockResolvedValue(undefined);
+      await store().removeAddress('10.0.0.5', 47821);
+      expect(mocks.api.removeNetworkAddress).toHaveBeenCalledWith('10.0.0.5', 47821);
+      expect(store().nodes.map((n) => n.deviceId)).toEqual(['A']);
+    });
+
+    it('unblock sends the device id and reloads the nodes', async () => {
+      mocks.api.unblockNetworkDevice.mockResolvedValue(undefined);
+      await store().unblock('B1');
+      expect(mocks.api.unblockNetworkDevice).toHaveBeenCalledWith('B1');
+      expect(store().nodes.map((n) => n.deviceId)).toEqual(['A']);
+    });
+
+    it('setHidden saves the flag and reloads the status', async () => {
+      mocks.api.setNetworkVisibility.mockResolvedValue(undefined);
+      await store().setHidden(true);
+      expect(mocks.api.setNetworkVisibility).toHaveBeenCalledWith(true);
+      expect(store().status?.displayName).toBe('Fresh');
+    });
+
+    it('setHidden rejects and leaves the status alone when the call fails', async () => {
+      useNetworkStore.setState({ status: makeStatus({ displayName: 'Kept' }) });
+      mocks.api.setNetworkVisibility.mockRejectedValue('Internal error: settings locked');
+      await expect(store().setHidden(true)).rejects.toBe('Internal error: settings locked');
+      expect(mocks.api.getNetworkStatus).not.toHaveBeenCalled();
+      expect(store().status?.displayName).toBe('Kept');
+    });
+
+    it('saveName saves the name and reloads the status', async () => {
+      mocks.api.setNetworkProfile.mockResolvedValue(undefined);
+      await store().saveName('Ana L.');
+      expect(mocks.api.setNetworkProfile).toHaveBeenCalledWith('Ana L.');
+      expect(store().status?.displayName).toBe('Fresh');
+    });
+
+    it('markIntroSeen saves the flag and reloads the status', async () => {
+      mocks.api.markNetworkIntroSeen.mockResolvedValue(undefined);
+      await store().markIntroSeen();
+      expect(mocks.api.markNetworkIntroSeen).toHaveBeenCalledTimes(1);
+      expect(store().status?.displayName).toBe('Fresh');
+    });
+  });
+
   describe('startNetworkPairing', () => {
     it('keeps the code, opens the dialog and closes the panel', async () => {
       useNetworkStore.setState({ panelOpen: true });
@@ -524,7 +731,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useNetworkEventBridge } from '@/lib/network-event-bridge';
 import { useNetworkStore } from '@/stores/network-store';
 import { createDeferred } from '@/test/deferred';
-import { makeNode, makeStatus } from '@/test/network-fixtures';
+import { makeIncoming, makeNode, makeStatus } from '@/test/network-fixtures';
 
 const mocks = vi.hoisted(() => {
   const handlers: Record<string, (payload: unknown) => void> = {};
@@ -639,16 +846,8 @@ describe('useNetworkEventBridge', () => {
     await mountBridge();
     emit('pairing', incomingEvent());
     emit('pairing', incomingEvent());
-    expect(store().incoming).toEqual([
-      {
-        pairingId: 'p1',
-        deviceId: 'DEV9',
-        shortId: 'ZZZZ-9999',
-        displayName: 'Dana Roy',
-        code: '482913',
-        accepted: false,
-      },
-    ]);
+    // The default of makeIncoming matches the fields of incomingEvent.
+    expect(store().incoming).toEqual([makeIncoming()]);
   });
 
   it.each([
@@ -734,8 +933,8 @@ describe('useNetworkEventBridge', () => {
 
 - [ ] **Step 5: Run the tests to verify they fail**
 
-Run: `bunx vitest run src/lib/__tests__/tauri-api.network.test.ts src/lib/__tests__/network-utils.test.ts src/stores/__tests__/network-store.test.ts src/lib/__tests__/network-event-bridge.test.ts`
-Expected: FAIL. The wrapper test reports `getNetworkStatus is not a function`; the other three report `Failed to resolve import "@/lib/network-utils"`, `"@/stores/network-store"` and `"@/lib/network-event-bridge"` (and `"@/test/network-fixtures"`).
+Run: `bunx vitest run src/lib/__tests__/tauri-api.network.test.ts src/lib/__tests__/network-utils.test.ts src/lib/__tests__/error-text.test.ts src/lib/__tests__/listen-scope.test.ts src/stores/__tests__/network-store.test.ts src/lib/__tests__/network-event-bridge.test.ts`
+Expected: FAIL. The wrapper test reports `getNetworkStatus is not a function`; the others report `Failed to resolve import` for `"@/lib/network-utils"`, `"@/lib/error-text"`, `"@/lib/listen-scope"`, `"@/stores/network-store"` and `"@/lib/network-event-bridge"` (and `"@/test/network-fixtures"`).
 
 - [ ] **Step 6: Add the fixtures**
 
@@ -743,6 +942,7 @@ Create `src/test/network-fixtures.ts`:
 
 ```ts
 import type { NetworkNode, NetworkStatus } from '@/lib/tauri-api';
+import type { PairingIncoming } from '@/stores/network-store';
 
 /** A running status with discovery and the listener available. */
 export function makeStatus(patch: Partial<NetworkStatus> = {}): NetworkStatus {
@@ -772,6 +972,19 @@ export function makeNode(patch: Partial<NetworkNode> = {}): NetworkNode {
     group: 'nearby',
     status: 'available',
     source: 'mdns',
+    ...patch,
+  };
+}
+
+/** An open request from a node that wants to pair. The user has not answered yet. */
+export function makeIncoming(patch: Partial<PairingIncoming> = {}): PairingIncoming {
+  return {
+    pairingId: 'p1',
+    deviceId: 'DEV9',
+    shortId: 'ZZZZ-9999',
+    displayName: 'Dana Roy',
+    code: '482913',
+    accepted: false,
     ...patch,
   };
 }
@@ -921,16 +1134,66 @@ export const onNetworkPairing = (
 - [ ] **Step 8: Add `src/lib/network-utils.ts`**
 
 ```ts
-// The backend sends errors as their Display text, so the type prefix is dropped.
-export function errorText(error: unknown): string {
-  const raw = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
-  const text = raw.replace(/^(Invalid input|Internal error): /, '').trim();
-  return text || 'Something went wrong. Try again.';
-}
-
 // Shows six digits as two groups of three, for example "482 913".
 export function formatPairingCode(code: string): string {
   return /^\d{6}$/.test(code) ? `${code.slice(0, 3)} ${code.slice(3)}` : code;
+}
+```
+
+- [ ] **Step 8a: Add `src/lib/error-text.ts` and `src/lib/listen-scope.ts`**
+
+Both are generic, so they live in `src/lib/` and not in the network folder. Create `src/lib/error-text.ts`:
+
+```ts
+import { toast } from 'sonner';
+
+// The backend sends errors as their Display text, so the type prefix is dropped.
+export function errorText(err: unknown, fallback = 'Something went wrong. Try again.'): string {
+  const raw = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
+  const text = raw.replace(/^(Invalid input|Internal error): /, '').trim();
+  return text || fallback;
+}
+
+// Shows the cleaned error text as an error toast. The optional prefix goes in front of it.
+export function toastError(err: unknown, prefix?: string): void {
+  const text = errorText(err);
+  toast.error(prefix ? `${prefix} ${text}` : text);
+}
+```
+
+Create `src/lib/listen-scope.ts`. It holds the lifecycle that `useUpdateNotice` wrote by hand: a listener that finishes registering after the component unmounted is unlistened at once, and a failed registration is swallowed.
+
+```ts
+export interface ListenerScope {
+  /** Keeps the unlisten function of a Tauri `listen` call that is still registering. */
+  keep: (registration: Promise<() => void>) => void;
+  isDisposed: () => boolean;
+  /** Unlistens everything kept so far. A listener that registers later is unlistened at once. */
+  dispose: () => void;
+}
+
+// One scope per effect run. Call `dispose` in the effect cleanup.
+export function createListenerScope(): ListenerScope {
+  let disposed = false;
+  const unlisteners: (() => void)[] = [];
+
+  return {
+    keep(registration) {
+      registration
+        .then((unlisten) => {
+          // The component may unmount before the promise resolves.
+          if (disposed) unlisten();
+          else unlisteners.push(unlisten);
+        })
+        .catch(() => undefined);
+    },
+    isDisposed: () => disposed,
+    dispose() {
+      disposed = true;
+      for (const unlisten of unlisteners) unlisten();
+      unlisteners.length = 0;
+    },
+  };
 }
 ```
 
@@ -938,13 +1201,20 @@ export function formatPairingCode(code: string): string {
 
 ```ts
 import { create } from 'zustand';
-import { errorText } from '@/lib/network-utils';
+import { errorText } from '@/lib/error-text';
 import {
+  addNetworkAddress,
   getNetworkStatus,
   listNetworkNodes,
+  markNetworkIntroSeen,
   type NetworkNode,
   type NetworkStatus,
+  removeNetworkAddress,
+  removeNetworkPaired,
   requestNetworkPairing,
+  setNetworkProfile,
+  setNetworkVisibility,
+  unblockNetworkDevice,
 } from '@/lib/tauri-api';
 
 /** An incoming request lives this long. It matches the backend pairing lifetime. */
@@ -984,6 +1254,14 @@ export interface NetworkState {
   error: string | null;
   refresh: () => Promise<void>;
   refreshNodes: () => Promise<void>;
+  /** The mutations below reject with the backend error and reload what they changed. */
+  removePaired: (deviceId: string) => Promise<void>;
+  addAddress: (host: string, port: number) => Promise<void>;
+  removeAddress: (host: string, port: number) => Promise<void>;
+  unblock: (deviceId: string) => Promise<void>;
+  setHidden: (hidden: boolean) => Promise<void>;
+  saveName: (displayName: string) => Promise<void>;
+  markIntroSeen: () => Promise<void>;
   addIncoming: (incoming: PairingIncoming) => void;
   removeIncoming: (pairingId: string) => void;
   markIncomingAccepted: (pairingId: string) => void;
@@ -1038,6 +1316,46 @@ export const useNetworkStore = create<NetworkState>()((set, get) => ({
     } catch (err) {
       if (seq === nodesSeq) set({ error: errorText(err) });
     }
+  },
+
+  async removePaired(deviceId) {
+    try {
+      await removeNetworkPaired(deviceId);
+    } finally {
+      // The list is the truth, also after a failure. refreshNodes never throws.
+      await get().refreshNodes();
+    }
+  },
+
+  async addAddress(host, port) {
+    await addNetworkAddress(host, port);
+    await get().refreshNodes();
+  },
+
+  async removeAddress(host, port) {
+    await removeNetworkAddress(host, port);
+    await get().refreshNodes();
+  },
+
+  // A device that was blocked can show up as nearby again.
+  async unblock(deviceId) {
+    await unblockNetworkDevice(deviceId);
+    await get().refreshNodes();
+  },
+
+  async setHidden(hidden) {
+    await setNetworkVisibility(hidden);
+    await get().refresh();
+  },
+
+  async saveName(displayName) {
+    await setNetworkProfile(displayName);
+    await get().refresh();
+  },
+
+  async markIntroSeen() {
+    await markNetworkIntroSeen();
+    await get().refresh();
   },
 
   addIncoming(incoming) {
@@ -1107,6 +1425,7 @@ export async function startNetworkPairing(node: NetworkNode): Promise<void> {
 ```ts
 import { useEffect } from 'react';
 import { toast } from 'sonner';
+import { createListenerScope } from '@/lib/listen-scope';
 import {
   type NetworkChangedEvent,
   type NetworkPairingEvent,
@@ -1180,39 +1499,83 @@ export function handleNetworkPairing(event: NetworkPairingEvent): void {
  */
 export function useNetworkEventBridge(): void {
   useEffect(() => {
-    let disposed = false;
-    const unlisteners: (() => void)[] = [];
     // A listener that resolves after disposal is unlistened at once.
-    const keep = (registration: Promise<() => void>) =>
-      registration
-        .then((unlisten) => {
-          if (disposed) unlisten();
-          else unlisteners.push(unlisten);
-        })
-        .catch((err) => console.error('[network] failed to register a listener', err));
-
-    keep(
+    const scope = createListenerScope();
+    scope.keep(
       onNetworkChanged((event) => {
-        if (!disposed) handleNetworkChanged(event);
+        if (!scope.isDisposed()) handleNetworkChanged(event);
       }),
     );
-    keep(
+    scope.keep(
       onNetworkPairing((event) => {
-        if (!disposed) handleNetworkPairing(event);
+        if (!scope.isDisposed()) handleNetworkPairing(event);
       }),
     );
 
     void useNetworkStore.getState().refresh();
     void useNetworkStore.getState().refreshNodes();
 
+    return () => scope.dispose();
+  }, []);
+}
+```
+
+- [ ] **Step 10a: Move `useUpdateNotice` onto the listener scope**
+
+`src/hooks/useUpdateNotice.tsx` has the `disposed`, `unlisteners` and `keep` code that `createListenerScope` replaces. Move it onto the scope. This is the only other file that changes for this helper.
+
+Edit 1: after the quoted line `import { UPDATE_TOAST_ID, UpdateToast } from '@/components/updates/UpdateToast';` add:
+
+```ts
+import { createListenerScope } from '@/lib/listen-scope';
+```
+
+Edit 2: replace the whole `useUpdateNotice` function (from `// Listens for update events and shows the update toast. Mount once.` to the end of the file) with:
+
+```tsx
+// Listens for update events and shows the update toast. Mount once.
+export function useUpdateNotice(): void {
+  useEffect(() => {
+    const scope = createListenerScope();
+
+    getInstallKind()
+      .then((kind) => {
+        if (!scope.isDisposed()) useUpdateStore.getState().setInstallKind(kind);
+      })
+      .catch(() => undefined);
+
+    scope.keep(
+      onUpdateAvailable((info) => {
+        const { status } = useUpdateStore.getState();
+        // A running or finished download keeps its update. The next check announces again.
+        if (status === 'downloading' || status === 'ready') return;
+        if (announced.has(info.version)) return;
+        // A new version starts over, so old progress or errors do not leak into its toast.
+        useUpdateStore.setState({ available: info, status: 'idle', progress: null, error: null });
+        announced.add(info.version);
+        showToast();
+      }),
+    );
+    scope.keep(onUpdateProgress((p) => useUpdateStore.getState().setProgress(p)));
+
+    // Progress, status and error changes refresh the toast that is already shown.
+    const unsubscribe = useUpdateStore.subscribe((s, prev) => {
+      if (!s.available || !announced.has(s.available.version)) return;
+      if (s.available !== prev.available) return;
+      if (s.status === prev.status && s.progress === prev.progress && s.error === prev.error)
+        return;
+      showToast();
+    });
+
     return () => {
-      disposed = true;
-      for (const unlisten of unlisteners) unlisten();
-      unlisteners.length = 0;
+      scope.dispose();
+      unsubscribe();
     };
   }, []);
 }
 ```
+
+Nothing else in that file changes, and `src/hooks/__tests__/useUpdateNotice.test.tsx` must pass without edits. Run it in Step 12.
 
 - [ ] **Step 11: Mount the bridge in `src/App.tsx`**
 
@@ -1228,10 +1591,91 @@ Edit 2: after the quoted line `  useFlowRequestPathEvents();` (inside `App`) add
   useNetworkEventBridge();
 ```
 
+- [ ] **Step 11a: Teach the audit screen the three network kinds**
+
+Plan 04 adds three audit kinds in Rust. The audit screen lists them, so its TypeScript union and summary text must know them (the `switch` in `summarize` has no default branch, so `bun run tsc --noEmit` fails until all three are handled). Field names are camelCase, as for the existing kinds.
+
+Test first, in `src/components/audit/__tests__/AuditEventRow.network.test.tsx`:
+
+```tsx
+import { render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
+import { AuditEventRow } from '@/components/audit/AuditEventRow';
+import type { AuditEventKind, SecurityAuditEvent } from '@/lib/tauri-api';
+
+const makeEvent = (event: AuditEventKind): SecurityAuditEvent => ({
+  id: 'e1',
+  occurredAt: '2026-11-06T10:00:00Z',
+  actor: 'user',
+  workspaceId: null,
+  event,
+  controls: [],
+  prevHash: '',
+  hash: 'abcdef0123456789',
+});
+
+const show = (event: AuditEventKind) =>
+  render(
+    <table>
+      <tbody>
+        <AuditEventRow event={makeEvent(event)} />
+      </tbody>
+    </table>,
+  );
+
+describe('AuditEventRow network kinds', () => {
+  it('describes a new pairing', () => {
+    show({ kind: 'network_device_paired', deviceId: 'AAAA-1111' });
+    expect(screen.getByText('Paired with device AAAA-1111')).toBeInTheDocument();
+  });
+
+  it('describes a pairing the user removed', () => {
+    show({ kind: 'network_device_unpaired', deviceId: 'AAAA-1111', byPeer: false });
+    expect(screen.getByText('Removed the pairing with device AAAA-1111')).toBeInTheDocument();
+  });
+
+  it('describes a pairing the other device removed', () => {
+    show({ kind: 'network_device_unpaired', deviceId: 'AAAA-1111', byPeer: true });
+    expect(screen.getByText('Device AAAA-1111 removed the pairing')).toBeInTheDocument();
+  });
+
+  it('describes a block', () => {
+    show({ kind: 'network_device_blocked', deviceId: 'AAAA-1111' });
+    expect(screen.getByText('Blocked device AAAA-1111')).toBeInTheDocument();
+  });
+});
+```
+
+Run: `bunx vitest run src/components/audit/__tests__/AuditEventRow.network.test.tsx`
+Expected: FAIL (type errors or missing text).
+
+In `src/lib/tauri-api.ts`, in `AuditEventKind`, after the quoted line `  | { kind: 'audit_chain_broken'; atEventId: string; expectedHash: string; actualHash: string };` replace its closing `;` with a newline and add:
+
+```ts
+  | { kind: 'network_device_paired'; deviceId: string }
+  | { kind: 'network_device_unpaired'; deviceId: string; byPeer: boolean }
+  | { kind: 'network_device_blocked'; deviceId: string };
+```
+
+In `src/components/audit/AuditEventRow.tsx`, in `summarize`, after the `case 'audit_chain_broken':` return line add:
+
+```tsx
+    case 'network_device_paired':
+      return `Paired with device ${k.deviceId}`;
+    case 'network_device_unpaired':
+      return k.byPeer
+        ? `Device ${k.deviceId} removed the pairing`
+        : `Removed the pairing with device ${k.deviceId}`;
+    case 'network_device_blocked':
+      return `Blocked device ${k.deviceId}`;
+```
+
+Run the test again. Expected: PASS (4 tests).
+
 - [ ] **Step 12: Run the tests to verify they pass**
 
-Run: `bunx vitest run src/lib/__tests__/tauri-api.network.test.ts src/lib/__tests__/network-utils.test.ts src/stores/__tests__/network-store.test.ts src/lib/__tests__/network-event-bridge.test.ts`
-Expected: PASS (all four files).
+Run: `bunx vitest run src/lib/__tests__/tauri-api.network.test.ts src/lib/__tests__/network-utils.test.ts src/lib/__tests__/error-text.test.ts src/lib/__tests__/listen-scope.test.ts src/stores/__tests__/network-store.test.ts src/lib/__tests__/network-event-bridge.test.ts src/components/audit/__tests__/AuditEventRow.network.test.tsx src/hooks/__tests__/useUpdateNotice.test.tsx`
+Expected: PASS (all eight files, including the unchanged `useUpdateNotice` test).
 
 - [ ] **Step 13: Run the checks**
 
@@ -1248,8 +1692,10 @@ No commit; reviewed at the plan end.
 
 **Files:**
 - Create: `src/components/network/network-helpers.ts`, `src/components/network/NodeRow.tsx`, `src/components/network/NetworkPanel.tsx`, `src/components/network/AddAddressDialog.tsx`, `src/components/network/RemovePairedDialog.tsx`, `src/components/status-bar/NetworkStatusItem.tsx`
-- Modify: `src/components/layout/StatusBar.tsx`, `src/components/layout/__tests__/StatusBar.test.tsx`
+- Create (shared pieces): `src/hooks/useAsyncAction.ts`, `src/components/ui/search-input.tsx`, `src/components/ui/initials-avatar.tsx`, `src/components/status-bar/StatusBarItem.tsx`, `src/components/status-bar/StatusBarCount.tsx`, `src/components/network/ListRow.tsx`, `src/components/network/NetworkIdentity.tsx`, `src/components/network/SectionLabel.tsx`
+- Modify: `src/components/layout/StatusBar.tsx`, `src/components/layout/__tests__/StatusBar.test.tsx`, `src/components/ui/badge.tsx` (`success` variant), `src/components/status-bar/ContractsStatusItem.tsx` (use `StatusBarItem`)
 - Test: `src/components/network/__tests__/network-helpers.test.ts`, `src/components/network/__tests__/NetworkPanel.test.tsx`, `src/components/network/__tests__/AddAddressDialog.test.tsx`, `src/components/network/__tests__/RemovePairedDialog.test.tsx`, `src/components/status-bar/__tests__/NetworkStatusItem.test.tsx`
+- Test (shared pieces): `src/hooks/__tests__/useAsyncAction.test.tsx`, `src/components/ui/__tests__/search-input.test.tsx`, `src/components/ui/__tests__/initials-avatar.test.tsx`, `src/components/ui/__tests__/badge.test.tsx`, `src/components/status-bar/__tests__/StatusBarItem.test.tsx`, `src/components/network/__tests__/network-parts.test.tsx`
 
 **Interfaces:**
 - Consumes: everything Task 1 produces.
@@ -1278,6 +1724,31 @@ export function RemovePairedDialog(props: { node: NetworkNode | null; onClose: (
 
 // NetworkStatusItem.tsx
 export function NetworkStatusItem(): JSX.Element;
+
+// Shared pieces (used here and by Task 3)
+// src/hooks/useAsyncAction.ts
+export type ErrorReport = 'toast' | 'inline';
+export interface AsyncAction {
+  busy: boolean;
+  error: string | null;                                     // Set only in 'inline' mode.
+  setError: (message: string | null) => void;
+  run: (action: () => Promise<unknown>) => Promise<boolean>; // true on success, false on failure; never rejects.
+  reset: () => void;                                        // Clears error and busy.
+}
+export function useAsyncAction(report?: ErrorReport): AsyncAction;   // default 'toast'
+// src/components/ui/search-input.tsx
+export function SearchInput(props: { value: string; onChange: (value: string) => void; label: string; placeholder?: string; className?: string }): JSX.Element;
+// src/components/ui/initials-avatar.tsx
+export function InitialsAvatar(props: { name: string; initials?: string; size?: number }): JSX.Element;   // size default 28
+// src/components/ui/badge.tsx: Badge variant 'success' added.
+// src/components/status-bar/StatusBarItem.tsx
+export function StatusBarItem(props: Omit<ComponentProps<typeof Button>, 'variant' | 'size' | 'asChild'>): JSX.Element;
+// src/components/status-bar/StatusBarCount.tsx
+export function StatusBarCount(props: { children: ReactNode }): JSX.Element;
+// src/components/network/ListRow.tsx, NetworkIdentity.tsx, SectionLabel.tsx
+export function ListRow(props: ComponentProps<'li'>): JSX.Element;
+export function NetworkIdentity(props: { name: string; shortId: string; extra?: string }): JSX.Element;
+export function SectionLabel(props: { as?: 'h3' | 'p'; className?: string; children: ReactNode }): JSX.Element;
 ```
 
 Until Task 3 mounts `PairingDialog`, pressing Pair stores the pairing and opens nothing visible. That is expected.
@@ -1419,7 +1890,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NetworkPanel } from '@/components/network/NetworkPanel';
 import { useNetworkStore } from '@/stores/network-store';
-import { makeNode, makeStatus } from '@/test/network-fixtures';
+import { makeIncoming, makeNode, makeStatus } from '@/test/network-fixtures';
 
 const mocks = vi.hoisted(() => ({
   toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
@@ -1508,20 +1979,14 @@ describe('NetworkPanel', () => {
     expect(screen.queryByText('Dana Roy')).not.toBeInTheDocument();
 
     await userEvent.clear(search());
-    await userEvent.type(search(), 'ao');
-    expect(screen.queryByText('Cleo Park')).not.toBeInTheDocument();
+    await userEvent.type(search(), 'dr');
+    expect(screen.getByText('Dana Roy')).toBeInTheDocument();
+    expect(screen.queryByText('Ben Ortiz')).not.toBeInTheDocument();
   });
 
   it('says nothing matches, keeps the requests and hides the empty state', async () => {
     setup();
-    useNetworkStore.getState().addIncoming({
-      pairingId: 'p1',
-      deviceId: 'DEV9',
-      shortId: 'ZZZZ-9999',
-      displayName: 'Eli Stone',
-      code: '482913',
-      accepted: false,
-    });
+    useNetworkStore.getState().addIncoming(makeIncoming({ displayName: 'Eli Stone' }));
     await userEvent.type(search(), 'zzzqq');
     expect(screen.getByText('No nodes match "zzzqq".')).toBeInTheDocument();
     expect(screen.queryByText('No Rocket nodes found on this network.')).not.toBeInTheDocument();
@@ -1543,6 +2008,11 @@ describe('NetworkPanel', () => {
     setup([makeNode({ displayName: 'Old Mac', shortId: 'OLDM-0001', status: 'needs_update' })]);
     expect(screen.getByText('Needs update')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Pair with Old Mac (OLDM-0001)' })).toBeDisabled();
+  });
+
+  it('shows the Pairing chip while a pairing with the node is open', () => {
+    setup([makeNode({ displayName: 'New Mac', shortId: 'NEWM-0001', status: 'pairing' })]);
+    expect(screen.getByText('Pairing…')).toBeInTheDocument();
   });
 
   it('shows the empty state with the VPN hint and one Add by address button', async () => {
@@ -1580,14 +2050,7 @@ describe('NetworkPanel', () => {
   it('lists open requests at the top and reviews one', async () => {
     setup([dana]);
     useNetworkStore.setState({ panelOpen: true });
-    useNetworkStore.getState().addIncoming({
-      pairingId: 'p1',
-      deviceId: 'DEV9',
-      shortId: 'ZZZZ-9999',
-      displayName: 'Eli Stone',
-      code: '482913',
-      accepted: false,
-    });
+    useNetworkStore.getState().addIncoming(makeIncoming({ displayName: 'Eli Stone' }));
     const requests = within(await screen.findByRole('list', { name: 'Requests' }));
     expect(requests.getByText('Eli Stone')).toBeInTheDocument();
     expect(requests.getByText('ZZZZ-9999 · 482 913')).toBeInTheDocument();
@@ -1924,10 +2387,337 @@ and add this test inside the `describe('StatusBar', ...)` block, after the quote
   });
 ```
 
+- [ ] **Step 4a: Write the failing tests for the shared pieces**
+
+The panel, the dialogs, the status item and the Settings section share small pieces. They are tested once here. Create `src/hooks/__tests__/useAsyncAction.test.tsx`:
+
+```tsx
+import { act, renderHook } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { useAsyncAction } from '@/hooks/useAsyncAction';
+import { createDeferred } from '@/test/deferred';
+
+const mocks = vi.hoisted(() => ({ toast: { error: vi.fn() } }));
+
+vi.mock('sonner', () => ({ toast: mocks.toast }));
+
+describe('useAsyncAction', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('is busy while the action runs and resolves true when it succeeds', async () => {
+    const pending = createDeferred<void>();
+    const { result } = renderHook(() => useAsyncAction());
+    let outcome: Promise<boolean> = Promise.resolve(false);
+    act(() => {
+      outcome = result.current.run(() => pending.promise);
+    });
+    expect(result.current.busy).toBe(true);
+    await act(async () => {
+      pending.resolve();
+    });
+    await expect(outcome).resolves.toBe(true);
+    expect(result.current.busy).toBe(false);
+    expect(mocks.toast.error).not.toHaveBeenCalled();
+  });
+
+  it('toasts the cleaned error and resolves false by default', async () => {
+    const { result } = renderHook(() => useAsyncAction());
+    let ok = true;
+    await act(async () => {
+      ok = await result.current.run(() => Promise.reject('Internal error: disk full'));
+    });
+    expect(ok).toBe(false);
+    expect(mocks.toast.error).toHaveBeenCalledWith('disk full');
+    expect(result.current.error).toBeNull();
+    expect(result.current.busy).toBe(false);
+  });
+
+  it('keeps the error inline, without a toast, in inline mode', async () => {
+    const { result } = renderHook(() => useAsyncAction('inline'));
+    await act(async () => {
+      await result.current.run(() => Promise.reject('Invalid input: Port is taken'));
+    });
+    expect(result.current.error).toBe('Port is taken');
+    expect(mocks.toast.error).not.toHaveBeenCalled();
+  });
+
+  it('clears the inline error when the next run starts', async () => {
+    const { result } = renderHook(() => useAsyncAction('inline'));
+    await act(async () => {
+      await result.current.run(() => Promise.reject('Internal error: first'));
+    });
+    expect(result.current.error).toBe('first');
+    await act(async () => {
+      await result.current.run(() => Promise.resolve());
+    });
+    expect(result.current.error).toBeNull();
+  });
+
+  it('lets the caller set and clear the inline error', () => {
+    const { result } = renderHook(() => useAsyncAction('inline'));
+    act(() => result.current.setError('Enter a name.'));
+    expect(result.current.error).toBe('Enter a name.');
+    act(() => result.current.setError(null));
+    expect(result.current.error).toBeNull();
+  });
+
+  it('reset clears the error and the busy flag', async () => {
+    const pending = createDeferred<void>();
+    const { result } = renderHook(() => useAsyncAction('inline'));
+    act(() => result.current.setError('old'));
+    act(() => {
+      void result.current.run(() => pending.promise);
+    });
+    expect(result.current.busy).toBe(true);
+    act(() => result.current.reset());
+    expect(result.current.busy).toBe(false);
+    expect(result.current.error).toBeNull();
+    await act(async () => {
+      pending.resolve();
+    });
+  });
+
+  it('keeps run and reset stable across renders', () => {
+    const { result, rerender } = renderHook(() => useAsyncAction());
+    const { run, reset } = result.current;
+    rerender();
+    expect(result.current.run).toBe(run);
+    expect(result.current.reset).toBe(reset);
+  });
+});
+```
+
+Create `src/components/ui/__tests__/search-input.test.tsx`:
+
+```tsx
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi } from 'vitest';
+import { SearchInput } from '@/components/ui/search-input';
+
+describe('SearchInput', () => {
+  it('is a search box with the label and the placeholder', () => {
+    render(<SearchInput value='' onChange={vi.fn()} label='Search nodes' placeholder='Find' />);
+    const box = screen.getByRole('searchbox', { name: 'Search nodes' });
+    expect(box).toHaveAttribute('placeholder', 'Find');
+  });
+
+  it('shows the value it is given', () => {
+    render(<SearchInput value='ana' onChange={vi.fn()} label='Search nodes' />);
+    expect(screen.getByRole('searchbox')).toHaveValue('ana');
+  });
+
+  it('hands the typed text, not the event, to onChange', async () => {
+    const onChange = vi.fn();
+    render(<SearchInput value='' onChange={onChange} label='Search nodes' />);
+    await userEvent.type(screen.getByRole('searchbox'), 'ab');
+    expect(onChange).toHaveBeenNthCalledWith(1, 'a');
+    expect(onChange).toHaveBeenNthCalledWith(2, 'b');
+  });
+
+  it('puts the class name on the wrapper', () => {
+    const { container } = render(
+      <SearchInput value='' onChange={vi.fn()} label='Search nodes' className='w-64' />,
+    );
+    expect(container.firstElementChild).toHaveClass('relative', 'w-64');
+  });
+});
+```
+
+Create `src/components/ui/__tests__/initials-avatar.test.tsx`:
+
+```tsx
+import { render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
+import { InitialsAvatar } from '@/components/ui/initials-avatar';
+import { avatarColorForName } from '@/lib/contracts/avatarColor';
+
+describe('InitialsAvatar', () => {
+  it('shows the initials it is given', () => {
+    render(<InitialsAvatar name='Ana Lima' initials='AL' />);
+    expect(screen.getByText('AL')).toBeInTheDocument();
+  });
+
+  it('works out the initials from the name when none are given', () => {
+    render(<InitialsAvatar name='Dana Roy' />);
+    expect(screen.getByText('DR')).toBeInTheDocument();
+  });
+
+  it('uses the same colour for the same name', () => {
+    render(<InitialsAvatar name='Ana Lima' initials='AL' />);
+    expect(screen.getByText('AL')).toHaveStyle({
+      backgroundColor: avatarColorForName('Ana Lima'),
+    });
+  });
+
+  it('defaults to 28 pixels and takes another size', () => {
+    const { rerender } = render(<InitialsAvatar name='Ana Lima' initials='AL' />);
+    expect(screen.getByText('AL')).toHaveStyle({ width: '28px', height: '28px' });
+    rerender(<InitialsAvatar name='Ana Lima' initials='AL' size={20} />);
+    expect(screen.getByText('AL')).toHaveStyle({ width: '20px', height: '20px' });
+  });
+
+  it('is hidden from assistive technology', () => {
+    render(<InitialsAvatar name='Ana Lima' initials='AL' />);
+    expect(screen.getByText('AL')).toHaveAttribute('aria-hidden', 'true');
+  });
+});
+```
+
+Create `src/components/ui/__tests__/badge.test.tsx`:
+
+```tsx
+import { render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
+import { Badge, badgeVariants } from '@/components/ui/badge';
+
+describe('Badge', () => {
+  it('has a success variant', () => {
+    render(<Badge variant='success'>Online</Badge>);
+    expect(screen.getByText('Online')).toHaveClass(
+      'bg-[hsl(var(--success-soft))]',
+      'text-[hsl(var(--toast-success-fg))]',
+    );
+  });
+
+  it('keeps the other variants', () => {
+    expect(badgeVariants()).toContain('bg-badge-bg');
+    expect(badgeVariants({ variant: 'warning' })).toContain('bg-warning');
+    expect(badgeVariants({ variant: 'destructive' })).toContain('bg-destructive-solid');
+    expect(badgeVariants({ variant: 'outline' })).toContain('text-foreground');
+  });
+});
+```
+
+Create `src/components/status-bar/__tests__/StatusBarItem.test.tsx`. The last test is the check that `PopoverTrigger asChild` still reaches the button through the component:
+
+```tsx
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { createRef } from 'react';
+import { describe, expect, it, vi } from 'vitest';
+import { StatusBarCount } from '@/components/status-bar/StatusBarCount';
+import { StatusBarItem } from '@/components/status-bar/StatusBarItem';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+
+describe('StatusBarItem', () => {
+  it('frames a button with its title and label', () => {
+    render(
+      <StatusBarItem title='Open it' aria-label='Item label'>
+        Body
+      </StatusBarItem>,
+    );
+    const button = screen.getByRole('button', { name: 'Item label' });
+    expect(button).toHaveAttribute('title', 'Open it');
+    expect(button).toHaveTextContent('Body');
+    expect(button.parentElement).toHaveClass(
+      'flex',
+      'h-5',
+      'items-center',
+      'border-x',
+      'border-statusbar-border',
+      'px-1',
+    );
+  });
+
+  it('forwards the click', async () => {
+    const onClick = vi.fn();
+    render(<StatusBarItem aria-label='Item label' onClick={onClick} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Item label' }));
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('forwards a ref to the button', () => {
+    const ref = createRef<HTMLButtonElement>();
+    render(<StatusBarItem ref={ref} aria-label='Item label' />);
+    expect(ref.current).toBe(screen.getByRole('button', { name: 'Item label' }));
+  });
+
+  it('adds a class name to the button', () => {
+    render(<StatusBarItem aria-label='Item label' className='opacity-50' />);
+    expect(screen.getByRole('button', { name: 'Item label' })).toHaveClass('opacity-50', 'h-5');
+  });
+
+  it('works as the trigger of a Popover', async () => {
+    render(
+      <Popover>
+        <PopoverTrigger asChild>
+          <StatusBarItem aria-label='Open panel'>Trigger</StatusBarItem>
+        </PopoverTrigger>
+        <PopoverContent>Panel body</PopoverContent>
+      </Popover>,
+    );
+    const button = screen.getByRole('button', { name: 'Open panel' });
+    expect(button).toHaveAttribute('aria-expanded', 'false');
+    await userEvent.click(button);
+    expect(await screen.findByText('Panel body')).toBeInTheDocument();
+    expect(button).toHaveAttribute('aria-expanded', 'true');
+  });
+});
+
+describe('StatusBarCount', () => {
+  it('shows its content in a pill', () => {
+    render(<StatusBarCount>3</StatusBarCount>);
+    expect(screen.getByText('3')).toHaveClass('rounded-full', 'bg-muted', 'text-2xs');
+  });
+});
+```
+
+Create `src/components/network/__tests__/network-parts.test.tsx`:
+
+```tsx
+import { render, screen } from '@testing-library/react';
+import { describe, expect, it } from 'vitest';
+import { ListRow } from '@/components/network/ListRow';
+import { NetworkIdentity } from '@/components/network/NetworkIdentity';
+import { SectionLabel } from '@/components/network/SectionLabel';
+
+describe('ListRow', () => {
+  it('is a list item with the row layout and an extra class', () => {
+    render(
+      <ul>
+        <ListRow className='px-3'>Row</ListRow>
+      </ul>,
+    );
+    const row = screen.getByRole('listitem');
+    expect(row).toHaveClass('flex', 'items-center', 'gap-2', 'px-3');
+    expect(row).toHaveTextContent('Row');
+  });
+});
+
+describe('NetworkIdentity', () => {
+  it('shows the name and the short id', () => {
+    render(<NetworkIdentity name='Ben Ortiz' shortId='AAAA-1111' />);
+    expect(screen.getByText('Ben Ortiz')).toBeInTheDocument();
+    expect(screen.getByText('AAAA-1111')).toBeInTheDocument();
+  });
+
+  it('adds the extra text after the short id in one line', () => {
+    render(<NetworkIdentity name='Eli Stone' shortId='ZZZZ-9999' extra='482 913' />);
+    expect(screen.getByText('ZZZZ-9999 · 482 913')).toBeInTheDocument();
+  });
+});
+
+describe('SectionLabel', () => {
+  it('is a level 3 heading by default', () => {
+    render(<SectionLabel>Paired (2)</SectionLabel>);
+    expect(screen.getByRole('heading', { level: 3, name: 'Paired (2)' })).toBeInTheDocument();
+  });
+
+  it('can be a plain paragraph', () => {
+    render(<SectionLabel as='p'>Team network</SectionLabel>);
+    expect(screen.queryByRole('heading')).not.toBeInTheDocument();
+    expect(screen.getByText('Team network')).toHaveClass('uppercase', 'tracking-wider');
+  });
+});
+```
+
 - [ ] **Step 5: Run the tests to verify they fail**
 
-Run: `bunx vitest run src/components/network src/components/status-bar/__tests__/NetworkStatusItem.test.tsx src/components/layout/__tests__/StatusBar.test.tsx`
-Expected: FAIL. Each new file reports `Failed to resolve import` for `@/components/network/network-helpers`, `NetworkPanel`, `AddAddressDialog`, `RemovePairedDialog` or `@/components/status-bar/NetworkStatusItem`. The StatusBar test reports `Unable to find an element by: [data-testid="network-status-item"]`.
+Run: `bunx vitest run src/components/network src/components/ui/__tests__/search-input.test.tsx src/components/ui/__tests__/initials-avatar.test.tsx src/components/ui/__tests__/badge.test.tsx src/hooks/__tests__/useAsyncAction.test.tsx src/components/status-bar/__tests__ src/components/layout/__tests__/StatusBar.test.tsx`
+Expected: FAIL. Each new file reports `Failed to resolve import` for `@/components/network/network-helpers`, `NetworkPanel`, `AddAddressDialog`, `RemovePairedDialog` or `@/components/status-bar/NetworkStatusItem`, and for the shared pieces (`@/hooks/useAsyncAction`, `@/components/ui/search-input`, `@/components/ui/initials-avatar`, `@/components/status-bar/StatusBarItem`, `@/components/network/ListRow`). The `badge` test reports that variant `success` is not accepted (a type error) and a missing class. The StatusBar test reports `Unable to find an element by: [data-testid="network-status-item"]`.
 
 - [ ] **Step 6: Add `src/components/network/network-helpers.ts`**
 
@@ -1994,10 +2784,248 @@ export function validateAddress(hostInput: string, portInput: string): AddressCh
 }
 ```
 
+- [ ] **Step 6a: Add the shared pieces**
+
+Read `src/components/status-bar/ContractsStatusItem.tsx`, `src/components/contracts/PartyAvatar.tsx`, `src/components/ui/state-block.tsx` and `src/components/ui/badge.tsx` first. `PartyAvatar` and the other existing files stay as they are, except the `badge.tsx` edit in this step and Step 11a. Other search boxes (for example in `CollectionsSidebar` and `HistoryPanel`) and the Console count pill in `StatusBar.tsx` are not moved to the new components in this plan.
+
+Create `src/hooks/useAsyncAction.ts`. It is the busy flag plus the error report around one async call. A failure is a toast by default, or inline text for a form or dialog that shows an alert:
+
+```ts
+import { useCallback, useState } from 'react';
+import { errorText, toastError } from '@/lib/error-text';
+
+export type ErrorReport = 'toast' | 'inline';
+
+export interface AsyncAction {
+  /** True while a call started by `run` is in flight. */
+  busy: boolean;
+  /** The cleaned error text of the last failed call. Only set in `inline` mode. */
+  error: string | null;
+  /** Lets a form show its own validation text in the same place. */
+  setError: (message: string | null) => void;
+  /** Resolves true when the call succeeded and false when it failed. It never rejects. */
+  run: (action: () => Promise<unknown>) => Promise<boolean>;
+  /** Clears the error and the busy flag, for example when a dialog opens again. */
+  reset: () => void;
+}
+
+export function useAsyncAction(report: ErrorReport = 'toast'): AsyncAction {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = useCallback(
+    async (action: () => Promise<unknown>) => {
+      setBusy(true);
+      setError(null);
+      try {
+        await action();
+        return true;
+      } catch (err) {
+        if (report === 'inline') setError(errorText(err));
+        else toastError(err);
+        return false;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [report],
+  );
+
+  const reset = useCallback(() => {
+    setBusy(false);
+    setError(null);
+  }, []);
+
+  return { busy, error, setError, run, reset };
+}
+```
+
+Create `src/components/ui/search-input.tsx`. It is the icon plus `type='search'` box that the sidebars and the panel write by hand:
+
+```tsx
+import { Search } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
+
+export interface SearchInputProps {
+  value: string;
+  onChange: (value: string) => void;
+  /** The accessible name of the box. */
+  label: string;
+  placeholder?: string;
+  /** Goes on the wrapper, for example a width. */
+  className?: string;
+}
+
+/** A compact search box with a magnifier icon. It hands the text to `onChange`. */
+export function SearchInput({ value, onChange, label, placeholder, className }: SearchInputProps) {
+  return (
+    <div className={cn('relative', className)}>
+      <Search
+        className='pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground'
+        aria-hidden='true'
+      />
+      <Input
+        type='search'
+        aria-label={label}
+        placeholder={placeholder}
+        className='h-8 pl-8 text-xs'
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    </div>
+  );
+}
+```
+
+Create `src/components/ui/initials-avatar.tsx`. The colour comes from the name, like `PartyAvatar`:
+
+```tsx
+import { avatarColorForName, initialsForName } from '@/lib/contracts/avatarColor';
+
+export interface InitialsAvatarProps {
+  name: string;
+  /** Shown as given. Without it the initials come from the name. */
+  initials?: string;
+  /** Width and height in pixels. */
+  size?: number;
+}
+
+/** A round avatar with initials on a colour that depends on the name. */
+export function InitialsAvatar({ name, initials, size = 28 }: InitialsAvatarProps) {
+  return (
+    <span
+      aria-hidden='true'
+      style={{
+        width: size,
+        height: size,
+        backgroundColor: avatarColorForName(name),
+        fontSize: size * 0.4,
+      }}
+      className='inline-flex shrink-0 select-none items-center justify-center rounded-full font-semibold text-white'
+    >
+      {initials || initialsForName(name)}
+    </span>
+  );
+}
+```
+
+In `src/components/ui/badge.tsx`, in `badgeVariants`, after the quoted line `        warning: 'border-transparent bg-warning text-warning-foreground shadow hover:bg-warning/80',` add the variant below. It uses the existing `--success-soft` and `--toast-success-fg` tokens (both have light and dark values in `src/globals.css`). The other variants and `Badge` stay as they are. The chips keep their size through `className='px-1.5 py-0 text-2xs'`, so no size variant is needed.
+
+```ts
+        success:
+          'border-transparent bg-[hsl(var(--success-soft))] text-[hsl(var(--toast-success-fg))]',
+```
+
+Create `src/components/status-bar/StatusBarItem.tsx`. It has the frame and the button class that `ContractsStatusItem` wrote by hand. The props go to the button, including `ref` (React 19 passes it as a prop), so `PopoverTrigger asChild` reaches the button:
+
+```tsx
+import type { ComponentProps } from 'react';
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
+
+type StatusBarItemProps = Omit<ComponentProps<typeof Button>, 'variant' | 'size' | 'asChild'>;
+
+/** A status bar cell: a bordered frame around a small ghost button. */
+export function StatusBarItem({ className, ...props }: StatusBarItemProps) {
+  return (
+    <div className='flex h-5 items-center border-x border-statusbar-border px-1'>
+      <Button
+        variant='ghost'
+        size='sm'
+        className={cn(
+          'h-5 gap-1.25 rounded-sm px-1 text-[11px] text-muted-foreground transition-colors hover:bg-statusbar-item-hover hover:text-foreground',
+          className,
+        )}
+        {...props}
+      />
+    </div>
+  );
+}
+```
+
+Create `src/components/status-bar/StatusBarCount.tsx`:
+
+```tsx
+import type { ReactNode } from 'react';
+
+/** The small round number next to a status bar label. */
+export function StatusBarCount({ children }: { children: ReactNode }) {
+  return (
+    <span className='text-2xs px-1 rounded-full bg-muted text-muted-foreground'>{children}</span>
+  );
+}
+```
+
+Create `src/components/network/ListRow.tsx`:
+
+```tsx
+import type { ComponentProps } from 'react';
+import { cn } from '@/lib/utils';
+
+/** A list item that lays its children out in a row. Pass padding and state classes. */
+export function ListRow({ className, ...props }: ComponentProps<'li'>) {
+  return <li className={cn('flex items-center gap-2', className)} {...props} />;
+}
+```
+
+Create `src/components/network/NetworkIdentity.tsx`:
+
+```tsx
+interface NetworkIdentityProps {
+  name: string;
+  shortId: string;
+  /** Text after the short id, for example the pairing code of a request. */
+  extra?: string;
+}
+
+/** The name of a node with its short id below it. The short id is the only id the UI shows. */
+export function NetworkIdentity({ name, shortId, extra }: NetworkIdentityProps) {
+  return (
+    <div className='min-w-0 flex-1'>
+      <p className='truncate text-xs font-medium'>{name}</p>
+      <p className='font-mono text-2xs text-muted-foreground'>
+        {extra ? `${shortId} · ${extra}` : shortId}
+      </p>
+    </div>
+  );
+}
+```
+
+Create `src/components/network/SectionLabel.tsx`:
+
+```tsx
+import type { ReactNode } from 'react';
+import { cn } from '@/lib/utils';
+
+interface SectionLabelProps {
+  /** A heading by default. Use `p` for a title that is not part of the outline. */
+  as?: 'h3' | 'p';
+  className?: string;
+  children: ReactNode;
+}
+
+/** The small upper-case label above a group of rows. */
+export function SectionLabel({ as: Tag = 'h3', className, children }: SectionLabelProps) {
+  return (
+    <Tag
+      className={cn(
+        'text-[11px] font-semibold uppercase tracking-wider text-muted-foreground',
+        className,
+      )}
+    >
+      {children}
+    </Tag>
+  );
+}
+```
+
 - [ ] **Step 7: Add `src/components/network/NodeRow.tsx`**
 
 ```tsx
 import { MoreHorizontal, Trash2 } from 'lucide-react';
+import { ListRow } from '@/components/network/ListRow';
+import { NetworkIdentity } from '@/components/network/NetworkIdentity';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -2006,18 +3034,18 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { InitialsAvatar } from '@/components/ui/initials-avatar';
 import type { NetworkNode, NetworkNodeStatus } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 
 interface Chip {
   label: string;
-  variant: 'secondary' | 'outline' | 'warning';
-  className?: string;
+  variant: 'secondary' | 'outline' | 'warning' | 'success';
 }
 
 // A nearby node that can be paired has no chip. Its Pair button says enough.
 const CHIPS: Partial<Record<NetworkNodeStatus, Chip>> = {
-  online: { label: 'Online', variant: 'secondary', className: 'text-green-600 dark:text-green-400' },
+  online: { label: 'Online', variant: 'success' },
   offline: { label: 'Offline', variant: 'outline' },
   pairing: { label: 'Pairing…', variant: 'secondary' },
   needs_update: { label: 'Needs update', variant: 'warning' },
@@ -2038,24 +3066,11 @@ export function NodeRow({ node, busy, onPair, onRemove }: NodeRowProps) {
   const canPair = node.status === 'available';
 
   return (
-    <li
-      className={cn(
-        'flex items-center gap-2 px-3 py-1.5',
-        node.status === 'offline' && 'opacity-60',
-      )}
-    >
-      <span
-        aria-hidden='true'
-        className='flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-semibold text-muted-foreground'
-      >
-        {node.initials}
-      </span>
-      <div className='min-w-0 flex-1'>
-        <p className='truncate text-xs font-medium'>{node.displayName}</p>
-        <p className='font-mono text-2xs text-muted-foreground'>{node.shortId}</p>
-      </div>
+    <ListRow className={cn('px-3 py-1.5', node.status === 'offline' && 'opacity-60')}>
+      <InitialsAvatar name={node.displayName} initials={node.initials} />
+      <NetworkIdentity name={node.displayName} shortId={node.shortId} />
       {chip && (
-        <Badge variant={chip.variant} className={cn('px-1.5 py-0 text-2xs', chip.className)}>
+        <Badge variant={chip.variant} className='px-1.5 py-0 text-2xs'>
           {chip.label}
         </Badge>
       )}
@@ -2090,7 +3105,7 @@ export function NodeRow({ node, busy, onPair, onRemove }: NodeRowProps) {
           </DropdownMenuContent>
         </DropdownMenu>
       )}
-    </li>
+    </ListRow>
   );
 }
 ```
@@ -2098,19 +3113,20 @@ export function NodeRow({ node, busy, onPair, onRemove }: NodeRowProps) {
 - [ ] **Step 8: Add `src/components/network/NetworkPanel.tsx`**
 
 ```tsx
-import { Plus, Radar, Search } from 'lucide-react';
+import { Plus, Radar } from 'lucide-react';
 import { type ReactNode, useMemo, useState } from 'react';
-import { toast } from 'sonner';
-import {
-  filterNodes,
-  groupNodes,
-  sortNodes,
-} from '@/components/network/network-helpers';
+import { ListRow } from '@/components/network/ListRow';
+import { NetworkIdentity } from '@/components/network/NetworkIdentity';
+import { filterNodes, groupNodes, sortNodes } from '@/components/network/network-helpers';
 import { NodeRow } from '@/components/network/NodeRow';
+import { SectionLabel } from '@/components/network/SectionLabel';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/empty-state';
-import { Input } from '@/components/ui/input';
-import { errorText, formatPairingCode } from '@/lib/network-utils';
+import { InitialsAvatar } from '@/components/ui/initials-avatar';
+import { SearchInput } from '@/components/ui/search-input';
+import { StateBlock } from '@/components/ui/state-block';
+import { toastError } from '@/lib/error-text';
+import { formatPairingCode } from '@/lib/network-utils';
 import type { NetworkNode } from '@/lib/tauri-api';
 import { startNetworkPairing, useNetworkStore } from '@/stores/network-store';
 
@@ -2129,9 +3145,7 @@ function Shell({ children }: { children: ReactNode }) {
     <div className='flex max-h-[28rem] flex-col text-sm'>
       <div className='flex items-center gap-2 border-b border-border px-3 py-2'>
         <Radar className='h-3.5 w-3.5 text-muted-foreground' aria-hidden='true' />
-        <p className='text-[11px] font-semibold uppercase tracking-wider text-muted-foreground'>
-          Team network
-        </p>
+        <SectionLabel as='p'>Team network</SectionLabel>
       </div>
       {children}
     </div>
@@ -2150,9 +3164,7 @@ function NodeGroup({ title, nodes, pairingDeviceId, onPair, onRemove }: NodeGrou
   if (nodes.length === 0) return null;
   return (
     <section className='py-1'>
-      <h3 className='px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground'>
-        {`${title} (${nodes.length})`}
-      </h3>
+      <SectionLabel className='px-3 py-1'>{`${title} (${nodes.length})`}</SectionLabel>
       <ul aria-label={title}>
         {nodes.map((node) => (
           <NodeRow
@@ -2182,7 +3194,7 @@ export function NetworkPanel({ onAddAddress, onRemove }: NetworkPanelProps) {
     try {
       await startNetworkPairing(node);
     } catch (err) {
-      toast.error(errorText(err));
+      toastError(err);
     } finally {
       setPairingDeviceId(null);
     }
@@ -2197,7 +3209,9 @@ export function NetworkPanel({ onAddAddress, onRemove }: NetworkPanelProps) {
   if (!status) {
     return (
       <Shell>
-        <p className='px-3 py-4 text-xs text-muted-foreground'>Loading...</p>
+        <div className='p-3'>
+          <StateBlock tone='loading'>Loading...</StateBlock>
+        </div>
       </Shell>
     );
   }
@@ -2205,9 +3219,9 @@ export function NetworkPanel({ onAddAddress, onRemove }: NetworkPanelProps) {
   if (status.state === 'off') {
     return (
       <Shell>
-        <p role='status' className='px-3 py-4 text-xs text-muted-foreground'>
-          {status.offReason ?? 'Team network is off.'}
-        </p>
+        <div className='p-3'>
+          <StateBlock tone='empty'>{status.offReason ?? 'Team network is off.'}</StateBlock>
+        </div>
       </Shell>
     );
   }
@@ -2226,35 +3240,27 @@ export function NetworkPanel({ onAddAddress, onRemove }: NetworkPanelProps) {
           {NO_DISCOVERY}
         </p>
       )}
-      <div className='relative border-b border-border p-2'>
-        <Search
-          className='pointer-events-none absolute left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground'
-          aria-hidden='true'
-        />
-        <Input
-          type='search'
-          aria-label='Search nodes'
-          placeholder='Search by name or ID'
-          className='h-8 pl-8 text-xs'
+      <div className='border-b border-border p-2'>
+        <SearchInput
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={setQuery}
+          label='Search nodes'
+          placeholder='Search by name or ID'
         />
       </div>
       <div className='min-h-0 flex-1 overflow-y-auto'>
         {incoming.length > 0 && (
           <section className='border-b border-border py-1'>
-            <h3 className='px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground'>
-              {`Requests (${incoming.length})`}
-            </h3>
+            <SectionLabel className='px-3 py-1'>{`Requests (${incoming.length})`}</SectionLabel>
             <ul aria-label='Requests'>
               {incoming.map((request) => (
-                <li key={request.pairingId} className='flex items-center gap-2 px-3 py-1.5'>
-                  <div className='min-w-0 flex-1'>
-                    <p className='truncate text-xs font-medium'>{request.displayName}</p>
-                    <p className='font-mono text-2xs text-muted-foreground'>
-                      {`${request.shortId} · ${formatPairingCode(request.code)}`}
-                    </p>
-                  </div>
+                <ListRow key={request.pairingId} className='px-3 py-1.5'>
+                  <InitialsAvatar name={request.displayName} />
+                  <NetworkIdentity
+                    name={request.displayName}
+                    shortId={request.shortId}
+                    extra={formatPairingCode(request.code)}
+                  />
                   <Button
                     size='sm'
                     variant='outline'
@@ -2264,7 +3270,7 @@ export function NetworkPanel({ onAddAddress, onRemove }: NetworkPanelProps) {
                   >
                     Review
                   </Button>
-                </li>
+                </ListRow>
               ))}
             </ul>
           </section>
@@ -2278,9 +3284,9 @@ export function NetworkPanel({ onAddAddress, onRemove }: NetworkPanelProps) {
             reason={status.discoveryAvailable ? EMPTY_HINT : undefined}
           />
         ) : shown === 0 ? (
-          <p className='px-3 py-4 text-xs text-muted-foreground'>
-            {`No nodes match "${query.trim()}".`}
-          </p>
+          <div className='p-3'>
+            <StateBlock tone='empty'>{`No nodes match "${query.trim()}".`}</StateBlock>
+          </div>
         ) : (
           <>
             <NodeGroup
@@ -2333,8 +3339,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { errorText } from '@/lib/network-utils';
-import { addNetworkAddress } from '@/lib/tauri-api';
+import { useAsyncAction } from '@/hooks/useAsyncAction';
 import { useNetworkStore } from '@/stores/network-store';
 
 interface AddAddressDialogProps {
@@ -2346,17 +3351,16 @@ interface AddAddressDialogProps {
 export function AddAddressDialog({ open, onOpenChange }: AddAddressDialogProps) {
   const [host, setHost] = useState('');
   const [port, setPort] = useState(DEFAULT_NETWORK_PORT);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  // The form shows a failure under the fields, not as a toast.
+  const { busy, error, setError, run, reset } = useAsyncAction('inline');
 
   // Every opening starts with a clean form.
   useEffect(() => {
     if (!open) return;
     setHost('');
     setPort(DEFAULT_NETWORK_PORT);
-    setError(null);
-    setBusy(false);
-  }, [open]);
+    reset();
+  }, [open, reset]);
 
   async function submit() {
     if (busy) return;
@@ -2365,18 +3369,10 @@ export function AddAddressDialog({ open, onOpenChange }: AddAddressDialogProps) 
       setError(check.error);
       return;
     }
-    setBusy(true);
-    setError(null);
-    try {
-      await addNetworkAddress(check.host, check.port);
-      void useNetworkStore.getState().refreshNodes();
-      toast.success(`Added ${check.host}:${check.port}.`);
-      onOpenChange(false);
-    } catch (err) {
-      setError(errorText(err));
-    } finally {
-      setBusy(false);
-    }
+    const added = await run(() => useNetworkStore.getState().addAddress(check.host, check.port));
+    if (!added) return;
+    toast.success(`Added ${check.host}:${check.port}.`);
+    onOpenChange(false);
   }
 
   const submitOnEnter = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -2439,7 +3435,6 @@ export function AddAddressDialog({ open, onOpenChange }: AddAddressDialogProps) 
 - [ ] **Step 10: Add `src/components/network/RemovePairedDialog.tsx`**
 
 ```tsx
-import { toast } from 'sonner';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -2450,8 +3445,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { errorText } from '@/lib/network-utils';
-import { type NetworkNode, removeNetworkPaired } from '@/lib/tauri-api';
+import { useAsyncAction } from '@/hooks/useAsyncAction';
+import type { NetworkNode } from '@/lib/tauri-api';
 import { useNetworkStore } from '@/stores/network-store';
 
 interface RemovePairedDialogProps {
@@ -2460,18 +3455,11 @@ interface RemovePairedDialogProps {
   onClose: () => void;
 }
 
-async function remove(node: NetworkNode) {
-  try {
-    await removeNetworkPaired(node.deviceId);
-  } catch (err) {
-    toast.error(errorText(err));
-  }
-  // The list is the truth, also after a failure.
-  void useNetworkStore.getState().refreshNodes();
-}
-
 // Asks before an unpair. The peer is told when it is online.
 export function RemovePairedDialog({ node, onClose }: RemovePairedDialogProps) {
+  // A failure is a toast. The store action reloads the list either way.
+  const { run } = useAsyncAction();
+
   return (
     <AlertDialog
       open={node !== null}
@@ -2492,7 +3480,7 @@ export function RemovePairedDialog({ node, onClose }: RemovePairedDialogProps) {
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <AlertDialogAction
             onClick={() => {
-              if (node) void remove(node);
+              if (node) void run(() => useNetworkStore.getState().removePaired(node.deviceId));
             }}
           >
             Remove
@@ -2512,7 +3500,8 @@ import { useState } from 'react';
 import { AddAddressDialog } from '@/components/network/AddAddressDialog';
 import { NetworkPanel } from '@/components/network/NetworkPanel';
 import { RemovePairedDialog } from '@/components/network/RemovePairedDialog';
-import { Button } from '@/components/ui/button';
+import { StatusBarCount } from '@/components/status-bar/StatusBarCount';
+import { StatusBarItem } from '@/components/status-bar/StatusBarItem';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { NetworkNode } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
@@ -2521,7 +3510,7 @@ import { selectOnlinePairedCount, useNetworkStore } from '@/stores/network-store
 /**
  * Status bar button with the number of online paired nodes. It opens the Network panel.
  * The Add and Remove dialogs live here, outside the Popover, so closing the panel to open
- * one of them does not unmount it.
+ * one of them does not unmount it. They render in portals, so they sit next to the item.
  */
 export function NetworkStatusItem() {
   const online = useNetworkStore(selectOnlinePairedCount);
@@ -2542,23 +3531,13 @@ export function NetworkStatusItem() {
   }
 
   return (
-    <div className='flex h-5 items-center border-x border-statusbar-border px-1'>
+    <>
       <Popover open={open} onOpenChange={handleOpenChange}>
         <PopoverTrigger asChild>
-          <Button
-            variant='ghost'
-            size='sm'
-            className='h-5 gap-1.25 rounded-sm px-1 text-[11px] text-muted-foreground transition-colors hover:bg-statusbar-item-hover hover:text-foreground'
-            title='Team network'
-            aria-label={label}
-          >
+          <StatusBarItem title='Team network' aria-label={label}>
             <Radar className={cn('w-2.75 h-2.75', off && 'opacity-50')} aria-hidden='true' />
-            {online > 0 && (
-              <span className='text-2xs px-1 rounded-full bg-muted text-muted-foreground'>
-                {online}
-              </span>
-            )}
-          </Button>
+            {online > 0 && <StatusBarCount>{online}</StatusBarCount>}
+          </StatusBarItem>
         </PopoverTrigger>
         <PopoverContent side='top' align='start' className='w-80 overflow-hidden p-0'>
           <NetworkPanel
@@ -2575,10 +3554,53 @@ export function NetworkStatusItem() {
       </Popover>
       <AddAddressDialog open={addOpen} onOpenChange={setAddOpen} />
       <RemovePairedDialog node={removeTarget} onClose={() => setRemoveTarget(null)} />
-    </div>
+    </>
   );
 }
 ```
+
+- [ ] **Step 11a: Move `ContractsStatusItem` onto `StatusBarItem`**
+
+`ContractsStatusItem` wrote the same frame and button class that `StatusBarItem` now holds. The repo has no test that renders it (`StatusBar.test.tsx` mocks it, and `e2e/contracts.spec.ts` only reads the "breaching" label), so the label, title and click stay exactly as they are. In `src/components/status-bar/ContractsStatusItem.tsx`:
+
+Edit 1: replace the quoted line `import { Button } from '@/components/ui/button';` with:
+
+```tsx
+import { StatusBarItem } from '@/components/status-bar/StatusBarItem';
+```
+
+Edit 2: replace the whole `return (...)` at the end of `ContractsStatusItem` with:
+
+```tsx
+  return (
+    <StatusBarItem
+      onClick={() => {
+        try {
+          track('contracts.changelog_drawer_opened', {
+            contractId: mostRecentId,
+            source: 'status_bar',
+          });
+        } catch {
+          /* noop */
+        }
+        openDrawer(mostRecentId);
+      }}
+      title='Open latest contract changes'
+      aria-label={statusLabel}
+    >
+      <Lock className='w-2.75 h-2.75' aria-hidden='true' />
+      <span>{contractLabel}</span>
+      {meta.driftCount > 0 && (
+        <span className='text-[hsl(var(--warning))]'>· {meta.driftCount} drifting</span>
+      )}
+      {meta.breachCount > 0 && (
+        <span className='text-[hsl(var(--destructive))]'>· {meta.breachCount} breaching</span>
+      )}
+    </StatusBarItem>
+  );
+```
+
+Nothing else in that file changes. Run `bunx vitest run src/components/status-bar src/components/layout/__tests__/StatusBar.test.tsx` in Step 13.
 
 - [ ] **Step 12: Render the item in `src/components/layout/StatusBar.tsx`**
 
@@ -2596,7 +3618,7 @@ Edit 2: after the quoted line `      <ContractsStatusItem />` add:
 
 - [ ] **Step 13: Run the tests to verify they pass**
 
-Run: `bunx vitest run src/components/network src/components/status-bar/__tests__/NetworkStatusItem.test.tsx src/components/layout/__tests__/StatusBar.test.tsx`
+Run: `bunx vitest run src/components/network src/components/ui/__tests__/search-input.test.tsx src/components/ui/__tests__/initials-avatar.test.tsx src/components/ui/__tests__/badge.test.tsx src/hooks/__tests__/useAsyncAction.test.tsx src/components/status-bar src/components/layout/__tests__/StatusBar.test.tsx`
 Expected: PASS.
 
 - [ ] **Step 14: Run the checks**
@@ -2709,6 +3731,7 @@ import {
   useNetworkStore,
 } from '@/stores/network-store';
 import { createDeferred } from '@/test/deferred';
+import { makeIncoming } from '@/test/network-fixtures';
 
 const mocks = vi.hoisted(() => ({
   toast: { error: vi.fn(), success: vi.fn(), info: vi.fn() },
@@ -2736,15 +3759,8 @@ const started = (patch: Partial<ActivePairing> = {}): ActivePairing => ({
   ...patch,
 });
 
-const request = (patch: Partial<PairingIncoming> = {}): PairingIncoming => ({
-  pairingId: 'p1',
-  deviceId: 'DEV2',
-  shortId: 'DDDD-4444',
-  displayName: 'Dana Roy',
-  code: '048213',
-  accepted: false,
-  ...patch,
-});
+const request = (patch: Partial<PairingIncoming> = {}) =>
+  makeIncoming({ deviceId: 'DEV2', shortId: 'DDDD-4444', code: '048213', ...patch });
 
 function openStarted(patch: Partial<ActivePairing> = {}) {
   useNetworkStore.setState({ activePairing: started(patch), dialogPairingId: 'p1' });
@@ -2824,8 +3840,10 @@ describe('PairingDialog', () => {
         store().setActivePairing(null);
         store().closePairingDialog();
       });
-      pending.resolve();
-      await waitFor(() => expect(mocks.api.respondNetworkPairing).toHaveBeenCalled());
+      await act(async () => {
+        pending.resolve();
+      });
+      expect(mocks.api.respondNetworkPairing).toHaveBeenCalledWith('p1', 'accept');
       expect(store().activePairing).toBeNull();
     });
 
@@ -2951,11 +3969,8 @@ Create `src/hooks/__tests__/useIncomingPairingNotice.test.tsx`:
 import { renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useIncomingPairingNotice } from '@/hooks/useIncomingPairingNotice';
-import {
-  INCOMING_TTL_MS,
-  type PairingIncoming,
-  useNetworkStore,
-} from '@/stores/network-store';
+import { INCOMING_TTL_MS, useNetworkStore } from '@/stores/network-store';
+import { makeIncoming } from '@/test/network-fixtures';
 
 const mocks = vi.hoisted(() => ({
   toast: { custom: vi.fn(), dismiss: vi.fn() },
@@ -2965,14 +3980,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/tauri-api', () => mocks.api);
 vi.mock('sonner', () => ({ toast: mocks.toast }));
 
-const request = (pairingId: string): PairingIncoming => ({
-  pairingId,
-  deviceId: `DEV-${pairingId}`,
-  shortId: 'DDDD-4444',
-  displayName: 'Dana Roy',
-  code: '482913',
-  accepted: false,
-});
+const request = (pairingId: string) => makeIncoming({ pairingId });
 
 describe('useIncomingPairingNotice', () => {
   beforeEach(() => {
@@ -3043,6 +4051,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NetworkIntroCard } from '@/components/network/NetworkIntroCard';
+import type { NetworkStatus } from '@/lib/tauri-api';
 import { useNetworkStore } from '@/stores/network-store';
 import { useSettingsStore } from '@/stores/settings-store';
 import { makeStatus } from '@/test/network-fixtures';
@@ -3063,7 +4072,7 @@ vi.mock('sonner', () => ({ toast: mocks.toast }));
 
 const INTRO = "You're visible on this network as 'Ana Lima'.";
 
-function setup(patch = {}) {
+function setup(patch: Partial<NetworkStatus> = {}) {
   useNetworkStore.setState({ status: makeStatus({ introSeen: false, ...patch }) });
   render(<NetworkIntroCard />);
 }
@@ -3365,7 +4374,7 @@ export function validateDisplayName(input: string): NameCheck {
 - [ ] **Step 8: Add `src/components/network/PairingDialog.tsx`**
 
 ```tsx
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
@@ -3376,7 +4385,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { errorText, formatPairingCode } from '@/lib/network-utils';
+import { useAsyncAction } from '@/hooks/useAsyncAction';
+import { formatPairingCode } from '@/lib/network-utils';
 import { cancelNetworkPairing, respondNetworkPairing } from '@/lib/tauri-api';
 import { useNetworkStore } from '@/stores/network-store';
 
@@ -3391,32 +4401,21 @@ export function PairingDialog() {
   const id = useNetworkStore((s) => s.dialogPairingId);
   const active = useNetworkStore((s) => s.activePairing);
   const request = useNetworkStore((s) => s.incoming.find((i) => i.pairingId === s.dialogPairingId));
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // A failed call shows its text in the dialog, under the code.
+  const { busy, error, run, reset } = useAsyncAction('inline');
 
   // Another pairing starts with a clean error.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: id is the trigger, reset is stable.
   useEffect(() => {
-    setError(null);
-    setBusy(false);
-  }, [id]);
+    reset();
+  }, [id, reset]);
 
   if (!id) return null;
 
   const started = active && active.pairingId === id ? active : null;
+  // No view means the request is gone: it expired, or another event finished it.
   const view = started ?? request ?? null;
   const done = () => store().closePairingDialog();
-
-  async function run(action: () => Promise<void>) {
-    setBusy(true);
-    setError(null);
-    try {
-      await action();
-    } catch (err) {
-      setError(errorText(err));
-    } finally {
-      setBusy(false);
-    }
-  }
 
   const acceptStarted = () =>
     run(async () => {
@@ -3457,24 +4456,7 @@ export function PairingDialog() {
     done();
   }
 
-  // The request is gone: it expired, or another event finished it.
-  if (!view) {
-    return (
-      <Dialog open onOpenChange={handleOpenChange}>
-        <DialogContent className='sm:max-w-sm'>
-          <DialogHeader>
-            <DialogTitle>Pairing request</DialogTitle>
-            <DialogDescription>The request expired.</DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button onClick={done}>Done</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    );
-  }
-
-  const name = view.displayName;
+  const name = view?.displayName ?? '';
   const waitingForPeer = started ? started.phase === 'done' : (request?.accepted ?? false);
 
   return (
@@ -3482,18 +4464,24 @@ export function PairingDialog() {
       <DialogContent className='sm:max-w-sm'>
         <DialogHeader>
           <DialogTitle className='break-words'>
-            {started ? `Pair with ${name}` : `${name} wants to pair`}
+            {!view ? 'Pairing request' : started ? `Pair with ${name}` : `${name} wants to pair`}
           </DialogTitle>
           <DialogDescription>
-            {`Check that ${name} sees the same code, then accept.`}
+            {view ? `Check that ${name} sees the same code, then accept.` : 'The request expired.'}
           </DialogDescription>
         </DialogHeader>
-        <div role='group' aria-label='Pairing code' className='flex flex-col items-center gap-1 py-2'>
-          <p className='font-mono text-4xl font-semibold tracking-[0.2em]'>
-            {formatPairingCode(view.code)}
-          </p>
-          <p className='font-mono text-xs text-muted-foreground'>{`Device ID ${view.shortId}`}</p>
-        </div>
+        {view && (
+          <div
+            role='group'
+            aria-label='Pairing code'
+            className='flex flex-col items-center gap-1 py-2'
+          >
+            <p className='font-mono text-4xl font-semibold tracking-[0.2em]'>
+              {formatPairingCode(view.code)}
+            </p>
+            <p className='font-mono text-xs text-muted-foreground'>{`Device ID ${view.shortId}`}</p>
+          </div>
+        )}
         {waitingForPeer && (
           <p role='status' className='text-center text-sm text-muted-foreground'>
             {`Waiting for ${name}...`}
@@ -3505,8 +4493,8 @@ export function PairingDialog() {
           </p>
         )}
         <DialogFooter>
-          {waitingForPeer ? (
-            <Button variant='outline' onClick={done}>
+          {!view || waitingForPeer ? (
+            <Button variant={view ? 'outline' : 'default'} onClick={done}>
               Done
             </Button>
           ) : started ? (
@@ -3643,11 +4631,9 @@ export function useIncomingPairingNotice(): void {
 
 ```tsx
 import { useState } from 'react';
-import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { errorText } from '@/lib/network-utils';
-import { markNetworkIntroSeen, setNetworkVisibility } from '@/lib/tauri-api';
+import { useAsyncAction } from '@/hooks/useAsyncAction';
 import { useNetworkStore } from '@/stores/network-store';
 import { useSettingsStore } from '@/stores/settings-store';
 
@@ -3659,6 +4645,7 @@ import { useSettingsStore } from '@/stores/settings-store';
 export function NetworkIntroCard() {
   const status = useNetworkStore((s) => s.status);
   const [dismissed, setDismissed] = useState(false);
+  const hide = useAsyncAction();
 
   if (!status || status.state !== 'running' || status.introSeen || status.hidden || dismissed) {
     return null;
@@ -3668,8 +4655,7 @@ export function NetworkIntroCard() {
   async function markSeen() {
     setDismissed(true);
     try {
-      await markNetworkIntroSeen();
-      await useNetworkStore.getState().refresh();
+      await useNetworkStore.getState().markIntroSeen();
     } catch (err) {
       console.error('[NetworkIntroCard] could not save the intro flag', err);
     }
@@ -3680,14 +4666,10 @@ export function NetworkIntroCard() {
     void markSeen();
   }
 
+  // A failed hide keeps the card. The toast says why.
   async function hideNode() {
-    try {
-      await setNetworkVisibility(true);
-    } catch (err) {
-      toast.error(errorText(err));
-      return;
-    }
-    await markSeen();
+    const hidden = await hide.run(() => useNetworkStore.getState().setHidden(true));
+    if (hidden) await markSeen();
   }
 
   return (
@@ -3723,22 +4705,22 @@ export function NetworkIntroCard() {
 ```tsx
 import { type ReactNode, useEffect, useState } from 'react';
 import { toast } from 'sonner';
+import { ListRow } from '@/components/network/ListRow';
+import { NetworkIdentity } from '@/components/network/NetworkIdentity';
 import { validateDisplayName } from '@/components/network/network-helpers';
 import { SettingsSectionHeader } from '@/components/settings/SettingsSectionHeader';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { StateBlock } from '@/components/ui/state-block';
 import { Switch } from '@/components/ui/switch';
-import { errorText } from '@/lib/network-utils';
+import { useAsyncAction } from '@/hooks/useAsyncAction';
+import { errorText } from '@/lib/error-text';
 import {
   listNetworkAddresses,
   listNetworkBlocked,
   type NetworkAddress,
   type NetworkBlockedDevice,
-  removeNetworkAddress,
-  setNetworkProfile,
-  setNetworkVisibility,
-  unblockNetworkDevice,
 } from '@/lib/tauri-api';
 import { useNetworkStore } from '@/stores/network-store';
 
@@ -3756,11 +4738,13 @@ export function NetworkSection() {
   const status = useNetworkStore((s) => s.status);
   const displayName = status?.displayName ?? '';
   const [name, setName] = useState(displayName);
-  const [nameError, setNameError] = useState<string | null>(null);
-  const [savingName, setSavingName] = useState(false);
   const [blocked, setBlocked] = useState<NetworkBlockedDevice[]>([]);
   const [addresses, setAddresses] = useState<NetworkAddress[]>([]);
   const [listError, setListError] = useState<string | null>(null);
+  // Failures of the switch and of the row buttons are toasts. A name error shows under the field.
+  const visibility = useAsyncAction();
+  const nameSave = useAsyncAction('inline');
+  const rowAction = useAsyncAction();
 
   useEffect(() => {
     void useNetworkStore.getState().refresh();
@@ -3788,55 +4772,33 @@ export function NetworkSection() {
     };
   }, []);
 
-  async function toggleHidden(hidden: boolean) {
-    try {
-      await setNetworkVisibility(hidden);
-    } catch (err) {
-      toast.error(errorText(err));
-    }
-    // The switch shows the stored value, so a failure puts it back.
-    await useNetworkStore.getState().refresh();
-  }
+  // The switch shows the stored value, so a failed call leaves it where it was.
+  const toggleHidden = (hidden: boolean) =>
+    visibility.run(() => useNetworkStore.getState().setHidden(hidden));
 
   async function saveName() {
     const check = validateDisplayName(name);
     if (!check.ok) {
-      setNameError(check.error);
+      nameSave.setError(check.error);
       return;
     }
-    setNameError(null);
-    setSavingName(true);
-    try {
-      await setNetworkProfile(check.name);
-      await useNetworkStore.getState().refresh();
-      toast.success('Name saved.');
-    } catch (err) {
-      setNameError(errorText(err));
-    } finally {
-      setSavingName(false);
-    }
+    const saved = await nameSave.run(() => useNetworkStore.getState().saveName(check.name));
+    if (saved) toast.success('Name saved.');
   }
 
-  async function unblock(device: NetworkBlockedDevice) {
-    try {
-      await unblockNetworkDevice(device.deviceId);
+  const unblock = (device: NetworkBlockedDevice) =>
+    rowAction.run(async () => {
+      await useNetworkStore.getState().unblock(device.deviceId);
       setBlocked((list) => list.filter((d) => d.deviceId !== device.deviceId));
-    } catch (err) {
-      toast.error(errorText(err));
-    }
-  }
+    });
 
-  async function removeAddress(address: NetworkAddress) {
-    try {
-      await removeNetworkAddress(address.host, address.port);
+  const removeAddress = (address: NetworkAddress) =>
+    rowAction.run(async () => {
+      await useNetworkStore.getState().removeAddress(address.host, address.port);
       setAddresses((list) =>
         list.filter((a) => !(a.host === address.host && a.port === address.port)),
       );
-      void useNetworkStore.getState().refreshNodes();
-    } catch (err) {
-      toast.error(errorText(err));
-    }
-  }
+    });
 
   return (
     <div>
@@ -3845,7 +4807,7 @@ export function NetworkSection() {
         description='Find and pair with other Rocket apps on your network.'
       />
       {!status ? (
-        <p className='text-sm text-muted-foreground'>Loading...</p>
+        <StateBlock tone='loading'>Loading...</StateBlock>
       ) : (
         <>
           {status.state === 'off' && (
@@ -3887,13 +4849,13 @@ export function NetworkSection() {
                   value={name}
                   onChange={(e) => {
                     setName(e.target.value);
-                    setNameError(null);
+                    nameSave.setError(null);
                   }}
                 />
-                {nameError && <p className='text-xs text-destructive'>{nameError}</p>}
+                {nameSave.error && <p className='text-xs text-destructive'>{nameSave.error}</p>}
               </div>
               <Button
-                disabled={savingName || name.trim() === displayName}
+                disabled={nameSave.busy || name.trim() === displayName}
                 onClick={() => void saveName()}
               >
                 Save
@@ -3911,15 +4873,14 @@ export function NetworkSection() {
           </Block>
 
           <Block title='Blocked devices'>
-            {listError && <p className='text-sm text-destructive'>{listError}</p>}
+            {listError && <StateBlock tone='error'>{listError}</StateBlock>}
             {!listError && blocked.length === 0 && (
-              <p className='text-sm text-muted-foreground'>No blocked devices.</p>
+              <StateBlock tone='empty'>No blocked devices.</StateBlock>
             )}
             <ul className='space-y-1'>
               {blocked.map((device) => (
-                <li key={device.deviceId} className='flex items-center gap-2 text-sm'>
-                  <span className='min-w-0 flex-1 truncate'>{device.name}</span>
-                  <span className='font-mono text-xs text-muted-foreground'>{device.shortId}</span>
+                <ListRow key={device.deviceId}>
+                  <NetworkIdentity name={device.name} shortId={device.shortId} />
                   <Button
                     size='sm'
                     variant='outline'
@@ -3928,20 +4889,20 @@ export function NetworkSection() {
                   >
                     Unblock
                   </Button>
-                </li>
+                </ListRow>
               ))}
             </ul>
           </Block>
 
           <Block title='Saved addresses'>
             {!listError && addresses.length === 0 && (
-              <p className='text-sm text-muted-foreground'>No saved addresses.</p>
+              <StateBlock tone='empty'>No saved addresses.</StateBlock>
             )}
             <ul className='space-y-1'>
               {addresses.map((address) => {
                 const text = `${address.host}:${address.port}`;
                 return (
-                  <li key={text} className='flex items-center gap-2 text-sm'>
+                  <ListRow key={text} className='text-sm'>
                     <span className='min-w-0 flex-1 truncate font-mono'>{text}</span>
                     <Button
                       size='sm'
@@ -3951,7 +4912,7 @@ export function NetworkSection() {
                     >
                       Remove
                     </Button>
-                  </li>
+                  </ListRow>
                 );
               })}
             </ul>
@@ -4041,7 +5002,7 @@ Edit 4: after the quoted line `      <TrustMigrationNotice />` add:
 
 - [ ] **Step 14: Run the tests to verify they pass**
 
-Run: `bunx vitest run src/components/network src/components/status-bar src/hooks/__tests__/useIncomingPairingNotice.test.tsx src/components/settings src/components/layout/__tests__/StatusBar.test.tsx src/stores/__tests__/network-store.test.ts src/lib/__tests__/network-event-bridge.test.ts`
+Run: `bunx vitest run src/components/network src/components/status-bar src/components/ui src/hooks/__tests__/useIncomingPairingNotice.test.tsx src/hooks/__tests__/useAsyncAction.test.tsx src/hooks/__tests__/useUpdateNotice.test.tsx src/components/settings src/components/layout/__tests__/StatusBar.test.tsx src/stores/__tests__/network-store.test.ts src/lib/__tests__/network-event-bridge.test.ts src/lib/__tests__/error-text.test.ts src/lib/__tests__/listen-scope.test.ts`
 Expected: PASS.
 
 - [ ] **Step 15: Run the checks**
@@ -4070,12 +5031,13 @@ Rocket nodes on the same network find each other, pair once with a matching 6-di
 |---|---|
 | Domain (ids, pairing state machine, presence, dialer, wire types, events, ports) | `crates/rocket-network` |
 | Identity, YAML repos, TLS, peer server and client, mDNS | `crates/rocket-infra/src/network/` |
-| `NetworkService` (state, pairing, presence, audit) | `crates/rocket-app/src/network_service.rs` |
+| `NetworkService` (state, pairing, presence, audit) | `crates/rocket-app/src/network/` (a folder) |
 | Tauri commands and DTOs | `src-tauri/src/commands/network.rs` (commands are in `src-tauri/app-commands.txt`) |
 | Wrappers, types and listeners | `src/lib/tauri-api.ts`, section "Team network" |
 | State | `src/stores/network-store.ts` |
 | Events | `src/lib/network-event-bridge.ts`, `src/hooks/useIncomingPairingNotice.tsx` |
 | UI | `src/components/network/`, `src/components/status-bar/NetworkStatusItem.tsx`, `src/components/settings/sections/NetworkSection.tsx` |
+| Shared pieces | `src/lib/error-text.ts`, `src/lib/listen-scope.ts`, `src/hooks/useAsyncAction.ts`, `src/components/ui/search-input.tsx`, `src/components/ui/initials-avatar.tsx`, `src/components/status-bar/StatusBarItem.tsx`, `StatusBarCount.tsx` |
 | Data | `~/.rocket-api/network/` (`paired.yml`, `blocked.yml`, `addresses.yml`, `settings.yml`). Machine-local. The device key is in the OS keychain, service `com.rocketapi.device-identity`. |
 
 ## Frontend rules
@@ -4087,6 +5049,8 @@ Rocket nodes on the same network find each other, pair once with a matching 6-di
 - The Add by address, Remove and Pairing dialogs are mounted outside the Popover. Closing the panel never closes them.
 - Closing the pairing dialog of a pairing you started, before you pressed Accept, cancels it.
 - The UI shows the short device id only. Nonces, keys, certificates and the full device id are never shown or logged.
+- Mutations are store actions (`removePaired`, `addAddress`, `removeAddress`, `unblock`, `setHidden`, `saveName`, `markIntroSeen`). They call the IPC wrapper, reload the nodes or the status, and reject with the backend error. Components do not call `refresh()` after a call.
+- `useAsyncAction` wraps one call with a busy flag and a toast (default) or inline error text. `errorText` and `toastError` clean the backend error text. `createListenerScope` handles the Tauri listener lifecycle.
 
 ## Decisions
 
@@ -4106,8 +5070,10 @@ Rocket nodes on the same network find each other, pair once with a matching 6-di
 
 ```bash
 bunx vitest run src/lib/__tests__/tauri-api.network.test.ts src/stores/__tests__/network-store.test.ts \
-  src/lib/__tests__/network-event-bridge.test.ts src/components/network src/components/status-bar \
-  src/hooks/__tests__/useIncomingPairingNotice.test.tsx src/components/settings
+  src/lib/__tests__/network-event-bridge.test.ts src/lib/__tests__/error-text.test.ts \
+  src/lib/__tests__/listen-scope.test.ts src/components/network src/components/status-bar \
+  src/components/ui src/hooks/__tests__/useIncomingPairingNotice.test.tsx \
+  src/hooks/__tests__/useAsyncAction.test.tsx src/components/settings
 bun run tsc --noEmit
 bun run check
 ```
@@ -4169,7 +5135,7 @@ Contents
 
 ## 4: sleep and wake
 
-1. Put B to sleep for 2 minutes. A shows B Offline after about 40 seconds (two missed pings).
+1. Put B to sleep for 2 minutes. A shows B Offline after 40 to 60 seconds (two missed pings: A goes Offline when it sends the third ping, pings are 20 seconds apart).
 2. Wake B. Expect B Online on A again within about 2 minutes, without any click.
 
 ## 5: network change
@@ -4177,6 +5143,7 @@ Contents
 1. Move B from the Wi-Fi to another network (or switch Wi-Fi off and on). Move it back.
 2. Expect B Offline while away and Online again after it returns. The pairing is still there.
 3. Join both to a different Wi-Fi. Expect them to find each other again with the same pairing.
+4. On a third machine C that is nearby but not paired, switch the Wi-Fi off (no goodbye is sent). Expect C to leave A's Nearby list within about 2 minutes (the mDNS record expiry).
 
 ## 6: Add by address over VPN or Tailscale
 
@@ -4190,7 +5157,7 @@ Contents
 
 1. On a machine with a firewall (macOS or Windows), start Rocket for the first time and deny the incoming connection prompt.
 2. Expect the banner "Others can't connect to you. Allow Rocket in your firewall settings." in the panel.
-3. Outgoing still works: this machine can pair with a node that can reach it? No. Pairing needs only this machine to reach the other one, so from this machine pressing Pair on a visible node works.
+3. Outgoing still works: pairing needs only this machine to reach the other one, so pressing Pair on a node this machine can see works, even though others cannot connect to it first.
 4. Allow Rocket in the firewall settings, restart, and expect the banner to be gone.
 
 ## 8: Wi-Fi with client isolation
@@ -4247,18 +5214,18 @@ See `docs/features/team-network.md` for the team network (discovery, pairing, pr
 
 - [ ] **Step 20: Update the roadmaps**
 
-In `docs/roadmaps/roadmap.md`, in the R-83 row replace the quoted cell `| spec |` (the status cell right after the project text, before the spec path) with `| built, manual checks open |`, and replace the last cell text `User reviews the spec, then plans. Send and receive, and contract checks between nodes, get their own specs.` with `Manual checks in \`docs/manual-tests/team-network.md\`. Feature doc: \`docs/features/team-network.md\`. Send and receive, and contract checks between nodes, get their own specs.`
+In `docs/roadmaps/roadmap.md`, in the R-83 row replace the quoted text `many peers per node (hub) | spec |` with `many peers per node (hub) | built, manual checks open |`, and replace the last cell text `User reviews the spec, then plans. Send and receive, and contract checks between nodes, get their own specs.` with `Manual checks in \`docs/manual-tests/team-network.md\`. Feature doc: \`docs/features/team-network.md\`. Send and receive, and contract checks between nodes, get their own specs.`
 
 In `docs/roadmaps/contracts-ci-ai-roadmap.md`:
 
-- In the table row `| CA-5 | Team network: AirDrop-style discovery and pairing, one node as hub | none | spec |` replace the last cell `spec` with `built, manual checks open`.
+- In the table row `| CA-5 | Team network: AirDrop-style discovery and pairing, one node as hub | none | spec |` replace the ending `| none | spec |` with `| none | built, manual checks open |`.
 - In the CA-5 section replace `- MVP (spec written): every Rocket is a node.` with `- MVP (built, manual checks open in \`docs/manual-tests/team-network.md\`): every Rocket is a node.`
 
 Do not touch other rows. These two files already have uncommitted edits from the user; edit by quoted text only.
 
 - [ ] **Step 21: Run the whole frontend verification**
 
-Run: `bun run tsc --noEmit && bun run check && bunx vitest run src/lib src/stores src/components/network src/components/status-bar src/components/layout src/components/settings src/hooks`
+Run: `bun run tsc --noEmit && bun run check && bunx vitest run src/lib src/stores src/components/network src/components/status-bar src/components/layout src/components/settings src/components/ui src/hooks`
 Expected: all PASS. No Rust file changed in this plan, so no cargo command is needed.
 
 - [ ] **Step 22: No commit**
@@ -4272,14 +5239,14 @@ No commit; reviewed at the plan end.
 ```bash
 bun run tsc --noEmit
 bun run check
-bunx vitest run src/lib src/stores src/components/network src/components/status-bar src/components/layout src/components/settings src/hooks
+bunx vitest run src/lib src/stores src/components/network src/components/status-bar src/components/layout src/components/settings src/components/ui src/hooks
 git status --short   # only the files named in the File Structure table, plus the user's existing roadmap edits
 ```
 
 Then stop. Show the user the whole Plan 5 change. After the user's OK, commit through `dev-workflow-skills:1-git-commit`, staging explicit paths only, in this split:
 
-1. `feat(network): add network store, event bridge and wrappers` (Task 1 files).
-2. `feat(network): add status bar item, Network panel and address dialogs` (Task 2 files).
+1. `feat(network): add network store, event bridge and wrappers` (Task 1 files, including `listen-scope`, `error-text` and the `useUpdateNotice` change).
+2. `feat(network): add status bar item, Network panel and address dialogs` (Task 2 files, including the shared UI pieces, the `badge` variant and the `ContractsStatusItem` change).
 3. `feat(network): add pairing dialog, intro card and Settings section` (Task 3 source and tests).
 4. `docs(network): add feature doc, manual checks and roadmap status` (docs, `CLAUDE.md`, roadmaps).
 
@@ -4317,7 +5284,7 @@ Run the real app on two machines (`bun run tauri dev`), both on one Wi-Fi.
 | 10 manual checks | `docs/manual-tests/team-network.md` |
 | Index command table (14 wrappers) and event channels | Task 1 |
 
-**Names used.** Wrappers, channels and DTO fields match the plan index. TS type names (`NetworkStatus`, `NetworkNode`, `NetworkAddress`, `NetworkBlockedDevice`, `NetworkPairingStarted`) drop the `Dto` suffix used on the Rust side, as the repo does for other IPC types. `Presence` values are the node statuses (`online`, `offline`, `pairing`, `needs_update`, `available`).
+**Names used.** Wrappers, channels and DTO fields match the plan index. TS type names (`NetworkStatus`, `NetworkNode`, `NetworkAddress`, `NetworkBlockedDevice`, `NetworkPairingStarted`) drop the `Dto` suffix used on the Rust side, as the repo does for other IPC types. Shared pieces and where they are used: `createListenerScope` (bridge, `useUpdateNotice`), `errorText` and `toastError` (store, panel, `useAsyncAction`, Settings section; no other call site is moved), `StatusBarItem` and `StatusBarCount` (`NetworkStatusItem`; `StatusBarItem` also in `ContractsStatusItem`), `SearchInput` (panel only), `InitialsAvatar` (`NodeRow`, requests list), `Badge` variant `success` (Online chip), `StateBlock` (panel, Settings section), `ListRow`, `NetworkIdentity` and `SectionLabel` (panel, `NodeRow`, Settings section; `SectionLabel` not in the Settings blocks, whose headings are larger), `useAsyncAction` (Remove and Add dialogs, pairing dialog, intro card, Settings section), `makeIncoming` (all tests that need a request).
 
 **Deviations from the plan index and the task brief**
 
@@ -4327,11 +5294,12 @@ Run the real app on two machines (`bun run tauri dev`), both on one Wi-Fi.
 4. The two event channels have two payload unions (`NetworkChangedEvent`, `NetworkPairingEvent`), one per channel, instead of one union.
 5. Dialog buttons that only hide the dialog are named "Done" because `DialogContent` already has an X button named "Close".
 6. The "declined" toast is limited to the node that started the pairing, and `cancelled` is silent. The spec does not say who sees "<name> declined." and a user should not get a toast about their own click.
+7. Reuse changes against the first draft of this plan, each small and covered by tests: a failed listener registration is now swallowed (as in `useUpdateNotice`) instead of logged with `console.error`; `setHidden` reloads the status only after success (the switch is controlled by the stored status, so a failure already leaves it unchanged); `unblock` also reloads the nodes, because an unblocked device can be nearby again; the Online chip, the request avatar and the blocked-device rows look slightly different (success variant, coloured avatar, name above short id); the pairing dialog is one `Dialog` render path, and the expired view only swaps the title, the description and the footer.
 
 **Not covered / assumptions that need the backend to confirm**
 
-- `respondNetworkPairing(id, 'accept')` is assumed to work for the node that started the pairing (the initiator's Accept), and `cancelNetworkPairing` to work for either role. Plan 4 defines `respond_pairing(id, decision)` without a role split; if the initiator needs another command, Task 3's `acceptStarted` changes only.
-- It is assumed that `PairingFinished` is also sent to the node that pressed Decline or Block, and that the Rust side emits `nodesChanged` after a pairing is saved. The frontend works if it does not, because `accepted` also reloads the nodes and the panel reloads on open.
+- `respondNetworkPairing(id, 'accept')` works for the node that started the pairing (the initiator's Accept), and `cancelNetworkPairing` works for either role. Confirmed against Plan 04: `respond_pairing` sends the initiator's decision and then polls (`finish_as_initiator`), and `cancel_pairing` has no role check.
+- `PairingFinished` is also sent to the node that pressed Decline or Block, and the Rust side emits `nodesChanged` after a pairing is saved (confirmed against Plan 04, its deviation 4). A peer that stops answering partway ends as `failed` (Plan 04 calls `PairingSession::fail()`), so the user sees "Pairing failed. Try again."; only a user's Cancel ends as the silent `cancelled`.
 - The exact wording of backend error messages (for example the 200-device limit) comes from the backend. The UI shows them as received after dropping the type prefix.
 - Window focus and tray behaviour for the incoming toast (no OS notification when Rocket is in the background) are not built. Manual check 2 shows what happens today.
 - A visual Network tab, a diagnostics view, "paired only" visibility, team invite and any sending of data are post-MVP items from spec section 11.

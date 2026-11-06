@@ -55,6 +55,7 @@
 | `crates/rocket-network/src/pairing.rs` | **Create**, nonce, code functions, `PairingSession` |
 | `crates/rocket-network/src/presence.rs` | **Create**, `Presence`, `PresenceTracker`, `backoff` |
 | `crates/rocket-network/src/dialer.rs` | **Create**, `DialHint`, `should_dial`, `keep_dialed_by` |
+| `crates/rocket-network/src/rate.rs` | **Create**, `SlidingWindow` (request limit, pure) |
 | `crates/rocket-network/src/wire.rs` | **Create**, REST body types |
 | `crates/rocket-network/src/messages.rs` | **Create**, `PeerMessage` |
 | `crates/rocket-network/src/events.rs` | **Create**, `NetworkEvent` |
@@ -196,7 +197,7 @@ base64.workspace = true
 uuid.workspace = true
 chrono.workspace = true
 async-trait.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["sync"] }
 data-encoding = "2.11"
 rand = "0.8"
 zeroize = "1.8"
@@ -246,6 +247,7 @@ cargo check -j4 -p rocket-network
 | `PairingSession` | Pairing state machine for both roles. Time is passed in as `Instant`. |
 | `Presence`, `PresenceTracker`, `backoff` | Online state from ping bookkeeping, and the reconnect delay. |
 | `DialHint`, `should_dial`, `keep_dialed_by` | Which side opens the WebSocket. |
+| `SlidingWindow` | Request limit: at most `cap` hits in a `window`. Time is passed in as `Instant`. |
 | `HelloResponse`, `PairRequest`, `PairRequestResponse`, `NonceMessage`, `DecisionRequest`, `PairStatusResponse` | REST bodies, snake_case JSON. |
 | `PeerMessage` | WebSocket frame enum. `decode` enforces the 64 KiB limit and rejects unknown types. |
 | `NetworkEvent` | Events for the frontend. Implements `PublishedEvent`. Channels `network-changed` and `network-pairing`. |
@@ -262,7 +264,7 @@ cargo check -j4 -p rocket-network
 
 ## Workspace Relationships
 
-- Depends only on `rocket-shared`.
+- Depends on `rocket-shared` and small pure crates (`serde`, `sha2`, `base64`, `data-encoding`, `rand`, `zeroize`, `uuid`, `chrono`, `async-trait`). It uses `tokio::sync::mpsc` channel types only, for `PeerSocket`, declared with the `sync` feature like `rocket-http` does. It never starts a runtime, opens a socket or touches the filesystem. Do not add `rustls`, `axum`, `hyper`, `mdns-sd`, `keyring` or `tauri` here.
 - Concrete implementations of the ports live in `rocket-infra` (`src/network/`).
 - `rocket-app` holds the ports as `Arc<dyn Trait>` in `NetworkService`.
 - The Tauri shell in `src-tauri` wires infra to the service at startup.
@@ -1077,6 +1079,7 @@ impl PairingSession {
     pub fn decide_local(&mut self, accept: bool) -> DomainResult<()>;
     pub fn decide_remote(&mut self, accept: bool) -> DomainResult<()>;
     pub fn cancel(&mut self);
+    pub fn fail(&mut self);
     pub fn expire_if_due(&mut self, now: Instant) -> bool;
     pub fn id(&self) -> &PairingId; pub fn role(&self) -> PairingRole; pub fn state(&self) -> PairingState;
     pub fn peer(&self) -> &PeerIdentity; pub fn peer_profile(&self) -> &NodeProfile;
@@ -1643,6 +1646,24 @@ mod tests {
     }
 
     #[test]
+    fn fail_ends_a_live_session_as_failed() {
+        let (mut session, _) = shown(Instant::now());
+        session.fail();
+        assert_eq!(session.state(), PairingState::Failed);
+        assert_eq!(session.status(), PairingStatus::Declined);
+        assert_eq!(session.outcome(), Some(PairingOutcome::Failed));
+        assert!(session.is_terminal());
+    }
+
+    #[test]
+    fn fail_does_not_change_a_finished_session() {
+        let (mut session, _) = shown(Instant::now());
+        session.decide_local(false).expect("local");
+        session.fail();
+        assert_eq!(session.outcome(), Some(PairingOutcome::Declined));
+    }
+
+    #[test]
     fn outcome_names_are_stable() {
         assert_eq!(PairingOutcome::Accepted.as_str(), "accepted");
         assert_eq!(PairingOutcome::Declined.as_str(), "declined");
@@ -1992,6 +2013,14 @@ impl PairingSession {
         }
     }
 
+    /// Ends a live session as failed, for example when the peer cannot be
+    /// reached partway through. A finished session stays as it is.
+    pub fn fail(&mut self) {
+        if !self.is_terminal() {
+            self.finish(PairingState::Failed, PairingOutcome::Failed);
+        }
+    }
+
     /// Expires a live session once `PAIRING_TTL` has passed since creation.
     /// Returns true when this call expired it. Call it before every decision.
     pub fn expire_if_due(&mut self, now: Instant) -> bool {
@@ -2126,6 +2155,7 @@ No commit. Changes are reviewed at the plan end.
 - Modify: `crates/rocket-network/src/lib.rs`
 - Create: `crates/rocket-network/src/presence.rs`
 - Create: `crates/rocket-network/src/dialer.rs`
+- Create: `crates/rocket-network/src/rate.rs`
 - Create: `crates/rocket-network/src/wire.rs`
 - Create: `crates/rocket-network/src/messages.rs`
 - Create: `crates/rocket-network/src/events.rs`
@@ -2157,6 +2187,15 @@ pub enum DialHint { Mdns, ManualAddress }
 pub fn should_dial(local: &DeviceId, remote: &DeviceId, hint: DialHint, waited: Duration) -> bool;
 pub fn keep_dialed_by(local: &DeviceId, remote: &DeviceId) -> DeviceId;
 
+// rate.rs
+#[derive(Debug, Clone)]
+pub struct SlidingWindow { /* private */ }
+impl SlidingWindow {
+    pub fn new(cap: usize, window: Duration) -> SlidingWindow;
+    pub fn try_hit(&mut self, now: Instant) -> bool;
+    pub fn clear(&mut self);
+}
+
 // wire.rs: HelloResponse, PairRequest, PairRequestResponse, NonceMessage, DecisionRequest, PairStatusResponse
 
 // messages.rs
@@ -2175,6 +2214,7 @@ pub enum NetworkEvent { NodesChanged, StatusChanged, PairedRemoved { .. }, Pairi
 Rules this task implements and tests:
 
 - `PresenceTracker` starts `Unknown`. `on_connected` makes it `Online` with attempt 0 and missed 0. `on_ping_sent` adds one to the missed count and turns an `Online` tracker `Offline` when the count is above `MISSED_PINGS_OFFLINE` (the third unanswered ping). `on_disconnected` makes it `Offline` and adds one to the attempt. `backoff` gives 1, 1, 2, 4, 8, 16, 32, 64, 120, 120 seconds for attempts 0 to 9.
+- `SlidingWindow` is the request limit Plan 04 uses for "5 pairing requests per minute". `try_hit(now)` first drops hits that are at least `window` old (a hit exactly `window` old is dropped), then refuses when `cap` hits remain, else records `now` and returns true. A refused hit is not recorded. Cap 0 refuses everything. `clear` forgets all hits. It never reads the clock; the caller passes `Instant`.
 - `should_dial`: a manual address always dials. An mDNS sighting dials when `local < remote` or the wait reached `DIAL_GRACE`. `keep_dialed_by` returns the lower id.
 - `PeerMessage::decode` refuses a text longer than `MAX_FRAME_BYTES` before parsing, refuses unknown types, never echoes frame content in the error, and rebuilds the initials of a `Hello` profile (rejecting bad names).
 - `NetworkEvent` channels: `NodesChanged`, `StatusChanged`, `PairedRemoved` on `network-changed`; `PairingIncoming`, `PairingFinished` on `network-pairing`.
@@ -2195,6 +2235,7 @@ pub mod pairing;
 pub mod ports;
 pub mod presence;
 pub mod profile;
+pub mod rate;
 pub mod records;
 pub mod wire;
 
@@ -2215,6 +2256,7 @@ pub use ports::{
 };
 pub use presence::{backoff, Presence, PresenceTracker};
 pub use profile::{default_display_name, initials_for, NodeProfile};
+pub use rate::SlidingWindow;
 pub use records::{
     BlockedDevice, DiscoveredNode, DiscoverySource, ManualAddress, NetworkSettings, PairedDevice,
 };
@@ -2369,6 +2411,82 @@ mod tests {
         assert_eq!(keep_dialed_by(&low(), &high()), low());
         assert_eq!(keep_dialed_by(&high(), &low()), low());
         assert_eq!(keep_dialed_by(&low(), &low()), low());
+    }
+}
+```
+
+Create `crates/rocket-network/src/rate.rs` with the tests only:
+
+```rust
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn secs(n: u64) -> Duration {
+        Duration::from_secs(n)
+    }
+
+    #[test]
+    fn hits_up_to_the_cap_pass_and_the_next_one_is_refused() {
+        let t0 = Instant::now();
+        let mut window = SlidingWindow::new(3, secs(60));
+        assert!(window.try_hit(t0));
+        assert!(window.try_hit(t0));
+        assert!(window.try_hit(t0 + secs(1)));
+        assert!(!window.try_hit(t0 + secs(2)), "the fourth hit in the window");
+    }
+
+    #[test]
+    fn the_window_slides_as_old_hits_age_out() {
+        let t0 = Instant::now();
+        let mut window = SlidingWindow::new(2, secs(60));
+        assert!(window.try_hit(t0));
+        assert!(window.try_hit(t0 + secs(30)));
+        assert!(!window.try_hit(t0 + secs(59)));
+        assert!(window.try_hit(t0 + secs(60)), "the first hit has aged out");
+        assert!(!window.try_hit(t0 + secs(61)), "the hits at 30 s and 60 s remain");
+        assert!(window.try_hit(t0 + secs(90)), "the hit at 30 s has aged out");
+    }
+
+    #[test]
+    fn a_hit_exactly_one_window_old_is_dropped() {
+        let t0 = Instant::now();
+        let mut window = SlidingWindow::new(1, secs(60));
+        assert!(window.try_hit(t0));
+        assert!(!window.try_hit(t0 + secs(60) - Duration::from_millis(1)));
+        assert!(window.try_hit(t0 + secs(60)));
+    }
+
+    #[test]
+    fn a_refused_hit_is_not_recorded() {
+        let t0 = Instant::now();
+        let mut window = SlidingWindow::new(1, secs(60));
+        assert!(window.try_hit(t0));
+        assert!(!window.try_hit(t0 + secs(30)));
+        assert!(window.try_hit(t0 + secs(60)), "only the first hit counted");
+    }
+
+    #[test]
+    fn a_cap_of_zero_refuses_everything() {
+        let mut window = SlidingWindow::new(0, secs(60));
+        assert!(!window.try_hit(Instant::now()));
+    }
+
+    #[test]
+    fn a_clock_that_goes_back_keeps_the_hit_in_the_window() {
+        let t0 = Instant::now();
+        let mut window = SlidingWindow::new(1, secs(60));
+        assert!(window.try_hit(t0 + secs(10)));
+        assert!(!window.try_hit(t0), "an earlier `now` does not panic or free the slot");
+    }
+
+    #[test]
+    fn clear_forgets_every_hit() {
+        let t0 = Instant::now();
+        let mut window = SlidingWindow::new(1, secs(60));
+        assert!(window.try_hit(t0));
+        window.clear();
+        assert!(window.try_hit(t0));
     }
 }
 ```
@@ -2858,7 +2976,7 @@ mod tests {
 - [ ] **Step 2: Run the tests and see them fail**
 
 Run: `cargo test -j4 -p rocket-network`
-Expected: FAIL to compile. Typical errors: `cannot find type PresenceTracker`, `cannot find function should_dial`, `cannot find type HelloResponse`, `cannot find type PeerMessage`, `cannot find type NetworkEvent`, `cannot find trait DiscoverySink`, and unresolved imports in `lib.rs`.
+Expected: FAIL to compile. Typical errors: `cannot find type PresenceTracker`, `cannot find function should_dial`, `cannot find type SlidingWindow`, `cannot find type HelloResponse`, `cannot find type PeerMessage`, `cannot find type NetworkEvent`, `cannot find trait DiscoverySink`, and unresolved imports in `lib.rs`.
 
 - [ ] **Step 3: Implement `presence.rs`**
 
@@ -2948,7 +3066,7 @@ pub fn backoff(attempt: u32) -> Duration {
 }
 ```
 
-- [ ] **Step 4: Implement `dialer.rs`**
+- [ ] **Step 4: Implement `dialer.rs` and `rate.rs`**
 
 Add this above the `#[cfg(test)]` line in `crates/rocket-network/src/dialer.rs`:
 
@@ -2982,6 +3100,55 @@ pub fn should_dial(local: &DeviceId, remote: &DeviceId, hint: DialHint, waited: 
 /// When two connections exist for one pair, keep the one dialled by this id.
 pub fn keep_dialed_by(local: &DeviceId, remote: &DeviceId) -> DeviceId {
     *std::cmp::min(local, remote)
+}
+```
+
+Add this above the `#[cfg(test)]` line in `crates/rocket-network/src/rate.rs`:
+
+```rust
+//! A sliding-window counter for request limits. Pure; the caller passes the time.
+
+use std::collections::VecDeque;
+use std::time::{Duration, Instant};
+
+/// Allows at most `cap` hits within any `window`.
+#[derive(Debug, Clone)]
+pub struct SlidingWindow {
+    cap: usize,
+    window: Duration,
+    hits: VecDeque<Instant>,
+}
+
+impl SlidingWindow {
+    pub fn new(cap: usize, window: Duration) -> SlidingWindow {
+        SlidingWindow {
+            cap,
+            window,
+            hits: VecDeque::new(),
+        }
+    }
+
+    /// Records a hit at `now` and returns true, or returns false when `cap` hits are already
+    /// inside the window. A refused hit is not recorded.
+    pub fn try_hit(&mut self, now: Instant) -> bool {
+        while self
+            .hits
+            .front()
+            .is_some_and(|t| now.saturating_duration_since(*t) >= self.window)
+        {
+            self.hits.pop_front();
+        }
+        if self.hits.len() >= self.cap {
+            return false;
+        }
+        self.hits.push_back(now);
+        true
+    }
+
+    /// Forgets every hit.
+    pub fn clear(&mut self) {
+        self.hits.clear();
+    }
 }
 ```
 
@@ -3451,6 +3618,7 @@ Then stop and show the user the whole change: root `Cargo.toml`, root `CLAUDE.md
 | 6.3 states, 2 minute expiry | Task 2 (`PAIRING_TTL`, `expire_if_due`). The spec's `Requested`, `Revealed`, `LocalAccepted` and `RemoteAccepted` are folded into `Committed` and `CodeShown` plus two decision flags, as the index defines. |
 | 6.4 node in the middle | Task 2 `a_man_in_the_middle_sees_different_codes` |
 | 7.3 who dials, backoff, ping | Task 3 `dialer.rs`, `presence.rs`, `limits.rs` |
+| 8.3 pairing requests 5 per minute (the counter) | Task 3 `rate.rs` (`SlidingWindow`), used by Plan 04 |
 | 8.1 frame limit and variants as allow-list | Task 3 `PeerMessage::decode` |
 | 8.3 limits | Task 1 `limits.rs` (constants only; Plan 03 enforces them) |
 | 9 paired list full (200) | Task 1 `MAX_PAIRED_DEVICES`, Task 3 `PairedDeviceRepository::upsert` doc |

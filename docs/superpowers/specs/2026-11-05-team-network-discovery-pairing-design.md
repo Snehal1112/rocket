@@ -132,8 +132,10 @@ Persistence structs keep snake_case. camelCase only on the IPC DTOs.
 
 ### 5.3 `rocket-app`
 
-`NetworkService` owns the lifecycle: start at launch, stop on exit, restart
-when visibility or the port changes. It runs pairing sessions, updates
+`NetworkService` owns the lifecycle: start at launch and stop on exit. The
+port is picked once at launch and does not change while the app runs. Hiding
+withdraws the mDNS announcement and showing announces it again, without a
+restart (confirmed by the user on 2026-11-06). It runs pairing sessions, updates
 presence and publishes `NetworkEvent`s. It holds only `Box<dyn Trait>`.
 
 ### 5.4 `src-tauri`
@@ -220,6 +222,12 @@ The remover deletes the entry and, if the WebSocket is open, sends
 `PeerMessage::Unpair` and closes it. The peer deletes its entry too. An
 offline peer gets `403 not-paired` on its next WebSocket upgrade, marks the
 pairing as removed and tells its user.
+
+Blocking a paired device also removes the pairing in the same way: the entry
+is deleted, `PeerMessage::Unpair` is sent if the WebSocket is open, and the
+connection is closed. Any further frame from a blocked device closes the
+connection without an answer. The audit log records both the block and the
+removal (decided by the user on 2026-11-06).
 
 ### 6.6 Reinstall or lost key
 
@@ -326,6 +334,8 @@ through their own spec and security review.
 - Pairing requests: 5 a minute across all strangers; extra requests get
   `503 busy` and no notice. One open session per remote device.
 - Decline: 1 minute cooldown for that device. Block: refused until unblocked.
+  Blocking a paired device also removes the pairing and closes its
+  connection (section 6.5).
 - Requests with an `Origin` header are refused (stops browser pages and DNS
   rebinding).
 
@@ -391,8 +401,8 @@ using sections 6 and 8 as its checklist.
   message. mDNS: a spoofed TXT id is not listed; two addresses merge. If CI
   cannot run multicast, these use a fake `Discovery` and the real mDNS becomes
   a manual check. Keychain through an in-memory fake.
-- `rocket-app` tests with fakes: start, stop, restart on visibility or port
-  change; hidden node refuses pairing but serves paired presence; keychain
+- `rocket-app` tests with fakes: start, stop, withdraw and re-announce on
+  visibility change; hidden node refuses pairing but serves paired presence; keychain
   failure turns networking off.
 - Vitest: store reacts to each event; panel search, groups and chips; pairing
   dialog calls the right commands; first-launch card shows once.

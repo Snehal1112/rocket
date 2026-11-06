@@ -29,4 +29,14 @@ describe('SearchInput', () => {
     );
     expect(container.firstElementChild).toHaveClass('relative', 'w-64');
   });
+
+  it('is a plain text input, so the WebKit search appearance does not restyle it', () => {
+    render(<SearchInput value='' onChange={vi.fn()} label='Search nodes' />);
+    expect(screen.getByRole('searchbox')).not.toHaveAttribute('type', 'search');
+  });
+
+  it('uses the sidebar search density from the design system', () => {
+    render(<SearchInput value='' onChange={vi.fn()} label='Search nodes' />);
+    expect(screen.getByRole('searchbox')).toHaveClass('h-8', 'pl-7', 'text-sm');
+  });
 });

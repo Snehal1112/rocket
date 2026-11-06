@@ -8,7 +8,7 @@
 
 **Goal:** `rocket-infra` can keep a stable Ed25519 device key in the OS keychain, turn it into a self-signed certificate whose public key hashes to the device id, persist the four small YAML lists under `~/.rocket-api/network/`, and build rustls server and client configs that run mutual TLS 1.3 with a custom "any self-signed Ed25519 key, but pin it when the id is known" check. Nothing listens on a socket yet.
 
-**Architecture:** A new module directory `crates/rocket-infra/src/network/` holds four files. `identity_store.rs` implements the `DeviceIdentityStore` port over the existing `SecretStore` trait (new keychain namespace `com.rocketapi.device-identity`), with strict reads and no file fallback. `tls_identity.rs` makes the certificate with `rcgen` and reads the public key back with `rustls-webpki` (already in the tree through rustls), so `DeviceId = SHA-256(SPKI DER)` is computed from the same bytes on both sides of a connection. `repos.rs` has four YAML repos that share one private `YamlFile` helper (lock, atomic write, quarantine of damaged files). `tls_config.rs` builds the rustls configs with two small verifiers that still check the handshake signature, so a peer must hold the private key of the certificate it shows. Plan 03 builds the TLS server, the connector and mDNS on top of these.
+**Architecture:** A new module directory `crates/rocket-infra/src/network/` holds five files. `identity_store.rs` implements the `DeviceIdentityStore` port over the existing `SecretStore` trait (new keychain namespace `com.rocketapi.device-identity`), with strict reads and no file fallback. `tls_identity.rs` makes the certificate with `rcgen` and reads the public key back with `rustls-webpki` (already in the tree through rustls), so `DeviceId = SHA-256(SPKI DER)` is computed from the same bytes on both sides of a connection. `repos.rs` has four YAML repos that share one private `YamlFile` helper (lock, atomic write, quarantine of damaged files); the three list repos are thin wrappers over one generic `YamlListRepo` (list, get, remove, upsert with a limit). `lock.rs` holds `lock_ignore_poison`. `tls_config.rs` builds the rustls configs with two small verifiers that still check the handshake signature, so a peer must hold the private key of the certificate it shows. Plan 03 builds the TLS server, the connector and mDNS on top of these.
 
 **Tech Stack:** Rust, `rcgen` 0.13 (now a normal dependency), `rustls-webpki` 0.103 (already locked at 0.103.10), `rustls` 0.23 (ring provider, TLS 1.3 only), `tokio-rustls` 0.26, `keyring` through the existing `SecretStore`, `serde_yaml`, `tempfile` and `tokio::io::duplex` in tests.
 
@@ -18,11 +18,11 @@
 
 - `-j4` on every cargo invocation. Never `cargo test --workspace` or `--all`. Use `cargo test -j4 -p rocket-infra <filter>`.
 - Use only the names from the index. `rocket-network` (Plan 01) is imported by module path: `rocket_network::{device, identity, limits, ports, records}`. If Plan 01 also re-exports them at the crate root, either spelling works.
-- No `unwrap` or `expect` in production code. Tests use `expect("reason")`. Never write a bare unwrap call anywhere (a repo hook rejects Rust text that contains one, tests included). Mutex locks use `.lock().unwrap_or_else(|e| e.into_inner())` in production code.
+- No `unwrap` or `expect` in production code. Tests use `expect("reason")`. Never write a bare unwrap call anywhere (a repo hook rejects Rust text that contains one, tests included). Mutex locks go through `crate::network::lock::lock_ignore_poison(&mutex)` in production code (Task 1 Step 2). No file repeats the `unwrap_or_else(|e| e.into_inner())` form.
 - The private key is never logged, never put in an error message and never written to a file. Local copies of key bytes and of the base64 text live in `zeroize::Zeroizing`. Errors use fixed generic texts.
 - Fail closed: any keychain error from `load_or_create` is an `Err`. No key file, no environment variable, no lenient read.
 - Persistence structs keep snake_case serde (the records come from Plan 01). No camelCase here.
-- Writes go through `crate::atomic_write`. A damaged YAML file is renamed to `<name>.corrupt-<unix-secs>` and the list starts empty (index deviation 1). Nothing is deleted.
+- Writes go through `crate::atomic_write`. A damaged YAML file is renamed to `<name>.corrupt-<unix-secs>` and the list starts empty (index deviation 1). Nothing is deleted. The rename lives once, in `crate::yaml_io::quarantine_corrupt` (Task 2 Step 2), shared with `fs_trust_store.rs`.
 - Code comments are short, full sentences that end with a period.
 - No commits during this plan. Task 2 writes `.yml` files, so it starts with the OpenCollection read step.
 - Line numbers drift. Edits are anchored on quoted text.
@@ -45,9 +45,12 @@
 | `crates/rocket-infra/src/lib.rs` | modify | `pub mod network;` and re-exports of the infra types |
 | `crates/rocket-infra/src/secret_store.rs` | modify | `KeyringSecretStore::new_device_identity()` and every distinct-namespace test list |
 | `crates/rocket-infra/src/network/mod.rs` | create | Module list and re-exports |
+| `crates/rocket-infra/src/network/lock.rs` | create | `lock_ignore_poison`, used by every mutex in the network module |
 | `crates/rocket-infra/src/network/identity_store.rs` | create | `KeychainDeviceIdentity` |
 | `crates/rocket-infra/src/network/tls_identity.rs` | create | `TlsIdentity`, `build_tls_identity`, `spki_from_cert`, test helpers |
-| `crates/rocket-infra/src/network/repos.rs` | create | Four YAML repos, shared `YamlFile`, `QuarantineReport` impls |
+| `crates/rocket-infra/src/network/repos.rs` | create | Four YAML repos, shared `YamlFile`, generic `YamlListRepo` with `Keyed` and `ListFile`, one `QuarantineReport` macro |
+| `crates/rocket-infra/src/yaml_io.rs` | modify | `quarantine_corrupt(path)`, the one rename-to-`.corrupt-<secs>` helper, with a unit test |
+| `crates/rocket-infra/src/fs_trust_store.rs` | modify | `quarantine` calls `quarantine_corrupt`; existing tests unchanged |
 | `crates/rocket-infra/src/network/tls_config.rs` | create | `server_config`, `client_config`, `peer_identity_from_certs`, the two verifiers |
 
 ---
@@ -56,8 +59,8 @@
 
 **Files:**
 - Modify: `crates/rocket-infra/Cargo.toml`, `crates/rocket-infra/src/lib.rs`, `crates/rocket-infra/src/secret_store.rs`
-- Create: `crates/rocket-infra/src/network/mod.rs`, `crates/rocket-infra/src/network/identity_store.rs`, `crates/rocket-infra/src/network/tls_identity.rs`
-- Test: inline `#[cfg(test)] mod tests` in the three source files.
+- Create: `crates/rocket-infra/src/network/mod.rs`, `crates/rocket-infra/src/network/lock.rs`, `crates/rocket-infra/src/network/identity_store.rs`, `crates/rocket-infra/src/network/tls_identity.rs`
+- Test: inline `#[cfg(test)] mod tests` in the four source files.
 
 **Interfaces:**
 - Consumes (Plan 01): `rocket_network::device::DeviceId` (`from_spki`), `rocket_network::identity::{PeerIdentity, DeviceKeyMaterial}` (`PeerIdentity::from_spki(Vec<u8>)`, `DeviceKeyMaterial { pub pkcs8_der: Vec<u8> }`), `rocket_network::ports::DeviceIdentityStore`; `rocket_environment::secret_store::SecretStore`; `rocket_shared::error::{DomainError, DomainResult}`.
@@ -100,7 +103,7 @@ In `crates/rocket-infra/Cargo.toml`, under `[dependencies]`, after the line `dot
 ```toml
 # Team network: the domain crate, the TLS stack with the custom certificate checks, the device
 # certificate maker and the certificate reader. All crypto uses the ring provider.
-rocket-network = { path = "../rocket-network" }
+rocket-network.workspace = true
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 rcgen = { version = "0.13", default-features = false, features = ["crypto", "ring", "pem"] }
 rustls-webpki = { version = "0.103", default-features = false, features = ["alloc", "ring"] }
@@ -121,10 +124,52 @@ Create `crates/rocket-infra/src/network/mod.rs`:
 //! configs. The domain rules live in `rocket-network`.
 
 pub mod identity_store;
+pub(crate) mod lock;
 pub mod tls_identity;
 
 pub use identity_store::KeychainDeviceIdentity;
 pub use tls_identity::{build_tls_identity, spki_from_cert, TlsIdentity};
+```
+
+Create `crates/rocket-infra/src/network/lock.rs`. Every mutex in the network module (this plan and Plan 03) locks through this one function, so the poison rule is written once:
+
+```rust
+//! One place for the "a panic elsewhere must not stop the network" lock rule.
+
+use std::sync::{Mutex, MutexGuard};
+
+/// Locks `mutex`. A lock poisoned by a panic in another thread is used as it is, because the
+/// data behind these mutexes stays valid after any single update.
+pub(crate) fn lock_ignore_poison<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+
+    #[test]
+    fn it_locks_a_healthy_mutex() {
+        let mutex = Mutex::new(5);
+        *lock_ignore_poison(&mutex) += 1;
+        assert_eq!(*lock_ignore_poison(&mutex), 6);
+    }
+
+    #[test]
+    fn it_still_locks_after_another_thread_panicked_holding_the_lock() {
+        let mutex = Arc::new(Mutex::new(1));
+        let poisoner = mutex.clone();
+        let result = std::thread::spawn(move || {
+            let _guard = poisoner.lock().expect("lock before the panic");
+            panic!("poison the mutex on purpose");
+        })
+        .join();
+        assert!(result.is_err());
+        assert!(mutex.is_poisoned());
+        assert_eq!(*lock_ignore_poison(&mutex), 1);
+    }
+}
 ```
 
 Create `crates/rocket-infra/src/network/identity_store.rs` with this single line:
@@ -625,6 +670,8 @@ use rocket_network::ports::DeviceIdentityStore;
 use rocket_shared::error::{DomainError, DomainResult};
 use zeroize::Zeroizing;
 
+use crate::network::lock::lock_ignore_poison;
+
 /// Keychain scope of the device key.
 const SCOPE: &str = "device";
 /// Keychain key of the device key.
@@ -667,7 +714,7 @@ impl KeychainDeviceIdentity {
 
 impl DeviceIdentityStore for KeychainDeviceIdentity {
     fn load_or_create(&self) -> DomainResult<DeviceKeyMaterial> {
-        let _guard = self.create_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let _guard = lock_ignore_poison(&self.create_lock);
         // A strict read: a locked keychain is an error here and never looks like "no key yet".
         match self.store.get_strict(SCOPE, KEY)? {
             Some(text) => decode_stored(&Zeroizing::new(text)),
@@ -717,8 +764,8 @@ No commit. The whole plan is reviewed at the plan end.
 
 **Files:**
 - Create: `crates/rocket-infra/src/network/repos.rs`
-- Modify: `crates/rocket-infra/src/network/mod.rs`, `crates/rocket-infra/src/lib.rs`
-- Test: inline `#[cfg(test)] mod tests` in `repos.rs`.
+- Modify: `crates/rocket-infra/src/network/mod.rs`, `crates/rocket-infra/src/lib.rs`, `crates/rocket-infra/src/yaml_io.rs` (adds `quarantine_corrupt`), `crates/rocket-infra/src/fs_trust_store.rs` (calls it)
+- Test: inline `#[cfg(test)] mod tests` in `repos.rs` and in `yaml_io.rs`; the existing `fs_trust_store` tests must still pass.
 
 **Interfaces:**
 - Consumes (Plan 01): `rocket_network::ports::{PairedDeviceRepository, BlockedDeviceRepository, ManualAddressRepository, NetworkSettingsRepository, QuarantineReport}`, `rocket_network::records::{PairedDevice, BlockedDevice, ManualAddress, NetworkSettings}`, `rocket_network::device::DeviceId`, `rocket_network::limits::{MAX_PAIRED_DEVICES, MAX_MANUAL_ADDRESSES}`; `crate::atomic_write`.
@@ -732,11 +779,123 @@ pub struct FsNetworkSettingsRepo; // new(path: PathBuf) -> Self  file: settings.
 // Each implements its port from the index and `QuarantineReport`.
 // Files (private wrappers, snake_case): paired.yml and blocked.yml hold `devices: [...]`,
 // addresses.yml holds `addresses: [...]`, settings.yml is the `NetworkSettings` map itself.
+// The three list repos are newtypes over the private generic `YamlListRepo<F: ListFile>`;
+// `Keyed` (item key) and `ListFile` (file shape) are private traits. One `quarantine_report!`
+// macro implements `QuarantineReport` for all four repos.
+```
+
+Crate-private, from `crates/rocket-infra/src/yaml_io.rs` (Step 1b):
+
+```rust
+pub(crate) fn quarantine_corrupt(path: &Path) -> std::io::Result<PathBuf>;
+// Renames `path` to `<path>.corrupt-<unix-secs>` and returns the new path.
 ```
 
 - [ ] **Step 1: Read the spec reference**
 
 Before starting, read `docs/superpowers/specs/opencollection-spec-reference.md`. The network files are not collection files and use none of its formats, but this task writes `.yml` files, so the repo rule applies.
+
+- [ ] **Step 1b: Share the quarantine rename**
+
+`fs_trust_store.rs` already has a private `quarantine` that renames a damaged file to `<name>.corrupt-<unix-secs>`. The repos need the same rename, so it moves into `yaml_io.rs` once (next to `read_dir_yaml` and `delete_if_exists`) and both callers use it.
+
+First the failing tests. In `crates/rocket-infra/src/yaml_io.rs`, inside the existing `mod tests`, after the test `delete_if_exists_returns_not_found_when_absent`, add:
+
+```rust
+    #[test]
+    fn quarantine_corrupt_moves_the_file_and_keeps_its_bytes() {
+        let dir = TempDir::new().expect("tempdir");
+        let path = dir.path().join("paired.yml");
+        fs::write(&path, [0xff, 0xfe, 0x01]).expect("write");
+
+        let moved = quarantine_corrupt(&path).expect("quarantine");
+
+        assert!(!path.exists());
+        let name = moved
+            .file_name()
+            .expect("file name")
+            .to_string_lossy()
+            .into_owned();
+        assert!(name.starts_with("paired.yml.corrupt-"), "{name}");
+        assert!(name["paired.yml.corrupt-".len()..]
+            .chars()
+            .all(|c| c.is_ascii_digit()));
+        assert_eq!(moved.parent(), path.parent());
+        assert_eq!(fs::read(&moved).expect("read moved"), [0xff, 0xfe, 0x01]);
+    }
+
+    #[test]
+    fn quarantine_corrupt_fails_when_the_file_is_missing() {
+        let dir = TempDir::new().expect("tempdir");
+        let err = quarantine_corrupt(&dir.path().join("missing.yml")).expect_err("no file");
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    }
+```
+
+Run: `cargo test -j4 -p rocket-infra yaml_io`
+Expected: FAIL to compile with `cannot find function quarantine_corrupt in this scope`.
+
+Now the helper. In `crates/rocket-infra/src/yaml_io.rs`, after the line `use std::path::{Path, PathBuf};` add:
+
+```rust
+use std::time::{SystemTime, UNIX_EPOCH};
+```
+
+and add this function after `delete_if_exists`:
+
+```rust
+/// Rename a damaged file to `<name>.corrupt-<unix-secs>` next to it and return the new path.
+/// Nothing is deleted. Two damaged copies in the same second would share one name.
+pub(crate) fn quarantine_corrupt(path: &Path) -> std::io::Result<PathBuf> {
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let mut name = path.as_os_str().to_os_string();
+    name.push(format!(".corrupt-{secs}"));
+    let target = PathBuf::from(name);
+    fs::rename(path, &target)?;
+    Ok(target)
+}
+```
+
+Then make `fs_trust_store.rs` use it. In `crates/rocket-infra/src/fs_trust_store.rs`, replace the whole method
+
+```rust
+    fn quarantine(&self, path: &Path) -> DomainResult<()> {
+        let secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let mut name = path.as_os_str().to_os_string();
+        name.push(format!(".corrupt-{secs}"));
+        fs::rename(path, PathBuf::from(name))?;
+        Ok(())
+    }
+```
+
+with
+
+```rust
+    fn quarantine(&self, path: &Path) -> DomainResult<()> {
+        quarantine_corrupt(path)?;
+        Ok(())
+    }
+```
+
+The error mapping is the same as before: the `?` turns the `io::Error` into a `DomainError` through the existing `From` impl, exactly as the old `fs::rename(...)?` did. In the same file delete the now unused line `use std::time::{SystemTime, UNIX_EPOCH};` and, next to `use crate::atomic_write;`, add:
+
+```rust
+use crate::yaml_io::quarantine_corrupt;
+```
+
+`fs` and `PathBuf` stay imported because the rest of the file uses them.
+
+Run: `cargo test -j4 -p rocket-infra yaml_io`
+Expected: PASS, including the two new tests.
+
+Run: `cargo test -j4 -p rocket-infra fs_trust_store`
+Expected: PASS with the same test count as before this step, in particular `next_write_quarantines_a_corrupt_file` and `corrupt_file_fails_closed_and_counts_as_migrated`. If a test in this module fails, stop: the helper must behave exactly like the old method.
 
 - [ ] **Step 2: Add the module and a skeleton**
 
@@ -753,6 +912,7 @@ In `crates/rocket-infra/src/network/mod.rs`, replace the whole content with:
 //! configs. The domain rules live in `rocket-network`.
 
 pub mod identity_store;
+pub(crate) mod lock;
 pub mod repos;
 pub mod tls_identity;
 
@@ -844,6 +1004,118 @@ mod tests {
         let dir = TempDir::new().expect("tempdir");
         let repo = FsPairedDeviceRepo::new(dir.path().join("paired.yml"));
         (dir, repo)
+    }
+
+    // ---- the generic list helper ----
+
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+    struct Note {
+        id: u32,
+        text: String,
+    }
+
+    impl Keyed for Note {
+        type Key = u32;
+
+        fn key(&self) -> u32 {
+            self.id
+        }
+    }
+
+    #[derive(Debug, Default, Serialize, Deserialize)]
+    struct NoteFile {
+        #[serde(default)]
+        notes: Vec<Note>,
+    }
+
+    impl ListFile for NoteFile {
+        type Item = Note;
+
+        fn into_items(self) -> Vec<Note> {
+            self.notes
+        }
+
+        fn items_mut(&mut self) -> &mut Vec<Note> {
+            &mut self.notes
+        }
+    }
+
+    fn note(id: u32, text: &str) -> Note {
+        Note {
+            id,
+            text: text.to_string(),
+        }
+    }
+
+    fn note_repo() -> (TempDir, YamlListRepo<NoteFile>) {
+        let dir = TempDir::new().expect("tempdir");
+        let repo = YamlListRepo::new(dir.path().join("notes.yml"));
+        (dir, repo)
+    }
+
+    #[test]
+    fn the_list_helper_upsert_replaces_in_place_and_appends() {
+        let (_dir, repo) = note_repo();
+        repo.upsert(note(1, "one")).expect("upsert 1");
+        repo.upsert(note(2, "two")).expect("upsert 2");
+        repo.upsert(note(1, "uno")).expect("replace 1");
+        assert_eq!(repo.list().expect("list"), vec![note(1, "uno"), note(2, "two")]);
+        assert_eq!(repo.get(&2).expect("get"), Some(note(2, "two")));
+        assert_eq!(repo.get(&9).expect("get a miss"), None);
+        assert!(repo.contains(&1).expect("contains"));
+        assert!(!repo.contains(&9).expect("contains a miss"));
+    }
+
+    #[test]
+    fn the_list_helper_enforces_the_limit_but_allows_replacing() {
+        let (_dir, repo) = note_repo();
+        repo.upsert_with_limit(note(1, "one"), 2, "full").expect("first");
+        repo.upsert_with_limit(note(2, "two"), 2, "full").expect("second");
+        let err = repo
+            .upsert_with_limit(note(3, "three"), 2, "the list is full")
+            .expect_err("the third is refused");
+        assert!(matches!(&err, DomainError::InvalidInput(m) if m == "the list is full"));
+        repo.upsert_with_limit(note(2, "deux"), 2, "full")
+            .expect("replacing at the limit is fine");
+        assert_eq!(repo.list().expect("list"), vec![note(1, "one"), note(2, "deux")]);
+    }
+
+    #[test]
+    fn the_list_helper_insert_if_absent_keeps_the_first_entry_and_obeys_the_limit() {
+        let (_dir, repo) = note_repo();
+        assert!(repo.insert_if_absent(note(1, "one"), 2, "full").expect("add"));
+        assert!(!repo.insert_if_absent(note(1, "other"), 2, "full").expect("known"));
+        assert!(repo.insert_if_absent(note(2, "two"), 2, "full").expect("add 2"));
+        let err = repo
+            .insert_if_absent(note(3, "three"), 2, "full")
+            .expect_err("the third is refused");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+        assert!(!repo.insert_if_absent(note(2, "again"), 2, "full").expect("known at the limit"));
+        assert_eq!(repo.list().expect("list"), vec![note(1, "one"), note(2, "two")]);
+    }
+
+    #[test]
+    fn the_list_helper_remove_by_key_reports_a_miss() {
+        let (_dir, repo) = note_repo();
+        repo.upsert(note(1, "one")).expect("upsert");
+        repo.upsert(note(2, "two")).expect("upsert");
+        assert!(repo.remove_by_key(&1).expect("remove"));
+        assert!(!repo.remove_by_key(&1).expect("remove twice"));
+        assert_eq!(repo.list().expect("list"), vec![note(2, "two")]);
+    }
+
+    #[test]
+    fn the_list_helper_quarantines_a_damaged_file_once() {
+        let (dir, repo) = note_repo();
+        fs::write(dir.path().join("notes.yml"), "notes: nope").expect("write");
+        assert!(repo.list().expect("list starts empty").is_empty());
+        assert_eq!(repo.take_quarantined().as_deref(), Some("notes.yml"));
+        assert_eq!(repo.take_quarantined(), None);
+        assert!(repo.list().expect("list again").is_empty());
+        assert_eq!(repo.take_quarantined(), None);
+        assert_eq!(corrupt_files(&dir, "notes.yml").len(), 1);
+        repo.upsert(note(1, "one")).expect("upsert after quarantine");
+        assert_eq!(repo.list().expect("list").len(), 1);
     }
 
     // ---- paired ----
@@ -1137,7 +1409,7 @@ mod tests {
 - [ ] **Step 4: Run the tests and see them fail**
 
 Run: `cargo test -j4 -p rocket-infra network::repos`
-Expected: FAIL to compile with `cannot find type FsPairedDeviceRepo in this scope` (and `PairedFile`, `AddressFile`, `YamlFile`).
+Expected: FAIL to compile with `cannot find type FsPairedDeviceRepo in this scope` (and `PairedFile`, `AddressFile`, `YamlFile`, `YamlListRepo`, `Keyed`, `ListFile`).
 
 - [ ] **Step 5: Implement the repos**
 
@@ -1149,11 +1421,15 @@ Replace the single doc line at the top of `crates/rocket-infra/src/network/repos
 //! Machine-local files: never inside a workspace or collection and never committed. A missing
 //! or blank file is an empty list. A damaged file is renamed to `<name>.corrupt-<unix-secs>`,
 //! the list starts empty and the file name is remembered once for `take_quarantined()`.
+//!
+//! `YamlFile` is the shared file handling. `YamlListRepo` is the shared list logic (list, get,
+//! remove, upsert with a limit). The three list repos are thin wrappers over it, and the
+//! settings repo uses `YamlFile` alone.
 
 use std::fs;
+use std::marker::PhantomData;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use rocket_network::device::DeviceId;
 use rocket_network::limits::{MAX_MANUAL_ADDRESSES, MAX_PAIRED_DEVICES};
@@ -1167,6 +1443,8 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::atomic_write;
+use crate::network::lock::lock_ignore_poison;
+use crate::yaml_io::quarantine_corrupt;
 
 /// One YAML file with a lock, atomic writes and quarantine of damaged content.
 ///
@@ -1193,7 +1471,7 @@ impl YamlFile {
     }
 
     fn lock(&self) -> MutexGuard<'_, ()> {
-        self.write_lock.lock().unwrap_or_else(|e| e.into_inner())
+        lock_ignore_poison(&self.write_lock)
     }
 
     fn read<T: DeserializeOwned + Default>(&self) -> DomainResult<T> {
@@ -1216,10 +1494,7 @@ impl YamlFile {
     }
 
     fn take_quarantined(&self) -> Option<String> {
-        self.quarantined
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take()
+        lock_ignore_poison(&self.quarantined).take()
     }
 
     fn load<T: DeserializeOwned + Default>(&self) -> DomainResult<T> {
@@ -1258,21 +1533,130 @@ impl YamlFile {
             .map_err(|e| DomainError::Io(format!("Failed to write {}: {e}", self.file_name)))
     }
 
-    /// Moves the damaged file to `<name>.corrupt-<unix-secs>` and remembers its name.
+    /// Moves the damaged file aside (the shared `quarantine_corrupt` helper) and remembers its name.
     fn quarantine(&self) -> DomainResult<()> {
-        let secs = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let mut target = self.path.as_os_str().to_os_string();
-        target.push(format!(".corrupt-{secs}"));
-        fs::rename(&self.path, PathBuf::from(target)).map_err(|e| {
+        quarantine_corrupt(&self.path).map_err(|e| {
             DomainError::Io(format!("Failed to set {} aside: {e}", self.file_name))
         })?;
         tracing::warn!(file = %self.file_name, "network file was damaged and has been set aside");
-        *self.quarantined.lock().unwrap_or_else(|e| e.into_inner()) = Some(self.file_name.clone());
+        *lock_ignore_poison(&self.quarantined) = Some(self.file_name.clone());
         Ok(())
     }
+}
+
+/// An item of a list file. The key decides which entry an upsert replaces.
+trait Keyed {
+    type Key: PartialEq;
+
+    fn key(&self) -> Self::Key;
+}
+
+/// The private file shape of one list, for example `devices: [...]`.
+trait ListFile: Default + Serialize + DeserializeOwned {
+    type Item: Keyed + Clone;
+
+    fn into_items(self) -> Vec<Self::Item>;
+    fn items_mut(&mut self) -> &mut Vec<Self::Item>;
+}
+
+/// The key type of the items of list file `F`.
+type KeyOf<F> = <<F as ListFile>::Item as Keyed>::Key;
+
+/// A list kept in one YAML file: the logic the three list repos share.
+struct YamlListRepo<F: ListFile> {
+    file: YamlFile,
+    shape: PhantomData<fn() -> F>,
+}
+
+impl<F: ListFile> YamlListRepo<F> {
+    fn new(path: PathBuf) -> Self {
+        Self {
+            file: YamlFile::new(path),
+            shape: PhantomData,
+        }
+    }
+
+    fn list(&self) -> DomainResult<Vec<F::Item>> {
+        Ok(self.file.read::<F>()?.into_items())
+    }
+
+    fn get(&self, key: &KeyOf<F>) -> DomainResult<Option<F::Item>> {
+        Ok(self.list()?.into_iter().find(|item| item.key() == *key))
+    }
+
+    fn contains(&self, key: &KeyOf<F>) -> DomainResult<bool> {
+        Ok(self.list()?.iter().any(|item| item.key() == *key))
+    }
+
+    /// Replaces the entry with the same key in place, or appends a new one.
+    fn upsert(&self, item: F::Item) -> DomainResult<()> {
+        self.upsert_with_limit(item, usize::MAX, "")
+    }
+
+    /// Like `upsert`, but a new entry beyond `max` entries is refused with `full_message`.
+    /// Replacing an existing entry is always allowed.
+    fn upsert_with_limit(&self, item: F::Item, max: usize, full_message: &str) -> DomainResult<()> {
+        let key = item.key();
+        self.file.modify(|file: &mut F| {
+            let items = file.items_mut();
+            match items.iter().position(|existing| existing.key() == key) {
+                Some(index) => items[index] = item,
+                None => {
+                    if items.len() >= max {
+                        return Err(DomainError::InvalidInput(full_message.to_string()));
+                    }
+                    items.push(item);
+                }
+            }
+            Ok(((), true))
+        })
+    }
+
+    /// Appends `item` unless an entry with its key exists. Returns whether it was added.
+    /// A new entry beyond `max` entries is refused with `full_message`.
+    fn insert_if_absent(&self, item: F::Item, max: usize, full_message: &str) -> DomainResult<bool> {
+        let key = item.key();
+        self.file.modify(|file: &mut F| {
+            let items = file.items_mut();
+            if items.iter().any(|existing| existing.key() == key) {
+                return Ok((false, false));
+            }
+            if items.len() >= max {
+                return Err(DomainError::InvalidInput(full_message.to_string()));
+            }
+            items.push(item);
+            Ok((true, true))
+        })
+    }
+
+    fn take_quarantined(&self) -> Option<String> {
+        self.file.take_quarantined()
+    }
+
+    /// Returns whether an entry was removed.
+    fn remove_by_key(&self, key: &KeyOf<F>) -> DomainResult<bool> {
+        self.file.modify(|file: &mut F| {
+            let items = file.items_mut();
+            let before = items.len();
+            items.retain(|item| item.key() != *key);
+            let removed = items.len() != before;
+            Ok((removed, removed))
+        })
+    }
+}
+
+/// One `QuarantineReport` impl for every repo. Each repo keeps its storage in a field named
+/// `inner` (a `YamlListRepo` or a `YamlFile`) that has a `take_quarantined()` method.
+macro_rules! quarantine_report {
+    ($($repo:ty),+ $(,)?) => {
+        $(
+            impl QuarantineReport for $repo {
+                fn take_quarantined(&self) -> Option<String> {
+                    self.inner.take_quarantined()
+                }
+            }
+        )+
+    };
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -1281,10 +1665,50 @@ struct PairedFile {
     devices: Vec<PairedDevice>,
 }
 
+impl Keyed for PairedDevice {
+    type Key = DeviceId;
+
+    fn key(&self) -> DeviceId {
+        self.device_id
+    }
+}
+
+impl ListFile for PairedFile {
+    type Item = PairedDevice;
+
+    fn into_items(self) -> Vec<PairedDevice> {
+        self.devices
+    }
+
+    fn items_mut(&mut self) -> &mut Vec<PairedDevice> {
+        &mut self.devices
+    }
+}
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 struct BlockedFile {
     #[serde(default)]
     devices: Vec<BlockedDevice>,
+}
+
+impl Keyed for BlockedDevice {
+    type Key = DeviceId;
+
+    fn key(&self) -> DeviceId {
+        self.device_id
+    }
+}
+
+impl ListFile for BlockedFile {
+    type Item = BlockedDevice;
+
+    fn into_items(self) -> Vec<BlockedDevice> {
+        self.devices
+    }
+
+    fn items_mut(&mut self) -> &mut Vec<BlockedDevice> {
+        &mut self.devices
+    }
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -1293,151 +1717,115 @@ struct AddressFile {
     addresses: Vec<ManualAddress>,
 }
 
+/// Hosts compare without case and without surrounding spaces.
+fn normalize_host(host: &str) -> String {
+    host.trim().to_lowercase()
+}
+
+impl Keyed for ManualAddress {
+    type Key = (String, u16);
+
+    fn key(&self) -> (String, u16) {
+        (normalize_host(&self.host), self.port)
+    }
+}
+
+impl ListFile for AddressFile {
+    type Item = ManualAddress;
+
+    fn into_items(self) -> Vec<ManualAddress> {
+        self.addresses
+    }
+
+    fn items_mut(&mut self) -> &mut Vec<ManualAddress> {
+        &mut self.addresses
+    }
+}
+
 /// `paired.yml`: the devices this node has paired with.
 pub struct FsPairedDeviceRepo {
-    file: YamlFile,
+    inner: YamlListRepo<PairedFile>,
 }
 
 impl FsPairedDeviceRepo {
     /// `path` is the YAML file itself, for example `<data dir>/network/paired.yml`.
     pub fn new(path: PathBuf) -> Self {
         Self {
-            file: YamlFile::new(path),
+            inner: YamlListRepo::new(path),
         }
     }
 }
 
 impl PairedDeviceRepository for FsPairedDeviceRepo {
     fn list(&self) -> DomainResult<Vec<PairedDevice>> {
-        Ok(self.file.read::<PairedFile>()?.devices)
+        self.inner.list()
     }
 
     fn get(&self, id: &DeviceId) -> DomainResult<Option<PairedDevice>> {
-        Ok(self
-            .file
-            .read::<PairedFile>()?
-            .devices
-            .into_iter()
-            .find(|d| d.device_id == *id))
+        self.inner.get(id)
     }
 
     fn upsert(&self, device: PairedDevice) -> DomainResult<()> {
-        self.file.modify(|file: &mut PairedFile| {
-            let existing = file
-                .devices
-                .iter()
-                .position(|d| d.device_id == device.device_id);
-            match existing {
-                Some(index) => file.devices[index] = device,
-                None => {
-                    if file.devices.len() >= MAX_PAIRED_DEVICES {
-                        return Err(DomainError::InvalidInput(format!(
-                            "You've reached the limit of {MAX_PAIRED_DEVICES} paired devices. Remove one to pair."
-                        )));
-                    }
-                    file.devices.push(device);
-                }
-            }
-            Ok(((), true))
-        })
+        let full = format!(
+            "You've reached the limit of {MAX_PAIRED_DEVICES} paired devices. Remove one to pair."
+        );
+        self.inner.upsert_with_limit(device, MAX_PAIRED_DEVICES, &full)
     }
 
     fn remove(&self, id: &DeviceId) -> DomainResult<bool> {
-        self.file.modify(|file: &mut PairedFile| {
-            let before = file.devices.len();
-            file.devices.retain(|d| d.device_id != *id);
-            let removed = file.devices.len() != before;
-            Ok((removed, removed))
-        })
-    }
-}
-
-impl QuarantineReport for FsPairedDeviceRepo {
-    fn take_quarantined(&self) -> Option<String> {
-        self.file.take_quarantined()
+        self.inner.remove_by_key(id)
     }
 }
 
 /// `blocked.yml`: devices that are refused until the user unblocks them.
 pub struct FsBlockedDeviceRepo {
-    file: YamlFile,
+    inner: YamlListRepo<BlockedFile>,
 }
 
 impl FsBlockedDeviceRepo {
     /// `path` is the YAML file itself, for example `<data dir>/network/blocked.yml`.
     pub fn new(path: PathBuf) -> Self {
         Self {
-            file: YamlFile::new(path),
+            inner: YamlListRepo::new(path),
         }
     }
 }
 
 impl BlockedDeviceRepository for FsBlockedDeviceRepo {
     fn list(&self) -> DomainResult<Vec<BlockedDevice>> {
-        Ok(self.file.read::<BlockedFile>()?.devices)
+        self.inner.list()
     }
 
     fn contains(&self, id: &DeviceId) -> DomainResult<bool> {
-        Ok(self
-            .file
-            .read::<BlockedFile>()?
-            .devices
-            .iter()
-            .any(|d| d.device_id == *id))
+        self.inner.contains(id)
     }
 
     fn add(&self, device: BlockedDevice) -> DomainResult<()> {
-        self.file.modify(|file: &mut BlockedFile| {
-            let existing = file
-                .devices
-                .iter()
-                .position(|d| d.device_id == device.device_id);
-            match existing {
-                Some(index) => file.devices[index] = device,
-                None => file.devices.push(device),
-            }
-            Ok(((), true))
-        })
+        self.inner.upsert(device)
     }
 
     fn remove(&self, id: &DeviceId) -> DomainResult<bool> {
-        self.file.modify(|file: &mut BlockedFile| {
-            let before = file.devices.len();
-            file.devices.retain(|d| d.device_id != *id);
-            let removed = file.devices.len() != before;
-            Ok((removed, removed))
-        })
+        self.inner.remove_by_key(id)
     }
-}
-
-impl QuarantineReport for FsBlockedDeviceRepo {
-    fn take_quarantined(&self) -> Option<String> {
-        self.file.take_quarantined()
-    }
-}
-
-/// Hosts compare without case and without surrounding spaces.
-fn normalize_host(host: &str) -> String {
-    host.trim().to_lowercase()
 }
 
 /// `addresses.yml`: addresses the user added by hand ("Add by address").
 pub struct FsManualAddressRepo {
-    file: YamlFile,
+    inner: YamlListRepo<AddressFile>,
 }
 
 impl FsManualAddressRepo {
     /// `path` is the YAML file itself, for example `<data dir>/network/addresses.yml`.
     pub fn new(path: PathBuf) -> Self {
         Self {
-            file: YamlFile::new(path),
+            inner: YamlListRepo::new(path),
         }
     }
 }
 
 impl ManualAddressRepository for FsManualAddressRepo {
     fn list(&self) -> DomainResult<Vec<ManualAddress>> {
-        Ok(self.file.read::<AddressFile>()?.addresses)
+        self.inner.list()
     }
 
     fn add(&self, address: ManualAddress) -> DomainResult<()> {
@@ -1447,85 +1835,71 @@ impl ManualAddressRepository for FsManualAddressRepo {
                 "The address needs a host".to_string(),
             ));
         }
-        self.file.modify(|file: &mut AddressFile| {
-            let known = file
-                .addresses
-                .iter()
-                .any(|a| normalize_host(&a.host) == host && a.port == address.port);
-            if known {
-                return Ok(((), false));
-            }
-            if file.addresses.len() >= MAX_MANUAL_ADDRESSES {
-                return Err(DomainError::InvalidInput(format!(
-                    "You've reached the limit of {MAX_MANUAL_ADDRESSES} addresses. Remove one to add another."
-                )));
-            }
-            file.addresses.push(ManualAddress { host, ..address });
-            Ok(((), true))
-        })
+        let full = format!(
+            "You've reached the limit of {MAX_MANUAL_ADDRESSES} addresses. Remove one to add another."
+        );
+        // A known address keeps its first entry, so the first `added_at` stays.
+        self.inner
+            .insert_if_absent(ManualAddress { host, ..address }, MAX_MANUAL_ADDRESSES, &full)?;
+        Ok(())
     }
 
     fn remove(&self, host: &str, port: u16) -> DomainResult<bool> {
-        let host = normalize_host(host);
-        self.file.modify(|file: &mut AddressFile| {
-            let before = file.addresses.len();
-            file.addresses
-                .retain(|a| !(normalize_host(&a.host) == host && a.port == port));
-            let removed = file.addresses.len() != before;
-            Ok((removed, removed))
-        })
-    }
-}
-
-impl QuarantineReport for FsManualAddressRepo {
-    fn take_quarantined(&self) -> Option<String> {
-        self.file.take_quarantined()
+        self.inner.remove_by_key(&(normalize_host(host), port))
     }
 }
 
 /// `settings.yml`: visibility, display name and the intro flag.
 pub struct FsNetworkSettingsRepo {
-    file: YamlFile,
+    // The settings file is one map, not a list, so it uses `YamlFile` alone.
+    inner: YamlFile,
 }
 
 impl FsNetworkSettingsRepo {
     /// `path` is the YAML file itself, for example `<data dir>/network/settings.yml`.
     pub fn new(path: PathBuf) -> Self {
         Self {
-            file: YamlFile::new(path),
+            inner: YamlFile::new(path),
         }
     }
 }
 
 impl NetworkSettingsRepository for FsNetworkSettingsRepo {
     fn load(&self) -> DomainResult<NetworkSettings> {
-        self.file.read::<NetworkSettings>()
+        self.inner.read::<NetworkSettings>()
     }
 
     fn save(&self, settings: &NetworkSettings) -> DomainResult<()> {
-        self.file.modify(|current: &mut NetworkSettings| {
+        self.inner.modify(|current: &mut NetworkSettings| {
             *current = settings.clone();
             Ok(((), true))
         })
     }
 }
 
-impl QuarantineReport for FsNetworkSettingsRepo {
-    fn take_quarantined(&self) -> Option<String> {
-        self.file.take_quarantined()
-    }
-}
+quarantine_report!(
+    FsPairedDeviceRepo,
+    FsBlockedDeviceRepo,
+    FsManualAddressRepo,
+    FsNetworkSettingsRepo,
+);
 ```
 
 - [ ] **Step 6: Run the tests and see them pass**
 
 Run: `cargo test -j4 -p rocket-infra network::repos`
-Expected: PASS (all tests in `network::repos::tests`).
+Expected: PASS (all tests in `network::repos::tests`, including the five `the_list_helper_*` tests).
+
+Run: `cargo test -j4 -p rocket-infra network::lock`
+Expected: PASS, 2 tests.
+
+Run: `cargo test -j4 -p rocket-infra fs_trust_store`
+Expected: PASS, the same tests as before Step 1b. This proves the shared rename did not change the trust store.
 
 - [ ] **Step 7: Check**
 
 Run: `cargo check -j4 -p rocket-infra`
-Expected: PASS with no warnings from `repos.rs`.
+Expected: PASS with no warnings from `repos.rs`, `yaml_io.rs`, `fs_trust_store.rs` or `lock.rs` (an unused-import warning in `fs_trust_store.rs` means the `SystemTime, UNIX_EPOCH` line was not removed).
 
 No commit. The whole plan is reviewed at the plan end.
 
@@ -1582,6 +1956,7 @@ In `crates/rocket-infra/src/network/mod.rs`, replace the whole content with:
 //! configs. The domain rules live in `rocket-network`.
 
 pub mod identity_store;
+pub(crate) mod lock;
 pub mod repos;
 pub mod tls_config;
 pub mod tls_identity;
@@ -2187,12 +2562,12 @@ Next plan to run: `docs/superpowers/plans/team-network/2026-11-06-team-network-p
 - `rocket_infra::KeyringSecretStore::new_device_identity()`, `rocket_infra::KeychainDeviceIdentity::new(Arc<dyn SecretStore>)`.
 - `rocket_infra::{TlsIdentity, build_tls_identity, spki_from_cert}` and `rocket_infra::network::{server_config, client_config, peer_identity_from_certs}`.
 - `rocket_infra::{FsPairedDeviceRepo, FsBlockedDeviceRepo, FsManualAddressRepo, FsNetworkSettingsRepo}`, each `new(path: PathBuf)`, each also a `QuarantineReport`.
-- Not in the index, new here, crate-private: `server_config_with_resolver`, `client_config_with_resolver`, `YamlFile`, the verifier structs, `tls_identity::test_support`. Plan 03 tests may use `crate::network::tls_identity::test_support::{identity, key_material}` (compiled only in test builds).
+- Not in the index, new here, crate-private: `server_config_with_resolver`, `client_config_with_resolver`, `YamlFile`, `YamlListRepo`, `Keyed`, `ListFile`, `quarantine_report!`, `yaml_io::quarantine_corrupt(&Path) -> io::Result<PathBuf>`, `network::lock::lock_ignore_poison(&Mutex<T>) -> MutexGuard<T>` (Plan 03 uses it for every mutex), the verifier structs, `tls_identity::test_support`. Plan 03 tests may use `crate::network::tls_identity::test_support::{identity, key_material}` (compiled only in test builds).
 
 **Not covered.**
 - No socket, HTTP, WebSocket or mDNS code (Plan 03). No ALPN is set on the configs; Plan 03 sets `alpn_protocols` on its own copy if it needs `http/1.1`.
 - No real-keychain test. A manual check on each OS is needed once (first launch creates the key, second launch reuses it, a locked keychain turns networking off). Plan 05 lists it in `docs/manual-tests/team-network.md`.
 - No 0600 file-mode handling for the YAML files; the repo has none anywhere, and the files hold no secrets (only public device ids and names).
-- Quarantine names use whole seconds, so two damaged copies in the same second would overwrite each other's `.corrupt-<secs>` file. The same limit exists in `fs_trust_store.rs`.
+- Quarantine names use whole seconds, so two damaged copies in the same second would overwrite each other's `.corrupt-<secs>` file. `fs_trust_store.rs` and the repos now share this one helper (`quarantine_corrupt`), so the limit is in one place.
 - `DeviceKeyMaterial` zeroizes itself on drop (Plan 01). The key also exists briefly inside `rcgen::KeyPair` and rustls objects, which this plan cannot zero.
 - Certificate validity dates are not checked (the default `rcgen` range is 1975 to 4096), by design: trust is the pinned key, not the date.

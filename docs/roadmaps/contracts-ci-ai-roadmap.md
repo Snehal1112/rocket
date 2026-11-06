@@ -63,7 +63,7 @@ New for this roadmap:
 | CA-2 | Contracts from source code: check a spec generated from the code | CA-1 | open |
 | CA-3 | Consumer impact: who breaks, before the provider ships | CA-1 | open |
 | CA-4 | AI layer: MCP outside the app, PR explainer, failure debugging | CA-1, CA-3 for 4b | open |
-| CA-5 | Team network: AirDrop-style discovery and pairing, one node as hub | none | spec |
+| CA-5 | Team network: AirDrop-style discovery and pairing, one node as hub | none | built, manual checks open |
 
 Order: CA-1, then CA-3, then CA-2, then CA-4. CA-4c (failure debugging in the
 app) does not need the CLI and can start in parallel with CA-1.
@@ -248,7 +248,7 @@ together without a git server or a cloud service.
 
 What:
 
-- MVP (spec written): every Rocket is a node. Nodes on the same network show
+- MVP (built, manual checks open in `docs/manual-tests/team-network.md`): every Rocket is a node. Nodes on the same network show
   in a Network panel with a search box. Pairing uses the same 6-digit code on
   both screens. Pairings last until removed. One node can pair with many
   teammates and act as the team's hub. "Add by address" covers VPN and
@@ -256,6 +256,13 @@ What:
 - Later, each with its own spec: sending collections, contracts and pins as
   sanitised snapshots (lands with zero trust), and contract checks between
   nodes. Git history over the hub stays a separate spike.
+- Decision (2026-11-06): the contract check between nodes shows the change as
+  a side-by-side diff in the existing Monaco diff viewer
+  (`src/components/git/DiffViewer.tsx`, the same one used for git diffs), with
+  the per-teammate results (breaks or passes, which field) next to it. It
+  reuses the OpenAPI sync diff as the data source (see CA-2). Only pass or
+  break results travel between nodes, never the teammate's collection. The
+  Project 4 spec starts from this.
 - This reverses "no Rocket server" for an opt-out local service only. No
   hosted server.
 
