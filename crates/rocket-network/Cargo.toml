@@ -1,0 +1,18 @@
+[package]
+name = "rocket-network"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+rocket-shared.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+base64.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+async-trait.workspace = true
+tokio = { workspace = true, features = ["sync"] }
+data-encoding = "2.11"
+rand = "0.8"
+zeroize = "1.8"

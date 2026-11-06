@@ -5902,6 +5902,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "rocket-network"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "data-encoding",
+ "rand 0.8.5",
+ "rocket-shared",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
 name = "rocket-scripting"
 version = "0.1.0"
 dependencies = [

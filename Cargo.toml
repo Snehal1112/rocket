@@ -17,6 +17,7 @@ members = [
     "crates/rocket-acp",
     "crates/rocket-flow",
     "crates/rocket-grpc",
+    "crates/rocket-network",
     "src-tauri",
 ]
 
@@ -68,6 +69,7 @@ rocket-scripting = { path = "crates/rocket-scripting" }
 rocket-acp = { path = "crates/rocket-acp" }
 rocket-flow = { path = "crates/rocket-flow" }
 rocket-grpc = { path = "crates/rocket-grpc" }
+rocket-network = { path = "crates/rocket-network" }
 
 # Smaller debug info for dev and test builds: file names and line numbers only. Backtraces and
 # panic locations keep working. Variable inspection in a debugger does not. Linking V8 with full
