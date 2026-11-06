@@ -28,11 +28,12 @@ pub const TOKEN_LEN: usize = 32;
 /// At most this many connections are served at once.
 pub const MAX_CONNECTIONS: usize = 64;
 
-/// Pause after a failed accept.
-const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(75);
+/// Pause after a failed accept. Also used by the team network peer server.
+pub(crate) const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(75);
 
-/// A client must send its request headers within this time.
-const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(10);
+/// A client must send its request headers within this time. Also checked against the team
+/// network limit of the same name in the peer server tests.
+pub(crate) const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// One inbound call. Mirrors `rocket_app::ReceivedCall` field for field;
 /// `src-tauri` converts between them.

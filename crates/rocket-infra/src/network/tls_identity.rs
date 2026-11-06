@@ -56,14 +56,15 @@ pub fn spki_from_cert(cert_der: &[u8]) -> DomainResult<Vec<u8>> {
     Ok(cert.subject_public_key_info().as_ref().to_vec())
 }
 
-/// Shared helpers for the tests of this module directory.
-#[cfg(test)]
-pub(crate) mod test_support {
+/// Shared helpers for the tests of this module directory and, through the `test-support`
+/// feature, for the end-to-end tests in `rocket-app` (Plan 04b).
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support {
     use super::{build_tls_identity, TlsIdentity};
     use rocket_network::identity::DeviceKeyMaterial;
 
     /// A fresh Ed25519 device key.
-    pub(crate) fn key_material() -> DeviceKeyMaterial {
+    pub fn key_material() -> DeviceKeyMaterial {
         let pair =
             rcgen::KeyPair::generate_for(&rcgen::PKCS_ED25519).expect("generate an Ed25519 key");
         DeviceKeyMaterial {
@@ -72,7 +73,7 @@ pub(crate) mod test_support {
     }
 
     /// A fresh device identity with its own key and certificate.
-    pub(crate) fn identity() -> TlsIdentity {
+    pub fn identity() -> TlsIdentity {
         build_tls_identity(&key_material()).expect("build a device identity")
     }
 }

@@ -53,10 +53,17 @@ deno_core = "0.400.0"
 deno_error = "=0.7.1"
 thiserror.workspace = true
 url = "2"
-hyper = { version = "1", features = ["server", "http1"] }
-hyper-util = { version = "0.1", features = ["tokio"] }
+# `client` is the peer connector's HTTPS client (team network).
+hyper = { version = "1", features = ["server", "http1", "client"] }
+# `service` adapts the peer server's axum router to a hyper connection.
+hyper-util = { version = "0.1", features = ["tokio", "service"] }
 http-body-util = "0.1"
 bytes = "1"
+# The peer server routes of the team network. `ws` serves the `/peer` upgrade. No default
+# features, so nothing else is pulled in.
+axum = { version = "0.8", default-features = false, features = ["ws", "json", "tokio", "http1"] }
+# mDNS announce and browse for the team network. Pinned: 0.21.7 is less than two weeks old.
+mdns-sd = { version = "=0.21.6", default-features = false }
 keyring.workspace = true
 # Decrypts `BEGIN ENCRYPTED PRIVATE KEY` client keys in memory. `3des` and `sha1-insecure` are
 # only for reading old keys the user already has, never for writing.
