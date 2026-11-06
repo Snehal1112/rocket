@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { toast } from 'sonner';
 import { UPDATE_TOAST_ID, UpdateToast } from '@/components/updates/UpdateToast';
+import { createListenerScope } from '@/lib/listen-scope';
 import { getInstallKind, onUpdateAvailable, onUpdateProgress } from '@/lib/tauri-api';
 import { useUpdateStore } from '@/stores/update-store';
 
@@ -24,24 +25,15 @@ function showToast(): void {
 // Listens for update events and shows the update toast. Mount once.
 export function useUpdateNotice(): void {
   useEffect(() => {
-    let disposed = false;
-    const unlisteners: (() => void)[] = [];
-    const keep = (p: Promise<() => void>) =>
-      p
-        .then((fn) => {
-          // The component may unmount before the promise resolves.
-          if (disposed) fn();
-          else unlisteners.push(fn);
-        })
-        .catch(() => undefined);
+    const scope = createListenerScope();
 
     getInstallKind()
       .then((kind) => {
-        if (!disposed) useUpdateStore.getState().setInstallKind(kind);
+        if (!scope.isDisposed()) useUpdateStore.getState().setInstallKind(kind);
       })
       .catch(() => undefined);
 
-    void keep(
+    scope.keep(
       onUpdateAvailable((info) => {
         const { status } = useUpdateStore.getState();
         // A running or finished download keeps its update. The next check announces again.
@@ -53,7 +45,7 @@ export function useUpdateNotice(): void {
         showToast();
       }),
     );
-    void keep(onUpdateProgress((p) => useUpdateStore.getState().setProgress(p)));
+    scope.keep(onUpdateProgress((p) => useUpdateStore.getState().setProgress(p)));
 
     // Progress, status and error changes refresh the toast that is already shown.
     const unsubscribe = useUpdateStore.subscribe((s, prev) => {
@@ -65,10 +57,8 @@ export function useUpdateNotice(): void {
     });
 
     return () => {
-      disposed = true;
+      scope.dispose();
       unsubscribe();
-      for (const fn of unlisteners) fn();
-      unlisteners.length = 0;
     };
   }, []);
 }

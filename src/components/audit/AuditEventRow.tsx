@@ -1,4 +1,5 @@
 import { Badge } from '@/components/ui/badge';
+import { shortDeviceId } from '@/lib/network-utils';
 import type { SecurityAuditEvent } from '@/lib/tauri-api';
 import { cn } from '@/lib/utils';
 
@@ -43,6 +44,14 @@ function summarize(event: SecurityAuditEvent): string {
       return `Exported ${k.count} audit events`;
     case 'audit_chain_broken':
       return `Audit chain broken at event ${k.atEventId}`;
+    case 'network_device_paired':
+      return `Paired with device ${shortDeviceId(k.deviceId)}`;
+    case 'network_device_unpaired':
+      return k.byPeer
+        ? `Device ${shortDeviceId(k.deviceId)} removed the pairing`
+        : `Removed the pairing with device ${shortDeviceId(k.deviceId)}`;
+    case 'network_device_blocked':
+      return `Blocked device ${shortDeviceId(k.deviceId)}`;
   }
 }
 

@@ -2845,7 +2845,10 @@ export type AuditEventKind =
   | { kind: 'secret_variable_written'; environment: string; variableKey: string }
   | { kind: 'sensitive_auth_used'; authType: string; collection: string; requestPath: string }
   | { kind: 'audit_evidence_exported'; rangeStart: string; rangeEnd: string; count: number }
-  | { kind: 'audit_chain_broken'; atEventId: string; expectedHash: string; actualHash: string };
+  | { kind: 'audit_chain_broken'; atEventId: string; expectedHash: string; actualHash: string }
+  | { kind: 'network_device_paired'; deviceId: string }
+  | { kind: 'network_device_unpaired'; deviceId: string; byPeer: boolean }
+  | { kind: 'network_device_blocked'; deviceId: string };
 
 export interface SecurityAuditEvent {
   id: string;
@@ -4285,3 +4288,134 @@ export const onUpdateAvailable = (handler: (info: UpdateInfo) => void): Promise<
 
 export const onUpdateProgress = (handler: (p: UpdateProgress) => void): Promise<UnlistenFn> =>
   listen<UpdateProgress>('update-progress', (e) => handler(e.payload));
+
+// ============================================================
+// Team network
+// ============================================================
+
+export interface NetworkStatus {
+  state: 'running' | 'off';
+  /** Why networking is off, for example an unavailable keychain. */
+  offReason: string | null;
+  port: number | null;
+  /** False when the listener could not bind or a firewall blocks it. */
+  listenerAvailable: boolean;
+  /** False when mDNS is unavailable. Manual addresses still work. */
+  discoveryAvailable: boolean;
+  hidden: boolean;
+  displayName: string;
+  initials: string;
+  deviceShortId: string | null;
+  introSeen: boolean;
+  warnings: string[];
+}
+
+export type NetworkNodeGroup = 'paired' | 'nearby';
+export type NetworkNodeStatus = 'online' | 'offline' | 'pairing' | 'needs_update' | 'available';
+
+export interface NetworkNode {
+  deviceId: string;
+  /** For example `K7QF-2M9X`. The only id the UI shows. */
+  shortId: string;
+  displayName: string;
+  initials: string;
+  group: NetworkNodeGroup;
+  status: NetworkNodeStatus;
+  source: 'mdns' | 'manual' | null;
+}
+
+export interface NetworkAddress {
+  host: string;
+  port: number;
+  addedAt: string;
+}
+
+export interface NetworkBlockedDevice {
+  deviceId: string;
+  shortId: string;
+  name: string;
+  blockedAt: string;
+}
+
+/** `code` is the six digits without a space. */
+export interface NetworkPairingStarted {
+  pairingId: string;
+  code: string;
+}
+
+export type NetworkPairingDecision = 'accept' | 'decline' | 'block';
+
+/** Channel `network-changed`. Fields are snake_case as sent. */
+export type NetworkChangedEvent =
+  | { type: 'nodesChanged' }
+  | { type: 'statusChanged' }
+  | { type: 'pairedRemoved'; device_id: string; display_name: string; by_peer: boolean };
+
+/** Channel `network-pairing`. Fields are snake_case as sent. */
+export type NetworkPairingEvent =
+  | {
+      type: 'pairingIncoming';
+      pairing_id: string;
+      device_id: string;
+      short_id: string;
+      display_name: string;
+      code: string;
+    }
+  | {
+      type: 'pairingFinished';
+      pairing_id: string;
+      /** `accepted`, `declined`, `expired`, `cancelled` or `failed`. */
+      outcome: string;
+      display_name: string;
+    };
+
+export const getNetworkStatus = (): Promise<NetworkStatus> =>
+  invoke<NetworkStatus>('network_status');
+
+export const listNetworkNodes = (): Promise<NetworkNode[]> =>
+  invoke<NetworkNode[]>('network_list_nodes');
+
+export const setNetworkVisibility = (hidden: boolean): Promise<void> =>
+  invoke<void>('network_set_visibility', { hidden });
+
+export const setNetworkProfile = (displayName: string): Promise<void> =>
+  invoke<void>('network_set_profile', { displayName });
+
+export const markNetworkIntroSeen = (): Promise<void> => invoke<void>('network_mark_intro_seen');
+
+export const listNetworkAddresses = (): Promise<NetworkAddress[]> =>
+  invoke<NetworkAddress[]>('network_list_addresses');
+
+export const addNetworkAddress = (host: string, port: number): Promise<void> =>
+  invoke<void>('network_add_address', { host, port });
+
+export const removeNetworkAddress = (host: string, port: number): Promise<void> =>
+  invoke<void>('network_remove_address', { host, port });
+
+export const requestNetworkPairing = (deviceId: string): Promise<NetworkPairingStarted> =>
+  invoke<NetworkPairingStarted>('network_request_pairing', { deviceId });
+
+export const respondNetworkPairing = (
+  pairingId: string,
+  decision: NetworkPairingDecision,
+): Promise<void> => invoke<void>('network_respond_pairing', { pairingId, decision });
+
+export const cancelNetworkPairing = (pairingId: string): Promise<void> =>
+  invoke<void>('network_cancel_pairing', { pairingId });
+
+export const removeNetworkPaired = (deviceId: string): Promise<void> =>
+  invoke<void>('network_remove_paired', { deviceId });
+
+export const listNetworkBlocked = (): Promise<NetworkBlockedDevice[]> =>
+  invoke<NetworkBlockedDevice[]>('network_list_blocked');
+
+export const unblockNetworkDevice = (deviceId: string): Promise<void> =>
+  invoke<void>('network_unblock', { deviceId });
+
+export const onNetworkChanged = (
+  handler: (event: NetworkChangedEvent) => void,
+): Promise<UnlistenFn> => listen<NetworkChangedEvent>('network-changed', (e) => handler(e.payload));
+
+export const onNetworkPairing = (
+  handler: (event: NetworkPairingEvent) => void,
+): Promise<UnlistenFn> => listen<NetworkPairingEvent>('network-pairing', (e) => handler(e.payload));
