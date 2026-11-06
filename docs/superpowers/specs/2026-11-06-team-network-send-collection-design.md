@@ -45,7 +45,7 @@ A transfer id is a random 128-bit value created by the sender. It is not secret.
 
 ## 6. Protocol
 
-New `PeerMessage` variants. The protocol version goes from 1 to 2. A version 1 node closes the connection on an unknown variant, as it does today, so both nodes must run version 2 to transfer:
+New `PeerMessage` variants. `PROTOCOL_VERSION` goes from 1 to 2. Today a socket whose Hello version differs from the local one is closed and the node shows as `NeedsUpdate` (`version_matches` in `connections.rs`, and `pair_request` refuses a different version). That rule stays, so a version 1 node and a version 2 node do not connect at all until both are updated. The team network is not released yet, so this costs nothing in the field:
 
 ```
 CollectionOffer { transfer_id, name, size_bytes, chunk_count, sha256 }
@@ -57,7 +57,7 @@ TransferAbort   { transfer_id, reason }           // reason: cancelled | failed 
 - Each frame stays under `MAX_FRAME_BYTES` (64 KiB). `CHUNK_BYTES` is 32 KiB of raw data, about 43 KiB after base64.
 - A frame for an unknown, finished or expired transfer id is ignored.
 - A `Chunk` before `OfferAnswer { accept: true }`, a `seq` out of order or past `chunk_count`, or data beyond `size_bytes` aborts the transfer with `failed`.
-- An offer received by a node on a protocol version below 2 never happens: the sender checks the peer's `Hello` version before it offers, and shows "<name> needs a newer Rocket to receive this." if it is lower.
+- The pinned test `PROTOCOL_VERSION == 1` in `limits.rs` changes to 2. The variant name `send_collection` is not used, because an existing test uses it as an example of an unknown type.
 
 ## 7. Limits
 
@@ -78,9 +78,9 @@ An offer over a limit is refused with `TransferAbort { busy }` and the sender se
 
 ## 8. Security
 
-- The four new variants are added to the `PeerMessage` allow-list. The peer server still calls only `NetworkService` and `TransferService`. It does not touch collections directly. The import goes through the `CollectionImportPort` after the receiver pressed Accept.
+- The four new variants are added to the `PeerMessage` allow-list. The peer server still calls only `NetworkService`. `NetworkService` hands the four variants to a `TransferSink` (a trait in `rocket-network`) and never touches collections. The import goes through the `CollectionImportPort` after the receiver pressed Accept.
 - The receiver never writes into the workspace before Accept, and never overwrites an existing collection.
-- ZIP safety on import: reject absolute paths, `..` segments, symlinks, more than `MAX_ZIP_ENTRIES` entries, or more than `MAX_UNZIPPED_BYTES` unzipped. Entries are written only inside the temp folder. The check runs before any file is written, using the declared sizes, and again with a counting writer while extracting.
+- ZIP safety on import: a new strict validator (`rocket_import::transfer_zip::validate`) runs on the staged file before the importer sees it. It rejects absolute paths, `..` segments (`enclosed_name()` is `None`), symlink entries, more than `MAX_ZIP_ENTRIES` entries, and more than `MAX_UNZIPPED_BYTES` unzipped. The unzipped size is counted by actually decompressing every entry into a counter, so a lying declared size cannot pass. The existing extractor skips unsafe entries silently and has limits of 20000 entries and 512 MiB, so it stays as a second line of defence and is not the check.
 - The temp import folder and the staged chunk file are deleted on success, abort, expiry and at app start.
 - Imported scripts are untrusted until the receiver trusts the collection (existing collection trust gate).
 - Audit: two new `AuditEventKind` values, `network_collection_sent` and `network_collection_received`, with the short device id and the collection name. The full device id and the payload are never logged.
@@ -88,14 +88,18 @@ An offer over a limit is refused with `TransferAbort { busy }` and the sender se
 
 ## 9. Components
 
-**`rocket-network`** (pure, no I/O): the four `PeerMessage` variants, the transfer state machine (offered, accepted, receiving, done, aborted, expired), and the constants in section 7.
+**`rocket-network`** (pure, no I/O): the four `PeerMessage` variants, the transfer state machine (offered, accepted, receiving, done, aborted, expired), the constants in section 7, and the `TransferSink` trait (`on_frame(&self, from: DeviceId, message: PeerMessage)`).
 
-**`rocket-app`**: `TransferService`, trait-first.
-- Sender: ask `CollectionExportService` for the ZIP, hash it, offer, wait for the answer, stream chunks.
-- Receiver: hold pending offers with their expiry, stage chunks, verify size and hash, import through a new `CollectionImportPort`.
+**`rocket-app`**: `NetworkService` gains `send_to(&self, device: &DeviceId, message: PeerMessage) -> DomainResult<()>` (a bounded send on the connection's outbound channel, which does not exist as a public call today) and `set_transfer_sink(&self, sink: Arc<dyn TransferSink>)`. `run_socket` passes the four new variants to the sink. `TransferService`, trait-first:
+- Sender: ask `CollectionExportService::export_bruno(collection, include_environments)` for the ZIP bytes (it returns them in memory), hash it, offer, wait for the answer, stream chunks.
+- Receiver: hold pending offers with their expiry, stage chunks, verify size and hash, import through a new `CollectionImportPort` (`import_zip(&self, zip_path: &Path, display_name: &str) -> DomainResult<ImportedCollection>`). The receiver picks the display name: the offered name, or `<name> (from <sender>)` if a collection with that name exists. The importer's own `-1`, `-2` suffix still applies if that also exists.
 - Publishes `TransferEvent` (`offerIncoming`, `progress`, `finished`) fire-and-forget, with the usual event rules (camelCase tag, snake_case fields, contract test).
 
-**`rocket-infra`**: routes the four messages from the peer handler to `TransferService`, stages chunks in a temp file under `~/.rocket-api/`, and implements `CollectionImportPort` on top of `rocket-import` with the ZIP safety checks.
+**`rocket-import`**: `transfer_zip::validate(path) -> ImportResult<()>`, the strict check in section 8.
+
+**`rocket-infra`**: stages chunks in a temp file under `~/.rocket-api/` (`TransferStaging`), deleted on success, abort, expiry and at app start.
+
+**`src-tauri`**: the `CollectionImportPort` adapter lives here, on top of `ImportServiceFactory` and `import_auto_from_zip`, because that factory is in `src-tauri/src/import_wiring.rs` and `rocket-infra` cannot depend on it. The importer takes a ZIP path, not bytes, which is why the chunks are staged to a file first. It names the collection from the ZIP file stem, so the adapter stages the file as `<display name>.zip`; Plan 2 has a probe test that pins this.
 
 **`src-tauri`**: commands `network_send_collection`, `network_respond_transfer`, `network_cancel_transfer`, all added to `src-tauri/app-commands.txt`. Commands stay thin. A new event channel `network-transfer`.
 
@@ -110,7 +114,6 @@ An offer over a limit is refused with `TransferAbort { busy }` and the sender se
 | Case | Sender sees | Receiver sees |
 |---|---|---|
 | Peer offline | The node is not offered in the dialog | n/a |
-| Peer on protocol version 1 | "<name> needs a newer Rocket to receive this." | n/a |
 | Receiver declines | "<name> declined." | n/a |
 | Offer unanswered for 2 minutes | "The request expired." | "The request expired." (an open dialog switches to it) |
 | Over 10 MiB | "This collection is too big to send (X MiB, limit 10)." | n/a |
@@ -135,7 +138,7 @@ The import happens in a temp folder and moves into place only when it succeeds, 
 
 ## 12. Open items for the plan
 
-- The exact `CollectionImportPort` signature and whether it reuses the importer behind the existing Bruno import command.
+- Whether the importer really names a modern-format collection from the ZIP stem. The plan pins it with a test and falls back to renaming after import if it does not.
 - Whether the context-menu entry lives in the collection tree menu only, or also in the paired node menu of the Network panel.
 - How the progress line is shown for a transfer that finishes in under a second (likely hidden below a 300 ms threshold).
 
