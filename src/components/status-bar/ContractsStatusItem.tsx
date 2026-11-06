@@ -1,6 +1,6 @@
 import { Lock } from 'lucide-react';
 import { useMemo } from 'react';
-import { Button } from '@/components/ui/button';
+import { StatusBarItem } from '@/components/status-bar/StatusBarItem';
 import { useWorkspaces } from '@/lib/queries/workspace-queries';
 import { track } from '@/lib/telemetry';
 import { useContractsStore } from '@/stores/contracts/contractsSlice';
@@ -69,34 +69,29 @@ export function ContractsStatusItem() {
     .join(', ');
 
   return (
-    <div className='flex h-5 items-center border-x border-statusbar-border px-1'>
-      <Button
-        variant='ghost'
-        size='sm'
-        className='h-5 gap-1.25 rounded-sm px-1 text-[11px] text-muted-foreground transition-colors hover:bg-statusbar-item-hover hover:text-foreground'
-        onClick={() => {
-          try {
-            track('contracts.changelog_drawer_opened', {
-              contractId: mostRecentId,
-              source: 'status_bar',
-            });
-          } catch {
-            /* noop */
-          }
-          openDrawer(mostRecentId);
-        }}
-        title='Open latest contract changes'
-        aria-label={statusLabel}
-      >
-        <Lock className='w-2.75 h-2.75' aria-hidden='true' />
-        <span>{contractLabel}</span>
-        {meta.driftCount > 0 && (
-          <span className='text-[hsl(var(--warning))]'>· {meta.driftCount} drifting</span>
-        )}
-        {meta.breachCount > 0 && (
-          <span className='text-[hsl(var(--destructive))]'>· {meta.breachCount} breaching</span>
-        )}
-      </Button>
-    </div>
+    <StatusBarItem
+      onClick={() => {
+        try {
+          track('contracts.changelog_drawer_opened', {
+            contractId: mostRecentId,
+            source: 'status_bar',
+          });
+        } catch {
+          /* noop */
+        }
+        openDrawer(mostRecentId);
+      }}
+      title='Open latest contract changes'
+      aria-label={statusLabel}
+    >
+      <Lock className='w-2.75 h-2.75' aria-hidden='true' />
+      <span>{contractLabel}</span>
+      {meta.driftCount > 0 && (
+        <span className='text-[hsl(var(--warning))]'>· {meta.driftCount} drifting</span>
+      )}
+      {meta.breachCount > 0 && (
+        <span className='text-[hsl(var(--destructive))]'>· {meta.breachCount} breaching</span>
+      )}
+    </StatusBarItem>
   );
 }
