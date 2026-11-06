@@ -116,6 +116,9 @@ fn spawn_exit_signal_listener(app_handle: tauri::AppHandle) {
             if attempt > 0 {
                 std::process::exit(1);
             }
+            if let Some(slot) = app_handle.try_state::<commands::network::NetworkSlot>() {
+                slot.stop_for_good();
+            }
             if let Some(acp_session_svc) = app_handle.try_state::<rocket_app::AcpSessionService>() {
                 let _ = acp_session_svc.end_all_sessions().await;
             }
@@ -987,6 +990,46 @@ pub fn run() {
             app.manage(CloneDestinationCapabilities::default());
             app.manage(audit_svc);
             app.manage(audit_publisher.clone());
+
+            // Team network: discovery, pairing and presence. Files live in ~/.rocket-api/network/
+            // and never inside a workspace.
+            let network_dir = data_dir.join("network");
+            let network_paired = Arc::new(rocket_infra::network::FsPairedDeviceRepo::new(
+                network_dir.join("paired.yml"),
+            ));
+            let network_blocked = Arc::new(rocket_infra::network::FsBlockedDeviceRepo::new(
+                network_dir.join("blocked.yml"),
+            ));
+            let network_addresses = Arc::new(rocket_infra::network::FsManualAddressRepo::new(
+                network_dir.join("addresses.yml"),
+            ));
+            let network_settings = Arc::new(rocket_infra::network::FsNetworkSettingsRepo::new(
+                network_dir.join("settings.yml"),
+            ));
+            let network_svc = rocket_app::NetworkService::new(rocket_app::NetworkDeps {
+                identity: Arc::new(rocket_infra::network::KeychainDeviceIdentity::new(
+                    Arc::new(KeyringSecretStore::new_device_identity()),
+                )),
+                paired: network_paired.clone(),
+                blocked: network_blocked.clone(),
+                addresses: network_addresses.clone(),
+                settings: network_settings.clone(),
+                quarantine: vec![
+                    network_paired as Arc<dyn rocket_network::QuarantineReport>,
+                    network_blocked as Arc<dyn rocket_network::QuarantineReport>,
+                    network_addresses as Arc<dyn rocket_network::QuarantineReport>,
+                    network_settings as Arc<dyn rocket_network::QuarantineReport>,
+                ],
+                discovery: Arc::new(rocket_infra::network::MdnsDiscovery::new()),
+                transport: Arc::new(rocket_infra::network::RustlsPeerTransportFactory::new()),
+                events: Arc::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
+                audit: audit_publisher.clone(),
+                os_user_name: std::env::var("USER")
+                    .ok()
+                    .or_else(|| std::env::var("USERNAME").ok()),
+            });
+            app.manage(network_svc);
+            app.manage(commands::network::NetworkSlot::<rocket_app::NetworkHandle>::default());
             app.manage(Mutex::new(workspace_svc));
             app.manage(active_workspace_path);
             app.manage(Arc::clone(&mcp_server_registry));
@@ -1002,6 +1045,9 @@ pub fn run() {
             spawn_exit_signal_listener(app.handle().clone());
 
             commands::updates::start_update_checker(app.handle());
+
+            // Start the network node on the app runtime. The slot stops it at exit.
+            commands::network::start_network(app.handle());
 
             // Start the filesystem watcher for the collections directory. The service is
             // managed so workspace commands can restart it.
@@ -1148,6 +1194,20 @@ pub fn run() {
             commands::history::list_history,
             commands::history::get_history_entry,
             commands::history::clear_history,
+            commands::network::network_status,
+            commands::network::network_list_nodes,
+            commands::network::network_set_visibility,
+            commands::network::network_set_profile,
+            commands::network::network_mark_intro_seen,
+            commands::network::network_list_addresses,
+            commands::network::network_add_address,
+            commands::network::network_remove_address,
+            commands::network::network_request_pairing,
+            commands::network::network_respond_pairing,
+            commands::network::network_cancel_pairing,
+            commands::network::network_remove_paired,
+            commands::network::network_list_blocked,
+            commands::network::network_unblock,
             commands::history::search_history,
             commands::templates::list_templates,
             commands::templates::get_template,
@@ -1348,6 +1408,10 @@ pub fn run() {
 pub(crate) fn shutdown_services(app_handle: &tauri::AppHandle) {
     if let Some(slot) = app_handle.try_state::<commands::import::SyncSchedulerSlot>() {
         slot.stop();
+    }
+    if let Some(slot) = app_handle.try_state::<commands::network::NetworkSlot>() {
+        // Closes the listener and withdraws the mDNS announcement.
+        slot.stop_for_good();
     }
     if let Some(acp_session_svc) = app_handle.try_state::<rocket_app::AcpSessionService>() {
         // Best-effort on app exit. The process is about to tear

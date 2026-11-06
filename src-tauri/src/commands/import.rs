@@ -12,6 +12,7 @@ use rocket_infra::{
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 
+use super::slot::{Slot, Stoppable};
 use crate::import_wiring::ImportServiceFactory;
 
 /// Import a Bruno collection or workspace directory. Type is auto-detected from content.
@@ -218,11 +219,6 @@ pub(crate) fn recover_openapi_syncs(
     });
 }
 
-/// A running background loop that can be told to stop.
-pub(crate) trait Stoppable {
-    fn stop(&self);
-}
-
 impl Stoppable for rocket_app::SchedulerHandle {
     fn stop(&self) {
         rocket_app::SchedulerHandle::stop(self);
@@ -230,33 +226,8 @@ impl Stoppable for rocket_app::SchedulerHandle {
 }
 
 /// Holds the handle of the running sync supervisor, so a workspace switch or the app exit can
-/// stop it. Generic over `Stoppable` so tests can use a counting stand-in.
-pub(crate) struct SyncSchedulerSlot<H: Stoppable = rocket_app::SchedulerHandle>(Mutex<Option<H>>);
-
-impl<H: Stoppable> Default for SyncSchedulerSlot<H> {
-    fn default() -> Self {
-        Self(Mutex::new(None))
-    }
-}
-
-impl<H: Stoppable> SyncSchedulerSlot<H> {
-    /// Stops the previous handle first, then keeps the new one.
-    pub(crate) fn replace(&self, handle: H) {
-        let mut guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(old) = guard.take() {
-            old.stop();
-        }
-        *guard = Some(handle);
-    }
-
-    /// Stops and drops the kept handle. Calling it again does nothing.
-    pub(crate) fn stop(&self) {
-        let mut guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(old) = guard.take() {
-            old.stop();
-        }
-    }
-}
+/// stop it. Its `stop()` does not latch, so the next workspace switch can still `replace` it.
+pub(crate) type SyncSchedulerSlot<H = rocket_app::SchedulerHandle> = Slot<H>;
 
 /// Starts the sync supervisor for the active workspace and keeps its handle in the slot, which
 /// stops the previous one first. It checks only collections whose local interval is on. Recovery
@@ -430,24 +401,14 @@ mod sync_scheduler_slot {
     }
 
     #[test]
-    fn replace_stops_the_previous_handle() {
+    fn a_workspace_switch_after_a_stop_keeps_the_new_scheduler() {
         let slot = SyncSchedulerSlot::<Counting>::default();
-        let first = Arc::new(AtomicUsize::new(0));
-        let second = Arc::new(AtomicUsize::new(0));
+        let (first, second) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
         slot.replace(Counting(Arc::clone(&first)));
+        slot.stop();
         slot.replace(Counting(Arc::clone(&second)));
         assert_eq!(first.load(Ordering::SeqCst), 1);
-        assert_eq!(second.load(Ordering::SeqCst), 0);
-    }
-
-    #[test]
-    fn stop_is_idempotent() {
-        let slot = SyncSchedulerSlot::<Counting>::default();
-        let count = Arc::new(AtomicUsize::new(0));
-        slot.replace(Counting(Arc::clone(&count)));
-        slot.stop();
-        slot.stop();
-        assert_eq!(count.load(Ordering::SeqCst), 1);
+        assert_eq!(second.load(Ordering::SeqCst), 0, "stop() must not latch");
     }
 }
 
