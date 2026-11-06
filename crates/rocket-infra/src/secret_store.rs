@@ -58,6 +58,14 @@ impl KeyringSecretStore {
             service: "com.rocketapi.agent-credentials",
         }
     }
+
+    /// Backs the device key of the team network (scope_id = `device`, key = `ed25519-pkcs8`).
+    /// A separate keychain service from the other namespaces so the entries can never collide.
+    pub fn new_device_identity() -> Self {
+        Self {
+            service: "com.rocketapi.device-identity",
+        }
+    }
 }
 
 impl SecretStore for KeyringSecretStore {
@@ -133,6 +141,7 @@ mod tests {
             KeyringSecretStore::new_env_secrets(),
             KeyringSecretStore::new_vault_connections(),
             KeyringSecretStore::new_proxy(),
+            KeyringSecretStore::new_device_identity(),
         ] {
             assert_ne!(agent.service, other.service);
         }
@@ -147,8 +156,24 @@ mod tests {
             KeyringSecretStore::new_vault_connections(),
             KeyringSecretStore::new_proxy(),
             KeyringSecretStore::new_agent_credentials(),
+            KeyringSecretStore::new_device_identity(),
         ] {
             assert_ne!(sync.service, other.service);
+        }
+    }
+
+    #[test]
+    fn the_device_identity_namespace_is_distinct() {
+        let device = KeyringSecretStore::new_device_identity();
+        assert_eq!(device.service, "com.rocketapi.device-identity");
+        for other in [
+            KeyringSecretStore::new_env_secrets(),
+            KeyringSecretStore::new_vault_connections(),
+            KeyringSecretStore::new_proxy(),
+            KeyringSecretStore::new_openapi_sync(),
+            KeyringSecretStore::new_agent_credentials(),
+        ] {
+            assert_ne!(device.service, other.service);
         }
     }
 

@@ -70,6 +70,15 @@ futures-lite = "2"
 mime_guess = "2"
 # Parses `.env` text only. Its loading functions are never called.
 dotenvy = "0.15.7"
+# Team network: the domain crate, the TLS stack with the custom certificate checks, the device
+# certificate maker and the certificate reader. All crypto uses the ring provider.
+rocket-network.workspace = true
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+rcgen = { version = "0.13", default-features = false, features = ["crypto", "ring", "pem"] }
+rustls-webpki = { version = "0.103", default-features = false, features = ["alloc", "ring"] }
+# Wraps TCP streams for the peer server and connector (Plan 03). The dev-dependency below also
+# switches on `tls12`, which the tests use to build a TLS 1.2-only client.
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
 
 [[bin]]
 name = "test_acp_agent"
@@ -88,7 +97,6 @@ windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32
 rocket-git.workspace = true
 wiremock = "0.6"
 futures-util = "0.3"
-rcgen = { version = "0.13", default-features = false, features = ["crypto", "ring", "pem"] }
 tonic = { version = "0.14.6", default-features = false, features = ["codegen", "channel", "server", "router", "tls-ring"] }
 tonic-reflection = { version = "0.14.6", default-features = false, features = ["server"] }
 tokio-stream = { version = "0.1", features = ["net"] }
