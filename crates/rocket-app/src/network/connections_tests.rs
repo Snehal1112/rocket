@@ -644,3 +644,20 @@ async fn the_last_good_address_is_remembered() {
         vec![addr(2)]
     );
 }
+
+#[tokio::test(start_paused = true)]
+async fn stopping_the_node_closes_the_open_socket() {
+    let (a, handle) = solo(2).await;
+    let mut remote = go_online(&a, 2, a.id()).await;
+    assert_eq!(status_of(&a, 2), Some(NodeStatus::Online));
+
+    handle.stop();
+    settle().await;
+
+    // Every sender into the socket is gone, so the peer sees the connection close.
+    assert_eq!(
+        remote.from_service.try_recv(),
+        Err(tokio::sync::mpsc::error::TryRecvError::Disconnected),
+        "a stopped node must not keep a socket open"
+    );
+}

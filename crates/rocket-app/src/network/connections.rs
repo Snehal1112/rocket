@@ -201,7 +201,13 @@ impl NetworkService {
                         // the retry delay would be skipped.
                         let _ = tokio::time::timeout(Duration::ZERO, wake.notified()).await;
                     }
-                    SocketEnd::Unpaired | SocketEnd::Stopped | SocketEnd::Removed => return,
+                    SocketEnd::Stopped => {
+                        // The entry keeps a sender into the socket. Drop it, or the socket
+                        // stays open after the node stopped.
+                        self.with_conn(&id, |c| c.outbound = None);
+                        return;
+                    }
+                    SocketEnd::Unpaired | SocketEnd::Removed => return,
                 }
             }
         }
