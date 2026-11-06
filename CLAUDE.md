@@ -59,33 +59,10 @@ Frontend (React) → Tauri command → rocket-app service → rocket-infra repo 
 
 Rules in `.claude/rules/` — start with `.claude/rules/00-shortcuts.md` for a pointer map.
 See `.claude/frontend.md` for Zustand/tabs/UI state. See `.claude/tauri-commands.md` for IPC modules.
-See `docs/features/script-files.md` for shared .js script files and local require().
-See `docs/features/folder-settings.md` for the folder settings tab, `folder.yml` sections and inheritance.
-See `docs/features/assistant-composer.md` for the AI Assistant composer (PromptEditor keys, chips, masking, storage keys).
-See `docs/features/assistant-conversations.md` for stored assistant conversations (storage, pins, masking, caps).
-See `docs/features/collection-trust.md` for the collection trust gate (requested vs allowed access, `{{process.env}}` gate).
-See `docs/features/console-masking.md` for the Console secret masking rule (masked copy, reveal toggle, fail-closed, vault values).
-The software factory is the standalone project `~/data/rocket/rocket-factory` (home `~/.factory`, project `rocket`, global `/factory` command). Rocket's old in-repo copy is archived in `~/data/rocket/Archive/rocket-tools-factory/`.
-See `docs/features/assistant-followups.md` for workspace-assistant decisions and open follow-ups.
-See `docs/features/acp-multi-agent-support.md` for ACP agent kinds (Claude, Gemini, Generic), the session plan and the verified Gemini facts.
-See `docs/features/flow-request-refs.md` for how flows follow request moves (rewrite, event, delete dialog).
-See `docs/features/collection-export.md` for the collection export to Bruno and Postman (outputs, decisions, known losses, manual checks).
-See `docs/features/example-masking.md` for how saved request examples get their secrets masked in a git commit.
-See `docs/features/bruno-import-strictness.md` for Bruno 3 imports (files are copied as they are), what Rocket's readers now tolerate, and the known gaps.
-See `docs/features/response-examples.md` for saved response examples (save, view, limits, the Try temporary tab and its save guards, manual checks).
-See `docs/features/openapi-sync-ux.md` for the OpenAPI sync tab (spec updates bulk rules, View spec, Reset and Restore, Connect, local files, known limits, manual checks).
-See `docs/features/ipc-command-acl.md` for the app command ACL (app-commands.txt, main-window-only access).
-See `docs/features/settings-page.md` for the global Settings page (sections, lock, shortcuts, how to add a section).
-See `docs/features/elevation.md` for the four elevation levels (VS Code colours, shadows, which surface uses which, borders).
-See `docs/features/update-notification.md` for the update notice (schedule, install kinds, settings, manual checks).
-See `rocket-landing/.claude/deploy-railway.md` for hosting the landing page on Railway (project `rocket-app`, Dockerfile, manual deploy).
-See `docs/engineering/ddd-decisions.md` for the DDD rulings (mixed crates, `rocket-app` size, events direction, domain model depth, assistant naming).
-See `docs/roadmaps/contracts-ci-ai-roadmap.md` for the contracts, CI and AI direction (projects CA-1 to CA-4).
+See `.claude/docs-index.md` for the feature and engineering docs (script files, folder settings, assistant, collection trust, masking, ACP, export, import, OpenAPI sync, ACL, settings, elevation, DDD rulings, benchmarks, subagents, landing deploy, factory).
 See `docs/roadmaps/roadmap.md` for the master roadmap of unimplemented work, and `docs/roadmaps/flow-roadmap.md` for Flow (item IDs, status, batches). Update them when work ships.
 
 Delegation: for asks that mix sub-steps of different difficulty, use the `decompose-and-dispatch` skill and always state the subagent model. See `.claude/rules/delegation.md`.
-See `docs/engineering/benchmarks.md` for the Rocket vs Bruno vs Postman benchmark (method, per-run numbers, findings, how to re-run).
-See `docs/engineering/subagents.md` for which subagent type and model to use, the cost model and the limits seen in practice.
 
 ---
 
