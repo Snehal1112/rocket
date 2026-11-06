@@ -59,6 +59,7 @@ pub mod history_service;
 pub mod load_test_service;
 pub mod mcp_read_views;
 pub mod mcp_tool_service;
+pub mod network;
 pub mod oauth2_service;
 pub mod openapi_change_link;
 pub mod openapi_connect;
@@ -84,6 +85,7 @@ pub mod runner_sequence;
 pub mod secret_manager_service;
 pub mod security_audit_service;
 mod session_plan;
+pub(crate) mod stop_signal;
 pub mod template_service;
 #[cfg(test)]
 pub(crate) mod test_doubles;
@@ -159,6 +161,10 @@ pub use mcp_read_views::{
 pub use mcp_tool_service::{
     AssistantMode, McpRunResult, McpToolService, OUTLINE_RESOURCE_URI,
     WORKSPACE_ASSISTANT_INSTRUCTIONS,
+};
+pub use network::{
+    paired_limit_message, NetworkDeps, NetworkHandle, NetworkService, NetworkState, NetworkStatus,
+    NodeGroup, NodeStatus, NodeView, PairingDecision, PairingStarted,
 };
 pub use oauth2_service::OAuth2Service;
 pub use openapi_change_link::{ChangeLinkOutcome, ChangeLinkPreview};

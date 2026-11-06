@@ -17,6 +17,7 @@ use rocket_shared::events::EventPublisher;
 use tokio::sync::watch;
 
 use crate::openapi_sync_service::{CheckOutcome, OpenApiSyncService};
+use crate::stop_signal::sleep_or_stop;
 
 /// First retry delay for a check that returned an error, then doubled up to the cap.
 const ERROR_BACKOFF_BASE_SECS: i64 = 15 * 60;
@@ -204,17 +205,6 @@ fn error_backoff_secs(failures: u32) -> i64 {
     ERROR_BACKOFF_BASE_SECS
         .saturating_mul(1i64 << steps)
         .min(ERROR_BACKOFF_CAP_SECS)
-}
-
-/// Sleeps for `wait`. Returns false when a stop came first or the handle is gone.
-async fn sleep_or_stop(stop: &mut watch::Receiver<bool>, wait: Duration) -> bool {
-    if *stop.borrow() {
-        return false;
-    }
-    tokio::select! {
-        _ = tokio::time::sleep(wait) => !*stop.borrow(),
-        _ = stop.changed() => false,
-    }
 }
 
 #[cfg(test)]
