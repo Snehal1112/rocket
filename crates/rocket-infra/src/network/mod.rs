@@ -5,6 +5,7 @@
 pub mod client;
 pub mod identity_store;
 pub(crate) mod lock;
+pub mod mdns;
 #[cfg(test)]
 pub(crate) mod peer_test_support;
 pub mod repos;
@@ -15,6 +16,7 @@ pub mod tls_identity;
 
 pub use client::RustlsPeerConnector;
 pub use identity_store::KeychainDeviceIdentity;
+pub use mdns::MdnsDiscovery;
 pub use repos::{
     FsBlockedDeviceRepo, FsManualAddressRepo, FsNetworkSettingsRepo, FsPairedDeviceRepo,
 };
