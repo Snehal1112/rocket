@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::de::DeserializeOwned;
 
@@ -58,6 +59,20 @@ pub(crate) fn delete_if_exists(path: &Path, label: &str) -> DomainResult<()> {
     }
     fs::remove_file(path)?;
     Ok(())
+}
+
+/// Rename a damaged file to `<name>.corrupt-<unix-secs>` next to it and return the new path.
+/// Nothing is deleted. Two damaged copies in the same second would share one name.
+pub(crate) fn quarantine_corrupt(path: &Path) -> std::io::Result<PathBuf> {
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let mut name = path.as_os_str().to_os_string();
+    name.push(format!(".corrupt-{secs}"));
+    let target = PathBuf::from(name);
+    fs::rename(path, &target)?;
+    Ok(target)
 }
 
 #[cfg(test)]
@@ -164,6 +179,35 @@ mod tests {
             "expected NotFound, got {:?}",
             err
         );
+    }
+
+    #[test]
+    fn quarantine_corrupt_moves_the_file_and_keeps_its_bytes() {
+        let dir = TempDir::new().expect("tempdir");
+        let path = dir.path().join("paired.yml");
+        fs::write(&path, [0xff, 0xfe, 0x01]).expect("write");
+
+        let moved = quarantine_corrupt(&path).expect("quarantine");
+
+        assert!(!path.exists());
+        let name = moved
+            .file_name()
+            .expect("file name")
+            .to_string_lossy()
+            .into_owned();
+        assert!(name.starts_with("paired.yml.corrupt-"), "{name}");
+        assert!(name["paired.yml.corrupt-".len()..]
+            .chars()
+            .all(|c| c.is_ascii_digit()));
+        assert_eq!(moved.parent(), path.parent());
+        assert_eq!(fs::read(&moved).expect("read moved"), [0xff, 0xfe, 0x01]);
+    }
+
+    #[test]
+    fn quarantine_corrupt_fails_when_the_file_is_missing() {
+        let dir = TempDir::new().expect("tempdir");
+        let err = quarantine_corrupt(&dir.path().join("missing.yml")).expect_err("no file");
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
     }
 
     #[test]

@@ -7,7 +7,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use rocket_collection::{
     CollectionGrant, CollectionIdentity, CollectionTrustStore, GrantSource, MigrationNoticeEntry,
@@ -16,6 +15,7 @@ use rocket_shared::error::{DomainError, DomainResult};
 use serde::{Deserialize, Serialize};
 
 use crate::atomic_write;
+use crate::yaml_io::quarantine_corrupt;
 
 const FILE_VERSION: u32 = 1;
 
@@ -190,13 +190,7 @@ impl FsCollectionTrustStore {
     }
 
     fn quarantine(&self, path: &Path) -> DomainResult<()> {
-        let secs = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let mut name = path.as_os_str().to_os_string();
-        name.push(format!(".corrupt-{secs}"));
-        fs::rename(path, PathBuf::from(name))?;
+        quarantine_corrupt(path)?;
         Ok(())
     }
 }

@@ -112,7 +112,10 @@ pub use fs_workspace_config_repo::FsWorkspaceConfigRepo;
 pub use fs_workspace_repo::FsWorkspaceRepo;
 pub use grpc::{FsProtoFileReader, FsProtoLoader, TonicGrpcExecutor};
 pub use loopback_callback::LoopbackCallbackServer;
-pub use network::{build_tls_identity, spki_from_cert, KeychainDeviceIdentity, TlsIdentity};
+pub use network::{
+    build_tls_identity, spki_from_cert, FsBlockedDeviceRepo, FsManualAddressRepo,
+    FsNetworkSettingsRepo, FsPairedDeviceRepo, KeychainDeviceIdentity, TlsIdentity,
+};
 pub use process_host_env::ProcessHostEnv;
 pub use reqwest_executor::{ReqwestExecutor, ReqwestTokenClientProvider};
 pub use reqwest_spec_fetcher::ReqwestSpecFetcher;
