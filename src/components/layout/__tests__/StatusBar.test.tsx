@@ -12,6 +12,10 @@ vi.mock('@/components/status-bar/ContractsStatusItem', () => ({
   ContractsStatusItem: () => null,
 }));
 
+vi.mock('@/components/status-bar/NetworkStatusItem', () => ({
+  NetworkStatusItem: () => <div data-testid='network-status-item' />,
+}));
+
 vi.mock('@/hooks/useTheme', () => ({
   useTheme: () => ({ isDark: false, toggleTheme: vi.fn() }),
 }));
@@ -26,6 +30,11 @@ describe('StatusBar', () => {
     await waitFor(() => {
       expect(screen.getByText('v0.4.0')).toBeDefined();
     });
+  });
+
+  it('renders the team network item', () => {
+    render(<StatusBar />);
+    expect(screen.getByTestId('network-status-item')).toBeInTheDocument();
   });
 
   it('renders "Side by side" button when layout is stacked', () => {
