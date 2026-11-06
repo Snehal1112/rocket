@@ -10,6 +10,8 @@ import { OpenApiSyncNotifier } from '@/components/layout/OpenApiSyncNotifier';
 import { StatusBar } from '@/components/layout/StatusBar';
 import { TrustMigrationNotice } from '@/components/layout/TrustMigrationNotice';
 import { WorkspaceToolbar } from '@/components/layout/WorkspaceToolbar';
+import { NetworkIntroCard } from '@/components/network/NetworkIntroCard';
+import { PairingDialog } from '@/components/network/PairingDialog';
 import { PaneRenderer } from '@/components/panes/PaneRenderer';
 import { SplashScreen } from '@/components/SplashScreen';
 import { TitleBar } from '@/components/title-bar';
@@ -18,10 +20,12 @@ import { UpdateDialog } from '@/components/updates/UpdateDialog';
 import { useBackendLogs } from '@/hooks/useBackendLogs';
 import { useFileWatcherFailed } from '@/hooks/useFileWatcherFailed';
 import { useFlowRequestPathEvents } from '@/hooks/useFlowRequestPathEvents';
+import { useIncomingPairingNotice } from '@/hooks/useIncomingPairingNotice';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useUpdateNotice } from '@/hooks/useUpdateNotice';
 import { useAssistantEventBridge } from '@/lib/assistant-event-bridge';
 import { useGraphQlSubscriptionEventBridge } from '@/lib/graphql-subscription-event-bridge';
+import { useNetworkEventBridge } from '@/lib/network-event-bridge';
 import {
   collectionTrustKeys,
   useCollectionTrustEvents,
@@ -66,6 +70,8 @@ function App() {
   useUpdateNotice();
   useCollectionTrustEvents();
   useFlowRequestPathEvents();
+  useNetworkEventBridge();
+  useIncomingPairingNotice();
 
   useEffect(() => {
     const init = async () => {
@@ -290,6 +296,8 @@ function App() {
       {showSplash && <SplashScreen onComplete={() => setShowSplash(false)} />}
       <Toaster position='bottom-right' />
       <TrustMigrationNotice />
+      <PairingDialog />
+      <NetworkIntroCard />
       <UpdateDialog />
       <OpenApiSyncNotifier />
     </div>

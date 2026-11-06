@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type SettingsSection = 'proxy' | 'secret-managers' | 'ai' | 'support' | 'about';
+export type SettingsSection = 'proxy' | 'secret-managers' | 'ai' | 'network' | 'support' | 'about';
 
 interface SettingsState {
   open: boolean;

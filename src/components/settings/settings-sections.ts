@@ -1,7 +1,8 @@
-import { Bot, Globe, Info, KeyRound, LifeBuoy, type LucideIcon } from 'lucide-react';
+import { Bot, Globe, Info, KeyRound, LifeBuoy, type LucideIcon, Radar } from 'lucide-react';
 import type { ComponentType } from 'react';
 import { AboutSection } from '@/components/settings/sections/AboutSection';
 import { AiAgentsSection } from '@/components/settings/sections/AiAgentsSection';
+import { NetworkSection } from '@/components/settings/sections/NetworkSection';
 import { ProxySection } from '@/components/settings/sections/ProxySection';
 import { SecretManagersSection } from '@/components/settings/sections/SecretManagersSection';
 import { SupportSection } from '@/components/settings/sections/SupportSection';
@@ -27,6 +28,13 @@ export const SETTINGS_SECTIONS: SettingsSectionDef[] = [
     wide: true,
   },
   { id: 'ai', label: 'AI Agents', icon: Bot, Component: AiAgentsSection, wide: true },
+  {
+    id: 'network',
+    label: 'Team network',
+    icon: Radar,
+    Component: NetworkSection,
+    wide: true,
+  },
   { id: 'support', label: 'Support', icon: LifeBuoy, Component: SupportSection },
   { id: 'about', label: 'About', icon: Info, Component: AboutSection },
 ];

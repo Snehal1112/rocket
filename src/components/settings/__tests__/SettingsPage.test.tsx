@@ -31,7 +31,14 @@ describe('SettingsPage', () => {
     const labels = within(nav())
       .getAllByRole('button')
       .map((b) => b.textContent);
-    expect(labels).toEqual(['Proxy', 'Secret Managers', 'AI Agents', 'Support', 'About']);
+    expect(labels).toEqual([
+      'Proxy',
+      'Secret Managers',
+      'AI Agents',
+      'Team network',
+      'Support',
+      'About',
+    ]);
     expect(screen.getByRole('heading', { name: 'Proxy' })).toBeInTheDocument();
     expect(within(nav()).getByRole('button', { name: 'Proxy' })).toHaveAttribute(
       'aria-current',
