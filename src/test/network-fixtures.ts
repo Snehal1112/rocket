@@ -1,5 +1,5 @@
 import type { NetworkNode, NetworkStatus } from '@/lib/tauri-api';
-import type { PairingIncoming } from '@/stores/network-store';
+import type { IncomingTransfer, PairingIncoming } from '@/stores/network-store';
 
 /** A running status with discovery and the listener available. */
 export function makeStatus(patch: Partial<NetworkStatus> = {}): NetworkStatus {
@@ -41,6 +41,20 @@ export function makeIncoming(patch: Partial<PairingIncoming> = {}): PairingIncom
     shortId: 'ZZZZ-9999',
     displayName: 'Dana Roy',
     code: '482913',
+    accepted: false,
+    ...patch,
+  };
+}
+
+/** A pending offer from a node that wants to send a collection. */
+export function makeIncomingTransfer(patch: Partial<IncomingTransfer> = {}): IncomingTransfer {
+  return {
+    transferId: 't1',
+    deviceId: 'DEV9',
+    shortId: 'ZZZZ-9999',
+    displayName: 'Dana Roy',
+    collectionName: 'Orders',
+    sizeBytes: 2048,
     accepted: false,
     ...patch,
   };

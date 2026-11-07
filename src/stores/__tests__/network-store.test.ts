@@ -2,12 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NetworkNode } from '@/lib/tauri-api';
 import {
   INCOMING_TTL_MS,
+  onlinePairedNodes,
   selectOnlinePairedCount,
   startNetworkPairing,
   useNetworkStore,
 } from '@/stores/network-store';
 import { createDeferred } from '@/test/deferred';
-import { makeIncoming, makeNode, makeStatus } from '@/test/network-fixtures';
+import { makeIncoming, makeIncomingTransfer, makeNode, makeStatus } from '@/test/network-fixtures';
 
 const mocks = vi.hoisted(() => ({
   api: {
@@ -261,5 +262,207 @@ describe('network-store', () => {
       expect(store().dialogPairingId).toBeNull();
       expect(store().panelOpen).toBe(true);
     });
+  });
+});
+
+describe('network-store transfers', () => {
+  const offer = (transferId = 't1') => makeIncomingTransfer({ transferId });
+  const progress = (transferId = 't1', doneBytes = 1024) => ({
+    transferId,
+    direction: 'receive' as const,
+    doneBytes,
+    totalBytes: 2048,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    store().reset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('dedupes by transfer id and does not extend the expiry', () => {
+    vi.useFakeTimers();
+    store().addIncomingTransfer(offer('t1'));
+    vi.advanceTimersByTime(60_000);
+    store().addIncomingTransfer(offer('t1'));
+    expect(store().incomingTransfers).toHaveLength(1);
+    vi.advanceTimersByTime(INCOMING_TTL_MS - 60_000);
+    expect(store().incomingTransfers).toHaveLength(0);
+  });
+
+  it('keeps an offer until the expiry time', () => {
+    vi.useFakeTimers();
+    store().addIncomingTransfer(offer());
+    vi.advanceTimersByTime(INCOMING_TTL_MS - 1);
+    expect(store().incomingTransfers).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(store().incomingTransfers).toHaveLength(0);
+  });
+
+  it('keeps two offers, each with its own timer', () => {
+    vi.useFakeTimers();
+    store().addIncomingTransfer(offer('a'));
+    store().addIncomingTransfer(offer('b'));
+    expect(store().incomingTransfers.map((t) => t.transferId)).toEqual(['a', 'b']);
+    expect(vi.getTimerCount()).toBe(2);
+    store().removeIncomingTransfer('a');
+    expect(vi.getTimerCount()).toBe(1);
+    expect(store().incomingTransfers.map((t) => t.transferId)).toEqual(['b']);
+  });
+
+  it('stores a zero byte offer as given', () => {
+    store().addIncomingTransfer(makeIncomingTransfer({ sizeBytes: 0 }));
+    expect(store().incomingTransfers[0]?.sizeBytes).toBe(0);
+  });
+
+  it('an accepted offer no longer expires', () => {
+    vi.useFakeTimers();
+    store().addIncomingTransfer(offer());
+    store().markTransferAccepted('t1');
+    expect(vi.getTimerCount()).toBe(0);
+    vi.advanceTimersByTime(INCOMING_TTL_MS * 2);
+    expect(store().incomingTransfers[0]?.accepted).toBe(true);
+  });
+
+  it('markTransferAccepted does not bring back an offer that is gone', () => {
+    store().markTransferAccepted('missing');
+    expect(store().incomingTransfers).toEqual([]);
+  });
+
+  it('keeps one progress row for each transfer and updates it in place', () => {
+    store().setTransferProgress(progress('a', 100));
+    store().setTransferProgress(progress('b', 5));
+    store().setTransferProgress(progress('a', 900));
+    expect(store().activeTransfers).toEqual([progress('a', 900), progress('b', 5)]);
+  });
+
+  it('keeps the direction of a progress row', () => {
+    store().setTransferProgress({ ...progress('a'), direction: 'send' });
+    expect(store().activeTransfers[0]?.direction).toBe('send');
+  });
+
+  it('finishTransfer removes the offer, the progress and the timer, and reports the first finish', () => {
+    vi.useFakeTimers();
+    store().addIncomingTransfer(offer());
+    store().setTransferProgress(progress());
+    expect(store().finishTransfer('t1')).toBe(true);
+    expect(store().incomingTransfers).toEqual([]);
+    expect(store().activeTransfers).toEqual([]);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(store().finishTransfer('t1')).toBe(false);
+  });
+
+  it('ignores progress and offers that arrive after the finish', () => {
+    store().finishTransfer('t1');
+    store().setTransferProgress(progress());
+    store().addIncomingTransfer(offer());
+    expect(store().activeTransfers).toEqual([]);
+    expect(store().incomingTransfers).toEqual([]);
+  });
+
+  it('remembers only the last 100 finished transfers', () => {
+    for (let i = 0; i < 101; i++) store().finishTransfer(`f${i}`);
+    // The oldest id is forgotten, the newest is still remembered.
+    expect(store().finishTransfer('f0')).toBe(true);
+    expect(store().finishTransfer('f100')).toBe(false);
+  });
+
+  it('opens and closes the transfer dialog without touching the pairing dialog', () => {
+    store().openPairingDialog('p1');
+    store().openTransferDialog('t1');
+    expect(store().dialogTransferId).toBe('t1');
+    store().closeTransferDialog();
+    expect(store().dialogTransferId).toBeNull();
+    expect(store().dialogPairingId).toBe('p1');
+  });
+
+  it('reset clears the transfers, the timers and the finished memory', () => {
+    vi.useFakeTimers();
+    store().addIncomingTransfer(offer('a'));
+    store().setTransferProgress(progress('b'));
+    store().openTransferDialog('a');
+    store().endTransferDialog('The other node went offline.');
+    store().finishTransfer('c');
+    store().trackOutgoing('d', 'Dana Roy');
+    store().markCancelledHere('e');
+    store().reset();
+    expect(store().incomingTransfers).toEqual([]);
+    expect(store().activeTransfers).toEqual([]);
+    expect(store().dialogTransferId).toBeNull();
+    expect(store().dialogEndedText).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(store().advanceOutgoing('d', 'sending')).toBeNull();
+    expect(store().wasCancelledHere('e')).toBe(false);
+    // The id may be used again after a reset.
+    expect(store().finishTransfer('c')).toBe(true);
+  });
+
+  it('tracks a send and moves it forward once per phase', () => {
+    store().trackOutgoing('t1', 'Dana Roy');
+    expect(store().advanceOutgoing('t1', 'sending')).toBe('Dana Roy');
+    expect(store().advanceOutgoing('t1', 'sending')).toBeNull();
+    expect(store().advanceOutgoing('t1', 'sent')).toBe('Dana Roy');
+    // A phase never goes back.
+    expect(store().advanceOutgoing('t1', 'sending')).toBeNull();
+    expect(store().advanceOutgoing('other', 'sending')).toBeNull();
+  });
+
+  it('can skip the sending phase of a one chunk send', () => {
+    store().trackOutgoing('t1', 'Dana Roy');
+    expect(store().advanceOutgoing('t1', 'sent')).toBe('Dana Roy');
+    expect(store().advanceOutgoing('t1', 'sending')).toBeNull();
+  });
+
+  it('finishTransfer forgets the send and the local cancel', () => {
+    store().trackOutgoing('t1', 'Dana Roy');
+    store().markCancelledHere('t1');
+    expect(store().wasCancelledHere('t1')).toBe(true);
+    store().finishTransfer('t1');
+    expect(store().wasCancelledHere('t1')).toBe(false);
+    expect(store().advanceOutgoing('t1', 'sending')).toBeNull();
+  });
+
+  it('shows an end reason in the open dialog until it closes or another opens', () => {
+    store().openTransferDialog('t1');
+    expect(store().dialogEndedText).toBeNull();
+    store().endTransferDialog('The other node went offline.');
+    expect(store().dialogEndedText).toBe('The other node went offline.');
+    expect(store().dialogTransferId).toBe('t1');
+    store().openTransferDialog('t2');
+    expect(store().dialogEndedText).toBeNull();
+    store().endTransferDialog('The other node went offline.');
+    store().closeTransferDialog();
+    expect(store().dialogEndedText).toBeNull();
+  });
+
+  it('a pairing id and a transfer id never share a timer', () => {
+    vi.useFakeTimers();
+    store().addIncoming(makeIncoming({ pairingId: 'same' }));
+    store().addIncomingTransfer(offer('same'));
+    expect(vi.getTimerCount()).toBe(2);
+    store().removeIncomingTransfer('same');
+    expect(vi.getTimerCount()).toBe(1);
+    expect(store().incoming).toHaveLength(1);
+  });
+});
+
+describe('onlinePairedNodes', () => {
+  it('keeps only paired nodes that are online', () => {
+    const nodes = [
+      makeNode({ deviceId: 'A', group: 'paired', status: 'online' }),
+      makeNode({ deviceId: 'B', group: 'paired', status: 'offline' }),
+      makeNode({ deviceId: 'C', group: 'nearby', status: 'available' }),
+      makeNode({ deviceId: 'D', group: 'paired', status: 'needs_update' }),
+    ];
+    expect(onlinePairedNodes(nodes).map((n) => n.deviceId)).toEqual(['A']);
+  });
+
+  it('agrees with the count selector', () => {
+    const nodes = [makeNode({ group: 'paired', status: 'online' })];
+    useNetworkStore.setState({ nodes });
+    expect(selectOnlinePairedCount(useNetworkStore.getState())).toBe(onlinePairedNodes(nodes).length);
   });
 });

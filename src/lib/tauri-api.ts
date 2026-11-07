@@ -4420,3 +4420,72 @@ export const onNetworkChanged = (
 export const onNetworkPairing = (
   handler: (event: NetworkPairingEvent) => void,
 ): Promise<UnlistenFn> => listen<NetworkPairingEvent>('network-pairing', (e) => handler(e.payload));
+
+export type TransferDirection = 'send' | 'receive';
+
+/** How a transfer ended. The values are the snake_case `Outcome` of `rocket-network`. */
+export type TransferOutcome =
+  | 'completed'
+  | 'unconfirmed'
+  | 'declined'
+  | 'expired'
+  | 'cancelled'
+  | 'failed'
+  | 'too_big'
+  | 'busy'
+  | 'damaged'
+  | 'rejected';
+
+/** Channel `network-transfer`. Fields are snake_case as sent. */
+export type NetworkTransferEvent =
+  | {
+      type: 'offerIncoming';
+      transfer_id: string;
+      device_id: string;
+      short_id: string;
+      display_name: string;
+      collection_name: string;
+      size_bytes: number;
+    }
+  | {
+      type: 'progress';
+      transfer_id: string;
+      direction: TransferDirection;
+      done_bytes: number;
+      total_bytes: number;
+    }
+  | {
+      type: 'finished';
+      transfer_id: string;
+      direction: TransferDirection;
+      outcome: TransferOutcome;
+      display_name: string;
+      collection_name: string;
+      /** The importer's failure text on the receiving side, else null. */
+      message: string | null;
+    };
+
+/** Result of a started send. `notes` are human lines for what the export dropped or blanked. */
+export interface SendStarted {
+  transferId: string;
+  notes: string[];
+}
+
+/** Resolves once the offer is on its way. */
+export const sendNetworkCollection = (
+  deviceId: string,
+  collection: string,
+  includeEnvironments: boolean,
+): Promise<SendStarted> =>
+  invoke<SendStarted>('network_send_collection', { deviceId, collection, includeEnvironments });
+
+export const respondNetworkTransfer = (transferId: string, accept: boolean): Promise<void> =>
+  invoke<void>('network_respond_transfer', { transferId, accept });
+
+export const cancelNetworkTransfer = (transferId: string): Promise<void> =>
+  invoke<void>('network_cancel_transfer', { transferId });
+
+export const onNetworkTransfer = (
+  handler: (event: NetworkTransferEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<NetworkTransferEvent>('network-transfer', (e) => handler(e.payload));

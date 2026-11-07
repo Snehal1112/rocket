@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   addNetworkAddress,
   cancelNetworkPairing,
+  cancelNetworkTransfer,
   getNetworkStatus,
   listNetworkAddresses,
   listNetworkBlocked,
@@ -11,10 +12,13 @@ import {
   markNetworkIntroSeen,
   onNetworkChanged,
   onNetworkPairing,
+  onNetworkTransfer,
   removeNetworkAddress,
   removeNetworkPaired,
   requestNetworkPairing,
   respondNetworkPairing,
+  respondNetworkTransfer,
+  sendNetworkCollection,
   setNetworkProfile,
   setNetworkVisibility,
   unblockNetworkDevice,
@@ -105,5 +109,57 @@ describe('team network commands', () => {
     deliver(pairingCallback, { type: 'pairingFinished', pairing_id: 'p1' });
     expect(onChanged).toHaveBeenCalledWith({ type: 'nodesChanged' });
     expect(onPairing).toHaveBeenCalledWith({ type: 'pairingFinished', pairing_id: 'p1' });
+  });
+});
+
+describe('send a collection', () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(listen).mockReset();
+  });
+
+  it('sends camelCase arguments and returns the transfer id and the notes', async () => {
+    const started = {
+      transferId: '0123456789abcdef0123456789abcdef',
+      notes: ['Flows: skipped', 'Auth token: blanked'],
+    };
+    vi.mocked(invoke).mockResolvedValue(started);
+    await expect(sendNetworkCollection('DEV1', 'Orders "v2" café', true)).resolves.toEqual(started);
+    expect(invoke).toHaveBeenLastCalledWith('network_send_collection', {
+      deviceId: 'DEV1',
+      collection: 'Orders "v2" café',
+      includeEnvironments: true,
+    });
+  });
+
+  it('answers and cancels a transfer with camelCase arguments', async () => {
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    await respondNetworkTransfer('t1', false);
+    expect(invoke).toHaveBeenLastCalledWith('network_respond_transfer', {
+      transferId: 't1',
+      accept: false,
+    });
+    await cancelNetworkTransfer('t1');
+    expect(invoke).toHaveBeenLastCalledWith('network_cancel_transfer', { transferId: 't1' });
+  });
+
+  it('passes a rejection through unchanged', async () => {
+    vi.mocked(invoke).mockRejectedValue('Invalid input: That node is offline.');
+    await expect(sendNetworkCollection('DEV1', 'Orders', false)).rejects.toBe(
+      'Invalid input: That node is offline.',
+    );
+  });
+
+  it('listens on network-transfer and hands over the payload', async () => {
+    vi.mocked(listen).mockResolvedValue(() => undefined);
+    const handler = vi.fn();
+    await onNetworkTransfer(handler);
+    expect(listen).toHaveBeenCalledWith('network-transfer', expect.any(Function));
+    const callback = vi.mocked(listen).mock.calls[0]?.[1];
+    if (!callback) throw new Error('listener was not registered');
+    (callback as (event: { payload: unknown }) => void)({
+      payload: { type: 'progress', transfer_id: 't1' },
+    });
+    expect(handler).toHaveBeenCalledWith({ type: 'progress', transfer_id: 't1' });
   });
 });
