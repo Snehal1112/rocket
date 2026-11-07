@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use rocket_collection::CollectionRepository;
 use rocket_environment::{EnvironmentRepository, EnvironmentRepositoryFactory};
@@ -64,6 +64,8 @@ pub struct ImportService {
     collection_repo: Box<dyn CollectionRepository>,
     env_factory: Box<dyn EnvironmentRepositoryFactory>,
     pub(crate) files: Arc<dyn ImportFiles>,
+    /// The collection roots this service created, in order. See `created_roots`.
+    created_roots: Mutex<Vec<PathBuf>>,
 }
 
 impl ImportService {
@@ -78,7 +80,32 @@ impl ImportService {
             collection_repo,
             env_factory,
             files,
+            created_roots: Mutex::new(Vec::new()),
         }
+    }
+
+    /// The collection roots (`<workspace>/collections/<name>`) this service created, in order.
+    /// A root is recorded right after `CollectionRepository::create` succeeded and before any
+    /// request file is written, so an import that returns `Err` still lists the folder it made.
+    /// `create` refuses an existing folder, so every recorded root is one this service made.
+    pub fn created_roots(&self) -> Vec<PathBuf> {
+        match self.created_roots.lock() {
+            Ok(roots) => roots.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        }
+    }
+
+    /// Creates a collection through the repository and records its root.
+    fn create_collection_root(&self, name: &str) -> ImportResult<()> {
+        self.collection_repo
+            .create(name)
+            .map_err(ImportError::DomainError)?;
+        let root = self.workspace_path.join("collections").join(name);
+        match self.created_roots.lock() {
+            Ok(mut roots) => roots.push(root),
+            Err(poisoned) => poisoned.into_inner().push(root),
+        }
+        Ok(())
     }
 
     /// Test-only constructor — wires up `FsCollectionRepo` and `FsEnvironmentRepo` directly.
@@ -108,6 +135,7 @@ impl ImportService {
             collection_repo,
             env_factory,
             files: Arc::new(test_files::StdFiles),
+            created_roots: Mutex::new(Vec::new()),
         }
     }
 
@@ -152,9 +180,7 @@ impl ImportService {
             .unwrap_or_else(|| "imported".into());
 
         let resolved_name = self.resolve_collection_name(&col_name)?;
-        self.collection_repo
-            .create(&resolved_name)
-            .map_err(ImportError::DomainError)?;
+        self.create_collection_root(&resolved_name)?;
         report.created_collections.push(resolved_name.clone());
 
         // Walk request files. The set holds the output paths this run has taken.
@@ -577,9 +603,7 @@ impl ImportService {
             .unwrap_or_else(|| "imported".into());
 
         let resolved_name = self.resolve_collection_name(&col_name)?;
-        self.collection_repo
-            .create(&resolved_name)
-            .map_err(ImportError::DomainError)?;
+        self.create_collection_root(&resolved_name)?;
         report.created_collections.push(resolved_name.clone());
 
         let dest_root = self.workspace_path.join("collections").join(&resolved_name);
@@ -660,9 +684,7 @@ impl ImportService {
         let collection = parse_postman_json(self.files.as_ref(), json_path)?;
         let col_name = self.resolve_collection_name(&collection.info.name)?;
 
-        self.collection_repo
-            .create(&col_name)
-            .map_err(ImportError::DomainError)?;
+        self.create_collection_root(&col_name)?;
         report.created_collections.push(col_name.clone());
 
         let variables = pc::convert_collection_variables(&collection.variable);
@@ -797,9 +819,7 @@ impl ImportService {
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| "wsdl".to_string());
         let col_name = self.resolve_collection_name(&stem)?;
-        self.collection_repo
-            .create(&col_name)
-            .map_err(ImportError::DomainError)?;
+        self.create_collection_root(&col_name)?;
         report.created_collections.push(col_name.clone());
 
         let total_ops: usize = model
@@ -933,9 +953,7 @@ impl ImportService {
             .find(|s| !s.is_empty())
             .unwrap_or("openapi");
         let col_name = self.resolve_portable_collection_name(wanted)?;
-        self.collection_repo
-            .create(&col_name)
-            .map_err(ImportError::DomainError)?;
+        self.create_collection_root(&col_name)?;
         report.created_collections.push(col_name.clone());
 
         // `baseUrl` plus one empty secret variable for every placeholder an auth block uses.

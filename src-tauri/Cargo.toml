@@ -97,12 +97,17 @@ tokio-util = "0.7"
 # is already in the lockfile.
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
+# The private per-process folder for the team network import copies.
+tempfile = "3"
+
 [target.'cfg(target_os = "linux")'.dependencies]
 # v2_34 exposes MemoryPressureSettings; wry already enables it transitively.
 webkit2gtk = { version = "2.0", features = ["v2_34"] }
 
 [dev-dependencies]
 tempfile = "3"
+# Builds the test ZIPs for the transfer import adapter. Same version as rocket-import.
+zip = "2"
 tower = { version = "0.5", features = ["util"] }
 tauri = { version = "2", features = ["test"] }
 async-trait.workspace = true
