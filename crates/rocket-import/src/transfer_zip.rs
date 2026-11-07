@@ -189,6 +189,48 @@ fn check_end_record<R: Read + Seek>(
     {
         return Err(bad());
     }
+    let cd_start = u64::from(le32(16));
+    let cd_end = size - EOCD_LEN as u64;
+    walk_central_directory(reader, cd_start, cd_end, usize::from(total_entries)).map_err(|_| bad())
+}
+
+/// Walks the central directory header by header, as other readers do (they read until the
+/// directory size is used up, not until the entry count). Exactly `count` headers must fill
+/// `cd_start..cd_end` with nothing left over, so a hidden entry behind a low count is refused.
+/// Every read is bounds-checked, and any short or hostile data is an error.
+fn walk_central_directory<R: Read + Seek>(
+    reader: &mut R,
+    cd_start: u64,
+    cd_end: u64,
+    count: usize,
+) -> io::Result<()> {
+    const HEADER_LEN: u64 = 46;
+    const CDFH_SIG: [u8; 4] = [0x50, 0x4b, 0x01, 0x02];
+    let invalid = || io::Error::from(io::ErrorKind::InvalidData);
+    let mut pos = cd_start;
+    for _ in 0..count {
+        if pos.checked_add(HEADER_LEN).is_none_or(|next| next > cd_end) {
+            return Err(invalid());
+        }
+        reader.seek(io::SeekFrom::Start(pos))?;
+        let mut header = [0u8; HEADER_LEN as usize];
+        reader.read_exact(&mut header)?;
+        if header[..4] != CDFH_SIG {
+            return Err(invalid());
+        }
+        let var_len: u64 = [28usize, 30, 32]
+            .iter()
+            .map(|&at| u64::from(u16::from_le_bytes([header[at], header[at + 1]])))
+            .sum();
+        pos += HEADER_LEN + var_len;
+        if pos > cd_end {
+            return Err(invalid());
+        }
+    }
+    if pos != cd_end {
+        return Err(invalid());
+    }
+    reader.seek(io::SeekFrom::Start(0))?;
     Ok(())
 }
 
@@ -851,6 +893,81 @@ mod tests {
         let off = (b.len() - 100) as u32;
         b.extend(eocd(2, 10, off));
         assert!(refused_unsafe(&b), "case B");
+    }
+
+    /// Sets both entry counts of the end record to `count`.
+    fn set_counts(b: &mut [u8], count: u16) {
+        let e = b.len() - 22;
+        b[e + 8..e + 10].copy_from_slice(&count.to_le_bytes());
+        b[e + 10..e + 12].copy_from_slice(&count.to_le_bytes());
+    }
+
+    #[test]
+    fn validate_refuses_a_central_directory_longer_than_the_counts_say() {
+        // Case C: three headers, the counts say two, sizes and offsets stay true.
+        let mut b = dup_bytes();
+        set_counts(&mut b, 2);
+        assert!(refused_unsafe(&b));
+    }
+
+    #[test]
+    fn validate_refuses_a_hidden_traversal_entry_behind_a_low_count() {
+        // Case C2: the hidden third entry has a traversal name.
+        let mut b = mem_zip(&[
+            "orders/opencollection.yml",
+            "orders/get.yml",
+            "orders/xx/yy/e",
+        ]);
+        let from = b"orders/xx/yy/e";
+        let to = b"orders/../../e";
+        for i in 0..b.len() - from.len() {
+            if &b[i..i + from.len()] == from {
+                b[i..i + to.len()].copy_from_slice(to);
+            }
+        }
+        set_counts(&mut b, 2);
+        assert!(refused_unsafe(&b));
+    }
+
+    /// Start and size of the central directory of an exporter-style zip.
+    fn cd_span(b: &[u8]) -> (usize, usize) {
+        let e = b.len() - 22;
+        let size = u32::from_le_bytes([b[e + 12], b[e + 13], b[e + 14], b[e + 15]]) as usize;
+        let off = u32::from_le_bytes([b[e + 16], b[e + 17], b[e + 18], b[e + 19]]) as usize;
+        (off, size)
+    }
+
+    #[test]
+    fn validate_refuses_a_bad_central_header_signature() {
+        let mut b = mem_zip(&["orders/opencollection.yml", "orders/get.yml"]);
+        let (off, _) = cd_span(&b);
+        b[off + 3] = 0x09;
+        let (_dir, path) = write_bytes(&b);
+        assert!(validate(&files(), &path).is_err());
+    }
+
+    #[test]
+    fn validate_refuses_header_lengths_that_run_past_the_directory() {
+        for at in [28usize, 30, 32] {
+            let mut b = mem_zip(&["orders/opencollection.yml", "orders/get.yml"]);
+            let (off, _) = cd_span(&b);
+            b[off + at] = 0xF0;
+            let (_dir, path) = write_bytes(&b);
+            assert!(validate(&files(), &path).is_err(), "field at {at}");
+        }
+    }
+
+    #[test]
+    fn validate_refuses_a_central_directory_size_that_is_too_small_or_too_large() {
+        for delta in [-1i64, 1] {
+            let mut b = mem_zip(&["orders/opencollection.yml", "orders/get.yml"]);
+            let e = b.len() - 22;
+            let (_, size) = cd_span(&b);
+            let patched = (size as i64 + delta) as u32;
+            b[e + 12..e + 16].copy_from_slice(&patched.to_le_bytes());
+            let (_dir, path) = write_bytes(&b);
+            assert!(validate(&files(), &path).is_err(), "delta {delta}");
+        }
     }
 
     #[test]
