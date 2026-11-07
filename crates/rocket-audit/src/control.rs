@@ -35,7 +35,12 @@ pub static CONTROL_CATALOG: &[ControlEntry] = &[
         framework: Framework::Soc2,
         code: "CC6.7",
         title: "Transmission of sensitive information",
-        kinds: &["collection_exported", "audit_evidence_exported"],
+        kinds: &[
+            "collection_exported",
+            "audit_evidence_exported",
+            "network_collection_sent",
+            "network_collection_received",
+        ],
     },
     ControlEntry {
         framework: Framework::Soc2,
@@ -176,6 +181,24 @@ mod tests {
                     .iter()
                     .any(|c| c.framework == Framework::Soc2 && c.code == "CC6.1"),
                 "{tag} missing from CC6.1"
+            );
+        }
+    }
+
+    #[test]
+    fn cc6_7_lists_the_send_collection_kinds_and_keeps_the_old_ones() {
+        for tag in [
+            "collection_exported",
+            "audit_evidence_exported",
+            "network_collection_sent",
+            "network_collection_received",
+        ] {
+            let controls = controls_for_kind(tag);
+            assert!(
+                controls
+                    .iter()
+                    .any(|c| c.framework == Framework::Soc2 && c.code == "CC6.7"),
+                "{tag} missing from CC6.7"
             );
         }
     }

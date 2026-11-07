@@ -39,8 +39,13 @@ cargo check -j4 -p rocket-network
 | `DialHint`, `should_dial`, `keep_dialed_by` | Which side opens the WebSocket. |
 | `SlidingWindow` | Request limit: at most `cap` hits in a `window`. Time is passed in as `Instant`. |
 | `HelloResponse`, `PairRequest`, `PairRequestResponse`, `NonceMessage`, `DecisionRequest`, `PairStatusResponse` | REST bodies, snake_case JSON. |
-| `PeerMessage` | WebSocket frame enum. `decode` enforces the 64 KiB limit and rejects unknown types. |
-| `NetworkEvent` | Events for the frontend. Implements `PublishedEvent`. Channels `network-changed` and `network-pairing`. |
+| `PeerMessage` | WebSocket frame enum: Hello, Ping, Pong, Unpair and the six transfer frames (offer, answer, chunk, abort, chunk ack, result). `decode` enforces the 64 KiB limit and rejects unknown types. |
+| `AbortReason`, `ResultOutcome` | Why a transfer stopped (`cancelled`, `failed`, `too_big`, `busy`, `expired`) and what the receiver reports at the end (`completed`, `damaged`, `rejected`, `failed`). |
+| `TransferId`, `chunk_count_for`, `offer_name_is_valid`, `Direction`, `Outcome` | Transfer id (32 lowercase hex), chunk math, the offer name rule, direction and result names (`unconfirmed` when the sender got no result after the last chunk). |
+| `OutgoingTransfer`, `IncomingTransfer`, `OfferError`, `ChunkStep` | Sender and receiver state machines. Time is passed in as `Instant`. They hold no bytes. The sender keeps an ack window of 32 chunks (`window_open`, `on_ack`) and stays `Done` until `on_result` brings the receiver's outcome, or ends `Unconfirmed` when the peer goes or the result times out. |
+| `TransferLimits`, `Admission` | Pending, per-peer and rate limits for offers, plus duplicate-id detection. |
+| `TransferSink` | Port with `on_frame` (the six transfer frames from `NetworkService`) and `on_peer_gone` (peer socket ended or pairing removed). |
+| `NetworkEvent`, `TransferEvent` | Events for the frontend. Implement `PublishedEvent`. Channels `network-changed`, `network-pairing` and `network-transfer`. |
 | Ports | `DeviceIdentityStore`, `PairedDeviceRepository`, `BlockedDeviceRepository`, `ManualAddressRepository`, `NetworkSettingsRepository`, `QuarantineReport`, `Discovery`, `DiscoverySink`, `PeerHandler`, `PeerConnector`, `PeerServerControl`, `PeerTransportFactory`, plus `PeerSocket`, `PeerTransport`, `PeerError`, `PeerCallError`. |
 
 ## Key Patterns
@@ -50,6 +55,7 @@ cargo check -j4 -p rocket-network
 - Persistence structs keep snake_case serde. Peer wire types are snake_case JSON. Only IPC DTOs in `src-tauri` use camelCase.
 - `NetworkEvent` tag is camelCase and variant fields are snake_case on purpose. `wire_contract_*` tests pin the keys.
 - Pairing logic never reads the clock. Callers pass `Instant` to `PairingSession::new_*` and `expire_if_due`.
+- Transfer machines never read the clock and never touch bytes on disk. They return decoded chunk bytes to the caller.
 - Never log nonces, codes, keys or certificates. `Nonce` and `DeviceKeyMaterial` have no `Debug` on purpose.
 
 ## Workspace Relationships

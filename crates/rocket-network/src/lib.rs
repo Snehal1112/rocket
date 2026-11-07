@@ -17,7 +17,7 @@ pub mod wire;
 
 pub use device::DeviceId;
 pub use dialer::{keep_dialed_by, should_dial, DialHint};
-pub use events::NetworkEvent;
+pub use events::{NetworkEvent, TransferEvent};
 pub use identity::{DeviceKeyMaterial, PeerIdentity};
 pub use messages::{AbortReason, PeerMessage, ResultOutcome};
 pub use pairing::{

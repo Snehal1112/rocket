@@ -61,6 +61,21 @@ pub enum AuditEventKind {
     NetworkDeviceBlocked {
         device_id: String,
     },
+    /// A collection left for a paired node. `device_id` is the short id (`XXXX-XXXX`).
+    /// `outcome` is `completed` (the receiver confirmed), `unconfirmed` (the final ack came,
+    /// no result) or `failed` (the stream ended before the final ack).
+    NetworkCollectionSent {
+        device_id: String,
+        collection: String,
+        outcome: String,
+    },
+    /// A collection from a paired node arrived. `device_id` is the short id. `outcome` is
+    /// `completed` (imported), `damaged` (size or hash mismatch) or `rejected` (unsafe ZIP).
+    NetworkCollectionReceived {
+        device_id: String,
+        collection: String,
+        outcome: String,
+    },
 }
 
 impl AuditEventKind {
@@ -78,6 +93,8 @@ impl AuditEventKind {
             Self::NetworkDevicePaired { .. } => "network_device_paired",
             Self::NetworkDeviceUnpaired { .. } => "network_device_unpaired",
             Self::NetworkDeviceBlocked { .. } => "network_device_blocked",
+            Self::NetworkCollectionSent { .. } => "network_collection_sent",
+            Self::NetworkCollectionReceived { .. } => "network_collection_received",
         }
     }
 }
@@ -216,5 +233,81 @@ mod tests {
         assert_eq!(value["by_peer"], true);
         let back: AuditEventKind = serde_json::from_value(value).expect("kind round trips");
         assert_eq!(back, kind);
+    }
+
+    #[test]
+    fn network_collection_kinds_have_stable_tags() {
+        let sent = AuditEventKind::NetworkCollectionSent {
+            device_id: "ABCD-EFGH".into(),
+            collection: "Orders".into(),
+            outcome: "completed".into(),
+        };
+        let received = AuditEventKind::NetworkCollectionReceived {
+            device_id: "ABCD-EFGH".into(),
+            collection: "Orders".into(),
+            outcome: "rejected".into(),
+        };
+        assert_eq!(sent.tag(), "network_collection_sent");
+        assert_eq!(received.tag(), "network_collection_received");
+    }
+
+    #[test]
+    fn network_collection_kinds_map_to_soc2_cc6_7_only() {
+        let kinds = [
+            AuditEventKind::NetworkCollectionSent {
+                device_id: "ABCD-EFGH".into(),
+                collection: "Orders".into(),
+                outcome: "unconfirmed".into(),
+            },
+            AuditEventKind::NetworkCollectionReceived {
+                device_id: "ABCD-EFGH".into(),
+                collection: "Orders".into(),
+                outcome: "damaged".into(),
+            },
+        ];
+        for kind in kinds {
+            let tag = kind.tag();
+            let ev = SecurityAuditEvent::new("user", None, kind, "");
+            assert!(
+                ev.controls.iter().any(|c| c.code == "CC6.7"),
+                "{tag} is not under CC6.7"
+            );
+            assert!(
+                !ev.controls.iter().any(|c| c.code == "CC6.1"),
+                "{tag} must not be under CC6.1"
+            );
+        }
+    }
+
+    #[test]
+    fn network_collection_kinds_serialize_with_snake_case_fields() {
+        for (kind, tag, outcome) in [
+            (
+                AuditEventKind::NetworkCollectionSent {
+                    device_id: "ABCD-EFGH".into(),
+                    collection: "Orders".into(),
+                    outcome: "unconfirmed".into(),
+                },
+                "network_collection_sent",
+                "unconfirmed",
+            ),
+            (
+                AuditEventKind::NetworkCollectionReceived {
+                    device_id: "ABCD-EFGH".into(),
+                    collection: "Orders".into(),
+                    outcome: "rejected".into(),
+                },
+                "network_collection_received",
+                "rejected",
+            ),
+        ] {
+            let value = serde_json::to_value(&kind).expect("kind serializes");
+            assert_eq!(value["kind"], tag);
+            assert_eq!(value["device_id"], "ABCD-EFGH");
+            assert_eq!(value["collection"], "Orders");
+            assert_eq!(value["outcome"], outcome);
+            let back: AuditEventKind = serde_json::from_value(value).expect("kind round trips");
+            assert_eq!(back, kind);
+        }
     }
 }

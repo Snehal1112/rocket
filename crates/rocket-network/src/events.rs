@@ -2,7 +2,9 @@
 //!
 //! The tag is camelCase and the variant fields stay snake_case on purpose.
 //! Do not rename them: the frontend listeners read these keys.
+//! `TransferEvent` follows the same rule on its own channel.
 
+use crate::transfer::{Direction, Outcome};
 use rocket_shared::published_event::PublishedEvent;
 use serde::Serialize;
 
@@ -45,6 +47,55 @@ impl PublishedEvent for NetworkEvent {
                 "network-pairing"
             }
         }
+    }
+
+    fn to_json(&self) -> Result<serde_json::Value, serde_json::Error> {
+        serde_json::to_value(self)
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+/// Events about collection transfers. Channel `network-transfer`.
+///
+/// Same wire rule as `NetworkEvent`: camelCase tag, snake_case fields.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum TransferEvent {
+    /// A paired node offered a collection. The frontend asks the user.
+    OfferIncoming {
+        transfer_id: String,
+        device_id: String,
+        short_id: String,
+        display_name: String,
+        collection_name: String,
+        size_bytes: u64,
+    },
+    /// Bytes moved. The frontend hides this for a transfer that ends in under 300 ms.
+    Progress {
+        transfer_id: String,
+        direction: Direction,
+        done_bytes: u64,
+        total_bytes: u64,
+    },
+    /// A transfer ended. `outcome` is the snake_case `Outcome` (`unconfirmed` included).
+    /// `message` is extra text for the receiving side (the importer's failure text, or "The
+    /// other node went offline."), `null` when there is none.
+    Finished {
+        transfer_id: String,
+        direction: Direction,
+        outcome: Outcome,
+        display_name: String,
+        collection_name: String,
+        message: Option<String>,
+    },
+}
+
+impl PublishedEvent for TransferEvent {
+    fn channel(&self) -> &'static str {
+        "network-transfer"
     }
 
     fn to_json(&self) -> Result<serde_json::Value, serde_json::Error> {
@@ -212,5 +263,195 @@ mod tests {
             event.as_any().downcast_ref::<NetworkEvent>(),
             Some(&NetworkEvent::NodesChanged)
         );
+    }
+
+    fn transfer_cases() -> Vec<(TransferEvent, &'static [&'static str])> {
+        vec![
+            (
+                TransferEvent::OfferIncoming {
+                    transfer_id: "T".into(),
+                    device_id: "ID".into(),
+                    short_id: "ABCD-EFGH".into(),
+                    display_name: "Ada".into(),
+                    collection_name: "Orders".into(),
+                    size_bytes: 1234,
+                },
+                &[
+                    "type",
+                    "transfer_id",
+                    "device_id",
+                    "short_id",
+                    "display_name",
+                    "collection_name",
+                    "size_bytes",
+                ][..],
+            ),
+            (
+                TransferEvent::Progress {
+                    transfer_id: "T".into(),
+                    direction: Direction::Send,
+                    done_bytes: 10,
+                    total_bytes: 20,
+                },
+                &[
+                    "type",
+                    "transfer_id",
+                    "direction",
+                    "done_bytes",
+                    "total_bytes",
+                ][..],
+            ),
+            (
+                TransferEvent::Finished {
+                    transfer_id: "T".into(),
+                    direction: Direction::Receive,
+                    outcome: Outcome::TooBig,
+                    display_name: "Ada".into(),
+                    collection_name: "Orders".into(),
+                    message: None,
+                },
+                &[
+                    "type",
+                    "transfer_id",
+                    "direction",
+                    "outcome",
+                    "display_name",
+                    "collection_name",
+                    "message",
+                ][..],
+            ),
+        ]
+    }
+
+    fn transfer_keys(event: &TransferEvent) -> Vec<String> {
+        let value = event.to_json().expect("serializes");
+        let mut keys: Vec<String> = value
+            .as_object()
+            .expect("an object")
+            .keys()
+            .cloned()
+            .collect();
+        keys.sort();
+        keys
+    }
+
+    #[test]
+    fn transfer_events_use_one_channel() {
+        for (event, _) in transfer_cases() {
+            assert_eq!(event.channel(), "network-transfer", "event {event:?}");
+            assert!(event.also_emit_on().is_empty());
+            assert!(event.written_collections().is_empty());
+        }
+    }
+
+    // Wire contract: tag is camelCase, fields stay snake_case. A rename here
+    // breaks the frontend listeners and needs its own decision.
+    #[test]
+    fn wire_contract_transfer_events() {
+        for (event, expected) in transfer_cases() {
+            let mut want: Vec<String> = expected.iter().map(|k| k.to_string()).collect();
+            want.sort();
+            assert_eq!(transfer_keys(&event), want, "event {event:?}");
+        }
+    }
+
+    #[test]
+    fn wire_contract_transfer_tags_are_camel_case() {
+        let tags: Vec<String> = transfer_cases()
+            .iter()
+            .map(|(event, _)| {
+                event.to_json().expect("serializes")["type"]
+                    .as_str()
+                    .expect("tag")
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(tags, ["offerIncoming", "progress", "finished"]);
+    }
+
+    #[test]
+    fn wire_contract_transfer_envelope_keys_are_free() {
+        for (event, _) in transfer_cases() {
+            let keys = transfer_keys(&event);
+            for reserved in ["seq", "tsMs", "ts_ms", "workspaceId"] {
+                assert!(
+                    !keys.iter().any(|k| k == reserved),
+                    "event {event:?} uses {reserved}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn transfer_event_json_carries_the_values() {
+        let progress = TransferEvent::Progress {
+            transfer_id: "T1".into(),
+            direction: Direction::Send,
+            done_bytes: 10,
+            total_bytes: 20,
+        };
+        assert_eq!(
+            progress.to_json().expect("serializes"),
+            json!({
+                "type": "progress",
+                "transfer_id": "T1",
+                "direction": "send",
+                "done_bytes": 10,
+                "total_bytes": 20
+            })
+        );
+        let finished = TransferEvent::Finished {
+            transfer_id: "T1".into(),
+            direction: Direction::Receive,
+            outcome: Outcome::TooBig,
+            display_name: "Ada".into(),
+            collection_name: "Orders".into(),
+            message: None,
+        };
+        assert_eq!(
+            finished.to_json().expect("serializes"),
+            json!({
+                "type": "finished",
+                "transfer_id": "T1",
+                "direction": "receive",
+                "outcome": "too_big",
+                "display_name": "Ada",
+                "collection_name": "Orders",
+                "message": null
+            })
+        );
+    }
+
+    #[test]
+    fn finished_carries_a_null_or_a_string_message() {
+        let finished = |message: Option<&str>| TransferEvent::Finished {
+            transfer_id: "T1".into(),
+            direction: Direction::Receive,
+            outcome: Outcome::Failed,
+            display_name: "Ada".into(),
+            collection_name: "Orders".into(),
+            message: message.map(str::to_string),
+        };
+        let none = finished(None).to_json().expect("serializes");
+        assert!(none.as_object().expect("an object").contains_key("message"));
+        assert!(none["message"].is_null());
+        let some = finished(Some("The bundle has no collection."))
+            .to_json()
+            .expect("serializes");
+        assert_eq!(some["message"], "The bundle has no collection.");
+        // The event is cloneable, the service fans it out to the bus and its own state.
+        assert_eq!(finished(Some("x")).clone(), finished(Some("x")));
+    }
+
+    #[test]
+    fn transfer_events_can_be_downcast_and_are_not_network_events() {
+        let event: Box<dyn PublishedEvent> = Box::new(TransferEvent::Progress {
+            transfer_id: "T".into(),
+            direction: Direction::Send,
+            done_bytes: 0,
+            total_bytes: 1,
+        });
+        assert!(event.as_any().downcast_ref::<TransferEvent>().is_some());
+        assert!(event.as_any().downcast_ref::<NetworkEvent>().is_none());
     }
 }
