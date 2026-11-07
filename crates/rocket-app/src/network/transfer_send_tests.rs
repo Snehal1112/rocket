@@ -328,9 +328,16 @@ async fn cancel_while_streaming_ends_once_as_cancelled() {
         "exactly one result"
     );
     assert_eq!(aborts_sent(&rig), vec![AbortReason::Cancelled]);
-    assert!(rig.audited().is_empty(), "nothing was sent in the audit sense");
+    assert_eq!(
+        rig.audited(),
+        vec![sent_row("cancelled")],
+        "a chunk left, so it is recorded"
+    );
     assert!(
-        matches!(rig.events.all().last(), Some(TransferEvent::Finished { .. })),
+        matches!(
+            rig.events.all().last(),
+            Some(TransferEvent::Finished { .. })
+        ),
         "no progress after the end"
     );
 }
@@ -559,7 +566,7 @@ async fn a_damaged_result_ends_the_send_as_damaged() {
         rig.events.finished(),
         vec![(id, Direction::Send, Outcome::Damaged)]
     );
-    assert!(rig.audited().is_empty());
+    assert_eq!(rig.audited(), vec![sent_row("damaged")]);
 }
 
 #[tokio::test]
@@ -570,7 +577,7 @@ async fn a_rejected_result_ends_the_send_as_rejected() {
         rig.events.finished(),
         vec![(id, Direction::Send, Outcome::Rejected)]
     );
-    assert!(rig.audited().is_empty());
+    assert_eq!(rig.audited(), vec![sent_row("rejected")]);
 }
 
 #[tokio::test]
@@ -609,7 +616,11 @@ async fn a_missing_result_times_out_as_unconfirmed() {
         vec![(id.clone(), Direction::Send, Outcome::Unconfirmed)],
         "every byte left, so this is not a failure"
     );
-    assert_eq!(rig.audited(), vec![sent_row("unconfirmed")], "the egress is recorded");
+    assert_eq!(
+        rig.audited(),
+        vec![sent_row("unconfirmed")],
+        "the egress is recorded"
+    );
     assert!(matches!(
         rig.events.all().last(),
         Some(TransferEvent::Finished { .. })
@@ -660,7 +671,10 @@ async fn a_peer_gone_after_the_final_ack_is_unconfirmed() {
 async fn a_peer_gone_after_the_last_chunk_but_before_the_final_ack_fails_the_send() {
     let rig = rig_with_ana();
     let id = delivered(&rig).await;
-    assert!(rig.events.finished().is_empty(), "delivered, no final ack yet");
+    assert!(
+        rig.events.finished().is_empty(),
+        "delivered, no final ack yet"
+    );
 
     rig.svc.on_peer_gone(dev(ANA));
     settle().await;
@@ -671,8 +685,15 @@ async fn a_peer_gone_after_the_last_chunk_but_before_the_final_ack_fails_the_sen
         vec![(id.clone(), Direction::Send, Outcome::Failed)],
         "the receiver may never have got the last chunk, so this is a failure"
     );
-    assert_eq!(rig.audited(), vec![sent_row("failed")], "the egress is recorded");
-    assert!(aborts_sent(&rig).is_empty(), "nothing is told to a gone peer");
+    assert_eq!(
+        rig.audited(),
+        vec![sent_row("failed")],
+        "the egress is recorded"
+    );
+    assert!(
+        aborts_sent(&rig).is_empty(),
+        "nothing is told to a gone peer"
+    );
 
     // A late final ack or result changes nothing.
     let (_, count, _) = offer_of(&rig);
@@ -696,7 +717,10 @@ async fn no_final_ack_for_the_idle_limit_fails_the_send_even_after_the_last_chun
 
     tokio::time::advance(Duration::from_secs(9)).await;
     settle().await;
-    assert!(rig.events.finished().is_empty(), "still within the idle limit");
+    assert!(
+        rig.events.finished().is_empty(),
+        "still within the idle limit"
+    );
 
     tokio::time::advance(Duration::from_secs(2)).await;
     settle().await;
@@ -717,7 +741,10 @@ async fn the_result_timer_starts_only_with_the_final_ack() {
 
     // The 60 s result timeout passes with no final ack: it must not end the send.
     past_the_result_wait().await;
-    assert!(rig.events.finished().is_empty(), "no result timer before the final ack");
+    assert!(
+        rig.events.finished().is_empty(),
+        "no result timer before the final ack"
+    );
 
     // The final ack starts the wait; now the result timeout gives `Unconfirmed`.
     let (_, count, _) = offer_of(&rig);
@@ -744,7 +771,10 @@ async fn a_peer_gone_fails_an_unanswered_offer() {
         rig.events.finished(),
         vec![(id, Direction::Send, Outcome::Failed)]
     );
-    assert!(aborts_sent(&rig).is_empty(), "nothing is told to a gone peer");
+    assert!(
+        aborts_sent(&rig).is_empty(),
+        "nothing is told to a gone peer"
+    );
     let again = rig.svc.send(&dev(ANA), "orders", false).await;
     assert!(again.is_ok(), "the peer's slot is free again");
 }
@@ -844,7 +874,11 @@ async fn the_tamper_hook_flips_a_byte_of_the_chosen_chunk() {
     for (_, data) in &chunks {
         joined.extend(STANDARD.decode(data).expect("base64"));
     }
-    assert_ne!(format!("{:x}", Sha256::digest(&joined)), sha, "the hash no longer fits");
+    assert_ne!(
+        format!("{:x}", Sha256::digest(&joined)),
+        sha,
+        "the hash no longer fits"
+    );
 }
 
 #[test]
@@ -860,10 +894,20 @@ fn notes_list_skipped_and_blanked_items_only() {
         items: vec![
             note("flows/a.yml", "flow", ExportAction::Skipped, None),
             note("flows/b.yml", "flow", ExportAction::Skipped, None),
-            note("auth", "bearer token", ExportAction::Blanked, Some("value removed")),
+            note(
+                "auth",
+                "bearer token",
+                ExportAction::Blanked,
+                Some("value removed"),
+            ),
             note("x.yml", "digest auth", ExportAction::Blanked, None),
             note("scripts/a.js", "rok script", ExportAction::Preserved, None),
-            note("req.yml", "oauth2", ExportAction::Translated, Some("converted")),
+            note(
+                "req.yml",
+                "oauth2",
+                ExportAction::Translated,
+                Some("converted"),
+            ),
         ],
     };
 
@@ -937,7 +981,10 @@ async fn the_sender_never_has_more_than_32_chunks_unacked() {
     rig.peers.add(dev(ANA), "Ana");
     let id = start(&rig).await;
     let (_, count, _) = offer_of(&rig);
-    assert!(count > 2 * MAX_UNACKED_CHUNKS, "the payload must outgrow the window");
+    assert!(
+        count > 2 * MAX_UNACKED_CHUNKS,
+        "the payload must outgrow the window"
+    );
 
     rig.svc.on_frame(dev(ANA), answer(&id, true));
     settle().await;
@@ -953,10 +1000,17 @@ async fn the_sender_never_has_more_than_32_chunks_unacked() {
         rig.svc.on_frame(dev(ANA), ack(&id, acked));
         settle().await;
         let sent = chunks_sent(&rig).len() as u32;
-        assert!(sent - acked <= MAX_UNACKED_CHUNKS, "sent {sent}, acked {acked}");
+        assert!(
+            sent - acked <= MAX_UNACKED_CHUNKS,
+            "sent {sent}, acked {acked}"
+        );
         assert!(sent <= count);
     }
-    assert_eq!(chunks_sent(&rig).len() as u32, count, "every chunk went out in the end");
+    assert_eq!(
+        chunks_sent(&rig).len() as u32,
+        count,
+        "every chunk went out in the end"
+    );
 
     rig.svc
         .on_frame(dev(ANA), result(&id, ResultOutcome::Completed));
@@ -981,7 +1035,10 @@ async fn no_ack_for_the_idle_limit_fails_the_send() {
 
     tokio::time::advance(Duration::from_secs(9)).await;
     settle().await;
-    assert!(rig.events.finished().is_empty(), "still within the idle limit");
+    assert!(
+        rig.events.finished().is_empty(),
+        "still within the idle limit"
+    );
 
     tokio::time::advance(Duration::from_secs(2)).await;
     settle().await;
@@ -1009,7 +1066,11 @@ async fn an_ack_past_the_chunks_sent_fails_the_send() {
         vec![(id, Direction::Send, Outcome::Failed)]
     );
     assert_eq!(aborts_sent(&rig), vec![AbortReason::Failed]);
-    assert_eq!(chunks_sent(&rig).len() as u32, MAX_UNACKED_CHUNKS, "no chunk after it");
+    assert_eq!(
+        chunks_sent(&rig).len() as u32,
+        MAX_UNACKED_CHUNKS,
+        "no chunk after it"
+    );
 }
 
 #[tokio::test]
@@ -1087,4 +1148,159 @@ fn outcome_names_match_the_wire_names() {
         let wire = serde_json::to_string(&outcome).expect("serializes");
         assert_eq!(wire, format!("\"{}\"", outcome_name(outcome)));
     }
+}
+
+#[tokio::test]
+async fn an_end_before_the_first_chunk_writes_no_audit_row() {
+    let rig = rig_with_ana();
+    let id = start(&rig).await;
+    rig.svc.on_frame(dev(ANA), abort(&id, AbortReason::Failed));
+    settle().await;
+    assert_eq!(
+        rig.events.finished(),
+        vec![(id, Direction::Send, Outcome::Failed)]
+    );
+    assert!(rig.audited().is_empty());
+    tokio::time::resume();
+
+    let rig = rig_with_ana();
+    let _id = start(&rig).await;
+    rig.svc.on_peer_gone(dev(ANA));
+    settle().await;
+    assert_eq!(rig.events.finished().len(), 1);
+    assert!(rig.audited().is_empty(), "no byte left the node");
+}
+
+#[tokio::test]
+async fn a_peer_gone_during_the_offer_write_leaves_no_event_for_the_refused_send() {
+    let rig = rig_with_ana();
+    let (reached, release) = rig.peers.hold_offer();
+    let svc = rig.svc.clone();
+    let task = tokio::spawn(async move { svc.send(&dev(ANA), "orders", false).await });
+    reached.notified().await;
+
+    rig.svc.on_peer_gone(dev(ANA));
+    settle().await;
+    release.notify_one();
+    let result = task.await.expect("joins");
+
+    assert!(result.is_err(), "the caller gets an error");
+    assert!(rig.events.finished().is_empty(), "and no id ever finished");
+    assert!(rig.audited().is_empty());
+    let again = rig.svc.send(&dev(ANA), "orders", false).await;
+    assert!(again.is_ok(), "the slot is free");
+}
+
+#[tokio::test]
+async fn an_abort_after_the_final_ack_is_a_failure_with_an_audit_row() {
+    for reason in [
+        AbortReason::Failed,
+        AbortReason::Cancelled,
+        AbortReason::Busy,
+    ] {
+        let rig = rig_with_ana();
+        let id = delivered_and_acked(&rig).await;
+
+        rig.svc.on_frame(dev(ANA), abort(&id, reason));
+        settle().await;
+
+        assert_eq!(
+            rig.events.finished(),
+            vec![(id, Direction::Send, Outcome::Failed)],
+            "{reason:?}"
+        );
+        assert_eq!(rig.audited(), vec![sent_row("failed")], "{reason:?}");
+        tokio::time::resume();
+    }
+}
+
+#[tokio::test]
+async fn an_abort_after_the_last_chunk_before_the_final_ack_is_a_failure() {
+    for reason in [AbortReason::Failed, AbortReason::Cancelled] {
+        let rig = rig_with_ana();
+        let id = delivered(&rig).await;
+
+        rig.svc.on_frame(dev(ANA), abort(&id, reason));
+        settle().await;
+
+        assert_eq!(
+            rig.events.finished(),
+            vec![(id, Direction::Send, Outcome::Failed)],
+            "{reason:?}"
+        );
+        assert_eq!(rig.audited(), vec![sent_row("failed")], "{reason:?}");
+        tokio::time::resume();
+    }
+}
+
+#[tokio::test]
+async fn a_failed_send_carries_a_fixed_message() {
+    let rig = rig_with_ana();
+    let id = delivered(&rig).await;
+
+    rig.svc.on_frame(dev(ANA), abort(&id, AbortReason::Failed));
+    settle().await;
+
+    assert_eq!(
+        rig.events.finished_messages(),
+        vec![Some("The transfer failed.".to_string())]
+    );
+}
+
+#[tokio::test]
+async fn a_peer_gone_twice_ends_the_send_once() {
+    let rig = rig_with_ana();
+    let id = delivered_and_acked(&rig).await;
+
+    rig.svc.on_peer_gone(dev(ANA));
+    rig.svc.on_peer_gone(dev(ANA));
+    settle().await;
+    rig.svc
+        .on_frame(dev(ANA), result(&id, ResultOutcome::Completed));
+    settle().await;
+
+    assert_eq!(
+        rig.events.finished(),
+        vec![(id, Direction::Send, Outcome::Unconfirmed)]
+    );
+    assert_eq!(rig.audited(), vec![sent_row("unconfirmed")]);
+}
+
+#[tokio::test]
+async fn a_peer_gone_ends_the_send_while_the_node_still_reads_online() {
+    let rig = rig_with_ana();
+    let _id = start(&rig).await;
+    assert!(rig.peers.is_online(&dev(ANA)), "the state is stale");
+
+    rig.svc.on_peer_gone(dev(ANA));
+    settle().await;
+
+    assert_eq!(rig.events.finished().len(), 1);
+}
+
+#[tokio::test]
+async fn repeated_acks_do_not_restart_the_idle_clock() {
+    let timing = Timing {
+        idle_limit: Duration::from_secs(10),
+        ..Timing::default()
+    };
+    let rig = rig_timed(big_files(), timing);
+    rig.peers.add(dev(ANA), "Ana");
+    let id = start(&rig).await;
+    rig.svc.on_frame(dev(ANA), answer(&id, true));
+    settle().await;
+    rig.svc.on_frame(dev(ANA), ack(&id, 1));
+    settle().await;
+
+    // The same ack again and again must not keep the send alive.
+    for _ in 0..4 {
+        tokio::time::advance(Duration::from_secs(4)).await;
+        rig.svc.on_frame(dev(ANA), ack(&id, 1));
+        settle().await;
+    }
+
+    assert_eq!(
+        rig.events.finished(),
+        vec![(id, Direction::Send, Outcome::Failed)]
+    );
 }

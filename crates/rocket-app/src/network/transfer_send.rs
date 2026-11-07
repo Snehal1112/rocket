@@ -42,8 +42,12 @@ pub(super) struct Out {
     pub last_ack: Instant,
     /// Wakes the stream when an ack opens the window. `notify_one` keeps a permit.
     pub ack_signal: Arc<Notify>,
-    /// The last chunk frame was built (every byte of the ZIP is out or on its way).
-    pub all_chunks_out: bool,
+    /// The highest `next_seq` the receiver acked. Only a higher one restarts the idle clock.
+    pub acked: u32,
+    /// True while the offer frame is being written. A peer-gone notice in that time only marks
+    /// `lost`, so `send` can return an error without a `Finished` for an id nobody got.
+    pub offer_pending: bool,
+    pub lost: bool,
     /// The 60 s result timer runs only once the receiver's final `ChunkAck` arrived.
     pub result_timer_started: bool,
 }
@@ -219,8 +223,8 @@ impl TransferService {
     ) -> DomainResult<Vec<String>> {
         let export = Arc::clone(&self.deps.export);
         let name = collection.to_string();
-        let (zip, notes) = tokio::task::spawn_blocking(
-            move || -> DomainResult<(Vec<u8>, Vec<String>)> {
+        let (zip, notes) =
+            tokio::task::spawn_blocking(move || -> DomainResult<(Vec<u8>, Vec<String>)> {
                 let out = export.export_bruno(&name, include_environments)?;
                 if out.report.exported == 0 {
                     return Err(DomainError::InvalidInput(
@@ -229,10 +233,9 @@ impl TransferService {
                 }
                 let notes = export_notes(&out.report);
                 Ok((out.bytes, notes))
-            },
-        )
-        .await
-        .map_err(|e| DomainError::Internal(format!("The export task failed: {e}")))??;
+            })
+            .await
+            .map_err(|e| DomainError::Internal(format!("The export task failed: {e}")))??;
         self.offer_bytes(device, id, collection, zip).await?;
         Ok(notes)
     }
@@ -275,13 +278,31 @@ impl TransferService {
                 machine,
                 last_ack: now,
                 ack_signal: Arc::new(Notify::new()),
-                all_chunks_out: false,
+                acked: 0,
+                offer_pending: true,
+                lost: false,
                 result_timer_started: false,
             },
         );
-        if let Err(e) = self.deps.network.send_to(device, offer).await {
+        let sent = self.deps.network.send_to(device, offer).await;
+        let lost = {
+            let mut inner = self.lock();
+            match inner.outgoing.get_mut(id) {
+                Some(out) => {
+                    out.offer_pending = false;
+                    out.lost
+                }
+                None => false,
+            }
+        };
+        if let Err(e) = sent {
             self.take_out(id);
             return Err(e);
+        }
+        if lost {
+            // The peer went away while the offer was written: nothing is reported for this id.
+            self.take_out(id);
+            return Err(offline());
         }
         self.spawn_offer_timer(id.clone());
         Ok(())
@@ -357,12 +378,16 @@ impl TransferService {
             if out.device != *from {
                 return false;
             }
-            // After the last chunk the machine is `Done` and ignores the abort; a failure
-            // report while the sender waits for the result still counts.
-            out.machine
-                .on_abort(reason)
-                .or_else(|| out.machine.fail_with(failure_outcome(reason)))
-                .is_some()
+            // Once every chunk is out the receiver holds the whole collection, so any abort is
+            // a failure, whatever its reason, and the egress is audited.
+            if out.machine.last_chunk_built() {
+                out.machine.fail_with(Outcome::Failed).is_some()
+            } else {
+                out.machine
+                    .on_abort(reason)
+                    .or_else(|| out.machine.fail_with(failure_outcome(reason)))
+                    .is_some()
+            }
         };
         if ended {
             if let Some(out) = self.take_out(id) {
@@ -401,8 +426,11 @@ impl TransferService {
             if out.machine.on_ack(next_seq).is_some() {
                 (true, false)
             } else {
-                out.last_ack = now;
-                out.ack_signal.notify_one();
+                if next_seq > out.acked {
+                    out.acked = next_seq;
+                    out.last_ack = now;
+                    out.ack_signal.notify_one();
+                }
                 // Only the final ack starts the wait for the result (and so the only
                 // `Unconfirmed` end). Before it a lost peer is `Failed`.
                 let start = out.machine.awaiting_result() && !out.result_timer_started;
@@ -429,12 +457,17 @@ impl TransferService {
     pub(super) fn outgoing_gone(&self, device: &DeviceId) {
         let gone: Vec<(TransferId, Out)> = {
             let mut inner = self.lock();
-            let ids: Vec<TransferId> = inner
-                .outgoing
-                .iter()
-                .filter(|(_, out)| out.device == *device)
-                .map(|(id, _)| id.clone())
-                .collect();
+            let mut ids: Vec<TransferId> = Vec::new();
+            for (id, out) in inner.outgoing.iter_mut() {
+                if out.device != *device {
+                    continue;
+                }
+                if out.offer_pending {
+                    out.lost = true;
+                } else {
+                    ids.push(id.clone());
+                }
+            }
             ids.into_iter()
                 .filter_map(|id| inner.take_out(&id).map(|out| (id, out)))
                 .collect()
@@ -465,7 +498,8 @@ impl TransferService {
     }
 
     /// The one place a send ends. The caller has already removed the transfer, and the machine
-    /// holds the outcome. `Completed`, `Unconfirmed` and every `Failed` end are audited.
+    /// holds the outcome. One audit row is written when at least one chunk went out, whatever
+    /// the outcome; a send that ended before the first chunk writes none.
     fn finish_out(&self, id: &TransferId, out: Out) {
         let outcome = out.machine.outcome().unwrap_or(Outcome::Failed);
         self.emit(TransferEvent::Finished {
@@ -476,10 +510,7 @@ impl TransferService {
             collection_name: out.collection.clone(),
             message: (outcome == Outcome::Failed).then(|| SEND_FAILED_MESSAGE.to_string()),
         });
-        if matches!(
-            outcome,
-            Outcome::Completed | Outcome::Unconfirmed | Outcome::Failed
-        ) {
+        if out.machine.done_bytes() > 0 {
             self.audit(AuditEventKind::NetworkCollectionSent {
                 device_id: out.device.short(),
                 collection: out.collection,
@@ -624,7 +655,10 @@ impl TransferService {
                     return;
                 };
                 if !out.machine.window_open() && out.machine.is_active() {
-                    StreamStep::Wait(out.ack_signal.clone(), out.last_ack + self.timing.idle_limit)
+                    StreamStep::Wait(
+                        out.ack_signal.clone(),
+                        out.last_ack + self.timing.idle_limit,
+                    )
                 } else {
                     let start = out.machine.done_bytes() as usize;
                     let end = (start + CHUNK_BYTES).min(out.zip.len());
@@ -645,10 +679,7 @@ impl TransferService {
                             frame,
                             done: out.machine.done_bytes(),
                             total: out.machine.total_bytes(),
-                            last: {
-                                out.all_chunks_out = out.machine.last_chunk_built();
-                                out.all_chunks_out
-                            },
+                            last: out.machine.last_chunk_built(),
                         },
                         // The machine says the transfer is not streaming (ended meanwhile).
                         Err(_) => return,
@@ -681,6 +712,9 @@ impl TransferService {
             }
             {
                 // The entry may have left while the frame was in flight. Then nothing more is said.
+                // The event goes out under the lock on purpose: `Finished` is emitted after the
+                // entry is removed, so this keeps `Progress` before it. The publisher must only
+                // enqueue and never call back into the service.
                 let inner = self.lock();
                 if !inner.outgoing.contains_key(id) {
                     return;
@@ -707,9 +741,7 @@ impl TransferService {
         let now = Self::now();
         let limit = self.timing.idle_limit;
         let Some(out) = self.take_out_if(id, |o| {
-            !o.machine.window_open()
-                && !o.machine.awaiting_result()
-                && o.last_ack + limit <= now
+            !o.machine.window_open() && !o.machine.awaiting_result() && o.last_ack + limit <= now
         }) else {
             // An ack came first, or the send already ended: the loop looks again.
             return !self.lock().outgoing.contains_key(id);

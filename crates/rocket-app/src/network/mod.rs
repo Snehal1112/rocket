@@ -46,8 +46,8 @@ pub use pairing::{PairingDecision, PairingStarted};
 pub use service::{paired_limit_message, NetworkDeps, NetworkHandle, NetworkService};
 pub use status::{NetworkState, NetworkStatus};
 pub use transfer::{PeerSender, Timing, TransferDeps, TransferService};
-pub use transfer_send::SendStarted;
 pub use transfer_ports::{
     receiver_display_name, CollectionImportPort, ImportedCollection, StagedFile, StagedZip,
     TransferStaging, UNSAFE_ZIP_MESSAGE,
 };
+pub use transfer_send::SendStarted;

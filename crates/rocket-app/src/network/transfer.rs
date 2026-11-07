@@ -253,7 +253,8 @@ impl TransferService {
     }
 
     /// Puts an item into the queue. A full queue drops a frame, but a peer-gone notice must
-    /// not be lost, so it runs right here.
+    /// not be lost, so it runs right here. That puts the event and audit publishes in the
+    /// socket loop, which is fine only while both publishers just enqueue.
     fn enqueue(&self, item: Item) {
         match self.frames.try_send(item) {
             Ok(()) => {}
@@ -262,7 +263,10 @@ impl TransferService {
                 self.handle_gone(&device);
             }
             Err(_) => {
-                tracing::debug!(code = "network_transfer_frame_dropped", "frame queue is full");
+                tracing::debug!(
+                    code = "network_transfer_frame_dropped",
+                    "frame queue is full"
+                );
             }
         }
     }

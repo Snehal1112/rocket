@@ -17,10 +17,10 @@ use rocket_network::{
     chunk_count_for, AbortReason, DeviceId, Direction, Outcome, PeerMessage, ResultOutcome,
     TransferEvent, TransferSink,
 };
-use std::io::{Cursor, Read};
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{EventPublisher, PublishedEvent};
 use sha2::{Digest, Sha256};
+use std::io::{Cursor, Read};
 use tokio::sync::Notify;
 
 use super::transfer::{PeerSender, Timing, TransferDeps, TransferService};
@@ -158,6 +158,7 @@ pub(crate) struct FakePeers {
     sent: Mutex<Vec<(DeviceId, PeerMessage)>>,
     sink: Mutex<Option<Arc<dyn TransferSink>>>,
     hold: Mutex<Option<Hold>>,
+    hold_offer: Mutex<Option<(Arc<Notify>, Arc<Notify>)>>,
 }
 
 impl FakePeers {
@@ -200,6 +201,13 @@ impl FakePeers {
         self.sink.lock().expect("sink lock").clone()
     }
 
+    /// Parks the send of the next offer until `release` is notified. `reached` fires when it parks.
+    pub fn hold_offer(&self) -> (Arc<Notify>, Arc<Notify>) {
+        let pair = (Arc::new(Notify::new()), Arc::new(Notify::new()));
+        *self.hold_offer.lock().expect("hold offer lock") = Some(pair.clone());
+        pair
+    }
+
     /// Parks the send of chunk `seq` until `release` is notified. `reached` fires when it parks.
     pub fn hold_chunk(&self, seq: u32) -> (Arc<Notify>, Arc<Notify>) {
         let reached = Arc::new(Notify::new());
@@ -225,6 +233,13 @@ impl PeerSender for FakePeers {
                 _ => None,
             }
         };
+        if matches!(message, PeerMessage::CollectionOffer { .. }) {
+            let parked = self.hold_offer.lock().expect("hold offer lock").take();
+            if let Some((reached, release)) = parked {
+                reached.notify_one();
+                release.notified().await;
+            }
+        }
         if let Some((reached, release)) = hold {
             reached.notify_one();
             release.notified().await;
@@ -232,7 +247,10 @@ impl PeerSender for FakePeers {
         if !self.online.lock().expect("online lock").contains(device) {
             return Err(DomainError::InvalidInput("That node is offline.".into()));
         }
-        self.sent.lock().expect("sent lock").push((*device, message));
+        self.sent
+            .lock()
+            .expect("sent lock")
+            .push((*device, message));
         Ok(())
     }
 
@@ -275,7 +293,13 @@ impl RecordingTransferEvents {
                     collection_name,
                     size_bytes,
                     ..
-                } => Some((transfer_id, display_name, short_id, collection_name, size_bytes)),
+                } => Some((
+                    transfer_id,
+                    display_name,
+                    short_id,
+                    collection_name,
+                    size_bytes,
+                )),
                 _ => None,
             })
             .collect()
@@ -389,7 +413,11 @@ impl FakeStaging {
             c.discarded() + c.finished(),
             "every staged file is discarded or finished"
         );
-        assert_eq!(c.released(), c.finished(), "every finished file is released");
+        assert_eq!(
+            c.released(),
+            c.finished(),
+            "every finished file is released"
+        );
         assert_eq!(c.purges(), 0, "the service never purges");
     }
 }
@@ -631,10 +659,24 @@ pub(crate) struct Link<'r> {
 
 impl<'r> Link<'r> {
     /// `a` knows `b_id` as `b_name` and `b` knows `a_id` as `a_name`; both are paired and online.
-    pub fn new(a: &'r Rig, a_id: DeviceId, a_name: &str, b: &'r Rig, b_id: DeviceId, b_name: &str) -> Link<'r> {
+    pub fn new(
+        a: &'r Rig,
+        a_id: DeviceId,
+        a_name: &str,
+        b: &'r Rig,
+        b_id: DeviceId,
+        b_name: &str,
+    ) -> Link<'r> {
         a.peers.add(b_id, b_name);
         b.peers.add(a_id, a_name);
-        Link { a, a_id, b, b_id, a_seen: 0, b_seen: 0 }
+        Link {
+            a,
+            a_id,
+            b,
+            b_id,
+            a_seen: 0,
+            b_seen: 0,
+        }
     }
 
     /// Moves every frame sent since the last call, both ways. Returns how many moved.
@@ -658,7 +700,11 @@ impl<'r> Link<'r> {
     }
 
     /// Pumps on the real clock until `done` holds. Fails the test after about 5 seconds.
-    pub async fn run_until(&mut self, drop: &dyn Fn(&PeerMessage) -> bool, done: impl Fn() -> bool) {
+    pub async fn run_until(
+        &mut self,
+        drop: &dyn Fn(&PeerMessage) -> bool,
+        done: impl Fn() -> bool,
+    ) {
         for _ in 0..500 {
             self.pump(drop);
             if done() {
