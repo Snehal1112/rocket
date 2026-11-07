@@ -15,14 +15,14 @@ A user sends one collection to a paired node, like AirDrop. It is a one-time cop
 | 3 | The receiver always gets a new collection in the active workspace. Nothing is overwritten. A name clash gets a suffix, for example `Orders (from Ana)`. | An import can never destroy data. |
 | 4 | The receiver is asked for every offer (sender, name, size). An offer expires after 2 minutes. No per-peer auto-accept. | Pairing proves who the peer is, not that the user wants their data. Per-peer permissions stay a later idea (MVP spec, section 11). |
 | 5 | Transport: chunks over the existing peer WebSocket (`/peer`) with new `PeerMessage` variants. No new HTTP route. | Reuses the paired-keys-only rule and the frame allow-list. Works whichever side dialled. |
-| 6 | Received scripts stay untrusted. The imported collection goes through the existing collection trust gate. | A pushed collection cannot run code until the receiver trusts it. |
+| 6 | A received collection has no trust record, so the existing collection trust gate gives it no Developer mode, no extra script folders, no agent runs, no host env and no RocketVault access until the receiver allows them. Its pre-request and test scripts DO run in the Safe sandbox on the first Send. There is no separate script gate. The incoming dialog warns about this before Accept. | The trust gate already covers the dangerous capabilities. A script gate is a separate project; the warning keeps the user informed. |
 
 ## 3. Success criteria
 
 - A Linux node sends a collection to a paired Mac node (and the reverse). The receiver accepts and finds a new collection with the same requests and folders.
 - Declining, ignoring for 2 minutes, a dropped connection, a damaged payload and an unsafe ZIP each end with a clear message and no collection created.
 - A secret value in the source collection is not in the received files.
-- A pushed script does not run before the receiver trusts the collection.
+- A received collection gets no trust record: Developer mode, extra script folders, agent runs, host env and vault access stay denied until the receiver allows them, even when the ZIP asks for `extensions.rocketapi.sandboxMode: developer`. Its scripts run in the Safe sandbox, and the incoming dialog says so before Accept.
 - The size limit is exact: 10 MiB passes, 10 MiB + 1 byte is refused before any offer.
 
 ## 4. Non-goals
@@ -38,8 +38,8 @@ A user sends one collection to a paired node, like AirDrop. It is a one-time cop
 2. The sender builds the ZIP with `export_bruno` and computes its SHA-256. If the ZIP is over 10 MiB the send stops with "This collection is too big to send (X MiB, limit 10)." and no offer is made.
 3. The sender sends `CollectionOffer`: transfer id, collection name, size in bytes, chunk count, SHA-256.
 4. The receiver shows a toast and a dialog with sender name, short device id, collection name and size, with Accept and Decline.
-5. On Accept the receiver sends `OfferAnswer { accept: true }`. The sender streams `Chunk` frames. The receiver stages them in a temp file.
-6. After the last chunk the receiver checks size and SHA-256, validates the ZIP with the safety checks in section 8, and imports it with the Bruno importer as a new collection. It then sends `TransferResult` with the true outcome. The sender waits for that frame (up to `SENDER_RESULT_TIMEOUT`, 60 s) and only then shows "Sent" and writes the audit entry. Both sides get a finished event.
+5. On Accept the receiver sends `OfferAnswer { accept: true }`. The sender streams `Chunk` frames with an ack window: at most `MAX_UNACKED_CHUNKS` (32) chunks may be sent and not yet acknowledged. The receiver sends `ChunkAck` after every `ACK_EVERY_CHUNKS` (16) chunks accepted in order and after the last chunk. The receiver stages the chunks in a temp file.
+6. After the last chunk the receiver checks the staged length against `size_bytes` and the SHA-256, validates the ZIP with the safety checks in section 8, and imports it with the Bruno importer as a new collection. It then sends `TransferResult` with the true outcome. The sender waits for that frame (up to `SENDER_RESULT_TIMEOUT`, 60 s) and only then shows "Sent" and writes the audit entry with outcome `completed`. If the peer goes away, or the 60 s pass with no result, after the receiver's final `ChunkAck` (the ack for the last chunk) was received, the sender ends with `unconfirmed` ("Sent, but the other node did not confirm."), not with a failure, and writes the audit entry with outcome `unconfirmed`, because the receiver confirmed every chunk. If the peer goes away or the stream stalls before that final ack arrived, even when the last chunk was already sent, the sender ends with `failed` ("Sending failed.") and writes the audit entry with outcome `failed`; the 60 s result timer does not run until the final ack arrives. Both sides get a finished event.
 
 A transfer id is a random 128-bit value created by the sender. It is not secret. It only ties frames together, and every frame is already inside the authenticated, paired TLS connection.
 
@@ -52,17 +52,24 @@ CollectionOffer { transfer_id, name, size_bytes, chunk_count, sha256 }
 OfferAnswer     { transfer_id, accept }
 Chunk           { transfer_id, seq, data }        // data is base64
 TransferAbort   { transfer_id, reason }           // reason: cancelled | failed | too_big | busy | expired
+ChunkAck        { transfer_id, next_seq }         // receiver to sender; next_seq is the count of chunks accepted in order
 TransferResult  { transfer_id, outcome }          // receiver to sender after the last chunk; outcome: completed | damaged | rejected | failed
 ```
 
+Six new variants in total (type tags `collection_offer`, `offer_answer`, `chunk`, `transfer_abort`, `chunk_ack`, `transfer_result`).
+
 - Each frame stays under `MAX_FRAME_BYTES` (64 KiB). `CHUNK_BYTES` is 32 KiB of raw data, about 43 KiB after base64.
 - A frame for an unknown, finished or expired transfer id is ignored.
+- Flow control: the receiver sends `ChunkAck { next_seq }` after every 16 chunks accepted in order (`next_seq` a multiple of 16) and after the last chunk (`next_seq == chunk_count`). The sender keeps at most 32 chunks sent and not acknowledged, and waits for an ack before it sends more. An ack whose `next_seq` goes backwards or past the chunks sent aborts the transfer with `failed`. If no ack arrives for the per-transfer idle limit (120 s), the sender aborts with `failed` (`Outcome::Failed`).
+- Liveness: any inbound transfer frame on a peer socket counts as a pong, so the ping rule cannot mark a node offline while a transfer is moving. The block-list check that runs for every inbound frame is skipped for `Chunk` and `ChunkAck`: they only touch a transfer that was admitted after that check, and blocking a device closes its socket, which ends its transfers.
+- Lost frames: a dropped or reordered chunk fails the transfer at the next chunk by the sequence rule. A stream that stops (a lost last chunk, a socket replaced by the duplicate-connection rule) ends with `failed` within the idle limit on the side that waits for a frame; there is no retransmit. A sender whose receiver already acknowledged the last chunk (the final `ChunkAck`) ends with `unconfirmed` instead (section 5). A sender that sent the last chunk but never got the final ack ends with `failed` at its idle limit (120 s), or at once when the peer goes away.
+- Offer names: not blank, at most 200 characters, no control characters (Unicode Cc) and no bidi or zero-width format characters (U+00AD, U+061C, U+180E, U+200B to U+200F, U+202A to U+202E, U+2060 to U+2064, U+2066 to U+2069, U+FEFF). The sender checks the same rule before any offer and refuses with "This collection name cannot be sent. Rename it and try again."
 - A `Chunk` before `OfferAnswer { accept: true }`, a `seq` out of order or past `chunk_count`, or data beyond `size_bytes` aborts the transfer with `failed`.
 - The pinned test `PROTOCOL_VERSION == 1` in `limits.rs` changes to 2. The variant name `send_collection` is not used, because an existing test uses it as an example of an unknown type.
 
 ## 7. Limits
 
-All constants live in `rocket-network/src/limits.rs`.
+All constants live in `rocket-network/src/limits.rs`. `rocket-import` does not depend on `rocket-network`, so it keeps its own copy of `MAX_ZIP_ENTRIES` and `MAX_UNZIPPED_BYTES` and a test in `rocket-app` (`the_zip_limits_equal_the_protocol_limits`, which sees both crates) pins the copies equal to these values.
 
 | Constant | Value |
 |---|---|
@@ -74,33 +81,37 @@ All constants live in `rocket-network/src/limits.rs`.
 | `OFFERS_PER_PEER_PER_MINUTE` | 5 (same rate as pairing requests) |
 | `MAX_UNZIPPED_BYTES` | 50 MiB |
 | `MAX_ZIP_ENTRIES` | 5000 |
+| `ACK_EVERY_CHUNKS` | 16 |
+| `MAX_UNACKED_CHUNKS` | 32 |
+| `SENDER_RESULT_TIMEOUT` | 60 s |
+| idle limit between frames | 120 s (a `TransferService` timing field, not a constant) |
 
 An offer over a limit is refused with `TransferAbort { busy }` and the sender sees "<name> is busy. Try again in a minute."
 
 ## 8. Security
 
-- The five new variants are added to the `PeerMessage` allow-list. The peer server still calls only `NetworkService`. `NetworkService` hands the five variants to a `TransferSink` (a trait in `rocket-network`) and never touches collections. The import goes through the `CollectionImportPort` after the receiver pressed Accept.
+- The six new variants are added to the `PeerMessage` allow-list. The peer server still calls only `NetworkService`. `NetworkService` hands the six variants to a `TransferSink` (a trait in `rocket-network`) and never touches collections. The import goes through the `CollectionImportPort` after the receiver pressed Accept.
 - The receiver never writes into the workspace before Accept, and never overwrites an existing collection.
-- ZIP safety on import: a new strict validator (`rocket_import::transfer_zip::validate`) runs on the staged file before the importer sees it. It rejects absolute paths, `..` segments (`enclosed_name()` is `None`), symlink entries, more than `MAX_ZIP_ENTRIES` entries, and more than `MAX_UNZIPPED_BYTES` unzipped. The unzipped size is counted by actually decompressing every entry into a counter, so a lying declared size cannot pass. The existing extractor skips unsafe entries silently and has limits of 20000 entries and 512 MiB, so it stays as a second line of defence and is not the check.
-- The temp import folder and the staged chunk file are deleted on success, abort, expiry and at app start.
-- Imported scripts are untrusted until the receiver trusts the collection (existing collection trust gate).
-- Audit: two new `AuditEventKind` values, `network_collection_sent` and `network_collection_received`, with the short device id and the collection name. The full device id and the payload are never logged.
+- ZIP safety on import: a new strict validator (`rocket_import::transfer_zip::validate`) runs on the staged file before the importer sees it. It rejects absolute paths, `..` segments (`enclosed_name()` is `None`), symlink entries, entry names with `:`, control or format characters, a trailing dot or space, or a Windows reserved name (`CON`, `PRN`, `AUX`, `NUL`, `COM1` to `COM9`, `LPT1` to `LPT9`, any case, with or without an extension), duplicate entry names (compared case-folded), more than `MAX_ZIP_ENTRIES` entries, and more than `MAX_UNZIPPED_BYTES` unzipped. The unzipped size is counted by actually decompressing every entry into a counter, so a lying declared size cannot pass. The existing extractor skips unsafe entries silently and has limits of 20000 entries and 512 MiB, so it stays as a second line of defence and is not the check.
+- The temp import folder and the staged chunk file are deleted on success, abort, expiry and at app start. The adapter's temp ZIP copy lives in a per-process private folder (mode 0700, random name) under `~/.rocket-api/network/import-tmp/`, never in the shared system temp dir. The strict validator runs on that copy, the exact file the importer reads. The startup purge removes only folders whose owner process has exited (their lock file can be locked) and folders without a lock file that are older than the current process start, so a second running instance never deletes the first one's copy.
+- A received collection has no trust record, so it gets no Developer mode, extra script folders, agent runs, host env or vault access until the receiver allows them (existing collection trust gate). Its scripts DO run in the Safe sandbox on the first Send; there is no script gate. The incoming dialog shows a warning, with the script count when the offer or a ZIP preview has it (this version has neither, so the warning text stands alone).
+- Audit (CC6.7): two new `AuditEventKind` values, `network_collection_sent` and `network_collection_received`, with the short device id, the collection name and an `outcome` (the `Outcome` wire name). The sender writes `network_collection_sent` for `completed`, `unconfirmed` and, when it lost the stream after the last chunk was sent but before the final ack, `failed` (every egress is recorded). The receiver writes `network_collection_received` for `completed`, `damaged` and `rejected` (a tampered or hostile payload is evidence). The full device id and the payload are never logged.
 - Nothing about the payload, the name or the sender's collection path is logged at info level.
 
 ## 9. Components
 
-**`rocket-network`** (pure, no I/O): the five `PeerMessage` variants, the transfer state machine (offered, accepted, receiving, done, aborted, expired), the constants in section 7, and the `TransferSink` trait (`on_frame(&self, from: DeviceId, message: PeerMessage)` and `on_peer_gone(&self, device: DeviceId)`). `NetworkService` calls `on_peer_gone` when a peer socket ends and when a pairing is removed, so the receiver cleans up at once instead of waiting for an idle timer. A 120 s idle limit between frames stays as a fallback.
+**`rocket-network`** (pure, no I/O): the six `PeerMessage` variants, the transfer state machines (offered, accepted, receiving, done, aborted, expired) with the ack window, the constants in section 7, and the `TransferSink` trait (`on_frame(&self, from: DeviceId, message: PeerMessage)` and `on_peer_gone(&self, device: DeviceId)`). `NetworkService` calls `on_peer_gone` when a peer socket ends and when a pairing is removed, so the receiver cleans up at once instead of waiting for an idle timer. A 120 s idle limit between frames stays as a fallback.
 
-**`rocket-app`**: `NetworkService` gains `send_to(&self, device: &DeviceId, message: PeerMessage) -> DomainResult<()>` (a bounded send on the connection's outbound channel, which does not exist as a public call today) and `set_transfer_sink(&self, sink: Arc<dyn TransferSink>)`. `run_socket` passes the four new variants to the sink. `TransferService`, trait-first:
+**`rocket-app`**: `NetworkService` gains `send_to(&self, device: &DeviceId, message: PeerMessage) -> DomainResult<()>` (a bounded send on the connection's outbound channel, which does not exist as a public call today) and `set_transfer_sink(&self, sink: Arc<dyn TransferSink>)`. `run_socket` passes the six new variants to the sink. `TransferService`, trait-first:
 - Sender: ask `CollectionExportService::export_bruno(collection, include_environments)` for the ZIP bytes (it returns them in memory), hash it, offer, wait for the answer, stream chunks.
-- Receiver: hold pending offers with their expiry, stage chunks, verify size and hash, import through a new `CollectionImportPort` (`import_zip(&self, zip_path: &Path, display_name: &str) -> DomainResult<ImportedCollection>`). The receiver picks the display name: the offered name, or `<name> (from <sender>)` if a collection with that name exists. The importer's own `-1`, `-2` suffix still applies if that also exists.
+- Receiver: hold pending offers with their expiry, stage chunks, send `ChunkAck`, verify size and hash, import through a new `CollectionImportPort` (`import_zip(&self, zip_path: &Path, display_name: &str) -> DomainResult<ImportedCollection>`). The receiver picks the display name: the offered name, or `<name> (from <sender>)` if a collection with that name exists. The importer's own `-1`, `-2` suffix still applies if that also exists.
 - Publishes `TransferEvent` (`offerIncoming`, `progress`, `finished`) fire-and-forget, with the usual event rules (camelCase tag, snake_case fields, contract test).
 
-**`rocket-import`**: `transfer_zip::validate(path) -> ImportResult<()>`, the strict check in section 8.
+**`rocket-import`**: `transfer_zip::validate(files, path) -> ImportResult<()>`, the strict check in section 8. The importer records the exact collection folders it created in one run (`ImportService::created_roots`), so a failed transfer import removes only those.
 
 **`rocket-infra`**: stages chunks in a temp file under `~/.rocket-api/` (`TransferStaging`), deleted on success, abort, expiry and at app start.
 
-**`src-tauri`**: the `CollectionImportPort` adapter lives here, on top of `ImportServiceFactory` and `import_auto_from_zip`, because that factory is in `src-tauri/src/import_wiring.rs` and `rocket-infra` cannot depend on it. The importer takes a ZIP path, not bytes, which is why the chunks are staged to a file first. It names the collection from the ZIP file stem, so the adapter stages the file as `<display name>.zip`; Plan 2 has a probe test that pins this.
+**`src-tauri`**: the `CollectionImportPort` adapter lives here, on top of `ImportServiceFactory` and `import_auto_from_zip`, because that factory is in `src-tauri/src/import_wiring.rs` and `rocket-infra` cannot depend on it. The importer takes a ZIP path, not bytes, which is why the chunks are staged to a file first. It names the collection from the ZIP file stem, so the adapter copies the staged file to `<private temp dir>/<display name>.zip`, validates that copy and imports it; Plan 2 has a probe test that pins the stem rule.
 
 **`src-tauri`**: commands `network_send_collection`, `network_respond_transfer`, `network_cancel_transfer`, all added to `src-tauri/app-commands.txt`. Commands stay thin. A new event channel `network-transfer`.
 
@@ -116,28 +127,33 @@ An offer over a limit is refused with `TransferAbort { busy }` and the sender se
 |---|---|---|
 | Peer offline | The node is not offered in the dialog | n/a |
 | Receiver declines | "<name> declined." | n/a |
+| Receiver cancels while receiving | "<name> cancelled the transfer." | The dialog closes |
+| Sender goes offline while the offer is pending | n/a | "The other node went offline." (the open dialog switches to it) |
 | Offer unanswered for 2 minutes | "The request expired." | "The request expired." (an open dialog switches to it) |
 | Over 10 MiB | "This collection is too big to send (X MiB, limit 10)." | n/a |
 | Too many pending offers | "<name> is busy. Try again in a minute." | n/a |
-| Connection drops mid-transfer | "Sending failed. Try again." | "Receiving failed." (staged file deleted) |
+| Connection drops mid-transfer, or no frame for the idle limit | "Sending failed. Try again." | "Receiving failed." (staged file deleted) |
+| Connection drops, or no result within 60 s, after the receiver's final `ChunkAck` | "Sent, but the other node did not confirm." (audited as `unconfirmed`) | Whatever its import produced |
+| Connection drops or the stream stalls after the last chunk was sent but before the final `ChunkAck` | "Sending failed." (audited as `failed`) | "Receiving failed." (after up to 120 s when a chunk was lost) |
+| Offer name breaks the name rule | "This collection name cannot be sent. Rename it and try again." inline in the send dialog | n/a |
 | Hash or size mismatch | "Sending failed. Try again." | "The collection arrived damaged and was not imported." |
 | Unsafe ZIP | "Sending failed. Try again." | "The collection was rejected because it is not safe to import." |
 | Import fails | "Sending failed. Try again." (the result frame carries only `failed`) | The failure text from the importer, carried in the finished event's `message`. Nothing is created |
 | Sender cancels a pending offer | n/a | "<name> cancelled the transfer." The pending offer and its dialog are closed |
-| Too big (event on the receiving or sending side) | "This collection is too big to send (X MiB, limit 10)." as an inline error in the send dialog. A later `too_big` event carries no size, so its toast says "(limit 10 MiB)". | n/a |
+| Too big (sending side only) | "This collection is too big to send (X MiB, limit 10)." as an inline error in the send dialog. A later `too_big` event carries no size, so its toast says "(limit 10 MiB)". | n/a (a refused offer emits nothing on the receiver) |
 
-A failed import is cleaned up: the importer's own all-or-nothing behaviour plus a removal of any collection folder it created, so no half-written collection stays. The import runs inside the workspace, so the new folder can be briefly visible while it runs. Temp ZIP copies and staged chunk files are deleted on every exit path and at app start.
+A failed import is cleaned up: the importer's own all-or-nothing behaviour plus a removal of exactly the collection folders the importer reports it created in that run (never a diff of the collection list), so no half-written collection stays and a collection created at the same time by anything else survives. The import runs inside the workspace, so the new folder can be briefly visible while it runs. Temp ZIP copies and staged chunk files are deleted on every exit path and at app start.
 
 ## 11. Testing
 
 - Domain: the state machine for expiry, abort, duplicate offer, unknown id, out-of-order and surplus chunks. Exact boundary tests for 10 MiB and 10 MiB + 1 byte, and for the entry and unzipped-size limits.
-- Service: `TransferService` with fakes for export, import and peer ports. Cases: accept, decline, expiry, hash mismatch, cancel by either side, a second offer from the same peer while one is active, three pending offers and a fourth.
+- Service: `TransferService` with fakes for export, import and peer ports. Cases: accept, decline, expiry, hash mismatch, size mismatch, cancel by either side (including a pending offer), a second offer from the same peer while one is active, three pending offers and a fourth, the ack window on a slow link, a dropped chunk, a stalled stream, peer gone after the final ack (`unconfirmed`), peer gone after the last chunk but before the final ack (`failed`, audited `failed`), `include_environments = false` with environments in the source.
 - ZIP safety: absolute path, `..`, symlink entry, entry-count bomb, unzipped-size bomb, a ZIP whose declared sizes lie.
-- End to end over the real transport (same style as `crates/rocket-app/src/network/e2e_tests.rs`): a push and import, decline, drop mid-transfer, a tampered chunk.
+- End to end over the real transport (same style as `crates/rocket-app/src/network/e2e_tests.rs`): a push and import, decline, drop mid-transfer, a tampered chunk, a throttled receiver that keeps the ack window, cancel of a pending offer by either side, a send without environments.
 - Secret check: a collection with a literal token and a secret variable is pushed. The received files contain neither value.
-- Wire contract tests pin the `TransferEvent` keys and the JSON shape of the five `PeerMessage` variants.
+- Wire contract tests pin the `TransferEvent` keys and the JSON shape of the six `PeerMessage` variants.
 - Frontend: the store slice, the bridge handler, the send dialog (offline nodes hidden, environments off by default), the incoming dialog and its expiry while open, a duplicate `offerIncoming` (one row, one toast), a late response after the transfer ended.
-- Manual (new section in `docs/manual-tests/team-network.md`): Linux to Mac push and the reverse, decline, 2-minute expiry, a name clash, a push of a collection with a secret and a script.
+- Manual (new section in `docs/manual-tests/team-network.md`): Linux to Mac push and the reverse, decline, 2-minute expiry, a name clash, a push of a collection with a secret and a script (the script runs in Safe mode, Developer mode stays denied), a push with environments that carry secret variables (the keychain path).
 
 ## 12. Open items for the plan
 
