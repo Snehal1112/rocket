@@ -27,6 +27,7 @@ use crate::collection_export_service::CollectionExportService;
 
 use super::service::NetworkService;
 use super::transfer_ports::{CollectionImportPort, TransferStaging};
+use super::transfer_receive::{In, OfferFrame};
 use super::transfer_send::Out;
 
 /// Items that may wait for the worker. A full queue drops a frame; the lost frame ends its
@@ -128,6 +129,7 @@ pub struct TransferDeps {
 #[derive(Default)]
 pub(super) struct Inner {
     pub outgoing: HashMap<TransferId, Out>,
+    pub incoming: HashMap<TransferId, In>,
     pub limits: TransferLimits,
 }
 
@@ -273,6 +275,22 @@ impl TransferService {
 
     fn handle_frame(&self, from: DeviceId, message: PeerMessage) {
         match message {
+            PeerMessage::CollectionOffer {
+                transfer_id,
+                name,
+                size_bytes,
+                chunk_count,
+                sha256,
+            } => {
+                let frame = OfferFrame {
+                    transfer_id,
+                    name,
+                    size_bytes,
+                    chunk_count,
+                    sha256,
+                };
+                self.on_offer(from, frame);
+            }
             PeerMessage::OfferAnswer {
                 transfer_id,
                 accept,
@@ -281,12 +299,23 @@ impl TransferService {
                     self.on_answer(&from, &id, accept);
                 }
             }
+            PeerMessage::Chunk {
+                transfer_id,
+                seq,
+                data,
+            } => {
+                if let Ok(id) = TransferId::parse(&transfer_id) {
+                    self.on_chunk(from, &id, seq, &data);
+                }
+            }
             PeerMessage::TransferAbort {
                 transfer_id,
                 reason,
             } => {
                 if let Ok(id) = TransferId::parse(&transfer_id) {
-                    self.abort_outgoing(&from, &id, reason);
+                    if !self.abort_outgoing(&from, &id, reason) {
+                        self.abort_incoming(&from, &id, reason);
+                    }
                 }
             }
             PeerMessage::TransferResult {
@@ -305,7 +334,6 @@ impl TransferService {
                     self.on_ack(&from, &id, next_seq);
                 }
             }
-            // The receiver side handles offers and chunks (Task 3).
             _ => {}
         }
     }
@@ -313,7 +341,7 @@ impl TransferService {
     /// The device's connection ended or its pairing was removed: end its transfers now.
     pub(super) fn handle_gone(&self, device: &DeviceId) {
         self.outgoing_gone(device);
-        // The receiver side joins in Task 3.
+        self.incoming_gone(device);
     }
 }
 

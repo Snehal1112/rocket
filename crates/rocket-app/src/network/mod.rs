@@ -12,6 +12,7 @@ mod status;
 mod transfer;
 mod transfer_link;
 pub mod transfer_ports;
+mod transfer_receive;
 mod transfer_send;
 // Plan 04b reuses these fakes, so some helpers are unused here.
 #[cfg(test)]
@@ -37,6 +38,9 @@ mod transfer_link_tests;
 #[cfg(test)]
 #[allow(dead_code)]
 pub(crate) mod transfer_fakes;
+#[cfg(test)]
+#[path = "transfer_receive_tests.rs"]
+mod transfer_receive_tests;
 #[cfg(test)]
 #[path = "transfer_send_tests.rs"]
 mod transfer_send_tests;

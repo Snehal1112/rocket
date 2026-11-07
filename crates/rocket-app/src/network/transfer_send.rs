@@ -308,13 +308,16 @@ impl TransferService {
         Ok(())
     }
 
-    /// Cancels a transfer this node runs. An unknown or finished id is not an error. After the
-    /// last chunk a send can no longer be cancelled.
+    /// Cancels a transfer, sent or received. An unknown or finished id is not an error. After
+    /// the last chunk a send can no longer be cancelled. A receive that is importing is left alone.
     pub async fn cancel(&self, transfer_id: &str) -> DomainResult<()> {
         let Ok(id) = TransferId::parse(transfer_id) else {
             return Ok(());
         };
-        self.cancel_outgoing(&id).await?;
+        if self.cancel_outgoing(&id).await? {
+            return Ok(());
+        }
+        self.cancel_incoming(&id).await;
         Ok(())
     }
 
