@@ -45,6 +45,7 @@ cargo test -p rocket-import <test_name>
 | `openapi/{model,reader,layout}.rs` | OpenAPI 3.0, 3.1 and Swagger 2.0 reader into a neutral model (`OpenApiDoc`, `Operation`), and `GroupBy` folder layout |
 | `converter/openapi.rs` | `convert_operation`, `request_name`, `security_variable_names`, `sample_json`, `baseline_hash` |
 | `importer.rs` | `ImportService` — top-level orchestrator |
+| `transfer_zip.rs` | `validate(files, path)` (strict check of a ZIP pushed by another node: no absolute or `..` names, no `:`, control or bidi/zero-width characters, no trailing dot or space, no Windows reserved names, no case-folded duplicates (an exact duplicate is caught by comparing the end-of-central-directory count with the reader's count, because the zip reader collapses it), no symlinks, at most 5000 entries and 50 MiB unzipped, counted by really decompressing) and `require_collection_root(files, path)` (exactly one collection, no workspace), plus the shared name helpers `is_reserved_device_name` and `is_hidden_format_char`. Used by the team network import adapter; the consts equal the `rocket-network` limits and a `rocket-app` test pins that. |
 
 ### Data Flow
 

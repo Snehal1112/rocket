@@ -21,6 +21,9 @@ pub enum ImportError {
     #[error("zip is empty or contains no top-level directory")]
     EmptyZip,
 
+    #[error("unsafe transfer zip: {0}")]
+    UnsafeTransferZip(String),
+
     #[error("not a Postman collection (missing schema.getpostman.com in info.schema): {0}")]
     NotAPostmanCollection(std::path::PathBuf),
 

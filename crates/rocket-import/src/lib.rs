@@ -7,6 +7,7 @@ mod limits;
 pub(crate) mod openapi;
 pub(crate) mod postman;
 pub mod report;
+pub mod transfer_zip;
 pub(crate) mod wsdl;
 
 pub use converter::openapi::{baseline_hash, CONVERTER_VERSION};
