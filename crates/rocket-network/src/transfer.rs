@@ -300,7 +300,8 @@ impl OutgoingTransfer {
         self.state
     }
 
-    /// `None` while the transfer is active.
+    /// `None` while the transfer is active. `Completed` is provisional from the last chunk
+    /// until `on_result`, `connection_lost` or `result_timed_out` settles it.
     pub fn outcome(&self) -> Option<Outcome> {
         self.outcome
     }
@@ -428,8 +429,10 @@ impl OutgoingTransfer {
     }
 
     /// The peer stopped the transfer. Ignored once the transfer is final.
+    /// Also accepted after the last chunk was built until the final ack arrived, because the
+    /// receiver may refuse the tail. Ignored once the final ack or a result was received.
     pub fn on_abort(&mut self, reason: AbortReason) -> Option<Outcome> {
-        if !self.is_active() {
+        if !self.is_active() && !(self.last_chunk_built() && !self.final_acked) {
             return None;
         }
         self.finish(Outcome::from(reason))
@@ -473,7 +476,8 @@ impl OutgoingTransfer {
         self.last_chunk_built() && self.final_acked
     }
 
-    /// The last chunk frame was built and no result settled the transfer yet. The final
+    /// The last chunk frame was built and no result settled the transfer yet (`Completed` is
+    /// provisional until then). The final
     /// `ChunkAck` may still be missing. Plan 3 uses it to know the stream is finished and to
     /// refuse a cancel; `awaiting_result()` is the stricter question.
     pub fn last_chunk_built(&self) -> bool {
@@ -1344,12 +1348,47 @@ mod tests {
         let mut done = outgoing(10, now);
         done.on_answer(true, now);
         done.next_chunk(&[0u8; 10]).expect("only chunk");
+        assert_eq!(done.on_ack(1), None, "the final ack arrived");
         assert_eq!(
             done.on_abort(AbortReason::Failed),
             None,
-            "a finished send stays done"
+            "a send with the final ack stays done"
         );
         assert_eq!(done.outcome(), Some(Outcome::Completed));
+    }
+
+    #[test]
+    fn a_peer_abort_between_the_last_chunk_and_the_final_ack_ends_the_send() {
+        for (reason, outcome) in [
+            (AbortReason::Cancelled, Outcome::Cancelled),
+            (AbortReason::Failed, Outcome::Failed),
+            (AbortReason::TooBig, Outcome::TooBig),
+        ] {
+            let mut t = last_chunk_sent(Instant::now());
+            assert_eq!(t.on_abort(reason), Some(outcome), "reason {reason:?}");
+            assert_eq!(t.state(), OutgoingState::Aborted);
+            assert_eq!(t.outcome(), Some(outcome));
+            assert_eq!(t.on_abort(AbortReason::Failed), None, "only once");
+            assert_eq!(t.outcome(), Some(outcome));
+        }
+    }
+
+    #[test]
+    fn a_peer_abort_after_the_final_ack_or_a_result_is_ignored() {
+        let mut acked = waiting_for_result(Instant::now());
+        assert_eq!(acked.on_abort(AbortReason::Cancelled), None);
+        assert_eq!(acked.state(), OutgoingState::Done);
+        assert!(acked.awaiting_result());
+
+        let mut resulted = waiting_for_result(Instant::now());
+        resulted.on_result(ResultOutcome::Completed);
+        assert_eq!(resulted.on_abort(AbortReason::Failed), None);
+        assert_eq!(resulted.outcome(), Some(Outcome::Completed));
+
+        let mut unconfirmed = waiting_for_result(Instant::now());
+        unconfirmed.result_timed_out();
+        assert_eq!(unconfirmed.on_abort(AbortReason::Failed), None);
+        assert_eq!(unconfirmed.outcome(), Some(Outcome::Unconfirmed));
     }
 
     #[test]
