@@ -375,6 +375,16 @@ impl NetworkService {
                     }
                     // A second Hello is a protocol error.
                     Some(PeerMessage::Hello { .. }) => return SocketEnd::Closed,
+                    // Plan 3 routes the six transfer frames to the transfer sink. Until then
+                    // they are ignored, so a version 2 peer can send them without effect.
+                    Some(
+                        PeerMessage::CollectionOffer { .. }
+                        | PeerMessage::OfferAnswer { .. }
+                        | PeerMessage::Chunk { .. }
+                        | PeerMessage::TransferAbort { .. }
+                        | PeerMessage::ChunkAck { .. }
+                        | PeerMessage::TransferResult { .. },
+                    ) => {}
                 },
                 _ = ticker.tick() => {
                     let state = self.with_conn(id, |c| c.presence.on_ping_sent());
