@@ -9,6 +9,7 @@ mod nodes;
 mod pairing;
 mod service;
 mod status;
+mod transfer_link;
 pub mod transfer_ports;
 // Plan 04b reuses these fakes, so some helpers are unused here.
 #[cfg(test)]
@@ -27,6 +28,9 @@ mod pairing_tests;
 #[cfg(test)]
 #[path = "service_tests.rs"]
 mod service_tests;
+#[cfg(test)]
+#[path = "transfer_link_tests.rs"]
+mod transfer_link_tests;
 
 pub use nodes::{NodeGroup, NodeStatus, NodeView};
 pub use pairing::{PairingDecision, PairingStarted};

@@ -20,6 +20,7 @@ use rocket_network::{
     ManualAddressRepository, NetworkEvent, NetworkSettings, NetworkSettingsRepository, NodeProfile,
     PairedDeviceRepository, PairingId, PeerConnector, PeerHandler, PeerIdentity, PeerMessage,
     PeerServerControl, PeerTransport, PeerTransportFactory, QuarantineReport, SlidingWindow,
+    TransferSink,
 };
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::EventPublisher;
@@ -85,6 +86,9 @@ pub struct NetworkService {
     state: Mutex<State>,
     /// Serialises writes to the paired list that must not undo a removal.
     paired_lock: Mutex<()>,
+    /// Receives the transfer frames. It lives outside `State` because `prepare` resets `State`
+    /// on every start. The cycle with the transfer service lasts as long as the app.
+    pub(super) transfer_sink: Mutex<Option<Arc<dyn TransferSink>>>,
 }
 
 /// Keeps the node running. Dropping it, or calling `stop`, ends every task and closes the
@@ -175,6 +179,7 @@ impl NetworkService {
             deps,
             state: Mutex::new(state),
             paired_lock: Mutex::new(()),
+            transfer_sink: Mutex::new(None),
         })
     }
 

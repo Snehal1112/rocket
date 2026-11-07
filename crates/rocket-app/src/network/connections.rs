@@ -67,6 +67,15 @@ fn version_matches(hello: &PeerMessage) -> bool {
     matches!(hello, PeerMessage::Hello { version, .. } if *version == PROTOCOL_VERSION)
 }
 
+/// Chunks and acks belong to a transfer that an offer or an answer opened after this check
+/// passed. A block closes the socket, which ends the transfer, so they skip the file read.
+fn needs_block_check(message: &PeerMessage) -> bool {
+    !matches!(
+        message,
+        PeerMessage::Chunk { .. } | PeerMessage::ChunkAck { .. }
+    )
+}
+
 impl NetworkService {
     /// Asks the task of a paired device to retry now.
     pub(super) fn wake_device(&self, id: &DeviceId) {
@@ -192,7 +201,10 @@ impl NetworkService {
             }
 
             if let Some(socket) = socket {
-                match self.run_socket(&id, socket, &mut inbox, &mut stop).await {
+                let end = self.run_socket(&id, socket, &mut inbox, &mut stop).await;
+                // Whatever the end, open transfers with this device must not wait for a timer.
+                self.notify_peer_gone(&id);
+                match end {
                     SocketEnd::Closed => {
                         self.mark_disconnected(&id);
                         idle_since = Self::now();
@@ -359,7 +371,7 @@ impl NetworkService {
                     None => return SocketEnd::Closed,
                     // A blocked device gets no answer to any frame. Its entry goes, so the
                     // socket closes when this function returns.
-                    Some(_) if self.is_blocked(id) => {
+                    Some(ref message) if needs_block_check(message) && self.is_blocked(id) => {
                         self.lock().conns.remove(id);
                         return SocketEnd::Removed;
                     }
@@ -375,16 +387,19 @@ impl NetworkService {
                     }
                     // A second Hello is a protocol error.
                     Some(PeerMessage::Hello { .. }) => return SocketEnd::Closed,
-                    // Plan 3 routes the six transfer frames to the transfer sink. Until then
-                    // they are ignored, so a version 2 peer can send them without effect.
+                    // The transfer service owns these frames. Any of them shows the peer is
+                    // alive, so a long stream cannot starve the ping rule.
                     Some(
-                        PeerMessage::CollectionOffer { .. }
+                        message @ (PeerMessage::CollectionOffer { .. }
                         | PeerMessage::OfferAnswer { .. }
                         | PeerMessage::Chunk { .. }
                         | PeerMessage::TransferAbort { .. }
                         | PeerMessage::ChunkAck { .. }
-                        | PeerMessage::TransferResult { .. },
-                    ) => {}
+                        | PeerMessage::TransferResult { .. }),
+                    ) => {
+                        self.with_conn(id, |c| c.presence.on_pong());
+                        self.deliver_transfer_frame(id, message);
+                    }
                 },
                 _ = ticker.tick() => {
                     let state = self.with_conn(id, |c| c.presence.on_ping_sent());
@@ -425,6 +440,8 @@ impl NetworkService {
         };
         let entry = self.lock().conns.remove(id);
         drop(entry);
+        // The pairing and the connection are gone, so are the open transfers.
+        self.notify_peer_gone(id);
         if removed {
             tracing::info!(code = "network_device_unpaired", id = %id.short(), by_peer, "unpaired");
             let actor = if by_peer {
@@ -482,6 +499,8 @@ impl NetworkService {
         }
         let entry = self.lock().conns.remove(device_id);
         drop(entry);
+        // The pairing and the connection are gone, so are the open transfers.
+        self.notify_peer_gone(device_id);
         tracing::info!(code = "network_device_unpaired", id = %device_id.short(), by_peer = false, "unpaired");
         self.audit(
             AuditActor::User,
