@@ -16,12 +16,13 @@ use rocket_audit::publisher::RecordingSecurityAuditPublisher;
 use rocket_network::limits::{MAX_MANUAL_ADDRESSES, MAX_PAIRED_DEVICES, PROTOCOL_VERSION};
 use rocket_network::{
     Announcement, BlockedDevice, BlockedDeviceRepository, DecisionRequest, DeviceId,
-    DeviceIdentityStore, DeviceKeyMaterial, Discovery, DiscoveryEvent, DiscoverySink,
+    DeviceIdentityStore, DeviceKeyMaterial, Direction, Discovery, DiscoveryEvent, DiscoverySink,
     HelloResponse, ManualAddress, ManualAddressRepository, NetworkEvent, NetworkSettings,
-    NetworkSettingsRepository, NodeProfile, NonceMessage, PairRequest, PairRequestResponse,
-    PairStatusResponse, PairedDevice, PairedDeviceRepository, PairingId, PeerCallError,
-    PeerConnector, PeerError, PeerHandler, PeerIdentity, PeerMessage, PeerServerControl,
-    PeerSocket, PeerTransport, PeerTransportFactory, QuarantineReport,
+    NetworkSettingsRepository, NodeProfile, NonceMessage, Outcome, PairRequest,
+    PairRequestResponse, PairStatusResponse, PairedDevice, PairedDeviceRepository, PairingId,
+    PeerCallError, PeerConnector, PeerError, PeerHandler, PeerIdentity, PeerMessage,
+    PeerServerControl, PeerSocket, PeerTransport, PeerTransportFactory, QuarantineReport,
+    TransferEvent,
 };
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{EventPublisher, PublishedEvent};
@@ -691,9 +692,27 @@ impl QuarantineReport for FakeQuarantine {
 /// Kept concrete on purpose: its query helpers are specific to `NetworkEvent`, and the recorders
 /// in other crates are private test doubles.
 #[derive(Default)]
-pub(crate) struct RecordingEvents(Mutex<Vec<NetworkEvent>>);
+pub(crate) struct RecordingEvents(Mutex<Vec<NetworkEvent>>, Mutex<Vec<TransferEvent>>);
 
 impl RecordingEvents {
+    /// Every transfer event, in order.
+    pub fn transfers(&self) -> Vec<TransferEvent> {
+        self.1.lock().expect("events lock").clone()
+    }
+
+    /// The `(direction, outcome)` of every `Finished` transfer event, in order.
+    pub fn finished_outcomes(&self) -> Vec<(Direction, Outcome)> {
+        self.transfers()
+            .into_iter()
+            .filter_map(|e| match e {
+                TransferEvent::Finished {
+                    direction, outcome, ..
+                } => Some((direction, outcome)),
+                _ => None,
+            })
+            .collect()
+    }
+
     pub fn all(&self) -> Vec<NetworkEvent> {
         self.0.lock().expect("events lock").clone()
     }
@@ -746,6 +765,9 @@ impl EventPublisher for RecordingEvents {
     fn publish(&self, event: &dyn PublishedEvent) {
         if let Some(event) = event.downcast_ref::<NetworkEvent>() {
             self.0.lock().expect("events lock").push(event.clone());
+        }
+        if let Some(event) = event.downcast_ref::<TransferEvent>() {
+            self.1.lock().expect("events lock").push(event.clone());
         }
     }
 }

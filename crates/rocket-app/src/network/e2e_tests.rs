@@ -49,33 +49,33 @@ impl DeviceIdentityStore for FixedKey {
 }
 
 /// One real service with in-memory storage.
-struct E2eNode {
-    name: String,
-    svc: Arc<NetworkService>,
+pub(super) struct E2eNode {
+    pub(super) name: String,
+    pub(super) svc: Arc<NetworkService>,
     /// The PKCS#8 key, so a test can build a second connector that shows the same key.
-    key: Vec<u8>,
+    pub(super) key: Vec<u8>,
     /// The identity the TLS handshake shows for this node.
-    identity: PeerIdentity,
-    paired: Arc<MemPaired>,
-    blocked: Arc<MemBlocked>,
-    events: Arc<RecordingEvents>,
-    audit: Arc<RecordingSecurityAuditPublisher>,
+    pub(super) identity: PeerIdentity,
+    pub(super) paired: Arc<MemPaired>,
+    pub(super) blocked: Arc<MemBlocked>,
+    pub(super) events: Arc<RecordingEvents>,
+    pub(super) audit: Arc<RecordingSecurityAuditPublisher>,
 }
 
 impl E2eNode {
-    fn id(&self) -> DeviceId {
+    pub(super) fn id(&self) -> DeviceId {
         self.identity.device_id
     }
 
-    fn port(&self) -> u16 {
+    pub(super) fn port(&self) -> u16 {
         self.svc.status().port.expect("the node listens")
     }
 
-    fn addr(&self) -> SocketAddr {
+    pub(super) fn addr(&self) -> SocketAddr {
         local(self.port())
     }
 
-    fn audited(&self) -> Vec<AuditEventKind> {
+    pub(super) fn audited(&self) -> Vec<AuditEventKind> {
         self.audit.records().into_iter().map(|r| r.kind).collect()
     }
 
@@ -92,7 +92,7 @@ fn local(port: u16) -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], port))
 }
 
-fn e2e_node(name: &str) -> E2eNode {
+pub(super) fn e2e_node(name: &str) -> E2eNode {
     let key = key_material();
     let bytes = key.pkcs8_der.clone();
     let identity = build_tls_identity(&key).expect("identity").local;
@@ -126,7 +126,7 @@ fn e2e_node(name: &str) -> E2eNode {
 }
 
 /// Polls `check` every 50 ms until it holds. Fails the test after `WAIT`.
-async fn wait_until(what: &str, mut check: impl FnMut() -> bool) {
+pub(super) async fn wait_until(what: &str, mut check: impl FnMut() -> bool) {
     let deadline = tokio::time::Instant::now() + WAIT;
     while !check() {
         assert!(
@@ -138,7 +138,7 @@ async fn wait_until(what: &str, mut check: impl FnMut() -> bool) {
 }
 
 /// The status of the row for `id` in this node's list, if there is a row.
-fn row(node: &E2eNode, id: &DeviceId) -> Option<NodeStatus> {
+pub(super) fn row(node: &E2eNode, id: &DeviceId) -> Option<NodeStatus> {
     node.svc
         .list_nodes()
         .into_iter()
@@ -176,7 +176,7 @@ async fn linked() -> (E2eNode, E2eNode, NetworkHandle, NetworkHandle) {
 }
 
 /// A pairs with B, both accept, and both save. Returns the code both screens showed.
-async fn pair(a: &E2eNode, b: &E2eNode) -> String {
+pub(super) async fn pair(a: &E2eNode, b: &E2eNode) -> String {
     let started = a.svc.request_pairing(&b.id()).await.expect("request");
     wait_until("the notice on the responder", || {
         !b.events.incoming().is_empty()
@@ -198,7 +198,7 @@ async fn pair(a: &E2eNode, b: &E2eNode) -> String {
 }
 
 /// Two nodes that are paired and show each other online.
-async fn online_pair() -> (E2eNode, E2eNode, NetworkHandle, NetworkHandle) {
+pub(super) async fn online_pair() -> (E2eNode, E2eNode, NetworkHandle, NetworkHandle) {
     let (a, b, ha, hb) = linked().await;
     pair(&a, &b).await;
     wait_until("both rows show Online", || {
