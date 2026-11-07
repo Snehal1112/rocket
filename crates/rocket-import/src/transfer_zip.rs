@@ -88,14 +88,23 @@ fn is_plain_name(name: &str) -> bool {
     {
         return false;
     }
-    name.split(['/', '\\'])
-        .filter(|part| !part.is_empty() && *part != ".")
-        .all(|part| {
-            part != ".."
-                && !part.ends_with('.')
-                && !part.ends_with(' ')
-                && !is_reserved_device_name(part)
-        })
+    // One trailing separator is allowed for a directory entry. Empty and `.` segments are
+    // not, because `a//b` and `a/./b` extract onto the same file as `a/b`.
+    let trimmed = name
+        .strip_suffix('/')
+        .or_else(|| name.strip_suffix('\\'))
+        .unwrap_or(name);
+    if trimmed.is_empty() {
+        return false;
+    }
+    trimmed.split(['/', '\\']).all(|part| {
+        !part.is_empty()
+            && part != "."
+            && part != ".."
+            && !part.ends_with('.')
+            && !part.ends_with(' ')
+            && !is_reserved_device_name(part)
+    })
 }
 
 /// The key two entry names collide on, on a case-folding disk.
@@ -120,13 +129,19 @@ pub fn validate(files: &dyn ImportFiles, path: &Path) -> ImportResult<()> {
     validate_archive(file)
 }
 
-/// Reads the entry count that the end-of-central-directory record declares. The zip reader
-/// keeps entries in a map keyed by name, so an exact duplicate name silently collapses into
-/// one entry. Comparing this count with the reader's count exposes such a duplicate.
-/// Returns `None` when no consistent record is found.
-fn declared_entry_count<R: Read + Seek>(reader: &mut R) -> io::Result<Option<u16>> {
+/// Checks the end-of-central-directory record of an archive the reader already accepted. The
+/// zip reader keeps entries in a map keyed by name, so an exact duplicate name silently
+/// collapses into one entry, and it tolerates trailing bytes and zip64 records. This check
+/// fails closed: the record must be the only one in the tail, must end the file exactly (no
+/// comment, no trailing byte), must carry equal disk and total counts that equal the reader's
+/// count, and no zip64 sentinel or locator may appear.
+fn check_end_record<R: Read + Seek>(reader: &mut R, reader_count: usize) -> ImportResult<()> {
     const EOCD_LEN: usize = 22;
     const MAX_TAIL: u64 = (u16::MAX as u64) + EOCD_LEN as u64;
+    const EOCD_SIG: [u8; 4] = [0x50, 0x4b, 0x05, 0x06];
+    const ZIP64_LOCATOR_SIG: [u8; 4] = [0x50, 0x4b, 0x06, 0x07];
+    let bad = || unsafe_zip("the zip end record is not a plain single record");
+
     let size = reader.seek(io::SeekFrom::End(0))?;
     let tail_len = size.min(MAX_TAIL);
     reader.seek(io::SeekFrom::Start(size - tail_len))?;
@@ -134,32 +149,47 @@ fn declared_entry_count<R: Read + Seek>(reader: &mut R) -> io::Result<Option<u16
     reader.read_exact(&mut tail)?;
     reader.seek(io::SeekFrom::Start(0))?;
     if tail.len() < EOCD_LEN {
-        return Ok(None);
+        return Err(bad());
     }
-    for start in (0..=tail.len() - EOCD_LEN).rev() {
-        if tail[start..start + 4] != [0x50, 0x4b, 0x05, 0x06] {
-            continue;
-        }
-        let comment_len = u16::from_le_bytes([tail[start + 20], tail[start + 21]]) as usize;
-        if start + EOCD_LEN + comment_len == tail.len() {
-            return Ok(Some(u16::from_le_bytes([
-                tail[start + 10],
-                tail[start + 11],
-            ])));
-        }
+    if tail.windows(4).any(|w| w == ZIP64_LOCATOR_SIG) {
+        return Err(bad());
     }
-    Ok(None)
+    let start = tail.len() - EOCD_LEN;
+    if tail[start..start + 4] != EOCD_SIG {
+        return Err(bad());
+    }
+    // The record at the end of the file must be the only signature in the tail.
+    if tail.windows(4).filter(|w| *w == EOCD_SIG).count() != 1 {
+        return Err(bad());
+    }
+    let rec = &tail[start..];
+    let le16 = |at: usize| u16::from_le_bytes([rec[at], rec[at + 1]]);
+    let le32 = |at: usize| u32::from_le_bytes([rec[at], rec[at + 1], rec[at + 2], rec[at + 3]]);
+    let disk_entries = le16(8);
+    let total_entries = le16(10);
+    if le16(4) != 0
+        || le16(6) != 0
+        || le16(20) != 0
+        || disk_entries != total_entries
+        || disk_entries == u16::MAX
+        || le32(12) == u32::MAX
+        || le32(16) == u32::MAX
+        || usize::from(total_entries) != reader_count
+    {
+        return Err(bad());
+    }
+    Ok(())
 }
 
 fn validate_archive<R: Read + Seek>(mut reader: R) -> ImportResult<()> {
-    let declared = declared_entry_count(&mut reader)?;
-    let mut archive = zip::ZipArchive::new(reader).map_err(unreadable)?;
-    if archive.is_empty() {
+    let first = zip::ZipArchive::new(&mut reader).map_err(unreadable)?;
+    if first.is_empty() {
         return Err(ImportError::EmptyZip);
     }
-    if declared.is_some_and(|count| usize::from(count) != archive.len()) {
-        return Err(unsafe_zip("the zip holds two entries with the same name"));
-    }
+    let count = first.len();
+    drop(first);
+    check_end_record(&mut reader, count)?;
+    let mut archive = zip::ZipArchive::new(reader).map_err(unreadable)?;
     if archive.len() > MAX_ZIP_ENTRIES {
         return Err(unsafe_zip("the zip has too many entries"));
     }
@@ -202,6 +232,13 @@ pub fn require_collection_root(files: &dyn ImportFiles, path: &Path) -> ImportRe
     check_layout(archive.file_names())
 }
 
+/// Case-insensitive, because detection looks the file up on a case-folding disk too.
+fn is_marker(name: &str) -> bool {
+    COLLECTION_MARKERS
+        .iter()
+        .any(|marker| marker.eq_ignore_ascii_case(name))
+}
+
 fn check_layout<'a>(names: impl Iterator<Item = &'a str>) -> ImportResult<()> {
     let mut tops: BTreeSet<String> = BTreeSet::new();
     let mut loose_root_files = false;
@@ -221,14 +258,14 @@ fn check_layout<'a>(names: impl Iterator<Item = &'a str>) -> ImportResult<()> {
         };
         if parts.len() == 1 && !is_dir {
             loose_root_files = true;
-            root_marker |= COLLECTION_MARKERS.contains(&first);
-            workspace |= first == "workspace.yml";
+            root_marker |= is_marker(first);
+            workspace |= first.eq_ignore_ascii_case("workspace.yml");
             continue;
         }
         tops.insert(first.to_string());
         if parts.len() == 2 && !is_dir {
-            nested_marker |= COLLECTION_MARKERS.contains(&parts[1]);
-            workspace |= parts[1] == "workspace.yml";
+            nested_marker |= is_marker(parts[1]);
+            workspace |= parts[1].eq_ignore_ascii_case("workspace.yml");
         }
     }
 
@@ -668,5 +705,150 @@ mod tests {
         let path = dir.path().join("not.zip");
         std::fs::write(&path, b"nope").expect("write");
         assert!(require_collection_root(&files(), &path).is_err());
+    }
+
+    // ---- fix round 1: adversarial cases ----
+
+    /// An in-memory ZIP, built the way `rocket-export`'s Bruno exporter builds one.
+    fn mem_zip(names: &[&str]) -> Vec<u8> {
+        let mut w = ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        for (i, n) in names.iter().enumerate() {
+            w.start_file(*n, SimpleFileOptions::default())
+                .expect("start");
+            w.write_all(format!("data{i}").as_bytes()).expect("write");
+        }
+        w.finish().expect("finish").into_inner()
+    }
+
+    /// Three entries where the last name is patched into a duplicate of the second.
+    fn dup_bytes() -> Vec<u8> {
+        let mut b = mem_zip(&[
+            "orders/opencollection.yml",
+            "orders/get.yml",
+            "orders/gex.yml",
+        ]);
+        for i in 0..b.len() - 7 {
+            if &b[i..i + 7] == b"gex.yml" {
+                b[i + 2] = b't';
+            }
+        }
+        b
+    }
+
+    fn write_bytes(bytes: &[u8]) -> (TempDir, PathBuf) {
+        let dir = TempDir::new().expect("tempdir");
+        let path = dir.path().join("in.zip");
+        std::fs::write(&path, bytes).expect("write zip");
+        (dir, path)
+    }
+
+    fn refused_unsafe(bytes: &[u8]) -> bool {
+        let (_dir, path) = write_bytes(bytes);
+        is_unsafe(&validate(&files(), &path))
+    }
+
+    #[test]
+    fn validate_accepts_a_zip_built_like_the_exporter() {
+        let bytes = mem_zip(&["orders/opencollection.yml", "orders/get.yml"]);
+        let (_dir, path) = write_bytes(&bytes);
+        validate(&files(), &path).expect("exporter style zip passes");
+        require_collection_root(&files(), &path).expect("exporter style layout passes");
+    }
+
+    #[test]
+    fn validate_refuses_a_duplicate_with_a_trailing_byte() {
+        let mut b = dup_bytes();
+        b.push(0);
+        assert!(refused_unsafe(&b));
+    }
+
+    #[test]
+    fn validate_refuses_a_duplicate_when_the_total_field_lies() {
+        let mut b = dup_bytes();
+        let e = b.len() - 22;
+        b[e + 10] = 2;
+        b[e + 11] = 0;
+        assert!(refused_unsafe(&b));
+    }
+
+    #[test]
+    fn validate_refuses_a_duplicate_when_the_disk_count_lies() {
+        let mut b = dup_bytes();
+        let e = b.len() - 22;
+        b[e + 8] = 2;
+        b[e + 9] = 0;
+        assert!(refused_unsafe(&b));
+    }
+
+    #[test]
+    fn validate_refuses_a_zip64_sentinel_in_the_eocd() {
+        let mut b = mem_zip(&["orders/opencollection.yml", "orders/get.yml"]);
+        let e = b.len() - 22;
+        b[e + 16..e + 20].copy_from_slice(&u32::MAX.to_le_bytes());
+        let (_dir, path) = write_bytes(&b);
+        assert!(validate(&files(), &path).is_err());
+    }
+
+    #[test]
+    fn validate_refuses_a_zip64_locator_signature() {
+        // A locator signature right before the EOCD, as a zip64 archive would have.
+        let b = mem_zip(&["orders/opencollection.yml", "orders/get.yml"]);
+        let e = b.len() - 22;
+        let mut out = b[..e].to_vec();
+        out.extend_from_slice(&[0x50, 0x4b, 0x06, 0x07]);
+        out.extend_from_slice(&[0u8; 16]);
+        out.extend_from_slice(&b[e..]);
+        assert!(refused_unsafe(&out));
+    }
+
+    #[test]
+    fn validate_refuses_a_fake_eocd_inside_the_comment() {
+        let mut b = dup_bytes();
+        let e = b.len() - 22;
+        // The fake record is a copy of the real one, so the zip reader accepts it as well.
+        let fake = b[e..e + 22].to_vec();
+        // The real record now claims a 22 byte comment that holds the fake record.
+        b[e + 20] = 22;
+        b.extend_from_slice(&fake);
+        assert!(refused_unsafe(&b));
+    }
+
+    #[test]
+    fn validate_refuses_a_comment_after_the_eocd() {
+        let mut b = mem_zip(&["orders/opencollection.yml", "orders/get.yml"]);
+        let e = b.len() - 22;
+        b[e + 20] = 3;
+        b.extend_from_slice(b"abc");
+        assert!(refused_unsafe(&b));
+    }
+
+    #[test]
+    fn validate_refuses_dot_and_empty_segments_and_an_empty_name() {
+        for dup in ["orders/./get.yml", "orders//get.yml"] {
+            let b = mem_zip(&["orders/opencollection.yml", "orders/get.yml", dup]);
+            assert!(refused_unsafe(&b), "{dup:?} must fail");
+        }
+        let b = mem_zip(&["orders/opencollection.yml", ""]);
+        assert!(refused_unsafe(&b), "an empty name must fail");
+    }
+
+    #[test]
+    fn validate_accepts_a_directory_entry_with_one_trailing_slash() {
+        let (_dir, path) = build(|w| {
+            w.add_directory("orders/", opts()).expect("dir");
+            add_text(w, "orders/opencollection.yml", "info:\n  name: a\n");
+        });
+        validate(&files(), &path).expect("a directory entry passes");
+    }
+
+    #[test]
+    fn require_collection_root_refuses_a_workspace_in_any_letter_case() {
+        let b = mem_zip(&["orders/opencollection.yml", "orders/Workspace.yml"]);
+        let (_dir, path) = write_bytes(&b);
+        assert!(is_unsafe(&require_collection_root(&files(), &path)));
+
+        let b = mem_zip(&["WORKSPACE.YML", "OpenCollection.yml"]);
+        let (_dir2, path2) = write_bytes(&b);
+        assert!(is_unsafe(&require_collection_root(&files(), &path2)));
     }
 }
