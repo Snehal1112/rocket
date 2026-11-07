@@ -11,6 +11,7 @@ pub(crate) mod peer_test_support;
 pub mod repos;
 pub mod server;
 pub(crate) mod socket;
+pub mod staging;
 pub mod tls_config;
 pub mod tls_identity;
 pub mod transport;
@@ -22,6 +23,7 @@ pub use repos::{
     FsBlockedDeviceRepo, FsManualAddressRepo, FsNetworkSettingsRepo, FsPairedDeviceRepo,
 };
 pub use server::RustlsPeerServer;
+pub use staging::FsTransferStaging;
 pub use tls_config::{client_config, peer_identity_from_certs, server_config};
 pub use tls_identity::{build_tls_identity, spki_from_cert, TlsIdentity};
 pub use transport::RustlsPeerTransportFactory;

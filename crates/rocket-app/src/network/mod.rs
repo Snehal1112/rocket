@@ -9,6 +9,7 @@ mod nodes;
 mod pairing;
 mod service;
 mod status;
+pub mod transfer_ports;
 // Plan 04b reuses these fakes, so some helpers are unused here.
 #[cfg(test)]
 #[allow(dead_code, clippy::type_complexity)]
@@ -31,3 +32,7 @@ pub use nodes::{NodeGroup, NodeStatus, NodeView};
 pub use pairing::{PairingDecision, PairingStarted};
 pub use service::{paired_limit_message, NetworkDeps, NetworkHandle, NetworkService};
 pub use status::{NetworkState, NetworkStatus};
+pub use transfer_ports::{
+    receiver_display_name, CollectionImportPort, ImportedCollection, StagedFile, StagedZip,
+    TransferStaging, UNSAFE_ZIP_MESSAGE,
+};

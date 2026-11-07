@@ -114,8 +114,8 @@ pub use grpc::{FsProtoFileReader, FsProtoLoader, TonicGrpcExecutor};
 pub use loopback_callback::LoopbackCallbackServer;
 pub use network::{
     build_tls_identity, spki_from_cert, FsBlockedDeviceRepo, FsManualAddressRepo,
-    FsNetworkSettingsRepo, FsPairedDeviceRepo, KeychainDeviceIdentity, MdnsDiscovery,
-    RustlsPeerConnector, RustlsPeerServer, RustlsPeerTransportFactory, TlsIdentity,
+    FsNetworkSettingsRepo, FsPairedDeviceRepo, FsTransferStaging, KeychainDeviceIdentity,
+    MdnsDiscovery, RustlsPeerConnector, RustlsPeerServer, RustlsPeerTransportFactory, TlsIdentity,
 };
 pub use process_host_env::ProcessHostEnv;
 pub use reqwest_executor::{ReqwestExecutor, ReqwestTokenClientProvider};

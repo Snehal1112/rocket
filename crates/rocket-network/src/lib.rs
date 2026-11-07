@@ -12,6 +12,7 @@ pub mod presence;
 pub mod profile;
 pub mod rate;
 pub mod records;
+pub mod staging;
 pub mod transfer;
 pub mod wire;
 
@@ -36,6 +37,7 @@ pub use rate::SlidingWindow;
 pub use records::{
     BlockedDevice, DiscoveredNode, DiscoverySource, ManualAddress, NetworkSettings, PairedDevice,
 };
+pub use staging::{StagedFile, StagedZip, TransferStaging};
 pub use transfer::{
     chunk_count_for, offer_name_is_valid, Admission, ChunkStep, Direction, IncomingState,
     IncomingTransfer, OfferError, Outcome, OutgoingState, OutgoingTransfer, TransferId,
