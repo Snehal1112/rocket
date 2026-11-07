@@ -164,7 +164,8 @@ pub use mcp_tool_service::{
 };
 pub use network::{
     paired_limit_message, NetworkDeps, NetworkHandle, NetworkService, NetworkState, NetworkStatus,
-    NodeGroup, NodeStatus, NodeView, PairingDecision, PairingStarted,
+    NodeGroup, NodeStatus, NodeView, PairingDecision, PairingStarted, PeerSender, SendStarted,
+    Timing, TransferDeps, TransferService,
 };
 pub use oauth2_service::OAuth2Service;
 pub use openapi_change_link::{ChangeLinkOutcome, ChangeLinkPreview};

@@ -9,8 +9,10 @@ mod nodes;
 mod pairing;
 mod service;
 mod status;
+mod transfer;
 mod transfer_link;
 pub mod transfer_ports;
+mod transfer_send;
 // Plan 04b reuses these fakes, so some helpers are unused here.
 #[cfg(test)]
 #[allow(dead_code, clippy::type_complexity)]
@@ -31,11 +33,20 @@ mod service_tests;
 #[cfg(test)]
 #[path = "transfer_link_tests.rs"]
 mod transfer_link_tests;
+// The transfer fakes are shared by the send and receive tests.
+#[cfg(test)]
+#[allow(dead_code)]
+pub(crate) mod transfer_fakes;
+#[cfg(test)]
+#[path = "transfer_send_tests.rs"]
+mod transfer_send_tests;
 
 pub use nodes::{NodeGroup, NodeStatus, NodeView};
 pub use pairing::{PairingDecision, PairingStarted};
 pub use service::{paired_limit_message, NetworkDeps, NetworkHandle, NetworkService};
 pub use status::{NetworkState, NetworkStatus};
+pub use transfer::{PeerSender, Timing, TransferDeps, TransferService};
+pub use transfer_send::SendStarted;
 pub use transfer_ports::{
     receiver_display_name, CollectionImportPort, ImportedCollection, StagedFile, StagedZip,
     TransferStaging, UNSAFE_ZIP_MESSAGE,
