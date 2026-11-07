@@ -1146,4 +1146,54 @@ mod tests {
             "the requested developer mode stays denied until the user trusts the collection"
         );
     }
+
+    #[test]
+    fn a_received_zip_asking_for_developer_mode_gets_no_trust_record() {
+        // The received case end to end: the sender suffix in the name, a script entry and a
+        // hostile `opencollection.yml` that asks for Developer mode.
+        let (ws, adapter) = adapter();
+        let zips = tempfile::TempDir::new().expect("tempdir");
+        let zip = zips.path().join("Orders.zip");
+        write_zip(
+            &zip,
+            &[
+                (
+                    "Orders/opencollection.yml",
+                    "opencollection: \"1.0.0\"\ninfo:\n  name: Orders\nextensions:\n  rocketapi:\n    sandboxMode: developer\n",
+                ),
+                (
+                    "Orders/users/get.yml",
+                    "info:\n  name: get\nhttp:\n  method: GET\n  url: https://x.test\nruntime:\n  scripts:\n  - type: before-request\n    code: \"rok.setVar('a', 1)\"\n",
+                ),
+            ],
+        );
+
+        let imported = adapter
+            .import_zip(&zip, "Orders (from ann)")
+            .expect("the import succeeds");
+        assert_eq!(imported.name, "Orders (from ann)");
+
+        // The requested mode reached the disk, so the Safe assert below can fail.
+        let repo = FsCollectionRepo::new_standalone(ws.path().join("collections"));
+        let requested = repo.get_settings(&imported.name).expect("settings");
+        assert_eq!(
+            requested.sandbox_mode,
+            SandboxMode::Developer,
+            "the ZIP asked for it"
+        );
+
+        let trust_file = ws.path().join("trust.yml");
+        let store = FsCollectionTrustStore::new(trust_file.clone());
+        let identity = repo.collection_identity(&imported.name).expect("identity");
+        assert_eq!(
+            store.grant_for(&identity).expect("read"),
+            None,
+            "no trust record"
+        );
+        let effective = effective_capabilities(&repo, &store, &imported.name);
+        assert_eq!(effective.sandbox_mode, SandboxMode::Safe);
+        assert!(!effective.process_env && !effective.agent_run);
+        assert!(!effective.vault_values && !effective.vault_certificates);
+        assert!(!trust_file.exists(), "importing never writes a trust grant");
+    }
 }

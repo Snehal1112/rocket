@@ -25,9 +25,7 @@ mod connections_tests;
 #[cfg(test)]
 #[path = "e2e_tests.rs"]
 mod e2e_tests;
-// Task 3 of the send series reuses these helpers, so some are unused for now.
 #[cfg(test)]
-#[allow(dead_code)]
 #[path = "e2e_transfer_tests.rs"]
 mod e2e_transfer_tests;
 #[cfg(test)]
