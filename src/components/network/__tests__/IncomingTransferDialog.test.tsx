@@ -135,6 +135,8 @@ describe('IncomingTransferDialog', () => {
     const block = await screen.findByRole('alert');
     expect(block).toHaveTextContent('link down');
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeEnabled();
+    // A refused cancel leaves no local mark, so the other side's cancel still shows a toast.
+    expect(store().wasCancelledHere('t1')).toBe(false);
   });
 
   it('Decline sends the answer, removes the offer and closes the dialog', async () => {

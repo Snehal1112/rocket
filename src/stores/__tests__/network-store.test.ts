@@ -410,6 +410,19 @@ describe('network-store transfers', () => {
     expect(store().advanceOutgoing('other', 'sending')).toBeNull();
   });
 
+  it('trackOutgoing reports false for a transfer that already finished', () => {
+    store().finishTransfer('t1');
+    expect(store().trackOutgoing('t1', 'Dana Roy')).toBe(false);
+    expect(store().advanceOutgoing('t1', 'sending')).toBeNull();
+    expect(store().trackOutgoing('t2', 'Dana Roy')).toBe(true);
+  });
+
+  it('unmarkCancelledHere undoes a local cancel mark', () => {
+    store().markCancelledHere('t1');
+    store().unmarkCancelledHere('t1');
+    expect(store().wasCancelledHere('t1')).toBe(false);
+  });
+
   it('can skip the sending phase of a one chunk send', () => {
     store().trackOutgoing('t1', 'Dana Roy');
     expect(store().advanceOutgoing('t1', 'sent')).toBe('Dana Roy');

@@ -107,11 +107,14 @@ export interface NetworkState {
   /** Keeps the dialog open on an ended offer and says why. */
   endTransferDialog: (text: string) => void;
   /** A send started here. The bridge updates its waiting toast. */
-  trackOutgoing: (transferId: string, displayName: string) => void;
+  /** Returns false when the transfer had already finished, so the caller shows no waiting toast. */
+  trackOutgoing: (transferId: string, displayName: string) => boolean;
   /** Moves a tracked send forward. It returns the node name when the phase changed, else null. */
   advanceOutgoing: (transferId: string, phase: 'sending' | 'sent') => string | null;
   /** The local user pressed Cancel. The `cancelled` finish then shows no toast. */
   markCancelledHere: (transferId: string) => void;
+  /** Undoes `markCancelledHere` when the cancel call was refused. */
+  unmarkCancelledHere: (transferId: string) => void;
   wasCancelledHere: (transferId: string) => boolean;
   reset: () => void;
 }
@@ -315,8 +318,9 @@ export const useNetworkStore = create<NetworkState>()((set, get) => ({
   endTransferDialog: (dialogEndedText) => set({ dialogEndedText }),
 
   trackOutgoing(transferId, displayName) {
-    if (finishedTransfers.has(transferId)) return;
+    if (finishedTransfers.has(transferId)) return false;
     outgoing.set(transferId, { displayName, phase: 'waiting' });
+    return true;
   },
 
   advanceOutgoing(transferId, phase) {
@@ -328,6 +332,9 @@ export const useNetworkStore = create<NetworkState>()((set, get) => ({
 
   markCancelledHere: (transferId) => {
     cancelledHere.add(transferId);
+  },
+  unmarkCancelledHere: (transferId) => {
+    cancelledHere.delete(transferId);
   },
   wasCancelledHere: (transferId) => cancelledHere.has(transferId),
 

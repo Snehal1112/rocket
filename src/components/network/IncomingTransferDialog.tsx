@@ -84,7 +84,13 @@ export function IncomingTransferDialog() {
     run(async () => {
       // The finish event that follows is the user's own doing, so it shows no toast.
       store().markCancelledHere(id);
-      await cancelNetworkTransfer(id);
+      try {
+        await cancelNetworkTransfer(id);
+      } catch (err) {
+        // A refused cancel changes nothing, so a cancel by the other node still shows its toast.
+        store().unmarkCancelledHere(id);
+        throw err;
+      }
     });
 
   const name = offer ? peerName(offer.displayName) : '';
