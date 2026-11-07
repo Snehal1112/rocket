@@ -134,8 +134,16 @@ pub fn validate(files: &dyn ImportFiles, path: &Path) -> ImportResult<()> {
 /// collapses into one entry, and it tolerates trailing bytes and zip64 records. This check
 /// fails closed: the record must be the only one in the tail, must end the file exactly (no
 /// comment, no trailing byte), must carry equal disk and total counts that equal the reader's
-/// count, and no zip64 sentinel or locator may appear.
-fn check_end_record<R: Read + Seek>(reader: &mut R, reader_count: usize) -> ImportResult<()> {
+/// count, and no zip64 sentinel or locator may appear. The central directory the reader chose
+/// must also be the one this record names: no prepended data, the same start offset, and it
+/// must end exactly where the record starts (the reader scans the whole file backwards and
+/// skips a decoy record that fails its own checks).
+fn check_end_record<R: Read + Seek>(
+    reader: &mut R,
+    reader_count: usize,
+    reader_offset: u64,
+    reader_cd_start: u64,
+) -> ImportResult<()> {
     const EOCD_LEN: usize = 22;
     const MAX_TAIL: u64 = (u16::MAX as u64) + EOCD_LEN as u64;
     const EOCD_SIG: [u8; 4] = [0x50, 0x4b, 0x05, 0x06];
@@ -175,6 +183,9 @@ fn check_end_record<R: Read + Seek>(reader: &mut R, reader_count: usize) -> Impo
         || le32(12) == u32::MAX
         || le32(16) == u32::MAX
         || usize::from(total_entries) != reader_count
+        || reader_offset != 0
+        || u64::from(le32(16)) != reader_cd_start
+        || u64::from(le32(16)) + u64::from(le32(12)) != size - EOCD_LEN as u64
     {
         return Err(bad());
     }
@@ -187,8 +198,9 @@ fn validate_archive<R: Read + Seek>(mut reader: R) -> ImportResult<()> {
         return Err(ImportError::EmptyZip);
     }
     let count = first.len();
+    let (offset, cd_start) = (first.offset(), first.central_directory_start());
     drop(first);
-    check_end_record(&mut reader, count)?;
+    check_end_record(&mut reader, count, offset, cd_start)?;
     let mut archive = zip::ZipArchive::new(reader).map_err(unreadable)?;
     if archive.len() > MAX_ZIP_ENTRIES {
         return Err(unsafe_zip("the zip has too many entries"));
@@ -811,6 +823,47 @@ mod tests {
         b[e + 20] = 22;
         b.extend_from_slice(&fake);
         assert!(refused_unsafe(&b));
+    }
+
+    /// A hand-built end record with equal disk and total counts and no comment.
+    fn eocd(count: u16, cd_size: u32, cd_off: u32) -> Vec<u8> {
+        let mut e = vec![0x50, 0x4b, 0x05, 0x06, 0, 0, 0, 0];
+        e.extend_from_slice(&count.to_le_bytes());
+        e.extend_from_slice(&count.to_le_bytes());
+        e.extend_from_slice(&cd_size.to_le_bytes());
+        e.extend_from_slice(&cd_off.to_le_bytes());
+        e.extend_from_slice(&[0, 0]);
+        e
+    }
+
+    #[test]
+    fn validate_refuses_a_decoy_eocd_the_reader_skips() {
+        // The reader scans the whole file backwards and skips an end record whose central
+        // directory offset is bad, so it lands on the older real record far from the end.
+        let mut a = dup_bytes();
+        a.extend(std::iter::repeat_n(0u8, 70_000));
+        a.extend(eocd(2, 0, 0xFFFF_FFF0));
+        assert!(refused_unsafe(&a), "case A");
+
+        // The decoy offset looks plausible but no central header sits there.
+        let mut b = dup_bytes();
+        b.extend(std::iter::repeat_n(0u8, 70_000));
+        let off = (b.len() - 100) as u32;
+        b.extend(eocd(2, 10, off));
+        assert!(refused_unsafe(&b), "case B");
+    }
+
+    #[test]
+    fn validate_refuses_prepended_data() {
+        let mut b = vec![0u8; 100];
+        b.extend(mem_zip(&["orders/opencollection.yml", "orders/get.yml"]));
+        let (_dir, path) = write_bytes(&b);
+        assert!(validate(&files(), &path).is_err());
+    }
+
+    #[test]
+    fn validate_refuses_the_baseline_duplicate_without_a_decoy() {
+        assert!(refused_unsafe(&dup_bytes()));
     }
 
     #[test]
