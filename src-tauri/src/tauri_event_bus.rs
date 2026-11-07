@@ -113,6 +113,7 @@ mod tests {
     use rocket_collection::CollectionEvent;
     use rocket_flow::FlowEvent;
     use rocket_git::GitEvent;
+    use rocket_network::{Direction, Outcome, TransferEvent};
 
     #[test]
     fn emit_channels_adds_collection_changed_for_branch_switch_and_merge() {
@@ -410,6 +411,81 @@ mod tests {
         let value = envelope(&AcpEvent::AssistantConversationsCleared, 1, 2).expect("envelope");
         assert_eq!(value["type"], "assistantConversationsCleared");
         assert_eq!(value["seq"], 1);
+    }
+
+    #[test]
+    fn transfer_events_emit_on_the_network_transfer_channel() {
+        let progress = TransferEvent::Progress {
+            transfer_id: "t1".into(),
+            direction: Direction::Send,
+            done_bytes: 10,
+            total_bytes: 100,
+        };
+        assert_eq!(emit_channels(&progress), vec!["network-transfer"]);
+        let finished = TransferEvent::Finished {
+            transfer_id: "t1".into(),
+            direction: Direction::Receive,
+            outcome: Outcome::Completed,
+            display_name: "Ann".into(),
+            collection_name: "Orders".into(),
+            message: None,
+        };
+        assert_eq!(emit_channels(&finished), vec!["network-transfer"]);
+    }
+
+    #[test]
+    fn transfer_events_carry_seq_and_ts_ms_and_keep_snake_case_fields() {
+        let event = TransferEvent::Finished {
+            transfer_id: "t1".into(),
+            direction: Direction::Receive,
+            outcome: Outcome::Declined,
+            display_name: "Ann".into(),
+            collection_name: "Orders".into(),
+            message: None,
+        };
+        let value = envelope(&event, 7, 1234).expect("envelope");
+        assert_eq!(value["type"], "finished");
+        assert_eq!(value["seq"], 7);
+        assert_eq!(value["tsMs"], 1234);
+        assert_eq!(value["direction"], "receive");
+        assert_eq!(value["outcome"], "declined");
+        assert!(value["message"].is_null(), "no message is a JSON null");
+        let mut keys: Vec<&str> = value
+            .as_object()
+            .expect("an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            vec![
+                "collection_name",
+                "direction",
+                "display_name",
+                "message",
+                "outcome",
+                "seq",
+                "transfer_id",
+                "tsMs",
+                "type"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_receiver_failure_message_travels_in_the_finished_event() {
+        let event = TransferEvent::Finished {
+            transfer_id: "t1".into(),
+            direction: Direction::Receive,
+            outcome: Outcome::Failed,
+            display_name: "Ann".into(),
+            collection_name: "Orders".into(),
+            message: Some("The import failed.".into()),
+        };
+        let value = envelope(&event, 8, 99).expect("envelope");
+        assert_eq!(value["message"], "The import failed.");
+        assert_eq!(value["outcome"], "failed");
     }
 
     #[test]

@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use rocket_app::{
     NetworkHandle, NetworkService, NetworkState, NetworkStatus, NodeGroup, NodeStatus, NodeView,
-    PairingDecision, PairingStarted,
+    PairingDecision, PairingStarted, SendStarted, TransferService,
 };
 use rocket_network::{BlockedDevice, DeviceId, DiscoverySource, ManualAddress, PairingId};
 use rocket_shared::error::DomainError;
@@ -281,6 +281,58 @@ pub fn network_unblock(
     svc.unblock(&id)
 }
 
+// ----- send a collection -----
+
+/// What the UI gets after a push started: the transfer id and one line per item the export
+/// dropped or blanked.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SendStartedDto {
+    pub transfer_id: String,
+    pub notes: Vec<String>,
+}
+
+impl From<SendStarted> for SendStartedDto {
+    fn from(started: SendStarted) -> Self {
+        Self {
+            transfer_id: started.transfer_id,
+            notes: started.notes,
+        }
+    }
+}
+
+/// Starts a push of one collection to a paired node. Returns the transfer id and the notes.
+#[tauri::command]
+pub async fn network_send_collection(
+    device_id: String,
+    collection: String,
+    include_environments: bool,
+    svc: State<'_, Arc<TransferService>>,
+) -> Result<SendStartedDto, DomainError> {
+    let id = parse_device_id(&device_id)?;
+    let started = svc.send(&id, &collection, include_environments).await?;
+    Ok(SendStartedDto::from(started))
+}
+
+/// Accepts or declines an incoming offer.
+#[tauri::command]
+pub async fn network_respond_transfer(
+    transfer_id: String,
+    accept: bool,
+    svc: State<'_, Arc<TransferService>>,
+) -> Result<(), DomainError> {
+    svc.respond(&transfer_id, accept).await
+}
+
+/// Cancels a transfer from either side.
+#[tauri::command]
+pub async fn network_cancel_transfer(
+    transfer_id: String,
+    svc: State<'_, Arc<TransferService>>,
+) -> Result<(), DomainError> {
+    svc.cancel(&transfer_id).await
+}
+
 // ----- the running node -----
 
 impl Stoppable for NetworkHandle {
@@ -501,5 +553,32 @@ mod tests {
                 "{bad:?}"
             );
         }
+    }
+
+    #[test]
+    fn the_transfer_commands_are_in_the_acl_list() {
+        let list = include_str!("../../app-commands.txt");
+        for name in [
+            "network_send_collection",
+            "network_respond_transfer",
+            "network_cancel_transfer",
+        ] {
+            assert!(
+                list.lines().any(|line| line.trim() == name),
+                "{name} is missing from app-commands.txt"
+            );
+        }
+    }
+
+    #[test]
+    fn the_send_started_dto_uses_camel_case_keys() {
+        let dto = SendStartedDto::from(SendStarted {
+            transfer_id: "t1".to_string(),
+            notes: vec!["flow: skipped".to_string()],
+        });
+        let value = serde_json::to_value(&dto).expect("json");
+        assert_eq!(keys(&value), vec!["notes", "transferId"]);
+        assert_eq!(value["transferId"], "t1");
+        assert_eq!(value["notes"][0], "flow: skipped");
     }
 }

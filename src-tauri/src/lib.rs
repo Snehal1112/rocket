@@ -964,7 +964,7 @@ pub fn run() {
             app.manage(collection_discovery);
             app.manage(environment_services);
             app.manage(import_factory);
-            app.manage(export_svc);
+            app.manage(Arc::clone(&export_svc));
             app.manage(collection_svc);
             app.manage(trust_svc);
             app.manage(contract_svc);
@@ -1028,7 +1028,29 @@ pub fn run() {
                     .ok()
                     .or_else(|| std::env::var("USERNAME").ok()),
             });
+            // Team network send: one transfer service on top of the network service. `new`
+            // registers it as the network service's transfer sink. Files are staged under
+            // ~/.rocket-api/network/transfers and anything a crash left there is deleted now.
+            let transfer_staging = Arc::new(rocket_infra::FsTransferStaging::new(
+                network_dir.join("transfers"),
+            ));
+            // The adapter copies a received ZIP into its own private temp dir while it imports.
+            // A crash can leave a dir behind, so stale ones go at start with the staging folder.
+            let importer = Arc::new(import_wiring::ImporterAdapter::new(
+                Arc::clone(&active_workspace_path),
+                network_dir.join("import-tmp"),
+            ));
+            import_wiring::purge_transfer_temp(transfer_staging.as_ref(), importer.as_ref());
+            let transfer_svc = rocket_app::TransferService::new(rocket_app::TransferDeps {
+                network: Arc::clone(&network_svc) as Arc<dyn rocket_app::PeerSender>,
+                export: Arc::clone(&export_svc),
+                importer,
+                staging: transfer_staging,
+                events: Arc::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
+                audit: audit_publisher.clone(),
+            });
             app.manage(network_svc);
+            app.manage(transfer_svc);
             app.manage(commands::network::NetworkSlot::<rocket_app::NetworkHandle>::default());
             app.manage(Mutex::new(workspace_svc));
             app.manage(active_workspace_path);
@@ -1208,6 +1230,9 @@ pub fn run() {
             commands::network::network_remove_paired,
             commands::network::network_list_blocked,
             commands::network::network_unblock,
+            commands::network::network_send_collection,
+            commands::network::network_respond_transfer,
+            commands::network::network_cancel_transfer,
             commands::history::search_history,
             commands::templates::list_templates,
             commands::templates::get_template,

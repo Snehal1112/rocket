@@ -372,9 +372,56 @@ impl CollectionImportPort for ImporterAdapter {
     }
 }
 
+/// Startup cleanup for the team network send: staged chunk files and the adapter's stale
+/// temp dirs. A failure is logged and the start goes on.
+pub(crate) fn purge_transfer_temp(
+    staging: &dyn rocket_app::TransferStaging,
+    importer: &ImporterAdapter,
+) {
+    if let Err(err) = staging.purge() {
+        tracing::warn!(code = "transfer_staging_purge_failed", error = %err, "startup");
+    }
+    if let Err(err) = importer.purge_temp() {
+        tracing::warn!(code = "transfer_temp_purge_failed", error = %err, "startup");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_startup_purge_clears_staging_and_stale_temp_dirs() {
+        let root = tempfile::TempDir::new().expect("tempdir");
+        let staging = rocket_infra::FsTransferStaging::new(root.path().join("transfers"));
+        let mut left =
+            rocket_app::TransferStaging::create(&staging, "0123456789abcdef0123456789abcdef")
+                .expect("staged file");
+        left.append(b"half a zip").expect("append");
+        // A crash never runs finish or discard.
+        std::mem::forget(left);
+
+        // The temp dir of an instance that exited: its lock file exists and nobody holds it.
+        let temp_root = root.path().join("import-tmp");
+        let stale = temp_root.join("4242-stale");
+        std::fs::create_dir_all(&stale).expect("stale dir");
+        std::fs::write(stale.join("lock"), b"").expect("stale lock file");
+        std::fs::write(stale.join("Orders.zip"), b"old copy").expect("stale copy");
+        let ws = tempfile::TempDir::new().expect("workspace");
+        let adapter =
+            ImporterAdapter::new(Arc::new(Mutex::new(ws.path().to_path_buf())), temp_root);
+
+        purge_transfer_temp(&staging, &adapter);
+
+        let staged_left = std::fs::read_dir(root.path().join("transfers"))
+            .map(|entries| entries.count())
+            .unwrap_or(0);
+        assert_eq!(staged_left, 0, "no staged file survives the start");
+        assert!(
+            !stale.exists(),
+            "the temp dir of an exited instance is removed"
+        );
+    }
 
     #[test]
     fn workspace_path_follows_the_shared_path() {
