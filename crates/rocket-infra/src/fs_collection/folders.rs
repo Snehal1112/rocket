@@ -166,7 +166,18 @@ pub(super) fn create(repo: &FsCollectionRepo, name: &str) -> DomainResult<Collec
     if path.exists() {
         return Err(DomainError::AlreadyExists(format!("Collection '{}'", name)));
     }
-    fs::create_dir_all(&path)?;
+    // The check above is only for a clear error. The atomic `create_dir` decides, so a folder
+    // that another actor made in between is never reused or overwritten.
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    match fs::create_dir(&path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            return Err(DomainError::AlreadyExists(format!("Collection '{}'", name)));
+        }
+        Err(e) => return Err(e.into()),
+    }
 
     // Write opencollection.yml with basic info.
     let oc = OcCollection {

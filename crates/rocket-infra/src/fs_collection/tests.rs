@@ -3820,3 +3820,34 @@ fn lock_key_of_a_missing_path_is_the_path_as_given() {
 
     assert_eq!(repo.lock_key(&missing), missing);
 }
+
+#[test]
+fn create_never_touches_an_existing_collection_folder() {
+    let (dir, repo) = setup();
+    let root = dir.path().join("Taken");
+    fs::create_dir_all(&root).expect("dir");
+    fs::write(root.join("opencollection.yml"), "mine").expect("marker");
+
+    let err = repo.create("Taken").expect_err("must refuse");
+
+    assert!(matches!(err, DomainError::AlreadyExists(_)));
+    assert_eq!(
+        fs::read_to_string(root.join("opencollection.yml")).expect("read"),
+        "mine"
+    );
+}
+
+// A dangling symlink passes the `exists()` check, like a folder that appears right after it.
+// Only the atomic `create_dir` can then refuse it with `AlreadyExists`.
+#[cfg(unix)]
+#[test]
+fn create_reports_already_exists_when_the_atomic_create_loses_the_race() {
+    let (dir, repo) = setup();
+    let target = dir.path().join("nowhere");
+    std::os::unix::fs::symlink(&target, dir.path().join("Raced")).expect("link");
+
+    let err = repo.create("Raced").expect_err("must refuse");
+
+    assert!(matches!(err, DomainError::AlreadyExists(_)), "got {err:?}");
+    assert!(!target.exists(), "create must not write through the link");
+}
