@@ -1,5 +1,5 @@
 import { Loader2, Send } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -75,27 +75,42 @@ export function SendCollectionDialog({ open, collectionName, onClose }: SendColl
   // A failed send shows its text in the dialog.
   const { busy, error, run, reset } = useAsyncAction('inline');
 
-  // Every open starts clean.
+  // A second send call while one is in flight is ignored, even if the button is not disabled yet.
+  const sending = useRef(false);
+
+  // The dialog stays mounted while closed, so it resets on close. A reopen then starts clean
+  // from the first frame.
   useEffect(() => {
-    if (!open) return;
+    if (open) return;
     setPicked(null);
     setIncludeEnvironments(false);
     setNotes(null);
     reset();
   }, [open, reset]);
 
+  // The only online node is chosen once. After that the choice is frozen, so if that node leaves
+  // and another arrives, nothing is chosen and the user must pick. Setting state while rendering
+  // is the React way to adjust state to a change.
+  if (open && picked === null && online.length === 1) setPicked(online[0].deviceId);
+
   const pickedNode = picked === null ? undefined : online.find((n) => n.deviceId === picked);
   const lost = picked !== null && pickedNode === undefined;
-  // One online node is chosen for the user. If the user chose a node and it left, nothing is
-  // chosen: another node must never receive the collection by surprise.
-  const chosen = pickedNode ?? (picked === null && online.length === 1 ? online[0] : undefined);
+  // If the chosen node left, nothing is chosen: another node must never receive the collection
+  // by surprise.
+  const chosen = pickedNode;
 
   async function send() {
-    if (!chosen) return;
+    if (!chosen || sending.current) return;
+    sending.current = true;
     let result = null as SendStarted | null;
-    const ok = await run(async () => {
-      result = await sendNetworkCollection(chosen.deviceId, collectionName, includeEnvironments);
-    });
+    let ok = false;
+    try {
+      ok = await run(async () => {
+        result = await sendNetworkCollection(chosen.deviceId, collectionName, includeEnvironments);
+      });
+    } finally {
+      sending.current = false;
+    }
     if (!ok || !result) return;
     const sent: SendStarted = result;
     // The bridge updates the waiting toast of a send it knows (index R19).

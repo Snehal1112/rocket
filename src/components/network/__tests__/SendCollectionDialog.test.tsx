@@ -348,4 +348,40 @@ describe('SendCollectionDialog', () => {
     expect(screen.queryByText('Flows: skipped')).not.toBeInTheDocument();
     expect(await screen.findByRole('button', { name: 'Send' })).toBeInTheDocument();
   });
+
+  it('does not switch to another node when the auto-chosen one leaves and another arrives', async () => {
+    setup([ben]);
+    expect(await screen.findByRole('radio', { name: /Ben Ortiz/ })).toBeChecked();
+    act(() => useNetworkStore.setState({ nodes: [{ ...ben, status: 'offline' }, cara] }));
+    expect(screen.getByRole('radio', { name: /Cara Lund/ })).not.toBeChecked();
+    expect(screen.getByRole('alert')).toHaveTextContent('That node went offline. Choose another one.');
+    expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+    expect(mocks.api.sendNetworkCollection).not.toHaveBeenCalled();
+  });
+
+  it('calls the backend once on a double click', async () => {
+    const pending = createDeferred<ReturnType<typeof started>>();
+    mocks.api.sendNetworkCollection.mockReturnValue(pending.promise);
+    setup();
+    const button = await screen.findByRole('button', { name: 'Send' });
+    await act(async () => {
+      button.click();
+      button.click();
+    });
+    expect(mocks.api.sendNetworkCollection).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      pending.resolve(started());
+    });
+  });
+
+  it('lists two identical notes as two items', async () => {
+    mocks.api.sendNetworkCollection.mockResolvedValue(started(['Flows: skipped', 'Flows: skipped']));
+    // A duplicate React key only logs an error, so the test watches for it.
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    setup();
+    await userEvent.click(await screen.findByRole('button', { name: 'Send' }));
+    expect(await screen.findAllByText('Flows: skipped')).toHaveLength(2);
+    expect(errors).not.toHaveBeenCalled();
+    errors.mockRestore();
+  });
 });
