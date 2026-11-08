@@ -1039,6 +1039,7 @@ pub fn run() {
             let importer = Arc::new(import_wiring::ImporterAdapter::new(
                 Arc::clone(&active_workspace_path),
                 network_dir.join("import-tmp"),
+                Arc::clone(&trust_store),
             ));
             import_wiring::purge_transfer_temp(transfer_staging.as_ref(), importer.as_ref());
             let transfer_svc = rocket_app::TransferService::new(rocket_app::TransferDeps {

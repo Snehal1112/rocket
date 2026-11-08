@@ -8,7 +8,9 @@ use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
 use rocket_app::network::{CollectionImportPort, ImportedCollection, UNSAFE_ZIP_MESSAGE};
-use rocket_collection::{Collection, CollectionRepository};
+use rocket_collection::{
+    Collection, CollectionIdentity, CollectionRepository, CollectionTrustStore,
+};
 use rocket_environment::EnvironmentRepository;
 use rocket_environment::EnvironmentRepositoryFactory;
 use rocket_import::transfer_zip::{self, is_hidden_format_char, is_reserved_device_name};
@@ -88,18 +90,24 @@ pub struct ImporterAdapter {
     temp_root: PathBuf,
     process_dir: Mutex<Option<ProcessDir>>,
     started: SystemTime,
+    trust: Arc<dyn CollectionTrustStore>,
 }
 
 impl ImporterAdapter {
     /// `active_workspace_path` is the shared path the other import commands use. `temp_root`
     /// is `<network dir>/import-tmp`. Touches no disk; the private folder is made on first use.
-    pub fn new(active_workspace_path: Arc<Mutex<PathBuf>>, temp_root: PathBuf) -> Self {
+    pub fn new(
+        active_workspace_path: Arc<Mutex<PathBuf>>,
+        temp_root: PathBuf,
+        trust: Arc<dyn CollectionTrustStore>,
+    ) -> Self {
         Self {
             factory: ImportServiceFactory::new(active_workspace_path),
             import_lock: Mutex::new(()),
             temp_root,
             process_dir: Mutex::new(None),
             started: SystemTime::now(),
+            trust,
         }
     }
 
@@ -342,6 +350,21 @@ impl ImporterAdapter {
     }
 }
 
+impl ImporterAdapter {
+    /// Removes every trust record for the new collection folders. The store matches by folder
+    /// alone, so a record with any uid or none is cleared.
+    fn forget_trust(&self, roots: &[PathBuf]) -> DomainResult<()> {
+        for root in roots {
+            let canonical_root = root.canonicalize()?;
+            self.trust.remove(&CollectionIdentity {
+                canonical_root,
+                uid: None,
+            })?;
+        }
+        Ok(())
+    }
+}
+
 impl CollectionImportPort for ImporterAdapter {
     fn existing_names(&self) -> DomainResult<Vec<String>> {
         Ok(self.repo()?.list()?.into_iter().map(|s| s.name).collect())
@@ -368,7 +391,22 @@ impl CollectionImportPort for ImporterAdapter {
             .workspace_path()
             .map_err(DomainError::Internal)?;
         let service = self.factory.service_for(base.clone());
-        import_with(&service, &copy, &base.join("collections"))
+        let collections = base.join("collections");
+        let imported = import_with(&service, &copy, &collections)?;
+        // A stale record for the same folder would give the received collection a grant it
+        // never earned. Fail closed: if the records cannot be cleared, undo the import.
+        if let Err(e) = self.forget_trust(&service.created_roots()) {
+            remove_created_roots(&service.created_roots(), &collections);
+            tracing::warn!(
+                code = "transfer_trust_clear_failed",
+                "a trust record was not cleared"
+            );
+            tracing::debug!(error = %e, "transfer trust clear failed");
+            return Err(DomainError::Internal(
+                "The collection could not be imported.".into(),
+            ));
+        }
+        Ok(imported)
     }
 }
 
@@ -408,8 +446,13 @@ mod tests {
         std::fs::write(stale.join("lock"), b"").expect("stale lock file");
         std::fs::write(stale.join("Orders.zip"), b"old copy").expect("stale copy");
         let ws = tempfile::TempDir::new().expect("workspace");
-        let adapter =
-            ImporterAdapter::new(Arc::new(Mutex::new(ws.path().to_path_buf())), temp_root);
+        let adapter = ImporterAdapter::new(
+            Arc::new(Mutex::new(ws.path().to_path_buf())),
+            temp_root,
+            Arc::new(rocket_infra::FsCollectionTrustStore::new(
+                ws.path().join("trust.yml"),
+            )),
+        );
 
         purge_transfer_temp(&staging, &adapter);
 
@@ -474,7 +517,6 @@ mod tests {
 
     use rocket_app::effective_capabilities;
     use rocket_collection::settings::SandboxMode;
-    use rocket_collection::CollectionTrustStore;
     use rocket_import::{DirEntryInfo, EntryKind, ImportFiles, ReadSeek, WorkDir};
     use rocket_infra::FsCollectionTrustStore;
     use zip::write::SimpleFileOptions;
@@ -485,11 +527,20 @@ mod tests {
         Arc::new(Mutex::new(ws.to_path_buf()))
     }
 
+    /// The trust store at `trust.yml` in the test workspace.
+    fn trust_for(ws: &Path) -> Arc<dyn CollectionTrustStore> {
+        Arc::new(FsCollectionTrustStore::new(ws.join("trust.yml")))
+    }
+
     fn adapter() -> (tempfile::TempDir, ImporterAdapter) {
         let ws = tempfile::TempDir::new().expect("tempdir");
         std::fs::create_dir_all(ws.path().join("collections")).expect("collections dir");
         // The temp copies go inside the test workspace, outside `collections`.
-        let adapter = ImporterAdapter::new(shared(ws.path()), ws.path().join("transfer-tmp"));
+        let adapter = ImporterAdapter::new(
+            shared(ws.path()),
+            ws.path().join("transfer-tmp"),
+            trust_for(ws.path()),
+        );
         (ws, adapter)
     }
 
@@ -649,7 +700,11 @@ mod tests {
             .create("OnlyInB")
             .expect("create");
         let shared = shared(ws_a.path());
-        let adapter = ImporterAdapter::new(Arc::clone(&shared), ws_a.path().join("transfer-tmp"));
+        let adapter = ImporterAdapter::new(
+            Arc::clone(&shared),
+            ws_a.path().join("transfer-tmp"),
+            trust_for(ws_a.path()),
+        );
         assert!(adapter.existing_names().expect("names").is_empty());
 
         *shared.lock().expect("lock") = ws_b.path().to_path_buf();
@@ -1044,8 +1099,12 @@ mod tests {
         let live = first.process_dir().expect("process dir");
         std::fs::write(live.join("in-flight.zip"), b"zip").expect("in-flight copy");
         // A second instance on the same root that started long after the first.
-        let second = ImporterAdapter::new(shared(ws.path()), ws.path().join("transfer-tmp"))
-            .with_started(SystemTime::now() + HOUR);
+        let second = ImporterAdapter::new(
+            shared(ws.path()),
+            ws.path().join("transfer-tmp"),
+            trust_for(ws.path()),
+        )
+        .with_started(SystemTime::now() + HOUR);
 
         second.purge_temp().expect("purge");
         first.purge_temp().expect("purge by the owner");
@@ -1082,17 +1141,25 @@ mod tests {
 
         // Started before the folder was made: the folder may belong to a live instance that has
         // not written its lock yet, so it stays.
-        ImporterAdapter::new(shared(ws.path()), ws.path().join("transfer-tmp"))
-            .with_started(SystemTime::now() - HOUR)
-            .purge_temp()
-            .expect("purge");
+        ImporterAdapter::new(
+            shared(ws.path()),
+            ws.path().join("transfer-tmp"),
+            trust_for(ws.path()),
+        )
+        .with_started(SystemTime::now() - HOUR)
+        .purge_temp()
+        .expect("purge");
         assert!(lockless.exists(), "a young folder without a lock must stay");
 
         // Started after the folder was made: it is a leftover.
-        ImporterAdapter::new(shared(ws.path()), ws.path().join("transfer-tmp"))
-            .with_started(SystemTime::now() + HOUR)
-            .purge_temp()
-            .expect("purge");
+        ImporterAdapter::new(
+            shared(ws.path()),
+            ws.path().join("transfer-tmp"),
+            trust_for(ws.path()),
+        )
+        .with_started(SystemTime::now() + HOUR)
+        .purge_temp()
+        .expect("purge");
         assert!(!lockless.exists(), "an old folder without a lock must go");
     }
 
@@ -1195,5 +1262,81 @@ mod tests {
         assert!(!effective.process_env && !effective.agent_run);
         assert!(!effective.vault_values && !effective.vault_certificates);
         assert!(!trust_file.exists(), "importing never writes a trust grant");
+    }
+
+    /// Seeds a developer-mode grant at the folder the received `Orders` collection will take,
+    /// imports a hostile ZIP there and checks that no grant survives.
+    fn stale_grant_never_attaches(seed_uid: Option<&str>) {
+        let (ws, adapter) = adapter();
+        let collections = ws.path().join("collections");
+        let root = collections
+            .canonicalize()
+            .expect("canonical")
+            .join("Orders");
+        let seeded = rocket_collection::CollectionIdentity {
+            canonical_root: root,
+            uid: seed_uid.map(str::to_string),
+        };
+        let store = FsCollectionTrustStore::new(ws.path().join("trust.yml"));
+        store
+            .put(
+                &seeded,
+                rocket_collection::CollectionGrant {
+                    developer_mode: true,
+                    context_roots: Vec::new(),
+                    agent_run: true,
+                    process_env: true,
+                    vault_values: true,
+                    vault_certificates: true,
+                    source: rocket_collection::GrantSource::User,
+                },
+            )
+            .expect("seed");
+        assert!(store.grant_for(&seeded).expect("read").is_some());
+
+        let zips = tempfile::TempDir::new().expect("tempdir");
+        let zip = zips.path().join("Orders.zip");
+        write_zip(
+            &zip,
+            &[
+                (
+                    "Orders/opencollection.yml",
+                    "opencollection: \"1.0.0\"\nuid: shared-uid\ninfo:\n  name: Orders\nextensions:\n  rocketapi:\n    sandboxMode: developer\n",
+                ),
+                ("Orders/get.yml", "info:\n  name: get\nhttp:\n  method: GET\n  url: https://x.test\n"),
+            ],
+        );
+
+        let imported = adapter.import_zip(&zip, "Orders").expect("import");
+        assert_eq!(
+            imported.name, "Orders",
+            "the stale record sits at this folder"
+        );
+
+        let repo = FsCollectionRepo::new_standalone(collections);
+        let identity = repo.collection_identity("Orders").expect("identity");
+        assert_eq!(store.grant_for(&identity).expect("read"), None);
+        assert_eq!(store.grant_for(&seeded).expect("read"), None);
+        // The importer assigns a new uid, so only the folder can match a stale record. Read the
+        // raw file to prove that no record is left, whatever its uid.
+        let raw = std::fs::read_to_string(ws.path().join("trust.yml")).unwrap_or_default();
+        assert!(
+            !raw.contains(&*seeded.canonical_root.to_string_lossy()),
+            "no record remains: {raw}"
+        );
+        let effective = effective_capabilities(&repo, &store, "Orders");
+        assert_eq!(effective.sandbox_mode, SandboxMode::Safe);
+        assert!(!effective.process_env && !effective.agent_run);
+        assert!(!effective.vault_values && !effective.vault_certificates);
+    }
+
+    #[test]
+    fn a_stale_record_with_the_same_uid_is_removed_by_a_received_import() {
+        stale_grant_never_attaches(Some("shared-uid"));
+    }
+
+    #[test]
+    fn a_stale_record_without_a_uid_is_removed_by_a_received_import() {
+        stale_grant_never_attaches(None);
     }
 }
