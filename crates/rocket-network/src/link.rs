@@ -1,6 +1,6 @@
 //! Link types: ids, the manifest and the link record. Pure: no I/O.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use rand::RngCore;
 use rocket_shared::error::{DomainError, DomainResult};
@@ -12,6 +12,8 @@ use crate::limits::{MAX_MANIFEST_ENTRIES, MAX_TRANSFER_BYTES};
 use crate::planner::Decision;
 
 const PATH_MAX_BYTES: usize = 1024;
+const SEGMENT_MAX_BYTES: usize = 255;
+const CASE_CLASH: &str = "Two file names differ only by letter case.";
 
 /// Whether the text is exactly 32 lowercase hex characters.
 fn is_hex32(text: &str) -> bool {
@@ -91,14 +93,26 @@ pub fn is_sha256_hex(text: &str) -> bool {
 }
 
 fn is_device_name(segment: &str) -> bool {
-    let stem = segment.split('.').next().unwrap_or("").to_ascii_lowercase();
+    let stem = segment
+        .split('.')
+        .next()
+        .unwrap_or("")
+        .trim_end_matches(' ')
+        .to_ascii_lowercase();
     let numbered = (stem.starts_with("com") || stem.starts_with("lpt"))
         && matches!(stem.as_bytes(), [_, _, _, b'1'..=b'9']);
-    matches!(stem.as_str(), "con" | "prn" | "aux" | "nul") || numbered
+    let superscript = (stem.starts_with("com") || stem.starts_with("lpt"))
+        && matches!(stem.get(3..), Some("\u{b9}" | "\u{b2}" | "\u{b3}"));
+    matches!(
+        stem.as_str(),
+        "con" | "prn" | "aux" | "nul" | "conin$" | "conout$" | "clock$"
+    ) || numbered
+        || superscript
 }
 
 /// Whether a collection-relative path is safe: `/` separated, inside the root, no `..`, no
-/// `.rocket` folder, no device names, no drive letters, no control characters.
+/// `.rocket` folder, no device names, no drive letters, no control characters, no segment over
+/// 255 bytes.
 pub fn path_is_valid(path: &str) -> bool {
     if path.is_empty() || path.len() > PATH_MAX_BYTES || path.starts_with('/') {
         return false;
@@ -116,17 +130,19 @@ pub fn path_is_valid(path: &str) -> bool {
             && !segment.eq_ignore_ascii_case(".rocket")
             && !segment.ends_with('.')
             && !segment.ends_with(' ')
+            && segment.len() <= SEGMENT_MAX_BYTES
+            && !segment.split('.').next().unwrap_or("").ends_with(' ')
             && !is_device_name(segment)
     })
 }
 
 /// Relative path (`/` separated) to the lowercase hex SHA-256 of the exported file.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct Manifest(BTreeMap<String, String>);
+pub struct Manifest(BTreeMap<String, String>, BTreeSet<String>);
 
 impl Manifest {
     pub fn new() -> Manifest {
-        Manifest(BTreeMap::new())
+        Manifest(BTreeMap::new(), BTreeSet::new())
     }
     pub fn insert(&mut self, path: &str, sha256: &str) -> DomainResult<()> {
         if !path_is_valid(path) {
@@ -140,6 +156,11 @@ impl Manifest {
                 "manifest has too many entries".into(),
             ));
         }
+        let folded = path.to_lowercase();
+        if !self.0.contains_key(path) && self.1.contains(&folded) {
+            return Err(DomainError::InvalidInput(CASE_CLASH.into()));
+        }
+        self.1.insert(folded);
         self.0.insert(path.to_string(), sha256.to_string());
         Ok(())
     }
@@ -148,6 +169,10 @@ impl Manifest {
     }
     pub fn paths(&self) -> impl Iterator<Item = &str> {
         self.0.keys().map(String::as_str)
+    }
+    /// The `(path, sha256)` pairs in sorted path order.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.0.iter().map(|(p, h)| (p.as_str(), h.as_str()))
     }
     pub fn len(&self) -> usize {
         self.0.len()
@@ -226,7 +251,13 @@ impl Manifest {
 
     /// Wraps entries the caller took from validated manifests.
     pub(crate) fn from_entries(entries: BTreeMap<String, String>) -> Manifest {
-        Manifest(entries)
+        let folded = entries.keys().map(|p| p.to_lowercase()).collect();
+        Manifest(entries, folded)
+    }
+
+    /// Whether a path equal to `path` after lowercase folding is present.
+    pub(crate) fn has_folded(&self, path: &str) -> bool {
+        self.1.contains(&path.to_lowercase())
     }
 }
 
@@ -284,10 +315,14 @@ impl LinkRecord {
 
 /// One file move in a `SyncPlanPayload`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RenamePair {
     pub from: String,
     pub to: String,
 }
+
+/// The name Plan 3 uses for a move in a plan.
+pub type PlanRename = RenamePair;
 
 /// One file the planning node will send, with the hash of its content.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -336,6 +371,27 @@ impl SyncPlanPayload {
             return Err(DomainError::InvalidInput(
                 "plan has too many entries".into(),
             ));
+        }
+        let lists: [Vec<&str>; 5] = [
+            payload.wanted.iter().map(String::as_str).collect(),
+            payload.deletes.iter().map(String::as_str).collect(),
+            payload
+                .renames
+                .iter()
+                .flat_map(|r| [r.from.as_str(), r.to.as_str()])
+                .collect(),
+            payload.decisions.iter().map(|d| d.path.as_str()).collect(),
+            payload.sends.iter().map(|f| f.path.as_str()).collect(),
+        ];
+        for list in &lists {
+            let mut seen: BTreeMap<String, &str> = BTreeMap::new();
+            for path in list {
+                if let Some(first) = seen.insert(path.to_lowercase(), path) {
+                    if first != *path {
+                        return Err(DomainError::InvalidInput(CASE_CLASH.into()));
+                    }
+                }
+            }
         }
         let paths = payload
             .wanted
@@ -837,5 +893,108 @@ mod tests {
         let huge = vec![b' '; MAX_TRANSFER_BYTES as usize + 1];
         let err = SyncPlanPayload::from_json(&huge).expect_err("too large");
         assert!(matches!(err, DomainError::InvalidInput(m) if m == "plan too large"));
+    }
+
+    #[test]
+    fn insert_refuses_paths_that_differ_only_by_case() {
+        let mut m = Manifest::new();
+        m.insert("A.yml", A).expect("first");
+        let err = m.insert("a.yml", A).expect_err("case clash");
+        assert!(
+            matches!(&err, DomainError::InvalidInput(t) if t == "Two file names differ only by letter case.")
+        );
+        m.insert("A.yml", B).expect("same exact path is replaced");
+        let mut rev = Manifest::new();
+        rev.insert("a.yml", A).expect("first");
+        rev.insert("A.yml", A).expect_err("case clash");
+        let mut dir = Manifest::new();
+        dir.insert("Dir/x.yml", A).expect("first");
+        dir.insert("dir/x.yml", A).expect_err("folder case clash");
+        let mut uni = Manifest::new();
+        uni.insert("\u{c9}.yml", A).expect("first");
+        uni.insert("\u{e9}.yml", A).expect_err("unicode case clash");
+    }
+
+    #[test]
+    fn manifest_json_refuses_case_clashes() {
+        let text = format!(
+            r#"{{"entries":[{{"path":"A.yml","sha256":"{A}"}},{{"path":"a.yml","sha256":"{A}"}}]}}"#
+        );
+        Manifest::from_json(text.as_bytes()).expect_err("case clash");
+    }
+
+    #[test]
+    fn plan_json_refuses_case_clashes_inside_one_list() {
+        for text in [
+            r#"{"wanted":["A.yml","a.yml"],"deletes":[],"renames":[],"decisions":[]}"#,
+            r#"{"wanted":[],"deletes":["A.yml","a.yml"],"renames":[],"decisions":[]}"#,
+            r#"{"wanted":[],"deletes":[],"renames":[{"from":"A.yml","to":"a.yml"}],"decisions":[]}"#,
+            r#"{"wanted":[],"deletes":[],"renames":[],"decisions":[{"path":"A.yml","resolution":"keep_mine"},{"path":"a.yml","resolution":"keep_mine"}]}"#,
+        ] {
+            SyncPlanPayload::from_json(text.as_bytes()).expect_err("case clash");
+        }
+        // Different lists may hold paths that differ by case.
+        SyncPlanPayload::from_json(
+            br#"{"wanted":["A.yml"],"deletes":["a.yml"],"renames":[],"decisions":[]}"#,
+        )
+        .expect("lists are independent");
+    }
+
+    #[test]
+    fn rename_and_decision_entries_refuse_unknown_keys() {
+        for text in [
+            r#"{"wanted":[],"deletes":[],"renames":[{"from":"a.yml","to":"b.yml","x":1}],"decisions":[]}"#,
+            r#"{"wanted":[],"deletes":[],"renames":[],"decisions":[{"path":"a.yml","resolution":"keep_mine","x":1}]}"#,
+        ] {
+            SyncPlanPayload::from_json(text.as_bytes()).expect_err("unknown key");
+        }
+    }
+
+    #[test]
+    fn plan_rename_is_the_rename_pair() {
+        let r: crate::link::PlanRename = RenamePair {
+            from: "a".into(),
+            to: "b".into(),
+        };
+        assert_eq!(r.to, "b");
+    }
+
+    #[test]
+    fn iter_yields_path_and_hash_in_path_order() {
+        assert_eq!(
+            two().iter().collect::<Vec<_>>(),
+            vec![("a.yml", A), ("b/c.yml", B)]
+        );
+    }
+
+    #[test]
+    fn path_is_valid_rejects_more_reserved_names() {
+        for bad in [
+            "CONIN$",
+            "conout$.yml",
+            "a/CLOCK$",
+            "COM\u{b9}",
+            "com\u{b2}.yml",
+            "LPT\u{b3}.txt",
+            "lpt\u{b9}",
+            "nul .yml",
+            "a/nul .yml",
+            "x .yml",
+        ] {
+            assert!(!path_is_valid(bad), "{bad:?}");
+        }
+        for good in [
+            "console.yml",
+            "conin.yml",
+            "clock.yml",
+            "com.yml",
+            "lpt.yml",
+            "a b.yml",
+        ] {
+            assert!(path_is_valid(good), "{good:?}");
+        }
+        assert!(path_is_valid(&"a".repeat(255)));
+        assert!(!path_is_valid(&"a".repeat(256)));
+        assert!(!path_is_valid(&format!("d/{}", "a".repeat(256))));
     }
 }

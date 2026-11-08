@@ -80,7 +80,8 @@ pub enum AuditEventKind {
     },
     /// A sync this node started ended after the first chunk left the node, or was refused.
     /// `device_id` is the short id. `outcome` is `applied`, `failed`, `declined`, `cancelled`,
-    /// `expired`, `base_mismatch`, `link_missing` or `unconfirmed`. Counts only, never paths.
+    /// `expired`, `base_mismatch`, `link_missing` or `unconfirmed`. The fields are the short device id, the collection name and an outcome
+    /// word, never paths or file contents.
     NetworkSyncSent {
         device_id: String,
         collection: String,
@@ -93,7 +94,8 @@ pub enum AuditEventKind {
         collection: String,
         outcome: String,
     },
-    /// A link was removed here (Unlink or the pairing was removed). The files stay.
+    /// A link was removed here (Unlink or the pairing was removed). The files stay. The fields
+    /// are the short device id and the collection name, never paths or file contents.
     NetworkLinkRemoved {
         device_id: String,
         collection: String,

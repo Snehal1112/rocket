@@ -25,8 +25,8 @@ pub use events::{
 };
 pub use identity::{DeviceKeyMaterial, PeerIdentity};
 pub use link::{
-    is_sha256_hex, path_is_valid, LinkId, LinkRecord, LinkState, Manifest, PlanFile, RenamePair,
-    SyncId, SyncPlanPayload,
+    is_sha256_hex, path_is_valid, LinkId, LinkRecord, LinkState, Manifest, PlanFile, PlanRename,
+    RenamePair, SyncId, SyncPlanPayload,
 };
 pub use messages::{
     AbortReason, PeerMessage, ResultOutcome, SyncAbortReason, SyncOutcome, SyncPayloadKind,

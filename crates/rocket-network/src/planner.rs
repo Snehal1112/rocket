@@ -49,6 +49,7 @@ pub enum Resolution {
 
 /// The choice for the conflict at `path`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Decision {
     pub path: String,
     pub resolution: Resolution,
@@ -64,15 +65,20 @@ pub struct SyncPlan {
 type Map = BTreeMap<String, String>;
 
 fn renames_on(base: &Map, side: &Map) -> Vec<(String, String)> {
-    let added: Vec<&String> = side.keys().filter(|p| !base.contains_key(*p)).collect();
-    let mut used: BTreeSet<&String> = BTreeSet::new();
+    // Added paths by hash, each list in path order, so the first unused one is the smallest.
+    let mut added: BTreeMap<&str, Vec<&String>> = BTreeMap::new();
+    for (path, hash) in side.iter().filter(|(p, _)| !base.contains_key(*p)) {
+        added.entry(hash.as_str()).or_default().push(path);
+    }
+    let mut next: BTreeMap<&str, usize> = BTreeMap::new();
     let mut pairs = Vec::new();
     for (from, hash) in base.iter().filter(|(p, _)| !side.contains_key(*p)) {
-        let target = added
-            .iter()
-            .find(|q| !used.contains(**q) && side.get(**q) == Some(hash));
-        if let Some(to) = target {
-            used.insert(*to);
+        let Some(paths) = added.get(hash.as_str()) else {
+            continue;
+        };
+        let at = next.entry(hash.as_str()).or_insert(0);
+        if let Some(to) = paths.get(*at) {
+            *at += 1;
             pairs.push((from.clone(), (*to).clone()));
         }
     }
@@ -198,7 +204,7 @@ fn keep_both_path(path: &str, taken: &Manifest, chosen: &BTreeSet<String>) -> Do
             format!(" {n}")
         };
         let candidate = format!("{dir}{stem} (from peer){suffix}{ext}");
-        if !taken.entries().contains_key(&candidate) && !chosen.contains(&candidate) {
+        if !taken.has_folded(&candidate) && !chosen.contains(&candidate.to_lowercase()) {
             return if path_is_valid(&candidate) {
                 Ok(candidate)
             } else {
@@ -305,7 +311,7 @@ pub fn resolve(
                 Resolution::KeepBoth => match (c.mine.is_some(), c.theirs.is_some()) {
                     (true, true) => {
                         let as_path = keep_both_path(path, taken, &chosen)?;
-                        chosen.insert(as_path.clone());
+                        chosen.insert(as_path.to_lowercase());
                         out.push(SyncAction::RenameTheirs {
                             from: path.into(),
                             to: as_path.clone(),
@@ -1260,5 +1266,43 @@ mod tests {
                 &[decide("n.yml", resolution)],
             );
         }
+    }
+
+    #[test]
+    fn many_renames_with_long_shared_prefixes_pair_correctly() {
+        let prefix = "folder/".repeat(100);
+        let n = 5000usize;
+        let mut base = Manifest::new();
+        let mut theirs = Manifest::new();
+        for i in 0..n {
+            let hash = format!("{i:064x}");
+            base.insert(&format!("{prefix}old{i:05}.yml"), &hash)
+                .expect("valid entry");
+            theirs
+                .insert(&format!("{prefix}new{i:05}.yml"), &hash)
+                .expect("valid entry");
+        }
+        let plan = plan_sync(&base, &base, &theirs);
+        assert_eq!(plan.actions.len(), n);
+        assert!(plan.conflicts.is_empty());
+        assert_eq!(
+            plan.actions[0],
+            rename_mine(
+                &format!("{prefix}old00000.yml"),
+                &format!("{prefix}new00000.yml")
+            )
+        );
+    }
+
+    #[test]
+    fn keep_both_name_never_collides_by_case() {
+        let taken = manifest(&[("r.yml", '2'), ("R (From Peer).yml", '4')]);
+        let plan = one(Some('1'), Some('2'), Some('3'));
+        let actions =
+            resolve(&plan, &[decide("r.yml", Resolution::KeepBoth)], &taken).expect("resolves");
+        assert!(actions.contains(&SyncAction::PullAs {
+            path: "r.yml".into(),
+            as_path: "r (from peer) 2.yml".into()
+        }));
     }
 }
