@@ -12,6 +12,7 @@ import {
   MoreHorizontal,
   Pencil,
   Plus,
+  Send,
   Trash2,
   TriangleAlert,
 } from 'lucide-react';
@@ -24,6 +25,7 @@ import { offersConnect } from '@/components/collections/openapi-sync/openApiSync
 import { ScriptNode } from '@/components/collections/ScriptNode';
 import { ContractBadge } from '@/components/contract/ContractBadge';
 import { ExportCollectionDialog } from '@/components/export/ExportCollectionDialog';
+import { SendCollectionDialog } from '@/components/network/SendCollectionDialog';
 import { CreateRequestDialog } from '@/components/request/CreateRequestDialog';
 import {
   ContextMenu,
@@ -63,6 +65,7 @@ import {
 } from '@/lib/tauri-api';
 import { useContractStore } from '@/stores/contract-store';
 import { useContractsStore } from '@/stores/contracts/contractsSlice';
+import { selectOnlinePairedCount, useNetworkStore } from '@/stores/network-store';
 import { usePaneStore } from '@/stores/pane-store';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 import type { CollectionTab } from '@/types/pane-types';
@@ -124,6 +127,9 @@ export function CollectionNode({
   const [createRequestOpen, setCreateRequestOpen] = useState(false);
   const [newScriptOpen, setNewScriptOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [sendOpen, setSendOpen] = useState(false);
+  // A boolean selector: the row re-renders only when the answer flips.
+  const canSend = useNetworkStore((s) => selectOnlinePairedCount(s) > 0);
   const [connectOpen, setConnectOpen] = useState(false);
   // The sync status is only asked for once the row is hovered, focused or a menu opens.
   const [menuSeen, setMenuSeen] = useState(false);
@@ -553,6 +559,11 @@ export function CollectionNode({
               <DropdownMenuItem onClick={() => setExportOpen(true)}>
                 <Download aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Export...
               </DropdownMenuItem>
+              {canSend && (
+                <DropdownMenuItem onClick={() => setSendOpen(true)}>
+                  <Send aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Send to...
+                </DropdownMenuItem>
+              )}
               {(openApiSync.data || openApiSync.isError) && (
                 <DropdownMenuItem onClick={openOpenApiSync}>
                   <GitCompareArrows aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> OpenAPI sync
@@ -626,6 +637,11 @@ export function CollectionNode({
         <ContextMenuItem onClick={() => setExportOpen(true)}>
           <Download aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Export...
         </ContextMenuItem>
+        {canSend && (
+          <ContextMenuItem onClick={() => setSendOpen(true)}>
+            <Send aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Send to...
+          </ContextMenuItem>
+        )}
         {(openApiSync.data || openApiSync.isError) && (
           <ContextMenuItem onClick={openOpenApiSync}>
             <GitCompareArrows aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> OpenAPI sync
@@ -780,6 +796,13 @@ export function CollectionNode({
         collectionName={summary.name}
         onClose={() => setExportOpen(false)}
       />
+      {(canSend || sendOpen) && (
+        <SendCollectionDialog
+          open={sendOpen}
+          collectionName={summary.name}
+          onClose={() => setSendOpen(false)}
+        />
+      )}
       {(canConnect || connectOpen) && (
         <ConnectOpenApiDialog
           collection={summary.name}
