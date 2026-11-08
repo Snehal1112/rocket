@@ -8,6 +8,7 @@ pub mod limits;
 pub mod link;
 pub mod messages;
 pub mod pairing;
+pub mod planner;
 pub mod ports;
 pub mod presence;
 pub mod profile;
@@ -21,11 +22,18 @@ pub use device::DeviceId;
 pub use dialer::{keep_dialed_by, should_dial, DialHint};
 pub use events::{NetworkEvent, TransferEvent};
 pub use identity::{DeviceKeyMaterial, PeerIdentity};
-pub use link::{is_sha256_hex, path_is_valid, LinkId, LinkRecord, LinkState, Manifest, SyncId};
+pub use link::{
+    is_sha256_hex, path_is_valid, LinkId, LinkRecord, LinkState, Manifest, PlanFile, RenamePair,
+    SyncId, SyncPlanPayload,
+};
 pub use messages::{AbortReason, PeerMessage, ResultOutcome};
 pub use pairing::{
     commitment, commitment_from_base64, commitment_to_base64, pairing_code, Nonce, PairingCode,
     PairingId, PairingOutcome, PairingRole, PairingSession, PairingState, PairingStatus,
+};
+pub use planner::{
+    new_base, plan_sync, resolve, Conflict, ConflictKind, Decision, Resolution, SyncAction,
+    SyncPlan,
 };
 pub use ports::{
     Announcement, BlockedDeviceRepository, DeviceIdentityStore, Discovery, DiscoveryEvent,

@@ -9,6 +9,7 @@ use sha2::{Digest, Sha256};
 
 use crate::device::DeviceId;
 use crate::limits::{MAX_MANIFEST_ENTRIES, MAX_TRANSFER_BYTES};
+use crate::planner::Decision;
 
 const PATH_MAX_BYTES: usize = 1024;
 
@@ -217,6 +218,18 @@ struct ManifestFile {
     entries: Vec<ManifestEntry>,
 }
 
+impl Manifest {
+    /// The entries as a map, for the planner.
+    pub(crate) fn entries(&self) -> &BTreeMap<String, String> {
+        &self.0
+    }
+
+    /// Wraps entries the caller took from validated manifests.
+    pub(crate) fn from_entries(entries: BTreeMap<String, String>) -> Manifest {
+        Manifest(entries)
+    }
+}
+
 impl Serialize for Manifest {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         self.0.serialize(s)
@@ -269,9 +282,97 @@ impl LinkRecord {
     }
 }
 
+/// One file move in a `SyncPlanPayload`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RenamePair {
+    pub from: String,
+    pub to: String,
+}
+
+/// One file the planning node will send, with the hash of its content.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PlanFile {
+    pub path: String,
+    pub sha256: String,
+}
+
+/// The plan the planning node sends to the starting node as a transfer payload.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SyncPlanPayload {
+    pub wanted: Vec<String>,
+    pub deletes: Vec<String>,
+    pub renames: Vec<RenamePair>,
+    pub decisions: Vec<Decision>,
+    /// Files the planning node sends, so the starter can check them on arrival.
+    #[serde(default)]
+    pub sends: Vec<PlanFile>,
+    /// The hash of the manifest both nodes store after the sync.
+    #[serde(default)]
+    pub new_base_hash: Option<String>,
+}
+
+impl SyncPlanPayload {
+    pub fn to_json(&self) -> DomainResult<Vec<u8>> {
+        serde_json::to_vec(self)
+            .map_err(|_| DomainError::InvalidInput("plan cannot be encoded".into()))
+    }
+
+    pub fn from_json(bytes: &[u8]) -> DomainResult<SyncPlanPayload> {
+        if bytes.len() as u64 > MAX_TRANSFER_BYTES {
+            return Err(DomainError::InvalidInput("plan too large".into()));
+        }
+        let payload: SyncPlanPayload = serde_json::from_slice(bytes)
+            .map_err(|_| DomainError::InvalidInput("invalid plan".into()))?;
+        let lists = [
+            payload.wanted.len(),
+            payload.deletes.len(),
+            payload.renames.len(),
+            payload.decisions.len(),
+            payload.sends.len(),
+        ];
+        if lists.iter().any(|n| *n > MAX_MANIFEST_ENTRIES) {
+            return Err(DomainError::InvalidInput(
+                "plan has too many entries".into(),
+            ));
+        }
+        let paths = payload
+            .wanted
+            .iter()
+            .chain(&payload.deletes)
+            .map(String::as_str)
+            .chain(
+                payload
+                    .renames
+                    .iter()
+                    .flat_map(|r| [r.from.as_str(), r.to.as_str()]),
+            )
+            .chain(payload.decisions.iter().map(|d| d.path.as_str()))
+            .chain(payload.sends.iter().map(|f| f.path.as_str()));
+        for path in paths {
+            if !path_is_valid(path) {
+                return Err(DomainError::InvalidInput("invalid plan path".into()));
+            }
+        }
+        let hashes = payload
+            .sends
+            .iter()
+            .map(|f| f.sha256.as_str())
+            .chain(payload.new_base_hash.as_deref());
+        for hash in hashes {
+            if !is_sha256_hex(hash) {
+                return Err(DomainError::InvalidInput("invalid plan hash".into()));
+            }
+        }
+        Ok(payload)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::planner::Resolution;
 
     const A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -657,5 +758,84 @@ mod tests {
             record().base_hash(),
             "278204d7086284145bc980a5fa47f7bc6abfe3e0d4670ded3ec18e4b7aaa096d"
         );
+    }
+
+    #[test]
+    fn the_plan_payload_round_trips_with_its_pinned_shape() {
+        let payload = SyncPlanPayload {
+            wanted: vec!["a.yml".into()],
+            deletes: vec!["b.yml".into()],
+            renames: vec![RenamePair {
+                from: "c.yml".into(),
+                to: "d/c.yml".into(),
+            }],
+            decisions: vec![Decision {
+                path: "e.yml".into(),
+                resolution: Resolution::KeepBoth,
+            }],
+            sends: vec![PlanFile {
+                path: "f.yml".into(),
+                sha256: "1".repeat(64),
+            }],
+            new_base_hash: Some("2".repeat(64)),
+        };
+        let text = String::from_utf8(payload.to_json().expect("encodes")).expect("utf8");
+        assert_eq!(
+            text,
+            format!(
+                r#"{{"wanted":["a.yml"],"deletes":["b.yml"],"renames":[{{"from":"c.yml","to":"d/c.yml"}}],"decisions":[{{"path":"e.yml","resolution":"keep_both"}}],"sends":[{{"path":"f.yml","sha256":"{}"}}],"new_base_hash":"{}"}}"#,
+                "1".repeat(64),
+                "2".repeat(64)
+            )
+        );
+        assert_eq!(
+            SyncPlanPayload::from_json(text.as_bytes()).expect("decodes"),
+            payload
+        );
+        assert_eq!(
+            SyncPlanPayload::from_json(&SyncPlanPayload::default().to_json().expect("encodes"))
+                .expect("decodes"),
+            SyncPlanPayload::default()
+        );
+    }
+
+    #[test]
+    fn an_old_plan_payload_without_sends_and_base_hash_still_parses() {
+        let text = r#"{"wanted":["a.yml"],"deletes":[],"renames":[],"decisions":[]}"#;
+        let payload = SyncPlanPayload::from_json(text.as_bytes()).expect("decodes");
+        assert_eq!(payload.wanted, vec!["a.yml".to_string()]);
+        assert!(payload.sends.is_empty());
+        assert_eq!(payload.new_base_hash, None);
+    }
+
+    #[test]
+    fn the_plan_payload_rejects_unsafe_paths_unknown_fields_and_too_many_entries() {
+        let hash = "1".repeat(64);
+        for text in [
+            r#"{"wanted":["../a.yml"],"deletes":[],"renames":[],"decisions":[]}"#.to_string(),
+            r#"{"wanted":[],"deletes":["/a.yml"],"renames":[],"decisions":[]}"#.to_string(),
+            r#"{"wanted":[],"deletes":[],"renames":[{"from":"a.yml","to":".rocket/a.yml"}],"decisions":[]}"#.to_string(),
+            r#"{"wanted":[],"deletes":[],"renames":[],"decisions":[{"path":"nul","resolution":"keep_mine"}]}"#.to_string(),
+            r#"{"wanted":[],"deletes":[],"renames":[],"decisions":[{"path":"a.yml","resolution":"keep_all"}]}"#.to_string(),
+            r#"{"wanted":[],"deletes":[],"renames":[],"decisions":[],"extra":1}"#.to_string(),
+            r#"{"wanted":[]}"#.to_string(),
+            "nope".to_string(),
+            format!(r#"{{"wanted":[{}],"deletes":[],"renames":[],"decisions":[]}}"#, vec!["\"a.yml\""; MAX_MANIFEST_ENTRIES + 1].join(",")),
+            format!(r#"{{"wanted":[],"deletes":[],"renames":[],"decisions":[],"sends":[{{"path":"../a.yml","sha256":"{hash}"}}]}}"#),
+            r#"{"wanted":[],"deletes":[],"renames":[],"decisions":[],"sends":[{"path":"a.yml","sha256":"abc"}]}"#.to_string(),
+            format!(r#"{{"wanted":[],"deletes":[],"renames":[],"decisions":[],"sends":[{{"path":"a.yml","sha256":"{hash}","extra":1}}]}}"#),
+            format!(r#"{{"wanted":[],"deletes":[],"renames":[],"decisions":[],"sends":[{}]}}"#, vec![format!(r#"{{"path":"a.yml","sha256":"{hash}"}}"#); MAX_MANIFEST_ENTRIES + 1].join(",")),
+            r#"{"wanted":[],"deletes":[],"renames":[],"decisions":[],"new_base_hash":"zz"}"#.to_string(),
+        ] {
+            let err = SyncPlanPayload::from_json(text.as_bytes()).expect_err("rejected");
+            assert!(matches!(err, DomainError::InvalidInput(_)), "input {text:.80}");
+        }
+    }
+
+    #[test]
+    fn the_plan_payload_rejects_oversize_bytes() {
+        let huge = vec![b' '; MAX_TRANSFER_BYTES as usize + 1];
+        let err = SyncPlanPayload::from_json(&huge).expect_err("too large");
+        assert!(matches!(err, DomainError::InvalidInput(m) if m == "plan too large"));
     }
 }
