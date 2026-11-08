@@ -95,6 +95,8 @@ export function IncomingTransferDialog() {
 
   const name = offer ? peerName(offer.displayName) : '';
   const waiting = offer?.accepted ?? false;
+  // The import after the last chunk cannot be stopped, so Cancel would do nothing.
+  const allBytesIn = active !== undefined && active.doneBytes >= active.totalBytes;
   const progressLine =
     showProgress && active
       ? `${formatBytes(active.doneBytes)} of ${formatBytes(active.totalBytes)}`
@@ -155,7 +157,7 @@ export function IncomingTransferDialog() {
             <Button onClick={done}>Done</Button>
           ) : waiting ? (
             <>
-              <Button variant='outline' disabled={busy} onClick={() => void cancel()}>
+              <Button variant='outline' disabled={busy || allBytesIn} onClick={() => void cancel()}>
                 Cancel
               </Button>
               <Button onClick={done}>Done</Button>

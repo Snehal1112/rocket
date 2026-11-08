@@ -120,6 +120,30 @@ describe('IncomingTransferDialog', () => {
     expect(store().incomingTransfers[0]?.accepted).toBe(true);
   });
 
+  it('disables Cancel once all bytes are in, because the import cannot be stopped', async () => {
+    openOffer({ accepted: true });
+    act(() => {
+      store().setTransferProgress({
+        transferId: 't1',
+        direction: 'receive',
+        doneBytes: 100,
+        totalBytes: 200,
+      });
+    });
+    expect(await screen.findByRole('button', { name: 'Cancel' })).toBeEnabled();
+
+    act(() => {
+      store().setTransferProgress({
+        transferId: 't1',
+        direction: 'receive',
+        doneBytes: 200,
+        totalBytes: 200,
+      });
+    });
+
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+  });
+
   it('Cancel while receiving cancels the transfer and remembers it was local', async () => {
     openOffer({ accepted: true });
     await userEvent.click(await screen.findByRole('button', { name: 'Cancel' }));
