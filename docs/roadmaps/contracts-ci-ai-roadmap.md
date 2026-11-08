@@ -253,9 +253,14 @@ What:
   both screens. Pairings last until removed. One node can pair with many
   teammates and act as the team's hub. "Add by address" covers VPN and
   Tailscale.
-- Later, each with its own spec: sending collections, contracts and pins as
-  sanitised snapshots (lands with zero trust), and contract checks between
-  nodes. Git history over the hub stays a separate spike.
+- Send a collection (built, manual checks open in
+  `docs/manual-tests/team-network.md`, section 11): a one-time push of a
+  collection to a paired node. The receiver accepts every offer and the
+  imported collection has no trust record (its scripts run in the Safe
+  sandbox; Developer mode, host env and vault stay off).
+- Later, each with its own spec: sending contracts and pins as sanitised
+  snapshots (lands with zero trust), and contract checks between nodes. Git
+  history over the hub stays a separate spike.
 - Decision (2026-11-06): the contract check between nodes shows the change as
   a side-by-side diff in the existing Monaco diff viewer
   (`src/components/git/DiffViewer.tsx`, the same one used for git diffs), with
