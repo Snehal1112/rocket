@@ -11,9 +11,11 @@ pub mod report;
 pub mod scripts;
 pub mod scrub;
 mod sensitive;
+pub mod sync_merge;
+pub mod sync_zip;
 pub mod tree;
 
-pub use bruno::bruno_zip;
+pub use bruno::{bruno_zip, is_synced_path};
 pub use names::slug;
 pub use ports::{CollectionFileSource, SourceFile};
 pub use postman::{postman_collection, postman_url, PostmanOptions};
@@ -24,4 +26,6 @@ pub use scrub::{
     scrub_typed_rows, scrub_yaml, strip_rocket_namespace,
 };
 pub use sensitive::is_sensitive_name;
+pub use sync_merge::merge_file;
+pub use sync_zip::zip_entries;
 pub use tree::{CollectionExportTree, ExportFolder, ExportItem};

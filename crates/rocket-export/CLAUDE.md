@@ -17,6 +17,8 @@ Pure logic that turns a Rocket collection into a Bruno ZIP or a Postman Collecti
 | `events.rs` | `request_events`, `folder_events`: build the `prerequest` and `test` event blocks |
 | `postman_env.rs` | `postman_environment`, `environment_notes`, `postman_bundle` (collection plus environments ZIP) |
 | `names.rs` | `slug` for file names |
+| `sync_merge.rs` | `merge_file(local, received)`: the sync's file merge (peer wins; local filled scalar kept over a blank; `uid`, `info.uid`, `extensions.rocketapi`, `examples` stay local; lists replaced, rows matched by name and type) |
+| `sync_zip.rs` | `zip_entries`: reads a Bruno ZIP and strips its single root folder; `bruno.rs` also holds `is_synced_path`, the one path filter of the sync |
 | `report.rs` | `ExportReport`, `ExportNote`, `ExportAction` (`Translated`, `Blanked`, `Skipped`, `Preserved`) |
 
 ## Layering

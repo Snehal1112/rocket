@@ -12,7 +12,7 @@ use crate::ports::SourceFile;
 use crate::report::{ExportAction, ExportNote, ExportReport};
 use crate::scrub::{scrub_yaml, strip_rocket_namespace};
 
-fn is_noise(rel_path: &str) -> bool {
+pub(crate) fn is_noise(rel_path: &str) -> bool {
     if rel_path == "workspace.yml" {
         return true;
     }
@@ -23,7 +23,7 @@ fn is_noise(rel_path: &str) -> bool {
 
 /// The top-level directory of a Rocket-only file, which Bruno cannot read: `flows/` and
 /// any hidden directory such as `.rocket/` (contract snapshots).
-fn rocket_only_root(rel_path: &str) -> Option<&str> {
+pub(crate) fn rocket_only_root(rel_path: &str) -> Option<&str> {
     let (first, _) = rel_path.split_once('/')?;
     (first == "flows" || first.starts_with('.')).then_some(first)
 }
@@ -56,6 +56,22 @@ fn extension(rel_path: &str) -> &str {
 
 fn is_yaml(rel_path: &str) -> bool {
     matches!(extension(rel_path), "yml" | "yaml")
+}
+
+/// True for a collection-relative path that the Bruno export without environments carries.
+/// The sync uses this one rule for its manifests and its apply, so it cannot drift from the
+/// export. It also refuses a leading slash and any `..` segment.
+pub fn is_synced_path(rel_path: &str) -> bool {
+    if rel_path.starts_with('/') || rel_path.split('/').any(|part| part == "..") {
+        return false;
+    }
+    if is_noise(rel_path) || rocket_only_root(rel_path).is_some() {
+        return false;
+    }
+    if rel_path.starts_with("environments/") {
+        return false;
+    }
+    matches!(extension(rel_path), "yml" | "yaml" | "proto" | "js")
 }
 
 /// Records one `Preserved` note per file that has a `rok.` script.
