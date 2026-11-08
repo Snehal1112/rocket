@@ -5,6 +5,7 @@ pub mod dialer;
 pub mod events;
 pub mod identity;
 pub mod limits;
+pub mod link;
 pub mod messages;
 pub mod pairing;
 pub mod ports;
@@ -20,6 +21,7 @@ pub use device::DeviceId;
 pub use dialer::{keep_dialed_by, should_dial, DialHint};
 pub use events::{NetworkEvent, TransferEvent};
 pub use identity::{DeviceKeyMaterial, PeerIdentity};
+pub use link::{is_sha256_hex, path_is_valid, LinkId, LinkRecord, LinkState, Manifest, SyncId};
 pub use messages::{AbortReason, PeerMessage, ResultOutcome};
 pub use pairing::{
     commitment, commitment_from_base64, commitment_to_base64, pairing_code, Nonce, PairingCode,

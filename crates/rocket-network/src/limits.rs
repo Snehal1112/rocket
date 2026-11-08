@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 /// The peer protocol version this build speaks.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 /// The mDNS service type.
 pub const MDNS_SERVICE_TYPE: &str = "_rocket._tcp.local.";
 /// The first port the peer server tries.
@@ -69,6 +69,10 @@ pub const SENDER_RESULT_TIMEOUT: Duration = Duration::from_secs(60);
 pub const ACK_EVERY_CHUNKS: u32 = 16;
 /// The most chunks the sender may have sent and not yet seen acknowledged.
 pub const MAX_UNACKED_CHUNKS: u32 = 32;
+/// The most files one manifest lists. Equals `MAX_ZIP_ENTRIES`.
+pub const MAX_MANIFEST_ENTRIES: usize = 5000;
+/// The longest name a sync payload transfer carries in its offer.
+pub const SYNC_PAYLOAD_NAME_MAX: usize = 32;
 
 #[cfg(test)]
 mod tests {
@@ -77,7 +81,7 @@ mod tests {
 
     #[test]
     fn spec_values_are_pinned() {
-        assert_eq!(PROTOCOL_VERSION, 2);
+        assert_eq!(PROTOCOL_VERSION, 3);
         assert_eq!(MDNS_SERVICE_TYPE, "_rocket._tcp.local.");
         assert_eq!(MAX_PAIRED_DEVICES, 200);
         assert_eq!(MAX_MANUAL_ADDRESSES, 50);
@@ -106,6 +110,8 @@ mod tests {
         assert_eq!(SENDER_RESULT_TIMEOUT, Duration::from_secs(60));
         assert_eq!(ACK_EVERY_CHUNKS, 16);
         assert_eq!(MAX_UNACKED_CHUNKS, 32);
+        assert_eq!(MAX_MANIFEST_ENTRIES, 5000);
+        assert_eq!(SYNC_PAYLOAD_NAME_MAX, 32);
     }
 
     #[test]
@@ -127,6 +133,12 @@ mod tests {
         assert_eq!(encoded, 43_692);
         // The envelope is the type tag, a 32 character id and a sequence number.
         assert!(encoded + 200 < MAX_FRAME_BYTES);
+    }
+
+    #[test]
+    fn sync_limits_follow_the_zip_limit() {
+        // A manifest lists the files of one collection ZIP, so it can never hold more.
+        assert_eq!(MAX_MANIFEST_ENTRIES, MAX_ZIP_ENTRIES);
     }
 
     #[test]
