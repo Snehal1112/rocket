@@ -807,6 +807,41 @@ async fn an_abort_during_the_finish_stops_the_import() {
 }
 
 #[tokio::test]
+async fn a_non_cancel_abort_during_the_finish_is_a_failure() {
+    // Expired, busy and too_big mean nothing for a transfer that is already received.
+    for reason in [
+        AbortReason::Expired,
+        AbortReason::Busy,
+        AbortReason::TooBig,
+        AbortReason::Failed,
+    ] {
+        let rig = rig_peers();
+        let release = rig.staging.hold_finish();
+        let payload = Payload::new(40 * 1024);
+        let id = tid(1);
+        offer(&rig, ANA, &id, &payload).await;
+        rig.svc.respond(&id, true).await.expect("accepts");
+        feed(&rig, ANA, &id, &payload);
+        wait_for("the finish to start", || {
+            rig.staging.counters.finished() == 1
+        })
+        .await;
+
+        rig.svc.on_frame(dev(ANA), abort(&id, reason));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        release.send(()).expect("the finish waits");
+        wait_for_finish(&rig).await;
+
+        assert_eq!(
+            rig.events.finished(),
+            vec![(id, Direction::Receive, Outcome::Failed)],
+            "{reason:?}"
+        );
+        assert!(rig.importer.calls().is_empty());
+    }
+}
+
+#[tokio::test]
 async fn peer_gone_during_the_finish_stops_the_import() {
     let rig = rig_peers();
     let release = rig.staging.hold_finish();

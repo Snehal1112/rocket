@@ -369,7 +369,11 @@ impl TransferService {
             };
             if e.finalizing {
                 // The finalize task owns the entry. It sees the failed machine before it imports.
-                e.machine.fail_with(Outcome::from(reason));
+                let outcome = match reason {
+                    AbortReason::Cancelled => Outcome::Cancelled,
+                    _ => Outcome::Failed,
+                };
+                e.machine.fail_with(outcome);
                 return;
             }
             if e.machine.on_abort(reason).is_some() {
@@ -537,7 +541,10 @@ impl TransferService {
                 Err((Outcome::Rejected, Some(text)))
             }
             Ok(Err(error)) => {
-                tracing::warn!(code = "network_transfer_import_failed", error = %error, "import failed");
+                // The error can hold local paths and the peer's collection name, and warn
+                // lines reach the webview, so only the code goes at warn.
+                tracing::warn!(code = "network_transfer_import_failed", "import failed");
+                tracing::debug!(error = %error, "import failed");
                 Err((Outcome::Failed, Some(IMPORT_FAILED_MESSAGE.to_string())))
             }
             Err(_) => {
