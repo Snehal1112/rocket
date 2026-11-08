@@ -112,11 +112,11 @@ mod tests {
     fn transfer_limits_are_consistent() {
         assert_eq!(TRANSFER_OFFER_TTL, PAIRING_TTL);
         assert_eq!(OFFERS_PER_PEER_PER_MINUTE, PAIR_REQUESTS_PER_MINUTE);
-        assert!(MAX_TRANSFER_BYTES < MAX_UNZIPPED_BYTES);
+        const _: () = assert!(MAX_TRANSFER_BYTES < MAX_UNZIPPED_BYTES);
         // The sender gives up on the result sooner than an offer waits for its answer.
-        assert!(SENDER_RESULT_TIMEOUT < TRANSFER_OFFER_TTL);
+        const _: () = assert!(SENDER_RESULT_TIMEOUT.as_secs() < TRANSFER_OFFER_TTL.as_secs());
         // The receiver acks twice per window, so a sender never stalls on a healthy link.
-        assert!(ACK_EVERY_CHUNKS < MAX_UNACKED_CHUNKS);
+        const _: () = assert!(ACK_EVERY_CHUNKS < MAX_UNACKED_CHUNKS);
         assert_eq!(MAX_UNACKED_CHUNKS % ACK_EVERY_CHUNKS, 0);
     }
 
