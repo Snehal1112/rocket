@@ -81,8 +81,9 @@ pub enum TransferEvent {
         total_bytes: u64,
     },
     /// A transfer ended. `outcome` is the snake_case `Outcome` (`unconfirmed` included).
-    /// `message` is extra text for the receiving side (the importer's failure text, or "The
-    /// other node went offline."), `null` when there is none.
+    /// `message` is extra text for the receiving side (the fixed text "The collection could
+    /// not be imported." for an importer failure, or "The other node went offline."), `null`
+    /// when there is none.
     Finished {
         transfer_id: String,
         direction: Direction,

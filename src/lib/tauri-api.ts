@@ -4463,7 +4463,7 @@ export type NetworkTransferEvent =
       outcome: TransferOutcome;
       display_name: string;
       collection_name: string;
-      /** The importer's failure text on the receiving side, else null. */
+      /** A fixed text on the receiving side (an importer failure is "The collection could not be imported."), else null. */
       message: string | null;
     };
 

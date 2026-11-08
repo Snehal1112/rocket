@@ -63,7 +63,9 @@ pub enum AuditEventKind {
     },
     /// A collection left for a paired node. `device_id` is the short id (`XXXX-XXXX`).
     /// `outcome` is `completed` (the receiver confirmed), `unconfirmed` (the final ack came,
-    /// no result) or `failed` (the stream ended before the final ack).
+    /// no result), `failed` (the stream ended before the final ack), `cancelled`, `damaged`
+    /// or `rejected` (the receiver's verdict). A row exists only for a send that ended after
+    /// at least one chunk was sent.
     NetworkCollectionSent {
         device_id: String,
         collection: String,

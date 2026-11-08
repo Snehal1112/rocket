@@ -111,6 +111,7 @@ Audit (wire fields `device_id`, `collection`, `outcome`; the full device id and 
 Known open items:
 
 - The staging purge at startup is not lock-aware. A second Rocket instance that starts during a receive could delete the first instance's staged file (manual check 21).
+- The importer unpacks a received ZIP into the private system temp folder (0700, random name). The startup purge covers the staging and ZIP-copy folders only, so after a crash the unpacked tree stays in the system temp folder until the OS clears it.
 - The sonner toast action closes the waiting toast even when a cancel is refused. The Cancel then looks done while the transfer goes on (manual check 15).
 
 ## Decisions
