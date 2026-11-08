@@ -255,6 +255,16 @@ impl Manifest {
         Manifest(entries, folded)
     }
 
+    /// Whether a path of `self` and a different path of `other` are equal after lowercase folding.
+    ///
+    /// Identical paths on both sides are not a clash.
+    pub fn case_clashes_with(&self, other: &Manifest) -> bool {
+        other
+            .0
+            .keys()
+            .any(|p| !self.0.contains_key(p) && self.1.contains(&p.to_lowercase()))
+    }
+
     /// Whether a path equal to `path` after lowercase folding is present.
     pub(crate) fn has_folded(&self, path: &str) -> bool {
         self.1.contains(&path.to_lowercase())
@@ -913,6 +923,27 @@ mod tests {
         let mut uni = Manifest::new();
         uni.insert("\u{c9}.yml", A).expect("first");
         uni.insert("\u{e9}.yml", A).expect_err("unicode case clash");
+    }
+
+    #[test]
+    fn case_clashes_with_finds_paths_that_differ_only_by_case() {
+        let make = |paths: &[&str]| {
+            let mut m = Manifest::new();
+            for p in paths {
+                m.insert(p, A).expect("valid entry");
+            }
+            m
+        };
+        let lower = make(&["a.yml"]);
+        let upper = make(&["A.yml"]);
+        assert!(lower.case_clashes_with(&upper));
+        assert!(upper.case_clashes_with(&lower));
+        assert!(!lower.case_clashes_with(&make(&["a.yml"])));
+        assert!(!lower.case_clashes_with(&make(&["b.yml"])));
+        assert!(make(&["Dir/x.yml"]).case_clashes_with(&make(&["dir/x.yml"])));
+        assert!(make(&["\u{c9}.yml"]).case_clashes_with(&make(&["\u{e9}.yml"])));
+        assert!(!Manifest::new().case_clashes_with(&Manifest::new()));
+        assert!(!lower.case_clashes_with(&Manifest::new()));
     }
 
     #[test]

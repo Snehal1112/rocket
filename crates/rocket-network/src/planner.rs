@@ -88,7 +88,11 @@ fn renames_on(base: &Map, side: &Map) -> Vec<(String, String)> {
 /// Plans a sync from the planning node's view: `mine` is its manifest, `theirs` the starter's.
 ///
 /// Renames are paired first, then each remaining path goes through the three-way table. The
-/// result is sorted by path. A `RenameMine` or `RenameTheirs` whose `from` is the path of a
+/// result is sorted by path.
+///
+/// Callers must check `Manifest::case_clashes_with` for the two sides first. Paths that differ
+/// only by letter case across the sides are planned as separate files, and the stored result
+/// could not be loaded again. A `RenameMine` or `RenameTheirs` whose `from` is the path of a
 /// `RenameVsEdit` conflict is a marker only: `resolve` replaces it.
 pub fn plan_sync(base: &Manifest, mine: &Manifest, theirs: &Manifest) -> SyncPlan {
     let (b, m, t) = (base.entries(), mine.entries(), theirs.entries());
@@ -335,6 +339,9 @@ pub fn resolve(
 ///
 /// `base` and `decisions` are part of the contract but unused: the final actions already carry
 /// every decision, and the agreed state is `mine` with the planning node's own actions applied.
+///
+/// Callers must check `Manifest::case_clashes_with` for the two sides first. This function does
+/// not refuse case clashes, so its result could hold both `a.yml` and `A.yml`.
 pub fn new_base(
     _base: &Manifest,
     mine: &Manifest,
@@ -1132,6 +1139,14 @@ mod tests {
         let stored = new_base(base, mine, theirs, &actions, decisions);
         assert_eq!(stored, after_mine, "the stored base is the agreed state");
         stored
+    }
+
+    #[test]
+    fn case_only_difference_between_sides_is_detectable_before_planning() {
+        let mine = manifest(&[("a.yml", 'a')]);
+        let theirs = manifest(&[("A.yml", 'a')]);
+        assert!(mine.case_clashes_with(&theirs));
+        assert!(theirs.case_clashes_with(&mine));
     }
 
     #[test]
