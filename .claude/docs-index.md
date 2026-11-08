@@ -33,6 +33,7 @@ Pointers to the feature and engineering docs. Open the one that matches the area
 ## Roadmaps
 
 - `docs/roadmaps/contracts-ci-ai-roadmap.md` for the contracts, CI and AI direction (projects CA-1 to CA-4).
+- `.claude/sprint-plan.md` for the master roadmap split into one-week sprints.
 
 ## Other
 
