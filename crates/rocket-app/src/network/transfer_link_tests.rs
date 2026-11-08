@@ -82,6 +82,8 @@ fn frames() -> Vec<PeerMessage> {
             size_bytes: 10,
             chunk_count: 1,
             sha256: "0".repeat(64),
+            keep_in_sync: false,
+            link_id: None,
         },
         PeerMessage::OfferAnswer {
             transfer_id: transfer_id(),

@@ -281,6 +281,7 @@ impl TransferService {
                 size_bytes,
                 chunk_count,
                 sha256,
+                ..
             } => {
                 let frame = OfferFrame {
                     transfer_id,

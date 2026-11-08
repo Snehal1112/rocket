@@ -143,6 +143,7 @@ async fn send_offers_the_collection_with_size_and_hash() {
         size_bytes,
         chunk_count,
         sha256,
+        ..
     } = &sent[0]
     else {
         panic!("expected an offer, got {:?}", sent[0]);

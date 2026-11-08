@@ -256,6 +256,22 @@ async fn a_socket_with_another_protocol_version_needs_an_update() {
     assert!(remote.to_service.is_closed(), "the socket was dropped");
 }
 
+#[tokio::test(start_paused = true)]
+async fn a_peer_on_the_previous_protocol_version_needs_an_update() {
+    // Version 2 is the build before keep-in-sync. It must never talk to version 3.
+    let (a, _h) = solo(2).await;
+    let (socket, remote) = scripted_socket(identity(2), a.id(), PROTOCOL_VERSION - 1);
+    a.connector.push_socket(socket);
+    a.svc
+        .add_address("127.0.0.1", addr(2).port())
+        .await
+        .expect("add address");
+    settle().await;
+
+    assert_eq!(status_of(&a, 2), Some(NodeStatus::NeedsUpdate));
+    assert!(remote.to_service.is_closed(), "the socket was dropped");
+}
+
 // ----- duplicate sockets -----
 
 #[tokio::test(start_paused = true)]

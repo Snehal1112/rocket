@@ -9,6 +9,7 @@ use tokio::sync::mpsc;
 
 use crate::device::DeviceId;
 use crate::identity::{DeviceKeyMaterial, PeerIdentity};
+use crate::link::{LinkId, LinkRecord};
 use crate::messages::PeerMessage;
 use crate::pairing::PairingId;
 use crate::profile::NodeProfile;
@@ -49,6 +50,28 @@ pub trait ManualAddressRepository: Send + Sync {
 pub trait NetworkSettingsRepository: Send + Sync {
     fn load(&self) -> DomainResult<NetworkSettings>;
     fn save(&self, settings: &NetworkSettings) -> DomainResult<()>;
+}
+
+/// Persistence of links and their base files. Implemented by `rocket-infra` (`FsLinkRepo`).
+pub trait LinkRepository: Send + Sync {
+    /// Every link. A link whose `link.yml` is damaged is returned as a `Broken` record.
+    fn list(&self) -> DomainResult<Vec<LinkRecord>>;
+    fn get(&self, id: &LinkId) -> DomainResult<Option<LinkRecord>>;
+    /// Writes the record and updates the base copies. `base_files` (relative path and bytes) is
+    /// a delta, all or nothing:
+    ///
+    /// - A stored copy whose path is still in `record.base` is kept, so a state-only save
+    ///   passes `&[]`.
+    /// - A stored copy whose path left `record.base` is pruned.
+    /// - Each `(path, bytes)` replaces the stored copy. Its bytes must hash (SHA-256, lowercase
+    ///   hex) to the value in `record.base` for that path, and the path must be in
+    ///   `record.base`. Otherwise the save is refused with `InvalidInput` and nothing changes.
+    fn save(&self, record: &LinkRecord, base_files: &[(String, Vec<u8>)]) -> DomainResult<()>;
+    /// Removes the link and its base copies. A missing link is fine.
+    fn delete(&self, id: &LinkId) -> DomainResult<()>;
+    /// The base copy of one file. `None` when there is none. A path that fails
+    /// `path_is_valid` is `InvalidInput`.
+    fn read_base_file(&self, id: &LinkId, path: &str) -> DomainResult<Option<Vec<u8>>>;
 }
 
 /// Each Fs repo also implements this, so the service can warn about a quarantined file once.
@@ -235,6 +258,8 @@ pub trait PeerTransportFactory: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::link::{LinkState, Manifest};
+    use rocket_shared::error::DomainError;
     use std::sync::Mutex;
 
     fn assert_dyn<T: ?Sized>() {}
@@ -253,6 +278,7 @@ mod tests {
         assert_dyn::<dyn PeerConnector>();
         assert_dyn::<dyn PeerServerControl>();
         assert_dyn::<dyn PeerTransportFactory>();
+        assert_dyn::<dyn LinkRepository>();
     }
 
     #[test]
@@ -263,6 +289,178 @@ mod tests {
         assert_eq!(PeerError::Forbidden.status_code(), 403);
         assert_eq!(PeerError::BadRequest.status_code(), 400);
         assert_eq!(PeerError::Internal.status_code(), 500);
+    }
+
+    type Row = (LinkRecord, Vec<(String, Vec<u8>)>);
+
+    /// Lowercase hex SHA-256 of some bytes, as the manifest stores it.
+    fn hex_sha(bytes: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        Sha256::digest(bytes)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    }
+
+    /// An in-memory repository that follows the delta rule of `LinkRepository::save`.
+    #[derive(Default)]
+    struct MemoryLinks(Mutex<Vec<Row>>);
+
+    impl LinkRepository for MemoryLinks {
+        fn list(&self) -> DomainResult<Vec<LinkRecord>> {
+            let rows = self.0.lock().unwrap_or_else(|e| e.into_inner());
+            Ok(rows.iter().map(|(record, _)| record.clone()).collect())
+        }
+
+        fn get(&self, id: &LinkId) -> DomainResult<Option<LinkRecord>> {
+            Ok(self.list()?.into_iter().find(|r| &r.link_id == id))
+        }
+
+        fn save(&self, record: &LinkRecord, base_files: &[(String, Vec<u8>)]) -> DomainResult<()> {
+            for (path, bytes) in base_files {
+                let expected = record.base.get(path).ok_or_else(|| {
+                    DomainError::InvalidInput(format!("{path} is not in the base"))
+                })?;
+                if hex_sha(bytes) != expected {
+                    return Err(DomainError::InvalidInput(format!(
+                        "{path} does not match the base hash"
+                    )));
+                }
+            }
+            let mut rows = self.0.lock().unwrap_or_else(|e| e.into_inner());
+            let mut kept: Vec<(String, Vec<u8>)> = rows
+                .iter()
+                .filter(|(r, _)| r.link_id == record.link_id)
+                .flat_map(|(_, files)| files.iter().cloned())
+                .filter(|(path, _)| record.base.get(path).is_some())
+                .collect();
+            for (path, bytes) in base_files {
+                kept.retain(|(p, _)| p != path);
+                kept.push((path.clone(), bytes.clone()));
+            }
+            rows.retain(|(r, _)| r.link_id != record.link_id);
+            rows.push((record.clone(), kept));
+            Ok(())
+        }
+
+        fn delete(&self, id: &LinkId) -> DomainResult<()> {
+            let mut rows = self.0.lock().unwrap_or_else(|e| e.into_inner());
+            rows.retain(|(r, _)| &r.link_id != id);
+            Ok(())
+        }
+
+        fn read_base_file(&self, id: &LinkId, path: &str) -> DomainResult<Option<Vec<u8>>> {
+            let rows = self.0.lock().unwrap_or_else(|e| e.into_inner());
+            Ok(rows
+                .iter()
+                .filter(|(r, _)| &r.link_id == id)
+                .flat_map(|(_, files)| files.iter())
+                .find(|(p, _)| p == path)
+                .map(|(_, bytes)| bytes.clone()))
+        }
+    }
+
+    fn link_record(id: &LinkId, files: &[(&str, &[u8])]) -> LinkRecord {
+        let mut base = Manifest::new();
+        for (path, bytes) in files {
+            base.insert(path, &hex_sha(bytes)).expect("valid entry");
+        }
+        LinkRecord {
+            link_id: id.clone(),
+            peer_device_id: DeviceId::from_bytes([3; 32]),
+            collection_name: "Orders".into(),
+            collection_root: "/c/orders".into(),
+            collection_uid: None,
+            base,
+            state: LinkState::InSync,
+            updated_at: "2026-11-08T10:00:00Z".into(),
+        }
+    }
+
+    #[test]
+    fn the_link_repository_is_usable_through_the_trait_object() {
+        let repo: Arc<dyn LinkRepository> = Arc::new(MemoryLinks::default());
+        let id = LinkId::parse("0123456789abcdef0123456789abcdef").expect("valid id");
+        let record = link_record(&id, &[("a.yml", b"x")]);
+        assert_eq!(repo.get(&id).expect("reads"), None);
+        repo.save(&record, &[("a.yml".to_string(), b"x".to_vec())])
+            .expect("saves");
+        assert_eq!(repo.list().expect("lists"), vec![record.clone()]);
+        assert_eq!(repo.get(&id).expect("reads"), Some(record));
+        assert_eq!(
+            repo.read_base_file(&id, "a.yml").expect("reads"),
+            Some(b"x".to_vec())
+        );
+        assert_eq!(repo.read_base_file(&id, "b.yml").expect("reads"), None);
+        repo.delete(&id).expect("deletes");
+        assert_eq!(repo.get(&id).expect("reads"), None);
+        repo.delete(&id).expect("a second delete is fine");
+    }
+
+    #[test]
+    fn saving_base_files_is_a_delta() {
+        let repo: Arc<dyn LinkRepository> = Arc::new(MemoryLinks::default());
+        let id = LinkId::parse("0123456789abcdef0123456789abcdef").expect("valid id");
+        let first = link_record(&id, &[("a.yml", b"x"), ("b.yml", b"y")]);
+        repo.save(
+            &first,
+            &[
+                ("a.yml".to_string(), b"x".to_vec()),
+                ("b.yml".to_string(), b"y".to_vec()),
+            ],
+        )
+        .expect("saves");
+
+        // A state-only save keeps every copy whose path is still in the base.
+        let mut again = first.clone();
+        again.state = LinkState::ChangesWaiting;
+        repo.save(&again, &[]).expect("state-only save");
+        assert_eq!(repo.get(&id).expect("reads"), Some(again));
+        assert_eq!(
+            repo.read_base_file(&id, "a.yml").expect("reads"),
+            Some(b"x".to_vec())
+        );
+        assert_eq!(
+            repo.read_base_file(&id, "b.yml").expect("reads"),
+            Some(b"y".to_vec())
+        );
+
+        // A copy whose path left the base is pruned.
+        let shrunk = link_record(&id, &[("a.yml", b"x")]);
+        repo.save(&shrunk, &[]).expect("prunes");
+        assert_eq!(
+            repo.read_base_file(&id, "a.yml").expect("reads"),
+            Some(b"x".to_vec())
+        );
+        assert_eq!(repo.read_base_file(&id, "b.yml").expect("reads"), None);
+
+        // A changed file is replaced by the delta.
+        let changed = link_record(&id, &[("a.yml", b"z")]);
+        repo.save(&changed, &[("a.yml".to_string(), b"z".to_vec())])
+            .expect("replaces");
+        assert_eq!(
+            repo.read_base_file(&id, "a.yml").expect("reads"),
+            Some(b"z".to_vec())
+        );
+    }
+
+    #[test]
+    fn saving_a_file_that_does_not_fit_the_base_is_refused() {
+        let repo: Arc<dyn LinkRepository> = Arc::new(MemoryLinks::default());
+        let id = LinkId::parse("0123456789abcdef0123456789abcdef").expect("valid id");
+        let record = link_record(&id, &[("a.yml", b"x")]);
+        // The bytes do not hash to the base value.
+        let err = repo
+            .save(&record, &[("a.yml".to_string(), b"other".to_vec())])
+            .expect_err("hash mismatch");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+        // The path is not in the base.
+        let err = repo
+            .save(&record, &[("c.yml".to_string(), b"x".to_vec())])
+            .expect_err("path not in base");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+        // Nothing was written by the refused saves.
+        assert_eq!(repo.get(&id).expect("reads"), None);
     }
 
     struct Collecting(Mutex<Vec<DiscoveryEvent>>);

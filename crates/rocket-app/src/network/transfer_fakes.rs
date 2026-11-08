@@ -117,6 +117,8 @@ impl Payload {
             size_bytes: self.bytes.len() as u64,
             chunk_count: self.count(),
             sha256: self.sha(),
+            keep_in_sync: false,
+            link_id: None,
         }
     }
 

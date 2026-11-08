@@ -118,6 +118,8 @@ fn manual_offer(id: &str, name: &str, size: u64, count: u32, sha: &str) -> PeerM
         size_bytes: size,
         chunk_count: count,
         sha256: sha.to_string(),
+        keep_in_sync: false,
+        link_id: None,
     }
 }
 

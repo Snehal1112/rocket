@@ -78,6 +78,26 @@ pub enum AuditEventKind {
         collection: String,
         outcome: String,
     },
+    /// A sync this node started ended after the first chunk left the node, or was refused.
+    /// `device_id` is the short id. `outcome` is `applied`, `failed`, `declined`, `cancelled`,
+    /// `expired`, `base_mismatch`, `link_missing` or `unconfirmed`. Counts only, never paths.
+    NetworkSyncSent {
+        device_id: String,
+        collection: String,
+        outcome: String,
+    },
+    /// A sync a paired node started ended on this node. `device_id` is the short id. `outcome`
+    /// uses the same words as `NetworkSyncSent`.
+    NetworkSyncReceived {
+        device_id: String,
+        collection: String,
+        outcome: String,
+    },
+    /// A link was removed here (Unlink or the pairing was removed). The files stay.
+    NetworkLinkRemoved {
+        device_id: String,
+        collection: String,
+    },
 }
 
 impl AuditEventKind {
@@ -97,6 +117,9 @@ impl AuditEventKind {
             Self::NetworkDeviceBlocked { .. } => "network_device_blocked",
             Self::NetworkCollectionSent { .. } => "network_collection_sent",
             Self::NetworkCollectionReceived { .. } => "network_collection_received",
+            Self::NetworkSyncSent { .. } => "network_sync_sent",
+            Self::NetworkSyncReceived { .. } => "network_sync_received",
+            Self::NetworkLinkRemoved { .. } => "network_link_removed",
         }
     }
 }
@@ -308,6 +331,108 @@ mod tests {
             assert_eq!(value["device_id"], "ABCD-EFGH");
             assert_eq!(value["collection"], "Orders");
             assert_eq!(value["outcome"], outcome);
+            let back: AuditEventKind = serde_json::from_value(value).expect("kind round trips");
+            assert_eq!(back, kind);
+        }
+    }
+
+    #[test]
+    fn network_sync_kinds_have_stable_tags() {
+        let sent = AuditEventKind::NetworkSyncSent {
+            device_id: "ABCD-EFGH".into(),
+            collection: "Orders".into(),
+            outcome: "applied".into(),
+        };
+        let received = AuditEventKind::NetworkSyncReceived {
+            device_id: "ABCD-EFGH".into(),
+            collection: "Orders".into(),
+            outcome: "failed".into(),
+        };
+        let removed = AuditEventKind::NetworkLinkRemoved {
+            device_id: "ABCD-EFGH".into(),
+            collection: "Orders".into(),
+        };
+        assert_eq!(sent.tag(), "network_sync_sent");
+        assert_eq!(received.tag(), "network_sync_received");
+        assert_eq!(removed.tag(), "network_link_removed");
+    }
+
+    #[test]
+    fn network_sync_kinds_map_to_the_expected_controls() {
+        let sent = SecurityAuditEvent::new(
+            "user",
+            None,
+            AuditEventKind::NetworkSyncSent {
+                device_id: "ABCD-EFGH".into(),
+                collection: "Orders".into(),
+                outcome: "applied".into(),
+            },
+            "",
+        );
+        let received = SecurityAuditEvent::new(
+            "user",
+            None,
+            AuditEventKind::NetworkSyncReceived {
+                device_id: "ABCD-EFGH".into(),
+                collection: "Orders".into(),
+                outcome: "declined".into(),
+            },
+            "",
+        );
+        for ev in [&sent, &received] {
+            assert!(ev.controls.iter().any(|c| c.code == "CC6.7"));
+            assert!(!ev.controls.iter().any(|c| c.code == "CC6.1"));
+        }
+        let removed = SecurityAuditEvent::new(
+            "user",
+            None,
+            AuditEventKind::NetworkLinkRemoved {
+                device_id: "ABCD-EFGH".into(),
+                collection: "Orders".into(),
+            },
+            "",
+        );
+        assert!(removed.controls.iter().any(|c| c.code == "CC6.1"));
+    }
+
+    #[test]
+    fn network_sync_kinds_serialize_with_snake_case_fields() {
+        for (kind, tag, outcome) in [
+            (
+                AuditEventKind::NetworkSyncSent {
+                    device_id: "ABCD-EFGH".into(),
+                    collection: "Orders".into(),
+                    outcome: "applied".into(),
+                },
+                "network_sync_sent",
+                Some("applied"),
+            ),
+            (
+                AuditEventKind::NetworkSyncReceived {
+                    device_id: "ABCD-EFGH".into(),
+                    collection: "Orders".into(),
+                    outcome: "declined".into(),
+                },
+                "network_sync_received",
+                Some("declined"),
+            ),
+            (
+                AuditEventKind::NetworkLinkRemoved {
+                    device_id: "ABCD-EFGH".into(),
+                    collection: "Orders".into(),
+                },
+                "network_link_removed",
+                None,
+            ),
+        ] {
+            let value = serde_json::to_value(&kind).expect("kind serializes");
+            assert_eq!(value["kind"], tag);
+            assert_eq!(value["device_id"], "ABCD-EFGH");
+            assert_eq!(value["collection"], "Orders");
+            match outcome {
+                Some(word) => assert_eq!(value["outcome"], word),
+                None => assert!(value.get("outcome").is_none(), "the removal has no outcome"),
+            }
             let back: AuditEventKind = serde_json::from_value(value).expect("kind round trips");
             assert_eq!(back, kind);
         }

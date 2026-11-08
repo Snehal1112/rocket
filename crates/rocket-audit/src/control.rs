@@ -29,6 +29,7 @@ pub static CONTROL_CATALOG: &[ControlEntry] = &[
             "network_device_paired",
             "network_device_unpaired",
             "network_device_blocked",
+            "network_link_removed",
         ],
     },
     ControlEntry {
@@ -40,6 +41,8 @@ pub static CONTROL_CATALOG: &[ControlEntry] = &[
             "audit_evidence_exported",
             "network_collection_sent",
             "network_collection_received",
+            "network_sync_sent",
+            "network_sync_received",
         ],
     },
     ControlEntry {
@@ -201,5 +204,25 @@ mod tests {
                 "{tag} missing from CC6.7"
             );
         }
+    }
+
+    #[test]
+    fn the_sync_kinds_are_listed_in_the_catalog() {
+        for tag in ["network_sync_sent", "network_sync_received"] {
+            let controls = controls_for_kind(tag);
+            assert!(
+                controls
+                    .iter()
+                    .any(|c| c.framework == Framework::Soc2 && c.code == "CC6.7"),
+                "{tag} missing from CC6.7"
+            );
+        }
+        let controls = controls_for_kind("network_link_removed");
+        assert!(
+            controls
+                .iter()
+                .any(|c| c.framework == Framework::Soc2 && c.code == "CC6.1"),
+            "network_link_removed missing from CC6.1"
+        );
     }
 }

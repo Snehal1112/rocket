@@ -360,6 +360,8 @@ impl OutgoingTransfer {
             size_bytes: self.size_bytes,
             chunk_count: self.chunk_count,
             sha256: self.sha256.clone(),
+            keep_in_sync: false,
+            link_id: None,
         }
     }
 
@@ -1218,6 +1220,8 @@ mod tests {
                 size_bytes: 2 * CB + 10,
                 chunk_count: 3,
                 sha256: SHA.into(),
+                keep_in_sync: false,
+                link_id: None,
             }
         );
         assert_eq!(t.state(), OutgoingState::Offered);

@@ -39,13 +39,18 @@ cargo check -j4 -p rocket-network
 | `DialHint`, `should_dial`, `keep_dialed_by` | Which side opens the WebSocket. |
 | `SlidingWindow` | Request limit: at most `cap` hits in a `window`. Time is passed in as `Instant`. |
 | `HelloResponse`, `PairRequest`, `PairRequestResponse`, `NonceMessage`, `DecisionRequest`, `PairStatusResponse` | REST bodies, snake_case JSON. |
-| `PeerMessage` | WebSocket frame enum: Hello, Ping, Pong, Unpair and the six transfer frames (offer, answer, chunk, abort, chunk ack, result). `decode` enforces the 64 KiB limit and rejects unknown types. |
+| `PeerMessage` | WebSocket frame enum: Hello, Ping, Pong, Unpair, the six transfer frames (offer, answer, chunk, abort, chunk ack, result) and the three sync frames (`SyncOffer`, `SyncAbort`, `SyncResult`). `CollectionOffer` carries `keep_in_sync` and `link_id`. `decode` enforces the 64 KiB limit and rejects unknown types. |
+| `SyncPayloadKind`, `SyncAbortReason`, `SyncOutcome` | What a sync transfer carries (`manifest`, `plan`, `files`), why a sync stopped, and the apply result (`applied`, `failed`). Every payload travels on the transfer machines, never inside a frame. |
 | `AbortReason`, `ResultOutcome` | Why a transfer stopped (`cancelled`, `failed`, `too_big`, `busy`, `expired`) and what the receiver reports at the end (`completed`, `damaged`, `rejected`, `failed`). |
 | `TransferId`, `chunk_count_for`, `offer_name_is_valid`, `Direction`, `Outcome` | Transfer id (32 lowercase hex), chunk math, the offer name rule, direction and result names (`unconfirmed` when the sender got no result after the last chunk). |
 | `OutgoingTransfer`, `IncomingTransfer`, `OfferError`, `ChunkStep` | Sender and receiver state machines. Time is passed in as `Instant`. They hold no bytes. The sender keeps an ack window of 32 chunks (`window_open`, `on_ack`) and stays `Done` until `on_result` brings the receiver's outcome, or ends `Unconfirmed` when the peer goes or the result times out. |
 | `TransferLimits`, `Admission` | Pending, per-peer and rate limits for offers, plus duplicate-id detection. |
-| `TransferSink` | Port with `on_frame` (the six transfer frames from `NetworkService`) and `on_peer_gone` (peer socket ended or pairing removed). |
-| `NetworkEvent`, `TransferEvent` | Events for the frontend. Implement `PublishedEvent`. Channels `network-changed`, `network-pairing` and `network-transfer`. |
+| `LinkId`, `SyncId`, `Manifest`, `path_is_valid`, `is_sha256_hex` | Link and sync ids (32 lowercase hex), the path-to-SHA-256 map with its safe-path rule, the 5000 entry cap, `base_hash` and JSON. |
+| `LinkRecord`, `LinkState`, `SyncPlanPayload`, `RenamePair` | The persisted link (snake_case, with its base manifest), its state, and the JSON plan one node sends the other. |
+| `plan_sync`, `resolve`, `new_base`, `SyncAction`, `SyncPlan`, `Conflict`, `ConflictKind`, `Decision`, `Resolution` | The pure three-way planner: the table of spec section 6, renames by hash, conflicts, the user's decisions and the base both sides store. A rename conflict keeps its rename in `actions` as a marker that `resolve` replaces. |
+| `LinkRepository` | Port for link records and their base files. `save` takes the base files as a delta: copies still in the base are kept, copies that left it are pruned, and each given file must hash to its base value. Implemented by `rocket-infra`. |
+| `TransferSink` | Port with `on_frame` (the transfer and sync frames from `NetworkService`) and `on_peer_gone` (peer socket ended or pairing removed). |
+| `NetworkEvent`, `TransferEvent`, `SyncEvent` | Events for the frontend. Implement `PublishedEvent`. Channels `network-changed`, `network-pairing`, `network-transfer` and `network-sync`. `SyncSummary`, `ConflictView`, `SyncRole` and `SyncFinish` are the helper types of `SyncEvent`; the helper DTOs are camelCase. |
 | Ports | `DeviceIdentityStore`, `PairedDeviceRepository`, `BlockedDeviceRepository`, `ManualAddressRepository`, `NetworkSettingsRepository`, `QuarantineReport`, `Discovery`, `DiscoverySink`, `PeerHandler`, `PeerConnector`, `PeerServerControl`, `PeerTransportFactory`, plus `PeerSocket`, `PeerTransport`, `PeerError`, `PeerCallError`. |
 
 ## Key Patterns
@@ -56,6 +61,7 @@ cargo check -j4 -p rocket-network
 - `NetworkEvent` tag is camelCase and variant fields are snake_case on purpose. `wire_contract_*` tests pin the keys.
 - Pairing logic never reads the clock. Callers pass `Instant` to `PairingSession::new_*` and `expire_if_due`.
 - Transfer machines never read the clock and never touch bytes on disk. They return decoded chunk bytes to the caller.
+- The planner never reads files or the clock. It works on manifests and returns actions; Plan 2 and 3 of the sync series do the I/O.
 - Never log nonces, codes, keys or certificates. `Nonce` and `DeviceKeyMaterial` have no `Debug` on purpose.
 
 ## Workspace Relationships

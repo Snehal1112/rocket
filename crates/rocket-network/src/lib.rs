@@ -20,13 +20,17 @@ pub mod wire;
 
 pub use device::DeviceId;
 pub use dialer::{keep_dialed_by, should_dial, DialHint};
-pub use events::{NetworkEvent, TransferEvent};
+pub use events::{
+    ConflictView, NetworkEvent, SyncEvent, SyncFinish, SyncRole, SyncSummary, TransferEvent,
+};
 pub use identity::{DeviceKeyMaterial, PeerIdentity};
 pub use link::{
     is_sha256_hex, path_is_valid, LinkId, LinkRecord, LinkState, Manifest, PlanFile, RenamePair,
     SyncId, SyncPlanPayload,
 };
-pub use messages::{AbortReason, PeerMessage, ResultOutcome};
+pub use messages::{
+    AbortReason, PeerMessage, ResultOutcome, SyncAbortReason, SyncOutcome, SyncPayloadKind,
+};
 pub use pairing::{
     commitment, commitment_from_base64, commitment_to_base64, pairing_code, Nonce, PairingCode,
     PairingId, PairingOutcome, PairingRole, PairingSession, PairingState, PairingStatus,
@@ -37,9 +41,9 @@ pub use planner::{
 };
 pub use ports::{
     Announcement, BlockedDeviceRepository, DeviceIdentityStore, Discovery, DiscoveryEvent,
-    DiscoverySink, ManualAddressRepository, NetworkSettingsRepository, PairedDeviceRepository,
-    PeerCallError, PeerConnector, PeerError, PeerHandler, PeerServerControl, PeerSocket,
-    PeerTransport, PeerTransportFactory, QuarantineReport,
+    DiscoverySink, LinkRepository, ManualAddressRepository, NetworkSettingsRepository,
+    PairedDeviceRepository, PeerCallError, PeerConnector, PeerError, PeerHandler,
+    PeerServerControl, PeerSocket, PeerTransport, PeerTransportFactory, QuarantineReport,
 };
 pub use presence::{backoff, Presence, PresenceTracker};
 pub use profile::{default_display_name, initials_for, NodeProfile};

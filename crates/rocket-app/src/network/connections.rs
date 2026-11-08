@@ -395,7 +395,10 @@ impl NetworkService {
                         | PeerMessage::Chunk { .. }
                         | PeerMessage::TransferAbort { .. }
                         | PeerMessage::ChunkAck { .. }
-                        | PeerMessage::TransferResult { .. }),
+                        | PeerMessage::TransferResult { .. }
+                        | PeerMessage::SyncOffer { .. }
+                        | PeerMessage::SyncAbort { .. }
+                        | PeerMessage::SyncResult { .. }),
                     ) => {
                         self.with_conn(id, |c| c.presence.on_pong());
                         self.deliver_transfer_frame(id, message);
