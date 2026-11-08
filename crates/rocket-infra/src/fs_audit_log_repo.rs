@@ -80,6 +80,28 @@ impl AuditLogRepository for FsAuditLogRepo {
     }
 
     fn latest(&self) -> DomainResult<Option<SecurityAuditEvent>> {
+        match self.last_line()? {
+            Some(line) => Ok(Some(serde_json::from_str(&line)?)),
+            None => Ok(None),
+        }
+    }
+
+    fn head_hash(&self) -> DomainResult<Option<String>> {
+        // Read only the hash, so a last event of a kind this build does not know still works.
+        #[derive(serde::Deserialize)]
+        struct HashOnly {
+            hash: String,
+        }
+        match self.last_line()? {
+            Some(line) => Ok(Some(serde_json::from_str::<HashOnly>(&line)?.hash)),
+            None => Ok(None),
+        }
+    }
+}
+
+impl FsAuditLogRepo {
+    /// Returns the last non-empty line of the log without parsing it.
+    fn last_line(&self) -> DomainResult<Option<String>> {
         if !self.path.exists() {
             return Ok(None);
         }
@@ -136,8 +158,7 @@ impl AuditLogRepository for FsAuditLogRepo {
         if line.is_empty() {
             return Ok(None);
         }
-        let ev: SecurityAuditEvent = serde_json::from_str(line)?;
-        Ok(Some(ev))
+        Ok(Some(line.to_string()))
     }
 }
 
@@ -226,6 +247,69 @@ mod tests {
         );
         assert_eq!(events[0].hash, a.hash);
         assert_eq!(events[1].hash, b.hash);
+    }
+
+    /// A line as a newer build writes it, with an event kind this build does not know.
+    fn unknown_kind_line(prev: &str, hash: &str) -> String {
+        serde_json::json!({
+            "id": "01M6TPMA0XRMF7AGF3F14M8TDW",
+            "occurredAt": "2026-11-07T09:49:55.616283585Z",
+            "actor": "user",
+            "workspaceId": null,
+            "event": { "kind": "a_future_kind", "device_id": "abc" },
+            "controls": [],
+            "prevHash": prev,
+            "hash": hash,
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn head_hash_reads_the_hash_of_an_unknown_last_event() {
+        let dir = TempDir::new().expect("temp dir");
+        let path = dir.path().join("audit.jsonl");
+        let repo = FsAuditLogRepo::new(path.clone()).expect("repo");
+        let a = mk_event("");
+        let known = serde_json::to_string(&a).expect("serialize");
+        let unknown = unknown_kind_line(&a.hash, "future-hash");
+        std::fs::write(&path, format!("{known}\n{unknown}\n")).expect("write log");
+
+        assert_eq!(
+            repo.head_hash().expect("head hash"),
+            Some("future-hash".to_string())
+        );
+    }
+
+    #[test]
+    fn head_hash_is_none_for_a_missing_or_empty_log() {
+        let dir = TempDir::new().expect("temp dir");
+        let path = dir.path().join("audit.jsonl");
+        let repo = FsAuditLogRepo::new(path.clone()).expect("repo");
+        assert_eq!(repo.head_hash().expect("missing log"), None);
+        std::fs::write(&path, "").expect("write empty log");
+        assert_eq!(repo.head_hash().expect("empty log"), None);
+    }
+
+    #[test]
+    fn head_hash_matches_latest_for_a_known_last_event() {
+        let dir = TempDir::new().expect("temp dir");
+        let repo = FsAuditLogRepo::new(dir.path().join("audit.jsonl")).expect("repo");
+        let a = mk_event("");
+        repo.append(&a).expect("append");
+        assert_eq!(repo.head_hash().expect("head hash"), Some(a.hash));
+    }
+
+    #[test]
+    fn load_all_skips_an_unknown_last_event_without_failing() {
+        let dir = TempDir::new().expect("temp dir");
+        let path = dir.path().join("audit.jsonl");
+        let repo = FsAuditLogRepo::new(path.clone()).expect("repo");
+        let a = mk_event("");
+        let known = serde_json::to_string(&a).expect("serialize");
+        let unknown = unknown_kind_line(&a.hash, "future-hash");
+        std::fs::write(&path, format!("{known}\n{unknown}\n")).expect("write log");
+
+        assert_eq!(repo.load_all().expect("load").len(), 1);
     }
 
     #[test]

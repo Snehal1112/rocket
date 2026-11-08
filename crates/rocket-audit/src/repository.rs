@@ -18,4 +18,13 @@ pub trait AuditLogRepository: Send + Sync {
 
     /// Return the most recently appended event, if any.
     fn latest(&self) -> DomainResult<Option<SecurityAuditEvent>>;
+
+    /// Return the hash of the most recently appended event, if any.
+    ///
+    /// A log written by a newer build can end with an event kind this build does not
+    /// know. Such an event cannot be parsed, but the next event must still chain to
+    /// its hash, so an implementation should read the hash without parsing the kind.
+    fn head_hash(&self) -> DomainResult<Option<String>> {
+        Ok(self.latest()?.map(|e| e.hash))
+    }
 }

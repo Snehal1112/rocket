@@ -32,11 +32,13 @@ impl SecurityAuditService {
         log: Arc<dyn AuditLogRepository>,
         profile_repo: Arc<dyn ProfileRepository>,
     ) -> DomainResult<Self> {
-        let latest = log.latest()?;
+        // Only the hash is needed. A newer build may have appended an event kind this
+        // build cannot parse, and that must not stop the app from starting.
+        let head = log.head_hash()?;
         Ok(Self {
             log,
             profile_repo,
-            head: Mutex::new(latest.map(|e| e.hash)),
+            head: Mutex::new(head),
             workspace_resolver: None,
         })
     }
@@ -237,6 +239,51 @@ mod tests {
         AuditEventKind::CollectionDeleted {
             collection: name.into(),
         }
+    }
+
+    /// A log whose last event kind this build cannot parse, but whose hash is known.
+    struct UnparsableTailLog {
+        appended: std::sync::Mutex<Vec<SecurityAuditEvent>>,
+    }
+
+    impl AuditLogRepository for UnparsableTailLog {
+        fn append(&self, event: &SecurityAuditEvent) -> DomainResult<()> {
+            self.appended
+                .lock()
+                .expect("appended lock")
+                .push(event.clone());
+            Ok(())
+        }
+        fn load_all(&self) -> DomainResult<Vec<SecurityAuditEvent>> {
+            Ok(vec![])
+        }
+        fn load_range(
+            &self,
+            _start: chrono::DateTime<chrono::Utc>,
+            _end: chrono::DateTime<chrono::Utc>,
+        ) -> DomainResult<Vec<SecurityAuditEvent>> {
+            Ok(vec![])
+        }
+        fn latest(&self) -> DomainResult<Option<SecurityAuditEvent>> {
+            Err(DomainError::Serialization("unknown variant".into()))
+        }
+        fn head_hash(&self) -> DomainResult<Option<String>> {
+            Ok(Some("future-hash".to_string()))
+        }
+    }
+
+    #[test]
+    fn starts_and_chains_to_a_last_event_it_cannot_parse() {
+        let log = Arc::new(UnparsableTailLog {
+            appended: std::sync::Mutex::new(vec![]),
+        });
+        let profile = Arc::new(MemProfile {
+            p: Mutex::new(default_profile()),
+        });
+        let s = SecurityAuditService::new(log.clone(), profile).expect("service starts");
+        s.record("user".into(), None, del("x")).expect("record");
+        let appended = log.appended.lock().expect("appended lock");
+        assert_eq!(appended[0].prev_hash, "future-hash");
     }
 
     #[test]
