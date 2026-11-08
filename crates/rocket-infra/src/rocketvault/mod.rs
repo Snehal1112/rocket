@@ -345,10 +345,10 @@ fn validate_base_url(connection: &SecretManagerConnection) -> DomainResult<()> {
     Ok(())
 }
 
+use rocket_environment::certificate::VaultCertificateFormat;
 use rocket_environment::{
     ExternalSecretRef, VaultCertificateMaterial, VaultCertificateSummary, VaultSecretFetcher,
 };
-use rocket_environment::certificate::VaultCertificateFormat;
 
 /// Deserialization target for one entry inside a RocketVault list-secrets
 /// response's `secrets` array. Deliberately has no `value` field —

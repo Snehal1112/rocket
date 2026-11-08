@@ -32,9 +32,9 @@ pub use workspace::*;
 
 // Re-export the type aliases that opencollection.rs re-exported from shared crates.
 #[allow(unused_imports)]
-pub use rocket_shared::assertion::Assertion as OcAssertion;
-#[allow(unused_imports)]
 pub use rocket_environment::certificate::ClientCertificate as OcClientCertificate;
+#[allow(unused_imports)]
+pub use rocket_shared::assertion::Assertion as OcAssertion;
 #[allow(unused_imports)]
 pub use rocket_shared::description::{
     Description as OcDescription, Documentation as OcDocumentation,
