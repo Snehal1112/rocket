@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { AuditEventRow } from '@/components/audit/AuditEventRow';
 import type { AuditEventKind, SecurityAuditEvent } from '@/lib/tauri-api';
@@ -45,5 +45,57 @@ describe('AuditEventRow network kinds', () => {
   it('describes a block', () => {
     show({ kind: 'network_device_blocked', device_id: FULL_ID });
     expect(screen.getByText('Blocked device K7QF-2M9X')).toBeInTheDocument();
+  });
+
+  it('describes a collection that was sent', () => {
+    show({ kind: 'network_collection_sent', device_id: FULL_ID, collection: 'Orders', outcome: 'completed' });
+    expect(screen.getByText('Sent collection Orders to device K7QF-2M9X')).toBeInTheDocument();
+  });
+
+  it('describes a collection that was received', () => {
+    show({ kind: 'network_collection_received', device_id: FULL_ID, collection: 'Orders', outcome: 'completed' });
+    expect(screen.getByText('Received collection Orders from device K7QF-2M9X')).toBeInTheDocument();
+  });
+
+  it('describes a collection that was sent with a short id', () => {
+    show({ kind: 'network_collection_sent', device_id: 'K7QF-2M9X', collection: 'Orders', outcome: 'completed' });
+    expect(screen.getByText('Sent collection Orders to device K7QF-2M9X')).toBeInTheDocument();
+  });
+
+  it('describes a collection that was received with a short id', () => {
+    show({ kind: 'network_collection_received', device_id: 'K7QF-2M9X', collection: 'Orders', outcome: 'completed' });
+    expect(screen.getByText('Received collection Orders from device K7QF-2M9X')).toBeInTheDocument();
+  });
+
+  it('shows a collection name with a double quote and unicode as given', () => {
+    show({
+      kind: 'network_collection_sent',
+      device_id: FULL_ID,
+      collection: 'Orders "v2" café',
+      outcome: 'completed',
+    });
+    expect(screen.getByText('Sent collection Orders "v2" café to device K7QF-2M9X')).toBeInTheDocument();
+  });
+
+  it('shows the wire outcome of a send that did not complete', () => {
+    for (const outcome of ['unconfirmed', 'failed', 'cancelled', 'damaged', 'rejected']) {
+      show({ kind: 'network_collection_sent', device_id: FULL_ID, collection: 'Orders', outcome });
+      expect(
+        screen.getByText(`Sent collection Orders to device K7QF-2M9X (${outcome})`),
+      ).toBeInTheDocument();
+      cleanup();
+    }
+  });
+
+  it('shows a rejected and a damaged receive', () => {
+    show({ kind: 'network_collection_received', device_id: FULL_ID, collection: 'Orders', outcome: 'rejected' });
+    expect(
+      screen.getByText('Received collection Orders from device K7QF-2M9X (rejected)'),
+    ).toBeInTheDocument();
+    cleanup();
+    show({ kind: 'network_collection_received', device_id: FULL_ID, collection: 'Orders', outcome: 'damaged' });
+    expect(
+      screen.getByText('Received collection Orders from device K7QF-2M9X (damaged)'),
+    ).toBeInTheDocument();
   });
 });

@@ -2849,7 +2849,9 @@ export type AuditEventKind =
   // The network kinds use the wire names (snake_case): the Rust enum does not rename fields.
   | { kind: 'network_device_paired'; device_id: string }
   | { kind: 'network_device_unpaired'; device_id: string; by_peer: boolean }
-  | { kind: 'network_device_blocked'; device_id: string };
+  | { kind: 'network_device_blocked'; device_id: string }
+  | { kind: 'network_collection_sent'; device_id: string; collection: string; outcome: string }
+  | { kind: 'network_collection_received'; device_id: string; collection: string; outcome: string };
 
 export interface SecurityAuditEvent {
   id: string;

@@ -23,6 +23,11 @@ function formatRelative(iso: string): string {
   return `${Math.round(abs / 31536000)}y ${suffix}`;
 }
 
+// A completed transfer needs no word. Any other outcome is shown as its wire name.
+function outcomeSuffix(outcome: string): string {
+  return outcome === 'completed' ? '' : ` (${outcome})`;
+}
+
 function summarize(event: SecurityAuditEvent): string {
   const k = event.event;
   switch (k.kind) {
@@ -52,6 +57,10 @@ function summarize(event: SecurityAuditEvent): string {
         : `Removed the pairing with device ${shortDeviceId(k.device_id)}`;
     case 'network_device_blocked':
       return `Blocked device ${shortDeviceId(k.device_id)}`;
+    case 'network_collection_sent':
+      return `Sent collection ${k.collection} to device ${shortDeviceId(k.device_id)}${outcomeSuffix(k.outcome)}`;
+    case 'network_collection_received':
+      return `Received collection ${k.collection} from device ${shortDeviceId(k.device_id)}${outcomeSuffix(k.outcome)}`;
   }
 }
 
