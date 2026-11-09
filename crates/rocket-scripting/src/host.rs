@@ -5,8 +5,8 @@
 
 use std::collections::HashMap;
 
+use crate::script_cookie::{CookieEntry, CookieInput};
 use async_trait::async_trait;
-use rocket_http::{CookieEntry, CookieInput};
 use serde::{Deserialize, Serialize};
 
 /// An HTTP request a script sends with `rok.sendRequest`.

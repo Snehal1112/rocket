@@ -10,10 +10,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
-use rocket_http::{to_entry, HttpRequest, HttpResponse, RequestOptions, UrlScope};
+use rocket_http::{HttpRequest, HttpResponse, RequestOptions};
 use rocket_scripting::{
-    HostCookieOp, HostCookieResult, HostError, HostRequest, HostResponse, HostRunOutcome,
-    HostRunRequest, HostScopes, ScriptHost,
+    to_entry, HostCookieOp, HostCookieResult, HostError, HostRequest, HostResponse, HostRunOutcome,
+    HostRunRequest, HostScopes, ScriptHost, UrlScope,
 };
 use rocket_shared::types::{Body, BodyMode, Header, HttpMethod};
 

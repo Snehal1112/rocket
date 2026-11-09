@@ -1,6 +1,7 @@
+use crate::script_cookie::CookieEntry;
 use crate::{AssertionOutcome, ScriptPhase};
 use rocket_environment::VariableContext;
-use rocket_http::{CookieEntry, HttpRequest, HttpResponse};
+use rocket_http::{HttpRequest, HttpResponse};
 use rocket_shared::types::PathParam;
 use std::path::PathBuf;
 

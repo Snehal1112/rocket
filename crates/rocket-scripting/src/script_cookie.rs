@@ -1,10 +1,11 @@
 //! Pure helpers for the script cookie API: URL scoping, cookie building and entry projection.
 
-use crate::cookie::{
-    cookies_for_request, default_cookie_path, domain_matches, normalize_same_site, Cookie,
-    CookieJar, MAX_COOKIE_AGE_SECS,
-};
 use chrono::{DateTime, Duration, Utc};
+use rocket_http::cookie::{
+    cookies_for_request, default_cookie_path, domain_matches, normalize_same_site,
+    MAX_COOKIE_AGE_SECS,
+};
+use rocket_http::{Cookie, CookieJar};
 use rocket_shared::error::{DomainError, DomainResult};
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
@@ -431,6 +432,19 @@ mod tests {
     fn cookie_entry_serializes_camel_case_keys() {
         let c = build_cookie(&scope(), &input("sid"), now()).expect("cookie");
         let v = serde_json::to_value(to_entry(&c, now())).expect("json");
+        assert!(v.get("httpOnly").is_some());
+        assert!(v.get("maxAge").is_some());
+        assert!(v.get("sameSite").is_some());
+    }
+
+    #[test]
+    fn cookie_input_json_keys_are_camel_case() {
+        let json = r#"{"key":"a","value":"1","httpOnly":true,"maxAge":60,"sameSite":"Lax"}"#;
+        let i: CookieInput = serde_json::from_str(json).expect("json");
+        assert_eq!(i.http_only, Some(true));
+        assert_eq!(i.max_age, Some(60));
+        assert_eq!(i.same_site.as_deref(), Some("Lax"));
+        let v = serde_json::to_value(&i).expect("json");
         assert!(v.get("httpOnly").is_some());
         assert!(v.get("maxAge").is_some());
         assert!(v.get("sameSite").is_some());

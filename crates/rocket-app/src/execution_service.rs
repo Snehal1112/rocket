@@ -2414,14 +2414,14 @@ impl RequestExecutionService {
         };
         // A URL that does not parse, such as an unresolved template, gets no snapshot.
         let url = ctx.request.url.clone();
-        if let Ok(scope) = rocket_http::UrlScope::parse(&url) {
+        if let Ok(scope) = rocket_scripting::UrlScope::parse(&url) {
             let now = chrono::Utc::now();
             let found =
                 script_cookies::ScriptCookies::new(self.cookie_repo.as_ref(), &self.cookie_lock)
                     .find(&scope, now);
             match found {
                 Ok(list) => {
-                    let entries = list.iter().map(|c| rocket_http::to_entry(c, now)).collect();
+                    let entries = list.iter().map(|c| rocket_scripting::to_entry(c, now)).collect();
                     ctx = ctx.with_cookies(url, entries);
                 }
                 Err(e) => tracing::warn!("could not read the cookies for a script: {e}"),

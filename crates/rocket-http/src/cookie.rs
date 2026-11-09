@@ -85,10 +85,10 @@ pub fn default_cookie_path(request_path: &str) -> String {
 }
 
 /// Longest `Max-Age` kept, in seconds (400 days, as in RFC 6265bis).
-pub(crate) const MAX_COOKIE_AGE_SECS: i64 = 400 * 24 * 60 * 60;
+pub const MAX_COOKIE_AGE_SECS: i64 = 400 * 24 * 60 * 60;
 
 /// The canonical `SameSite` value (`Strict`, `Lax` or `None`) for `value`, ignoring case.
-pub(crate) fn normalize_same_site(value: &str) -> Option<String> {
+pub fn normalize_same_site(value: &str) -> Option<String> {
     match value.trim().to_ascii_lowercase().as_str() {
         "strict" => Some("Strict".to_string()),
         "lax" => Some("Lax".to_string()),

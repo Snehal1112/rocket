@@ -4281,8 +4281,7 @@ mod tests {
 mod cookie_tests {
     use super::tests::minimal_ctx;
     use super::*;
-    use rocket_http::CookieEntry;
-    use rocket_scripting::{HostCookieOp, HostCookieResult, HostError};
+    use rocket_scripting::{CookieEntry, HostCookieOp, HostCookieResult, HostError};
     use std::sync::Mutex;
 
     const URL: &str = "https://app.test/x";

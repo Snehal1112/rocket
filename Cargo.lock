@@ -5969,6 +5969,7 @@ name = "rocket-scripting"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "chrono",
  "rocket-environment",
  "rocket-http",
  "rocket-shared",
@@ -5976,6 +5977,7 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "tokio",
+ "url",
 ]
 
 [[package]]

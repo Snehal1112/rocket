@@ -5,6 +5,7 @@ pub mod engine;
 pub mod host;
 pub mod phase;
 pub mod result;
+pub mod script_cookie;
 
 pub use context::{ExecutionMode, SandboxMode, ScriptContext, ScriptFileScope};
 pub use engine::ScriptEngine;
@@ -16,4 +17,7 @@ pub use phase::ScriptPhase;
 pub use result::{
     AssertionOutcome, CollectionVarWrite, ConsoleEntry, ConsoleLevel, EnvVarWrite, HeaderMutation,
     NextRequest, RequestMutations, ScriptResult, TestResult, TestStatus,
+};
+pub use script_cookie::{
+    build_cookie, cookie_id, matching_cookies, to_entry, CookieEntry, CookieInput, UrlScope,
 };

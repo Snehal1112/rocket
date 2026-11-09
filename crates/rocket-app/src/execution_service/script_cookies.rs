@@ -1,10 +1,8 @@
 //! The cookie service behind `rok.cookies`. Every call is one locked read-modify-write on the jars.
 
 use chrono::{DateTime, Utc};
-use rocket_http::{
-    build_cookie, matching_cookies, Cookie, CookieInput, CookieJar, CookieJarLock,
-    CookieRepository, UrlScope,
-};
+use rocket_http::{Cookie, CookieJar, CookieJarLock, CookieRepository};
+use rocket_scripting::{build_cookie, matching_cookies, CookieInput, UrlScope};
 use rocket_shared::error::DomainResult;
 
 pub(crate) struct ScriptCookies<'a> {

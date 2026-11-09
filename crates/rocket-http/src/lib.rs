@@ -18,7 +18,6 @@ pub mod proxy;
 pub mod request;
 pub mod resolved_certificate;
 pub mod response;
-pub mod script_cookie;
 pub mod spec_fetch;
 pub mod token_client;
 mod util;
@@ -49,9 +48,6 @@ pub use resolved_certificate::{
     CertificateMaterial, CertificateSource, ResolvedClientCertificate, VaultCertificateBinding,
 };
 pub use response::HttpResponse;
-pub use script_cookie::{
-    build_cookie, cookie_id, matching_cookies, to_entry, CookieEntry, CookieInput, UrlScope,
-};
 pub use spec_fetch::{
     is_loopback_http, redirect_target_allowed, same_origin, LocalReadFailure, LocalSpecReader,
     SpecFetchFailure, SpecFetchOutcome, SpecFetchRequest, SpecFetcher, DEFAULT_MAX_SPEC_BYTES,
