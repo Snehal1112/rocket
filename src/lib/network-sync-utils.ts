@@ -56,4 +56,4 @@ export const syncResultToastId = (syncId: string): string => `network-sync-resul
 export const syncWaitingToastId = (syncId: string): string => `network-sync-waiting-${syncId}`;
 
 export const SAFE_SANDBOX_NOTE =
-  'Changed scripts run in the Safe sandbox. Developer mode, host environment and vault access stay off until you allow them.';
+  "Changed scripts run with this collection's current script access. A sync never changes trust settings.";

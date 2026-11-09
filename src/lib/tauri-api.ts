@@ -2851,7 +2851,10 @@ export type AuditEventKind =
   | { kind: 'network_device_unpaired'; device_id: string; by_peer: boolean }
   | { kind: 'network_device_blocked'; device_id: string }
   | { kind: 'network_collection_sent'; device_id: string; collection: string; outcome: string }
-  | { kind: 'network_collection_received'; device_id: string; collection: string; outcome: string };
+  | { kind: 'network_collection_received'; device_id: string; collection: string; outcome: string }
+  | { kind: 'network_sync_sent'; device_id: string; collection: string; outcome: string }
+  | { kind: 'network_sync_received'; device_id: string; collection: string; outcome: string }
+  | { kind: 'network_link_removed'; device_id: string; collection: string };
 
 export interface SecurityAuditEvent {
   id: string;

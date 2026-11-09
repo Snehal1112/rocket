@@ -1,6 +1,7 @@
 import { Plus, Radar } from 'lucide-react';
 import { type ReactNode, useMemo, useState } from 'react';
 import { toast } from 'sonner';
+import { LinkList } from '@/components/network/LinkList';
 import { ListRow } from '@/components/network/ListRow';
 import { NetworkIdentity } from '@/components/network/NetworkIdentity';
 import { NodeRow } from '@/components/network/NodeRow';
@@ -13,7 +14,7 @@ import { SearchInput } from '@/components/ui/search-input';
 import { StateBlock } from '@/components/ui/state-block';
 import { errorText } from '@/lib/error-text';
 import { formatPairingCode, PAIRING_FAILED_TOAST_ID } from '@/lib/network-utils';
-import type { NetworkNode } from '@/lib/tauri-api';
+import type { NetworkLink, NetworkNode } from '@/lib/tauri-api';
 import { startNetworkPairing, useNetworkStore } from '@/stores/network-store';
 
 const LISTENER_BANNER = "Others can't connect to you. Allow Rocket in your firewall settings.";
@@ -24,6 +25,7 @@ const EMPTY_HINT = 'VPNs and some Wi-Fi networks block discovery.';
 interface NetworkPanelProps {
   onAddAddress: () => void;
   onRemove: (node: NetworkNode) => void;
+  onUnlink?: (link: NetworkLink) => void;
 }
 
 function Shell({ children }: { children: ReactNode }) {
@@ -67,10 +69,11 @@ function NodeGroup({ title, nodes, pairingDeviceId, onPair, onRemove }: NodeGrou
 }
 
 // The body of the Network popover. The host mounts the Add and Remove dialogs.
-export function NetworkPanel({ onAddAddress, onRemove }: NetworkPanelProps) {
+export function NetworkPanel({ onAddAddress, onRemove, onUnlink }: NetworkPanelProps) {
   const status = useNetworkStore((s) => s.status);
   const nodes = useNetworkStore((s) => s.nodes);
   const incoming = useNetworkStore((s) => s.incoming);
+  const links = useNetworkStore((s) => s.links);
   const error = useNetworkStore((s) => s.error);
   const [query, setQuery] = useState('');
   const [pairingDeviceId, setPairingDeviceId] = useState<string | null>(null);
@@ -191,6 +194,12 @@ export function NetworkPanel({ onAddAddress, onRemove }: NetworkPanelProps) {
               onRemove={onRemove}
             />
           </>
+        )}
+        {links.length > 0 && onUnlink && (
+          <section className='border-t border-border py-1'>
+            <SectionLabel className='px-3 py-1'>{`Linked collections (${links.length})`}</SectionLabel>
+            <LinkList links={links} onUnlink={onUnlink} />
+          </section>
         )}
       </div>
       <div className='border-t border-border p-1'>

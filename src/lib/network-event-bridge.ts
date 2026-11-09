@@ -19,6 +19,7 @@ import {
   onNetworkTransfer,
 } from '@/lib/tauri-api';
 import { useNetworkStore } from '@/stores/network-store';
+import { useWorkspaceStore } from '@/stores/workspace-store';
 
 // Changes carry no data worth keeping, so the store refetches from the commands.
 export function handleNetworkChanged(event: NetworkChangedEvent): void {
@@ -378,6 +379,16 @@ export function useNetworkEventBridge(): void {
     void useNetworkStore.getState().refreshNodes();
     void useNetworkStore.getState().refreshLinks();
 
-    return () => scope.dispose();
+    // Links are matched to collections of the active workspace, so a switch reloads their state.
+    const stopWorkspaceWatch = useWorkspaceStore.subscribe((state, prev) => {
+      if (state.activeWorkspaceId !== prev.activeWorkspaceId) {
+        void useNetworkStore.getState().refreshLinks();
+      }
+    });
+
+    return () => {
+      stopWorkspaceWatch();
+      scope.dispose();
+    };
   }, []);
 }

@@ -98,4 +98,55 @@ describe('AuditEventRow network kinds', () => {
       screen.getByText('Received collection Orders from device K7QF-2M9X (damaged)'),
     ).toBeInTheDocument();
   });
+
+  it('describes a sync that was sent, with the short id and no word for success', () => {
+    show({ kind: 'network_sync_sent', device_id: FULL_ID, collection: 'Orders', outcome: 'applied' });
+    expect(screen.getByText('Sent sync changes for Orders to device K7QF-2M9X')).toBeInTheDocument();
+  });
+
+  it('describes a sync that was received, with the short id and no word for success', () => {
+    show({
+      kind: 'network_sync_received',
+      device_id: FULL_ID,
+      collection: 'Orders',
+      outcome: 'applied',
+    });
+    expect(
+      screen.getByText('Received sync changes for Orders from device K7QF-2M9X'),
+    ).toBeInTheDocument();
+  });
+
+  it('shows the outcome of a sync that did not complete', () => {
+    show({ kind: 'network_sync_sent', device_id: FULL_ID, collection: 'Orders', outcome: 'failed' });
+    expect(
+      screen.getByText('Sent sync changes for Orders to device K7QF-2M9X (failed)'),
+    ).toBeInTheDocument();
+    cleanup();
+    show({
+      kind: 'network_sync_received',
+      device_id: FULL_ID,
+      collection: 'Orders',
+      outcome: 'unconfirmed',
+    });
+    expect(
+      screen.getByText('Received sync changes for Orders from device K7QF-2M9X (unconfirmed)'),
+    ).toBeInTheDocument();
+  });
+
+  it('describes a removed link', () => {
+    show({ kind: 'network_link_removed', device_id: FULL_ID, collection: 'Orders' });
+    expect(screen.getByText('Unlinked collection Orders from device K7QF-2M9X')).toBeInTheDocument();
+  });
+
+  it('shows a collection name with a double quote as given', () => {
+    show({ kind: 'network_link_removed', device_id: FULL_ID, collection: 'Orders "v2"' });
+    expect(
+      screen.getByText('Unlinked collection Orders "v2" from device K7QF-2M9X'),
+    ).toBeInTheDocument();
+  });
+
+  it('does not show the full device id for the sync kinds', () => {
+    show({ kind: 'network_sync_sent', device_id: FULL_ID, collection: 'Orders', outcome: 'applied' });
+    expect(screen.queryByText(new RegExp(FULL_ID))).toBeNull();
+  });
 });

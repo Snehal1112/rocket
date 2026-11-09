@@ -1,8 +1,9 @@
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useNetworkEventBridge } from '@/lib/network-event-bridge';
 import { PAIRING_FAILED_TOAST_ID } from '@/lib/network-utils';
 import { useNetworkStore } from '@/stores/network-store';
+import { useWorkspaceStore } from '@/stores/workspace-store';
 import { createDeferred } from '@/test/deferred';
 import { makeIncoming, makeIncomingTransfer, makeNode, makeStatus } from '@/test/network-fixtures';
 
@@ -83,6 +84,14 @@ describe('useNetworkEventBridge', () => {
     expect(mocks.api.onNetworkTransfer).toHaveBeenCalledTimes(1);
     expect(mocks.api.onNetworkSync).toHaveBeenCalledTimes(1);
     expect(mocks.api.listNetworkLinks).toHaveBeenCalledTimes(1);
+  });
+
+  it('reloads the links when the active workspace changes', async () => {
+    await mountBridge();
+    expect(mocks.api.listNetworkLinks).toHaveBeenCalledTimes(1);
+    act(() => useWorkspaceStore.getState().setActiveWorkspaceId('ws-other'));
+    await waitFor(() => expect(mocks.api.listNetworkLinks).toHaveBeenCalledTimes(2));
+    useWorkspaceStore.getState().setActiveWorkspaceId('');
   });
 
   it('nodesChanged reloads the nodes', async () => {

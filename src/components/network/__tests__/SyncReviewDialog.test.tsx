@@ -121,11 +121,11 @@ describe('SyncReviewDialog', () => {
       expect(screen.queryByText(/Auth changed/)).toBeNull();
     });
 
-    it('warns that changed scripts run in the Safe sandbox', () => {
+    it('says changed scripts keep the current script access', () => {
       openEntry();
       expect(
         screen.getByText(
-          'Changed scripts run in the Safe sandbox. Developer mode, host environment and vault access stay off until you allow them.',
+          "Changed scripts run with this collection's current script access. A sync never changes trust settings.",
         ),
       ).toBeInTheDocument();
     });
@@ -396,7 +396,7 @@ describe('SyncReviewDialog', () => {
       confirm({ summary: makeSyncSummary({ scriptsChanged: ['s.yml'], authChanged: ['t.yml'] }) });
       expect(screen.getByText('Scripts changed (1)')).toBeInTheDocument();
       expect(screen.getByText('Auth changed (1)')).toBeInTheDocument();
-      expect(screen.getByText(/Changed scripts run in the Safe sandbox/)).toBeInTheDocument();
+      expect(screen.getByText(/Changed scripts run with this collection's current script access/)).toBeInTheDocument();
     });
 
     it('shows no conflict choices in the confirm dialog', () => {

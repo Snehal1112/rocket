@@ -1,8 +1,10 @@
 import { type ReactNode, useEffect, useState } from 'react';
 import { toast } from 'sonner';
+import { LinkList } from '@/components/network/LinkList';
 import { ListRow } from '@/components/network/ListRow';
 import { NetworkIdentity } from '@/components/network/NetworkIdentity';
 import { validateDisplayName } from '@/components/network/network-helpers';
+import { UnlinkDialog } from '@/components/network/UnlinkDialog';
 import { SettingsSectionHeader } from '@/components/settings/SettingsSectionHeader';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,6 +18,7 @@ import {
   listNetworkBlocked,
   type NetworkAddress,
   type NetworkBlockedDevice,
+  type NetworkLink,
 } from '@/lib/tauri-api';
 import { useNetworkStore } from '@/stores/network-store';
 
@@ -34,6 +37,8 @@ export function NetworkSection() {
   const error = useNetworkStore((s) => s.error);
   // The lists reload when the node list changes, for example after a Block elsewhere.
   const nodes = useNetworkStore((s) => s.nodes);
+  const links = useNetworkStore((s) => s.links);
+  const [unlinkTarget, setUnlinkTarget] = useState<NetworkLink | null>(null);
   const displayName = status?.displayName ?? '';
   const [name, setName] = useState(displayName);
   const [blocked, setBlocked] = useState<NetworkBlockedDevice[]>([]);
@@ -172,6 +177,14 @@ export function NetworkSection() {
             </dl>
           </Block>
 
+          <Block title='Linked collections'>
+            {links.length === 0 ? (
+              <StateBlock tone='empty'>No linked collections.</StateBlock>
+            ) : (
+              <LinkList links={links} onUnlink={setUnlinkTarget} />
+            )}
+          </Block>
+
           <Block title='Blocked devices'>
             {listError && <StateBlock tone='error'>{listError}</StateBlock>}
             {!listError && blocked.length === 0 && (
@@ -222,6 +235,7 @@ export function NetworkSection() {
           </Block>
         </>
       )}
+      <UnlinkDialog link={unlinkTarget} onClose={() => setUnlinkTarget(null)} />
     </div>
   );
 }

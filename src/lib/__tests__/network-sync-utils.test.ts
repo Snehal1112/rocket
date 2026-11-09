@@ -60,9 +60,9 @@ describe('ids and notes', () => {
     expect(syncResultToastId('s1')).toBe('network-sync-result-s1');
   });
 
-  it('says changed scripts run in the Safe sandbox', () => {
+  it('says changed scripts keep the current script access', () => {
     expect(SAFE_SANDBOX_NOTE).toBe(
-      'Changed scripts run in the Safe sandbox. Developer mode, host environment and vault access stay off until you allow them.',
+      "Changed scripts run with this collection's current script access. A sync never changes trust settings.",
     );
   });
 });
