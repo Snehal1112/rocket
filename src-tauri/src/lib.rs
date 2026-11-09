@@ -1050,8 +1050,33 @@ pub fn run() {
                 events: Arc::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
                 audit: audit_publisher.clone(),
             });
+            // Team network sync: links live under ~/.rocket-api/network/links, never in a
+            // workspace. Sync payloads stay in memory, so the service has no staging folder.
+            let link_repo = Arc::new(rocket_infra::FsLinkRepo::new(network_dir.join("links")));
+            let sync_collections = Arc::new(rocket_app::network::ExportBackedSyncCollections::new(
+                Arc::clone(&export_svc),
+                Arc::new(SharedPathCollectionRepo::new(Arc::clone(
+                    &active_workspace_path,
+                ))),
+                Arc::new(rocket_infra::FsFileTxFactory::new()),
+            ));
+            let sync_svc = rocket_app::SyncService::new(rocket_app::SyncDeps {
+                network: Arc::clone(&network_svc) as Arc<dyn rocket_app::PeerSender>,
+                links: link_repo,
+                collections: sync_collections,
+                events: Arc::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
+                audit: audit_publisher.clone(),
+            });
+            // A linked send needs the sync service to make its link.
+            transfer_svc.set_sync(Arc::clone(&sync_svc));
+            // `TransferService::new` made itself the sink. The router replaces it, so it comes
+            // last: sync frames go to the sync service, all others to the transfer service.
+            let frame_router =
+                rocket_app::FrameRouter::new(Arc::clone(&transfer_svc), Arc::clone(&sync_svc));
+            network_svc.set_transfer_sink(frame_router);
             app.manage(network_svc);
             app.manage(transfer_svc);
+            app.manage(sync_svc);
             app.manage(commands::network::NetworkSlot::<rocket_app::NetworkHandle>::default());
             app.manage(Mutex::new(workspace_svc));
             app.manage(active_workspace_path);
