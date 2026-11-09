@@ -1,29 +1,174 @@
 //! The file merge of a sync (spec decision 11 of the sync design).
 
+use std::cell::Cell;
+use std::fmt;
+
 use rocket_shared::error::{DomainError, DomainResult};
-use serde_yaml::{Mapping, Value};
+use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
+use serde_yaml::{Mapping, Number, Value};
+
+/// The smallest budget for a received file, in bytes.
+const MIN_BUDGET: u64 = 1024 * 1024;
+/// The budget cost of one node, so many tiny aliased nodes cannot grow without a bound.
+const NODE_COST: u64 = 16;
 
 /// Merges a received (scrubbed) file into the local file.
 pub fn merge_file(local: Option<&[u8]>, received: &[u8]) -> DomainResult<Vec<u8>> {
-    let received_value: Value = serde_yaml::from_slice(received)
-        .map_err(|_| DomainError::InvalidInput("The received file is not valid YAML.".into()))?;
+    let received_value = parse_received(received)?;
     let Some(local) = local else {
-        return Ok(received.to_vec());
+        let stripped = take_received(&received_value, "", &mut Vec::new());
+        if stripped == received_value {
+            return Ok(received.to_vec());
+        }
+        return write_yaml(&stripped);
     };
     let local_value: Value = serde_yaml::from_slice(local)
         .map_err(|_| DomainError::InvalidInput("The local file is not valid YAML.".into()))?;
     let merged = merge_value(&local_value, &received_value, &mut Vec::new());
-    serde_yaml::to_string(&merged)
+    write_yaml(&merged)
+}
+
+fn write_yaml(value: &Value) -> DomainResult<Vec<u8>> {
+    serde_yaml::to_string(value)
         .map(String::into_bytes)
         .map_err(|_| DomainError::Internal("The merged file could not be written.".into()))
+}
+
+/// Parses a received file. It refuses tags and non-string keys, and it stops when aliases
+/// expand to more than four times the input size (at least 1 MiB).
+fn parse_received(received: &[u8]) -> DomainResult<Value> {
+    let budget = Cell::new((received.len() as u64).saturating_mul(4).max(MIN_BUDGET));
+    let seed = Budgeted { budget: &budget };
+    seed.deserialize(serde_yaml::Deserializer::from_slice(received))
+        .map_err(|_| DomainError::InvalidInput("The received file is not valid YAML.".into()))
+}
+
+#[derive(Clone, Copy)]
+struct Budgeted<'a> {
+    budget: &'a Cell<u64>,
+}
+
+impl Budgeted<'_> {
+    fn charge<E: de::Error>(&self, bytes: u64) -> Result<(), E> {
+        let left = self.budget.get();
+        if bytes > left {
+            return Err(E::custom("budget"));
+        }
+        self.budget.set(left - bytes);
+        Ok(())
+    }
+}
+
+impl<'de> DeserializeSeed<'de> for Budgeted<'_> {
+    type Value = Value;
+
+    fn deserialize<D: de::Deserializer<'de>>(self, deserializer: D) -> Result<Value, D::Error> {
+        deserializer.deserialize_any(self)
+    }
+}
+
+impl<'de> Visitor<'de> for Budgeted<'_> {
+    type Value = Value;
+
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("a plain YAML value")
+    }
+
+    fn visit_bool<E: de::Error>(self, v: bool) -> Result<Value, E> {
+        self.charge(NODE_COST)?;
+        Ok(Value::Bool(v))
+    }
+
+    fn visit_i64<E: de::Error>(self, v: i64) -> Result<Value, E> {
+        self.charge(NODE_COST)?;
+        Ok(Value::Number(Number::from(v)))
+    }
+
+    fn visit_u64<E: de::Error>(self, v: u64) -> Result<Value, E> {
+        self.charge(NODE_COST)?;
+        Ok(Value::Number(Number::from(v)))
+    }
+
+    fn visit_f64<E: de::Error>(self, v: f64) -> Result<Value, E> {
+        self.charge(NODE_COST)?;
+        Ok(Value::Number(Number::from(v)))
+    }
+
+    fn visit_str<E: de::Error>(self, v: &str) -> Result<Value, E> {
+        self.charge(NODE_COST + v.len() as u64)?;
+        Ok(Value::String(v.to_string()))
+    }
+
+    fn visit_string<E: de::Error>(self, v: String) -> Result<Value, E> {
+        self.charge(NODE_COST + v.len() as u64)?;
+        Ok(Value::String(v))
+    }
+
+    fn visit_unit<E: de::Error>(self) -> Result<Value, E> {
+        self.charge(NODE_COST)?;
+        Ok(Value::Null)
+    }
+
+    fn visit_none<E: de::Error>(self) -> Result<Value, E> {
+        self.visit_unit()
+    }
+
+    fn visit_some<D: de::Deserializer<'de>>(self, d: D) -> Result<Value, D::Error> {
+        self.deserialize(d)
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Value, A::Error> {
+        self.charge(NODE_COST)?;
+        let mut out = Vec::new();
+        while let Some(item) = seq.next_element_seed(self)? {
+            out.push(item);
+        }
+        Ok(Value::Sequence(out))
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Value, A::Error> {
+        self.charge(NODE_COST)?;
+        let mut out = Mapping::new();
+        while let Some(key) = map.next_key_seed(self)? {
+            if !matches!(key, Value::String(_)) {
+                return Err(de::Error::custom("key"));
+            }
+            let value = map.next_value_seed(self)?;
+            if out.insert(key, value).is_some() {
+                return Err(de::Error::custom("duplicate"));
+            }
+        }
+        Ok(Value::Mapping(out))
+    }
+
+    // A tagged value reaches this default and is refused: the export never writes tags.
+    fn visit_enum<A: de::EnumAccess<'de>>(self, _data: A) -> Result<Value, A::Error> {
+        Err(de::Error::custom("tag"))
+    }
 }
 
 fn merge_value(local: &Value, received: &Value, path: &mut Vec<String>) -> Value {
     match (local, received) {
         (Value::Mapping(l), Value::Mapping(r)) => Value::Mapping(merge_map(l, r, path)),
         (Value::Sequence(l), Value::Sequence(r)) => Value::Sequence(merge_rows(l, r, path)),
-        (l, r) if is_blank(r) && is_filled_scalar(l) => l.clone(),
-        (_, r) => r.clone(),
+        (Value::Mapping(l), r) => {
+            // The local owned keys must not be lost to a non-mapping value.
+            let kept = merge_map(l, &Mapping::new(), path);
+            if kept.is_empty() {
+                fallback(local, r, path)
+            } else {
+                Value::Mapping(kept)
+            }
+        }
+        (l, r) => fallback(l, r, path),
+    }
+}
+
+fn fallback(local: &Value, received: &Value, path: &mut Vec<String>) -> Value {
+    if is_blank(received) && is_filled_scalar(local) {
+        local.clone()
+    } else {
+        take_received(received, "", path)
     }
 }
 
@@ -40,28 +185,19 @@ fn is_filled_scalar(value: &Value) -> bool {
 }
 
 /// The keys the export removes. They always come from the local file.
-fn is_local_owned(
-    path: &[String],
-    key: &str,
-    local: Option<&Value>,
-    received: Option<&Value>,
-) -> bool {
+fn is_local_owned(path: &[String], key: &str) -> bool {
     let path: Vec<&str> = path.iter().map(String::as_str).collect();
-    match (path.as_slice(), key) {
-        ([], "uid") | (["info"], "uid") | (["extensions"], "rocketapi") => true,
-        (_, "examples") => {
-            matches!(local, Some(Value::Sequence(_)))
-                || matches!(received, Some(Value::Sequence(_)))
-        }
-        _ => false,
-    }
+    matches!(
+        (path.as_slice(), key),
+        ([], "uid") | (["info"], "uid") | (["extensions"], "rocketapi") | (_, "examples")
+    )
 }
 
 fn merge_map(local: &Mapping, received: &Mapping, path: &mut Vec<String>) -> Mapping {
     let mut out = Mapping::new();
     for (key, value) in received {
         let name = key.as_str().unwrap_or("");
-        if is_local_owned(path, name, local.get(key), Some(value)) {
+        if is_local_owned(path, name) {
             continue;
         }
         let merged = match local.get(key) {
@@ -78,7 +214,7 @@ fn merge_map(local: &Mapping, received: &Mapping, path: &mut Vec<String>) -> Map
     for (key, value) in local {
         let name = key.as_str().unwrap_or("");
         let theirs = received.get(key);
-        if is_local_owned(path, name, Some(value), theirs) {
+        if is_local_owned(path, name) {
             out.insert(key.clone(), value.clone());
         } else if theirs.is_none() {
             // The peer dropped this key. Only owned keys deeper down are kept.
@@ -361,6 +497,256 @@ mod tests {
         assert!(v["type"].is_null());
         assert!(v["seq"].is_null());
         assert_eq!(v["uid"].as_str(), Some("f1"));
+    }
+
+    fn refused(local: Option<&str>, received: &str) -> bool {
+        matches!(
+            merge_file(local.map(str::as_bytes), received.as_bytes()),
+            Err(DomainError::InvalidInput(_))
+        )
+    }
+
+    #[test]
+    fn a_type_mismatch_still_drops_received_local_only_keys() {
+        let v = merged(
+            "info: ~
+",
+            "info:
+  name: R
+  uid: evil
+",
+        );
+        assert_eq!(v["info"]["name"].as_str(), Some("R"));
+        assert!(v["info"]["uid"].is_null());
+        for local in [
+            "extensions: ''
+",
+            "extensions: []
+",
+            "extensions: ~
+",
+        ] {
+            let v = merged(
+                local,
+                "extensions:
+  rocketapi:
+    sandboxMode: developer
+  bruno: 1
+",
+            );
+            assert!(v["extensions"]["rocketapi"].is_null(), "{local}");
+            assert_eq!(v["extensions"]["bruno"].as_u64(), Some(1), "{local}");
+        }
+        let v = merged(
+            "",
+            "uid: evil
+info:
+  name: R
+  uid: e2
+examples:
+  - name: x
+",
+        );
+        assert!(v["uid"].is_null());
+        assert!(v["info"]["uid"].is_null());
+        assert!(v["examples"].is_null());
+        assert_eq!(v["info"]["name"].as_str(), Some("R"));
+        let v = merged(
+            "items: ~
+",
+            "items:
+  - name: a
+    examples:
+      - name: e
+    http:
+      url: u
+",
+        );
+        assert!(v["items"][0]["examples"].is_null());
+        assert_eq!(v["items"][0]["http"]["url"].as_str(), Some("u"));
+    }
+
+    #[test]
+    fn tagged_values_in_the_received_file_are_refused() {
+        for received in [
+            "extensions:
+  !x rocketapi:
+    sandboxMode: developer
+",
+            "examples: !x
+  - name: e
+",
+            "!x
+name: r
+",
+            "a: !x 1
+",
+            "a:
+  - !x b
+",
+        ] {
+            assert!(
+                refused(
+                    Some(
+                        "a: 1
+"
+                    ),
+                    received
+                ),
+                "{received}"
+            );
+            assert!(refused(None, received), "{received}");
+        }
+    }
+
+    #[test]
+    fn non_string_keys_in_the_received_file_are_refused() {
+        for received in [
+            "1: a
+",
+            "? [a, b]
+: c
+",
+            "true: a
+",
+            "~: a
+",
+        ] {
+            assert!(
+                refused(
+                    Some(
+                        "a: 1
+"
+                    ),
+                    received
+                ),
+                "{received}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_received_null_or_scalar_keeps_the_local_owned_keys() {
+        let local = "uid: u
+info:
+  name: R
+  uid: iu
+extensions:
+  rocketapi:
+    sandboxMode: developer
+examples:
+  - name: e
+http:
+  url: a
+";
+        for received in [
+            "extensions: ~
+",
+            "info: ''
+",
+            "info: 5
+",
+            "",
+            "~
+",
+            "x: 1
+",
+        ] {
+            let v = merged(local, received);
+            assert_eq!(v["uid"].as_str(), Some("u"), "{received}");
+            assert_eq!(v["info"]["uid"].as_str(), Some("iu"), "{received}");
+            assert_eq!(
+                v["extensions"]["rocketapi"]["sandboxMode"].as_str(),
+                Some("developer"),
+                "{received}"
+            );
+            assert_eq!(v["examples"][0]["name"].as_str(), Some("e"), "{received}");
+        }
+        // Without owned keys the received scalar still wins.
+        let v = merged(
+            "docs:
+  content: x
+",
+            "docs: ~
+",
+        );
+        assert!(v["docs"].is_null());
+    }
+
+    #[test]
+    fn examples_are_local_only_whatever_their_type() {
+        let v = merged(
+            "a: 1
+",
+            "a: 1
+examples:
+  k: v
+",
+        );
+        assert!(v["examples"].is_null());
+        let v = merged(
+            "examples:
+  - name: e
+",
+            "examples:
+  k: v
+",
+        );
+        assert_eq!(v["examples"][0]["name"].as_str(), Some("e"));
+    }
+
+    #[test]
+    fn a_huge_alias_expansion_is_refused_fast() {
+        let big = "x".repeat(1024 * 1024);
+        let mut doc = format!("a: &a \"{big}\"\nl:\n");
+        for _ in 0..4000 {
+            doc.push_str("  - *a\n");
+        }
+        let start = std::time::Instant::now();
+        assert!(refused(Some("a: 1\n"), &doc));
+        assert!(refused(None, &doc));
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+    }
+
+    #[test]
+    fn nested_alias_growth_is_refused() {
+        let mut doc = String::from("a: &a [x, x, x, x, x, x, x, x, x, x]\n");
+        let mut prev = 'a';
+        for next in ['b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k'] {
+            let refs = format!("*{prev}, ").repeat(10);
+            doc.push_str(&format!("{next}: &{next} [{refs}]\n"));
+            prev = next;
+        }
+        assert!(refused(Some("a: 1\n"), &doc));
+    }
+
+    #[test]
+    fn ampersands_and_stars_in_strings_and_urls_still_merge() {
+        let received = "http:\n  url: https://x.test/a?b=1&c=2\n  note: \"a & b * c &x *y\"\n  glob: '*.txt'\n";
+        let v = merged("http:\n  url: old\n", received);
+        assert_eq!(v["http"]["url"].as_str(), Some("https://x.test/a?b=1&c=2"));
+        assert_eq!(v["http"]["note"].as_str(), Some("a & b * c &x *y"));
+        assert_eq!(v["http"]["glob"].as_str(), Some("*.txt"));
+    }
+
+    #[test]
+    fn a_small_alias_is_allowed() {
+        let v = merged("a: 1\n", "a: &x hello\nb: *x\n");
+        assert_eq!(v["b"].as_str(), Some("hello"));
+    }
+
+    #[test]
+    fn a_new_file_loses_the_peers_local_only_keys_and_keeps_the_rest() {
+        let received = "uid: evil\ninfo:\n  name: R\n  uid: e2\nextensions:\n  rocketapi:\n    sandboxMode: developer\n  bruno:\n    keep: 1\nexamples:\n  - name: x\nhttp:\n  url: https://x\n";
+        let out = merge_file(None, received.as_bytes()).expect("merges");
+        let v = parse(&out);
+        assert!(v["uid"].is_null());
+        assert!(v["info"]["uid"].is_null());
+        assert!(v["extensions"]["rocketapi"].is_null());
+        assert!(v["examples"].is_null());
+        assert_eq!(v["extensions"]["bruno"]["keep"].as_u64(), Some(1));
+        assert_eq!(v["info"]["name"].as_str(), Some("R"));
+        assert_eq!(v["http"]["url"].as_str(), Some("https://x"));
     }
 
     #[test]

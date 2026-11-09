@@ -38,15 +38,20 @@ pub fn zip_entries<R: Read + Seek>(reader: R) -> DomainResult<Vec<(String, Vec<u
             continue;
         }
         let rest = split_root(&name, &mut root)?;
-        total = total.saturating_add(entry.size());
-        if total > MAX_UNZIPPED_BYTES {
-            return Err(DomainError::InvalidInput("The archive is too big.".into()));
+        let too_big = || DomainError::InvalidInput("The archive is too big.".into());
+        if total.saturating_add(entry.size()) > MAX_UNZIPPED_BYTES {
+            return Err(too_big());
         }
+        // The declared size is not trusted, so the real bytes are counted as they come.
         let mut bytes = Vec::new();
         (&mut entry)
-            .take(MAX_UNZIPPED_BYTES + 1)
+            .take(MAX_UNZIPPED_BYTES - total + 1)
             .read_to_end(&mut bytes)
             .map_err(|_| DomainError::Io("The archive cannot be read.".into()))?;
+        total = total.saturating_add(bytes.len() as u64);
+        if total > MAX_UNZIPPED_BYTES {
+            return Err(too_big());
+        }
         out.push((rest, bytes));
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));
@@ -54,6 +59,19 @@ pub fn zip_entries<R: Read + Seek>(reader: R) -> DomainResult<Vec<(String, Vec<u
         return Err(DomainError::InvalidInput(
             "The archive has the same file twice.".into(),
         ));
+    }
+    let paths: std::collections::HashSet<&str> = out.iter().map(|(p, _)| p.as_str()).collect();
+    for (path, _) in &out {
+        let mut at = 0;
+        while let Some(slash) = path[at..].find('/') {
+            at += slash;
+            if paths.contains(&path[..at]) {
+                return Err(DomainError::InvalidInput(
+                    "The archive has a file and a folder with the same name.".into(),
+                ));
+            }
+            at += 1;
+        }
     }
     Ok(out)
 }
@@ -230,6 +248,82 @@ mod tests {
                 "{path} against the export"
             );
         }
+    }
+
+    #[test]
+    fn an_entry_that_inflates_past_its_declared_size_is_refused() {
+        let mut w = ZipWriter::new(Cursor::new(Vec::new()));
+        let opts =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        w.start_file("r/big.yml", opts).expect("start");
+        let chunk = vec![b'a'; 1024 * 1024];
+        for _ in 0..(MAX_UNZIPPED_BYTES / 1024 / 1024 + 2) {
+            w.write_all(&chunk).expect("write");
+        }
+        let mut bytes = w.finish().expect("finish").into_inner();
+        // Patch the declared uncompressed size to one byte in both headers.
+        let local = bytes
+            .windows(4)
+            .position(|x| x == [0x50, 0x4b, 0x03, 0x04])
+            .expect("local");
+        let central = bytes
+            .windows(4)
+            .rposition(|x| x == [0x50, 0x4b, 0x01, 0x02])
+            .expect("central");
+        bytes[local + 22..local + 26].copy_from_slice(&1u32.to_le_bytes());
+        bytes[central + 24..central + 28].copy_from_slice(&1u32.to_le_bytes());
+        let err = zip_entries(Cursor::new(bytes)).expect_err("refused");
+        assert!(
+            err.to_string().contains("too big") || matches!(err, DomainError::Io(_)),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_file_and_a_folder_with_the_same_path_are_refused() {
+        let zip = make_zip(&[("r/a", "1"), ("r/a/b.yml", "2")]);
+        assert!(matches!(
+            zip_entries(zip),
+            Err(DomainError::InvalidInput(_))
+        ));
+    }
+
+    #[test]
+    fn is_synced_path_ignores_case_in_its_rules() {
+        for path in [
+            "Environments/dev.yml",
+            "ENVIRONMENTS/dev.yml",
+            "FLOWS/f.yml",
+            "Flows/f.yml",
+            "Workspace.yml",
+            "WORKSPACE.YML",
+            "Node_Modules/a.js",
+            "a/NODE_MODULES/b.js",
+        ] {
+            assert!(!is_synced_path(path), "{path} should be refused");
+        }
+    }
+
+    #[test]
+    fn is_synced_path_refuses_odd_segments_and_hidden_names_at_any_depth() {
+        for path in [
+            "a\\b.yml",
+            "a/b\\c.yml",
+            "C:/x.yml",
+            "a/b:c.yml",
+            "a//b.yml",
+            "a/./b.yml",
+            "./a.yml",
+            "",
+            "a/.secret/x.yml",
+            ".x.yml",
+            "a/.x.yml",
+            "a/.git/x.yml",
+        ] {
+            assert!(!is_synced_path(path), "{path:?} should be refused");
+        }
+        assert!(is_synced_path("a/b/c.yml"));
+        assert!(is_synced_path("environments.yml"));
     }
 
     #[test]

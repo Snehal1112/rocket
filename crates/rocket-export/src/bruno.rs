@@ -13,19 +13,19 @@ use crate::report::{ExportAction, ExportNote, ExportReport};
 use crate::scrub::{scrub_yaml, strip_rocket_namespace};
 
 pub(crate) fn is_noise(rel_path: &str) -> bool {
-    if rel_path == "workspace.yml" {
+    if rel_path.eq_ignore_ascii_case("workspace.yml") {
         return true;
     }
     rel_path
         .split('/')
-        .any(|part| part == ".git" || part == "node_modules")
+        .any(|part| part.eq_ignore_ascii_case(".git") || part.eq_ignore_ascii_case("node_modules"))
 }
 
 /// The top-level directory of a Rocket-only file, which Bruno cannot read: `flows/` and
 /// any hidden directory such as `.rocket/` (contract snapshots).
 pub(crate) fn rocket_only_root(rel_path: &str) -> Option<&str> {
     let (first, _) = rel_path.split_once('/')?;
-    (first == "flows" || first.starts_with('.')).then_some(first)
+    (first.eq_ignore_ascii_case("flows") || first.starts_with('.')).then_some(first)
 }
 
 /// Removes saved request examples, which hold captured responses that may contain
@@ -62,14 +62,20 @@ fn is_yaml(rel_path: &str) -> bool {
 /// The sync uses this one rule for its manifests and its apply, so it cannot drift from the
 /// export. It also refuses a leading slash and any `..` segment.
 pub fn is_synced_path(rel_path: &str) -> bool {
-    if rel_path.starts_with('/') || rel_path.split('/').any(|part| part == "..") {
+    let odd = |part: &str| {
+        part.is_empty() || part.starts_with('.') || part.contains('\\') || part.contains(':')
+    };
+    // A hidden segment at any depth also covers `.`, `..` and `.git`.
+    if rel_path.starts_with('/') || rel_path.split('/').any(odd) {
         return false;
     }
     if is_noise(rel_path) || rocket_only_root(rel_path).is_some() {
         return false;
     }
-    if rel_path.starts_with("environments/") {
-        return false;
+    if let Some((first, _)) = rel_path.split_once('/') {
+        if first.eq_ignore_ascii_case("environments") {
+            return false;
+        }
     }
     matches!(extension(rel_path), "yml" | "yaml" | "proto" | "js")
 }
@@ -189,7 +195,9 @@ pub fn bruno_zip(
         if !matches!(ext, "yml" | "yaml" | "proto" | "js") {
             continue;
         }
-        let in_env = rel.starts_with("environments/");
+        let in_env = rel
+            .split_once('/')
+            .is_some_and(|(first, _)| first.eq_ignore_ascii_case("environments"));
         if in_env && !include_environments {
             continue;
         }
