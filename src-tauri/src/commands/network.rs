@@ -310,7 +310,7 @@ pub async fn network_send_collection(
     svc: State<'_, Arc<TransferService>>,
 ) -> Result<SendStartedDto, DomainError> {
     let id = parse_device_id(&device_id)?;
-    let started = svc.send(&id, &collection, include_environments).await?;
+    let started = svc.send(&id, &collection, include_environments, false).await?;
     Ok(SendStartedDto::from(started))
 }
 

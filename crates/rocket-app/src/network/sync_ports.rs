@@ -75,13 +75,26 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
-/// Reads the base from a ZIP. Paths the sync does not carry (environments, for one) are left
-/// out. A name that clashes with another by letter case is refused by the manifest.
+/// Whether a collection-relative path is one the sync carries: `is_synced_path`, and not an
+/// `opencollection.yml` below the root (a nested collection file, which apply refuses).
+pub fn is_sync_entry(path: &str) -> bool {
+    rocket_export::is_synced_path(path) && !is_nested_collection_file(path)
+}
+
+/// Whether the path names an `opencollection.yml` (any letter case) below the root.
+pub(crate) fn is_nested_collection_file(path: &str) -> bool {
+    path.rsplit_once('/')
+        .is_some_and(|(_, name)| name.eq_ignore_ascii_case("opencollection.yml"))
+}
+
+/// Reads the base from a ZIP. Paths the sync does not carry (environments, a nested
+/// `opencollection.yml`) are left out. A name that clashes with another by letter case is
+/// refused by the manifest.
 pub fn base_from_reader<R: Read + Seek>(reader: R) -> DomainResult<ZipBase> {
     let mut manifest = Manifest::new();
     let mut files = Vec::new();
     for (path, bytes) in rocket_export::zip_entries(reader)? {
-        if !rocket_export::is_synced_path(&path) {
+        if !is_sync_entry(&path) {
             continue;
         }
         manifest.insert(&path, &sha256_hex(&bytes))?;
@@ -151,6 +164,32 @@ mod tests {
         let paths: Vec<&str> = base.manifest.paths().collect();
         assert_eq!(paths, vec!["opencollection.yml"]);
         assert_eq!(base.files.len(), 1);
+    }
+
+    #[test]
+    fn a_zip_base_skips_a_nested_collection_file() {
+        // Apply refuses a nested collection file, so the base must not carry one either.
+        let zip = make_zip(&[
+            ("Orders/opencollection.yml", "a: 1\n"),
+            ("Orders/users/opencollection.yml", "b: 2\n"),
+            ("Orders/users/deep/OpenCollection.YML", "c: 3\n"),
+            ("Orders/users/get.yml", "d: 4\n"),
+        ]);
+        let base = base_from_reader(Cursor::new(zip)).expect("reads");
+        let paths: Vec<&str> = base.manifest.paths().collect();
+        assert_eq!(paths, vec!["opencollection.yml", "users/get.yml"]);
+        assert_eq!(base.files.len(), 2);
+    }
+
+    #[test]
+    fn a_sync_entry_is_a_synced_path_that_is_not_a_nested_collection_file() {
+        assert!(is_sync_entry("opencollection.yml"));
+        assert!(is_sync_entry("users/get.yml"));
+        assert!(is_sync_entry("users/folder.yml"));
+        assert!(!is_sync_entry("users/opencollection.yml"));
+        assert!(!is_sync_entry("a/b/OpenCollection.yml"));
+        assert!(!is_sync_entry("environments/dev.yml"));
+        assert!(!is_sync_entry("bruno.json"));
     }
 
     #[test]

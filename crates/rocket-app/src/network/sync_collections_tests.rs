@@ -125,6 +125,23 @@ fn exists_and_collection_uid_follow_the_collection() {
 }
 
 #[test]
+fn manifest_and_export_skip_a_nested_collection_file() {
+    // Apply refuses a nested collection file, so the manifest must not name one, or every
+    // sync of this collection would fail.
+    let rig = rig();
+    seed(&rig);
+    write(&rig, "users/opencollection.yml", OC);
+    let manifest = rig.port.manifest("c").expect("manifest");
+    assert!(manifest.get("users/opencollection.yml").is_none());
+    assert!(manifest.get("users/Get.yml").is_some());
+    let err = rig
+        .port
+        .export_files("c", &["users/opencollection.yml".to_string()])
+        .expect_err("not exported");
+    assert!(!err.to_string().contains("users"));
+}
+
+#[test]
 fn manifest_is_stable_across_two_calls() {
     let rig = rig();
     seed(&rig);

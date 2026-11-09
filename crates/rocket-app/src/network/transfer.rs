@@ -17,7 +17,7 @@ use async_trait::async_trait;
 use rocket_audit::{AuditActor, AuditEventKind, SecurityAuditPublisher};
 use rocket_network::limits::{SENDER_RESULT_TIMEOUT, TRANSFER_OFFER_TTL};
 use rocket_network::{
-    DeviceId, Outcome, PeerMessage, TransferEvent, TransferId, TransferLimits, TransferSink,
+    DeviceId, LinkId, Outcome, PeerMessage, TransferEvent, TransferId, TransferLimits, TransferSink,
 };
 use rocket_shared::error::DomainResult;
 use rocket_shared::events::EventPublisher;
@@ -26,6 +26,7 @@ use tokio::sync::mpsc;
 use crate::collection_export_service::CollectionExportService;
 
 use super::service::NetworkService;
+use super::sync::SyncService;
 use super::transfer_ports::{CollectionImportPort, TransferStaging};
 use super::transfer_receive::{In, OfferFrame};
 use super::transfer_send::Out;
@@ -148,6 +149,9 @@ pub struct TransferService {
     inner: Mutex<Inner>,
     frames: mpsc::Sender<Item>,
     worker: Mutex<Option<mpsc::Receiver<Item>>>,
+    /// The sync service, so a linked transfer can create its link. Without it a linked send
+    /// is refused.
+    sync: Mutex<Option<Arc<SyncService>>>,
     /// Test hook: a sleep before each chunk is taken. Not in a release build.
     #[cfg(test)]
     pub(super) chunk_delay: Mutex<Duration>,
@@ -175,6 +179,7 @@ impl TransferService {
             inner: Mutex::new(Inner::default()),
             frames,
             worker: Mutex::new(Some(queue)),
+            sync: Mutex::new(None),
             #[cfg(test)]
             chunk_delay: Mutex::new(Duration::ZERO),
             #[cfg(test)]
@@ -183,6 +188,53 @@ impl TransferService {
         let sink: Arc<dyn TransferSink> = svc.clone();
         svc.deps.network.set_transfer_sink(sink);
         svc
+    }
+
+    /// Gives the transfer service the sync service, so a linked send can create its link.
+    pub fn set_sync(&self, sync: Arc<SyncService>) {
+        *self.sync.lock().unwrap_or_else(|e| e.into_inner()) = Some(sync);
+    }
+
+    /// The sync service, when one was set.
+    pub(super) fn sync_service(&self) -> Option<Arc<SyncService>> {
+        self.sync.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// True when a transfer with this id is open in either direction.
+    pub(crate) fn has_transfer(&self, id: &TransferId) -> bool {
+        let inner = self.lock();
+        inner.outgoing.contains_key(id) || inner.incoming.contains_key(id)
+    }
+
+    /// Creates the link of a linked transfer from its own task. A failure is logged with a
+    /// code and never changes the transfer outcome.
+    pub(super) fn spawn_link(
+        &self,
+        link: LinkId,
+        peer: DeviceId,
+        collection: String,
+        zip: Vec<u8>,
+    ) {
+        let Some(sync) = self.sync_service() else {
+            tracing::warn!(code = "network_link_create_failed", "no sync service");
+            return;
+        };
+        drop(tokio::spawn(async move {
+            let made = tokio::task::spawn_blocking(move || {
+                sync.link_first_transfer(link, peer, &collection, &zip)
+            })
+            .await;
+            match made {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    tracing::warn!(code = "network_link_create_failed", "link not created");
+                    tracing::debug!(error = %e, "link not created");
+                }
+                Err(_) => {
+                    tracing::warn!(code = "network_link_create_failed", "link task ended");
+                }
+            }
+        }));
     }
 
     /// Test hook: wait this long before each chunk is taken from the ZIP.
@@ -281,7 +333,8 @@ impl TransferService {
                 size_bytes,
                 chunk_count,
                 sha256,
-                ..
+                keep_in_sync,
+                link_id,
             } => {
                 let frame = OfferFrame {
                     transfer_id,
@@ -289,6 +342,8 @@ impl TransferService {
                     size_bytes,
                     chunk_count,
                     sha256,
+                    keep_in_sync,
+                    link_id,
                 };
                 self.on_offer(from, frame);
             }
@@ -335,6 +390,7 @@ impl TransferService {
                     self.on_ack(&from, &id, next_seq);
                 }
             }
+            // Sync frames reach `SyncService` through `FrameRouter`, never this service.
             _ => {}
         }
     }

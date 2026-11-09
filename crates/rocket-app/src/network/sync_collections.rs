@@ -12,11 +12,11 @@ use std::sync::Arc;
 use rocket_collection::{
     validate_rel_path, CollectionFileTxFactory, CollectionRepository, RecoveryOutcome,
 };
-use rocket_export::{is_synced_path, merge_file, zip_entries};
+use rocket_export::{merge_file, zip_entries};
 use rocket_network::link::Manifest;
 use rocket_shared::error::{DomainError, DomainResult};
 
-use super::sync_ports::{sha256_hex, FileChange, SyncCollectionPort, SyncFile};
+use super::sync_ports::{is_sync_entry, sha256_hex, FileChange, SyncCollectionPort, SyncFile};
 use crate::collection_export_service::CollectionExportService;
 use crate::collection_lock::{collection_lock, with_collection_lock};
 
@@ -39,14 +39,8 @@ const CHANGED: &str = "The collection changed while the sync was running.";
 pub(super) type Overlay = BTreeMap<String, Option<Vec<u8>>>;
 
 fn checked(path: &str) -> DomainResult<()> {
-    if !is_synced_path(path) {
-        return Err(DomainError::InvalidInput(REFUSED.into()));
-    }
     // Only the collection root file is a collection file. A nested one is refused.
-    let nested = path
-        .rsplit_once('/')
-        .is_some_and(|(_, name)| name.eq_ignore_ascii_case("opencollection.yml"));
-    if nested {
+    if !is_sync_entry(path) {
         return Err(DomainError::InvalidInput(REFUSED.into()));
     }
     validate_rel_path(path).map_err(|_| DomainError::InvalidInput(REFUSED.into()))
@@ -249,10 +243,11 @@ impl ExportBackedSyncCollections {
             .map_err(|e| quiet(&e, "export", UNREADABLE))?;
         let entries =
             zip_entries(Cursor::new(out.bytes)).map_err(|e| quiet(&e, "zip", UNREADABLE))?;
-        // The same filter as the base of a link, so both sides name the same files.
+        // The same filter as the base of a link, so both sides name the same files. A nested
+        // collection file is left out too, because apply refuses it.
         Ok(entries
             .into_iter()
-            .filter(|(path, _)| is_synced_path(path))
+            .filter(|(path, _)| is_sync_entry(path))
             .collect())
     }
 

@@ -12,8 +12,8 @@ use std::time::{Duration, Instant};
 
 use rocket_audit::AuditEventKind;
 use rocket_network::{
-    AbortReason, Admission, ChunkStep, DeviceId, Direction, IncomingTransfer, Outcome, PeerMessage,
-    ResultOutcome, TransferEvent, TransferId,
+    AbortReason, Admission, ChunkStep, DeviceId, Direction, IncomingTransfer, LinkId, Outcome,
+    PeerMessage, ResultOutcome, TransferEvent, TransferId,
 };
 use rocket_shared::error::{DomainError, DomainResult};
 use tokio::sync::mpsc;
@@ -35,6 +35,18 @@ pub(super) struct OfferFrame {
     pub size_bytes: u64,
     pub chunk_count: u32,
     pub sha256: String,
+    pub keep_in_sync: bool,
+    pub link_id: Option<String>,
+}
+
+/// The link of a linked offer. `Err` when the two link fields disagree or the id does not
+/// parse: `keep_in_sync` needs a valid `link_id`, and a `link_id` needs `keep_in_sync`.
+fn offered_link(frame: &OfferFrame) -> Result<Option<LinkId>, ()> {
+    match (frame.keep_in_sync, frame.link_id.as_deref()) {
+        (false, None) => Ok(None),
+        (true, Some(text)) => LinkId::parse(text).map(Some).map_err(|_| ()),
+        _ => Err(()),
+    }
 }
 
 /// One incoming transfer, from the offer to the end of the import.
@@ -50,6 +62,9 @@ pub(super) struct In {
     pub finalizing: bool,
     /// The ack pump (ruling 20), from Accept on. Dropping the entry ends the pump.
     pub acks: Option<mpsc::UnboundedSender<PeerMessage>>,
+    /// A linked offer keeps its link id and a copy of every chunk in memory, so the link can be
+    /// created from the received ZIP after the import.
+    pub keep: Option<(LinkId, Vec<u8>)>,
 }
 
 enum Admit {
@@ -82,6 +97,9 @@ struct FinalView {
     from_name: String,
     /// Set when the machine was failed meanwhile (an abort or a gone peer).
     interrupted: Option<Outcome>,
+    device: DeviceId,
+    /// The link id and the received bytes of a linked offer, taken out of the entry.
+    keep: Option<(LinkId, Vec<u8>)>,
 }
 
 fn expired_error() -> DomainError {
@@ -252,6 +270,11 @@ impl TransferService {
             Admission::Refuse(reason) => return Admit::Refuse(reason),
             Admission::Admit => {}
         }
+        // The rate window already counted the offer. A bad link refuses it like a bad offer.
+        let Ok(link) = offered_link(frame) else {
+            inner.limits.release(id);
+            return Admit::Refuse(AbortReason::Failed);
+        };
         let machine = IncomingTransfer::from_offer(
             &frame.transfer_id,
             &frame.name,
@@ -273,6 +296,7 @@ impl TransferService {
                         last_activity: now,
                         finalizing: false,
                         acks: None,
+                        keep: link.map(|link| (link, Vec::new())),
                     },
                 );
                 Admit::Queued
@@ -320,6 +344,9 @@ impl TransferService {
                 ack,
             } => match entry.staged.as_mut().map(|staged| staged.append(&bytes)) {
                 Some(Ok(())) => {
+                    if let Some((_, copy)) = entry.keep.as_mut() {
+                        copy.extend_from_slice(&bytes);
+                    }
                     entry.last_activity = now;
                     self.emit_receive_progress(id, done_bytes, entry.machine.total_bytes());
                     // Queued under the lock, so the pump sends the acks in chunk order.
@@ -497,14 +524,20 @@ impl TransferService {
         };
         self.release_staged(&file);
         match result {
-            Ok(imported) => self.conclude(id, Outcome::Completed, None, Some(imported), true),
+            Ok(imported) => {
+                // The link is made only after a successful import, under the imported name.
+                if let Some((link, bytes)) = view.keep {
+                    self.spawn_link(link, view.device, imported.clone(), bytes);
+                }
+                self.conclude(id, Outcome::Completed, None, Some(imported), true)
+            }
             Err((outcome, message)) => self.conclude(id, outcome, message, None, true),
         }
     }
 
     fn final_view(&self, id: &TransferId) -> Option<FinalView> {
-        let inner = self.lock();
-        let entry = inner.incoming.get(id)?;
+        let mut inner = self.lock();
+        let entry = inner.incoming.get_mut(id)?;
         Some(FinalView {
             size_bytes: entry.machine.total_bytes(),
             sha256: entry.machine.sha256().to_string(),
@@ -514,6 +547,8 @@ impl TransferService {
                 .machine
                 .outcome()
                 .filter(|outcome| *outcome != Outcome::Completed),
+            device: entry.device,
+            keep: entry.keep.take(),
         })
     }
 

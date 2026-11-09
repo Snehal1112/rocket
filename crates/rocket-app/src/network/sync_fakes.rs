@@ -1,15 +1,37 @@
-//! In-memory fakes of the sync ports, for the `SyncService` tests of Plan 3.
+//! In-memory fakes of the sync ports, for the `SyncService` tests of Plan 3: links,
+//! collections held in memory, events, rigs and the scripted peer that plays the other node
+//! frame by frame.
 
 use std::collections::{BTreeMap, HashMap};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 
-use rocket_network::link::{LinkId, LinkRecord, Manifest};
+use base64::engine::general_purpose::STANDARD;
+use base64::Engine as _;
+use rocket_audit::publisher::RecordingSecurityAuditPublisher;
+use rocket_audit::AuditEventKind;
+use rocket_network::limits::{ACK_EVERY_CHUNKS, CHUNK_BYTES};
+use rocket_network::link::{LinkId, LinkRecord, LinkState, Manifest};
 use rocket_network::ports::LinkRepository;
+use rocket_network::{
+    chunk_count_for, DeviceId, PeerMessage, SyncAbortReason, SyncEvent, SyncFinish, SyncOutcome,
+    SyncPayloadKind,
+};
 use rocket_shared::error::{DomainError, DomainResult};
+use rocket_shared::events::{EventPublisher, PublishedEvent};
 
+use super::frame_router::FrameRouter;
+use super::sync::{SyncDeps, SyncService};
 use super::sync_collections::plan_changes;
+use super::sync_payload::pack_zip;
 use super::sync_ports::{sha256_hex, FileChange, SyncCollectionPort, SyncFile};
+use super::test_support::identity;
+use super::transfer::{PeerSender, Timing, TransferDeps, TransferService};
+pub(crate) use super::transfer_fakes::wait_for;
+use super::transfer_fakes::{
+    default_files, export_of, FakeImporter, FakePeers, FakeStaging, RecordingTransferEvents,
+};
 
 fn locked<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|e| e.into_inner())
@@ -255,6 +277,795 @@ impl LinkRepository for FakeLinkRepo {
             .get(path)
             .filter(|bytes| record.base.get(path) == Some(sha256_hex(bytes).as_str()))
             .cloned())
+    }
+}
+
+// ----- the Plan 3 service fakes -----
+
+/// The node under test, as its peer knows it.
+pub(crate) const BO: u8 = 1;
+/// The peer.
+pub(crate) const ANA: u8 = 2;
+/// A second peer.
+pub(crate) const BEN: u8 = 3;
+pub(crate) const ORDERS: &str = "orders";
+pub(crate) const ROOT: &str = "/ws/collections/orders";
+pub(crate) const UID: &str = "uid-orders";
+
+pub(crate) type Files = BTreeMap<String, Vec<u8>>;
+
+pub(crate) fn dev(seed: u8) -> DeviceId {
+    identity(seed).device_id
+}
+
+pub(crate) fn lid(n: u8) -> LinkId {
+    LinkId::parse(&format!("{n:032x}")).expect("a link id")
+}
+
+/// A payload transfer id the scripted peer uses: 32 lowercase hex characters.
+pub(crate) fn ptid(n: u8) -> String {
+    format!("f{n:031x}")
+}
+
+pub(crate) fn sha(bytes: &[u8]) -> String {
+    sha256_hex(bytes)
+}
+
+pub(crate) fn files(list: &[(&str, &str)]) -> Files {
+    list.iter()
+        .map(|(p, b)| (p.to_string(), b.as_bytes().to_vec()))
+        .collect()
+}
+
+pub(crate) fn manifest_of(files: &Files) -> Manifest {
+    let mut m = Manifest::new();
+    for (path, bytes) in files {
+        m.insert(path, &sha(bytes)).expect("a valid test path");
+    }
+    m
+}
+
+pub(crate) fn zip_of(files: &Files) -> Vec<u8> {
+    let list: Vec<SyncFile> = files
+        .iter()
+        .map(|(path, bytes)| SyncFile {
+            path: path.clone(),
+            bytes: bytes.clone(),
+        })
+        .collect();
+    pack_zip(&list).expect("a zip")
+}
+
+/// Short waits, so the expiry and stall tests run in well under a second each.
+pub(crate) fn fast() -> Timing {
+    Timing {
+        offer_ttl: Duration::from_millis(300),
+        idle_limit: Duration::from_millis(300),
+        result_timeout: Duration::from_millis(300),
+    }
+}
+
+pub(crate) fn record(link: &LinkId, peer: u8, base: &Files) -> LinkRecord {
+    LinkRecord {
+        link_id: link.clone(),
+        peer_device_id: dev(peer),
+        collection_name: ORDERS.to_string(),
+        collection_root: ROOT.to_string(),
+        collection_uid: Some(UID.to_string()),
+        base: manifest_of(base),
+        state: LinkState::InSync,
+        updated_at: "2026-11-08T10:00:00+00:00".to_string(),
+    }
+}
+
+// ----- links -----
+
+/// `FakeLinkRepo` (the R9 rules: delta, prune, hash and path checks) plus a save counter and a
+/// switch that makes every save fail.
+#[derive(Default)]
+pub(crate) struct FakeLinks {
+    repo: FakeLinkRepo,
+    pub fail_save: AtomicBool,
+    saves: AtomicUsize,
+}
+
+impl FakeLinks {
+    pub fn record(&self, id: &LinkId) -> Option<LinkRecord> {
+        self.repo.get(id).expect("get")
+    }
+
+    /// The stored base copies in path order.
+    pub fn base_files(&self, id: &LinkId) -> Vec<(String, Vec<u8>)> {
+        let links = locked(&self.repo.links);
+        let mut out: Vec<(String, Vec<u8>)> = links
+            .get(id.as_str())
+            .map(|(_, f)| f.iter().map(|(p, b)| (p.clone(), b.clone())).collect())
+            .unwrap_or_default();
+        out.sort();
+        out
+    }
+
+    pub fn count(&self) -> usize {
+        locked(&self.repo.links).len()
+    }
+
+    pub fn saves(&self) -> usize {
+        self.saves.load(Ordering::SeqCst)
+    }
+
+    pub fn list_for_test(&self) -> Vec<LinkRecord> {
+        self.list().expect("list")
+    }
+}
+
+impl LinkRepository for FakeLinks {
+    fn list(&self) -> DomainResult<Vec<LinkRecord>> {
+        self.repo.list()
+    }
+
+    fn get(&self, id: &LinkId) -> DomainResult<Option<LinkRecord>> {
+        self.repo.get(id)
+    }
+
+    fn save(&self, record: &LinkRecord, base_files: &[(String, Vec<u8>)]) -> DomainResult<()> {
+        if self.fail_save.load(Ordering::SeqCst) {
+            return Err(DomainError::Io("The link was not saved.".into()));
+        }
+        self.repo.save(record, base_files)?;
+        self.saves.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn delete(&self, id: &LinkId) -> DomainResult<()> {
+        self.repo.delete(id)
+    }
+
+    fn read_base_file(&self, id: &LinkId, path: &str) -> DomainResult<Option<Vec<u8>>> {
+        self.repo.read_base_file(id, path)
+    }
+}
+
+// ----- collections -----
+
+pub(crate) struct FakeColl {
+    pub uid: Option<String>,
+    pub root: String,
+    pub files: Files,
+}
+
+/// Collections in memory. "Export" is the identity: a file's wire bytes are its bytes. Apply
+/// plans with the real port's `plan_changes`, so the order (renames, deletes, puts), the YAML
+/// merge of a `Put` and the case rule match the port. Only `apply_if_unchanged` applies; a
+/// plain `apply` is counted and refused, because the service must never call it.
+#[derive(Default)]
+pub(crate) struct FakeCollections {
+    colls: Mutex<HashMap<String, FakeColl>>,
+    applied: Mutex<Vec<(String, Vec<FileChange>)>>,
+    /// Every apply that passed the manifest check fails while this is set.
+    pub fail_apply: AtomicBool,
+    plain_applies: AtomicUsize,
+    manifests: AtomicUsize,
+    edit_after: Mutex<Option<(usize, String, Vec<u8>)>>,
+    edit_before_apply: Mutex<Option<(String, Vec<u8>)>>,
+    apply_gate: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+}
+
+impl FakeCollections {
+    pub fn add(&self, name: &str, files: Files) {
+        let root = if name == ORDERS {
+            ROOT.to_string()
+        } else {
+            format!("/ws/collections/{name}")
+        };
+        locked(&self.colls).insert(
+            name.to_string(),
+            FakeColl {
+                uid: Some(UID.to_string()),
+                root,
+                files,
+            },
+        );
+    }
+
+    pub fn set_uid(&self, name: &str, uid: Option<&str>) {
+        if let Some(c) = locked(&self.colls).get_mut(name) {
+            c.uid = uid.map(str::to_string);
+        }
+    }
+
+    pub fn set_root(&self, name: &str, root: &str) {
+        if let Some(c) = locked(&self.colls).get_mut(name) {
+            c.root = root.to_string();
+        }
+    }
+
+    pub fn remove(&self, name: &str) {
+        locked(&self.colls).remove(name);
+    }
+
+    pub fn files(&self, name: &str) -> Files {
+        locked(&self.colls)
+            .get(name)
+            .map(|c| c.files.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn put(&self, name: &str, path: &str, bytes: &[u8]) {
+        if let Some(c) = locked(&self.colls).get_mut(name) {
+            c.files.insert(path.to_string(), bytes.to_vec());
+        }
+    }
+
+    /// Every non-empty apply that passed its manifest check, in order.
+    pub fn applied(&self) -> Vec<(String, Vec<FileChange>)> {
+        locked(&self.applied).clone()
+    }
+
+    /// How often the plain `apply` was called. The service must leave it at zero.
+    pub fn plain_applies(&self) -> usize {
+        self.plain_applies.load(Ordering::SeqCst)
+    }
+
+    pub fn manifest_calls(&self) -> usize {
+        self.manifests.load(Ordering::SeqCst)
+    }
+
+    /// The `n + 1`-th `manifest` call and every later read see `path` written: a local save
+    /// made while the sync runs.
+    pub fn edit_after_manifests(&self, n: usize, path: &str, bytes: &[u8]) {
+        *locked(&self.edit_after) = Some((n, path.to_string(), bytes.to_vec()));
+    }
+
+    /// The next `apply_if_unchanged` sees `path` written just before its check: a local save
+    /// that lands between the user's answer and the apply.
+    pub fn edit_before_apply(&self, path: &str, bytes: &[u8]) {
+        *locked(&self.edit_before_apply) = Some((path.to_string(), bytes.to_vec()));
+    }
+
+    /// Holds the next apply until the returned sender sends or is dropped.
+    pub fn hold_apply(&self) -> std::sync::mpsc::Sender<()> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        *locked(&self.apply_gate) = Some(rx);
+        tx
+    }
+
+    fn checked_apply(
+        &self,
+        collection: &str,
+        expected: &Manifest,
+        changes: &[FileChange],
+    ) -> DomainResult<()> {
+        let gate = locked(&self.apply_gate).take();
+        if let Some(gate) = gate {
+            // Runs in a blocking task, so waiting here does not stall the test runtime.
+            let _ = gate.recv();
+        }
+        let edit = locked(&self.edit_before_apply).take();
+        if let Some((path, bytes)) = edit {
+            self.put(collection, &path, &bytes);
+        }
+        let mut colls = locked(&self.colls);
+        let c = colls.get_mut(collection).ok_or_else(missing)?;
+        if &FakeSyncCollections::manifest_of(&c.files)? != expected {
+            return Err(DomainError::Conflict(
+                "The collection changed while the sync was running.".into(),
+            ));
+        }
+        if changes.is_empty() {
+            return Ok(());
+        }
+        locked(&self.applied).push((collection.to_string(), changes.to_vec()));
+        if self.fail_apply.load(Ordering::SeqCst) {
+            return Err(DomainError::Io("The fake apply was told to fail.".into()));
+        }
+        // The fake has no other files on disk, so nothing else can hold a path.
+        let overlay = plan_changes(&c.files, changes, &|_| Ok(false))?;
+        for (path, entry) in overlay {
+            match entry {
+                Some(bytes) => {
+                    c.files.insert(path, bytes);
+                }
+                None => {
+                    c.files.remove(&path);
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+impl SyncCollectionPort for FakeCollections {
+    fn exists(&self, collection: &str) -> DomainResult<bool> {
+        Ok(locked(&self.colls).contains_key(collection))
+    }
+
+    fn collection_uid(&self, collection: &str) -> DomainResult<Option<String>> {
+        Ok(locked(&self.colls)
+            .get(collection)
+            .ok_or_else(missing)?
+            .uid
+            .clone())
+    }
+
+    fn collection_root(&self, collection: &str) -> DomainResult<String> {
+        Ok(locked(&self.colls)
+            .get(collection)
+            .ok_or_else(missing)?
+            .root
+            .clone())
+    }
+
+    fn manifest(&self, collection: &str) -> DomainResult<Manifest> {
+        let n = self.manifests.fetch_add(1, Ordering::SeqCst);
+        let edit = {
+            let mut slot = locked(&self.edit_after);
+            match slot.as_ref() {
+                Some((after, _, _)) if n >= *after => slot.take(),
+                _ => None,
+            }
+        };
+        if let Some((_, path, bytes)) = edit {
+            self.put(collection, &path, &bytes);
+        }
+        let colls = locked(&self.colls);
+        FakeSyncCollections::manifest_of(&colls.get(collection).ok_or_else(missing)?.files)
+    }
+
+    fn export_files(&self, collection: &str, paths: &[String]) -> DomainResult<Vec<SyncFile>> {
+        let colls = locked(&self.colls);
+        let c = colls.get(collection).ok_or_else(missing)?;
+        paths
+            .iter()
+            .map(|p| {
+                c.files
+                    .get(p)
+                    .map(|b| SyncFile {
+                        path: p.clone(),
+                        bytes: b.clone(),
+                    })
+                    .ok_or_else(|| {
+                        DomainError::NotFound("A requested file is not in the collection.".into())
+                    })
+            })
+            .collect()
+    }
+
+    fn apply(&self, _collection: &str, _changes: &[FileChange]) -> DomainResult<()> {
+        self.plain_applies.fetch_add(1, Ordering::SeqCst);
+        Err(DomainError::Internal(
+            "The sync service must not call a plain apply.".into(),
+        ))
+    }
+
+    fn apply_if_unchanged(
+        &self,
+        collection: &str,
+        expected: &Manifest,
+        changes: &[FileChange],
+    ) -> DomainResult<()> {
+        self.checked_apply(collection, expected, changes)
+    }
+}
+
+// ----- events -----
+
+#[derive(Default)]
+pub(crate) struct RecordingSyncEvents(Mutex<Vec<SyncEvent>>);
+
+impl RecordingSyncEvents {
+    pub fn all(&self) -> Vec<SyncEvent> {
+        locked(&self.0).clone()
+    }
+
+    pub fn reviews(&self) -> Vec<SyncEvent> {
+        self.all()
+            .into_iter()
+            .filter(|e| matches!(e, SyncEvent::ReviewReady { .. }))
+            .collect()
+    }
+
+    pub fn confirms(&self) -> Vec<SyncEvent> {
+        self.all()
+            .into_iter()
+            .filter(|e| matches!(e, SyncEvent::ConfirmNeeded { .. }))
+            .collect()
+    }
+
+    /// `(sync_id, outcome, message)` of every `Finished`.
+    pub fn finished(&self) -> Vec<(String, SyncFinish, Option<String>)> {
+        self.all()
+            .into_iter()
+            .filter_map(|e| match e {
+                SyncEvent::Finished {
+                    sync_id,
+                    outcome,
+                    message,
+                    ..
+                } => Some((sync_id, outcome, message)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub fn link_changes(&self) -> usize {
+        self.all()
+            .iter()
+            .filter(|e| matches!(e, SyncEvent::LinkChanged { .. }))
+            .count()
+    }
+}
+
+impl EventPublisher for RecordingSyncEvents {
+    fn publish(&self, event: &dyn PublishedEvent) {
+        if let Some(event) = event.downcast_ref::<SyncEvent>() {
+            locked(&self.0).push(event.clone());
+        }
+    }
+}
+
+// ----- the rig -----
+
+pub(crate) struct SyncRig {
+    pub sync: Arc<SyncService>,
+    pub transfer: Arc<TransferService>,
+    pub router: Arc<FrameRouter>,
+    pub peers: Arc<FakePeers>,
+    pub events: Arc<RecordingSyncEvents>,
+    pub transfer_events: Arc<RecordingTransferEvents>,
+    pub audit: Arc<RecordingSecurityAuditPublisher>,
+    pub links: Arc<FakeLinks>,
+    pub colls: Arc<FakeCollections>,
+    pub importer: Arc<FakeImporter>,
+    /// The transfer service's staging. The sync service has none (index R3).
+    pub staging: Arc<FakeStaging>,
+}
+
+pub(crate) fn sync_rig() -> SyncRig {
+    sync_rig_timed(fast())
+}
+
+/// A transfer service and a sync service over the same fake peers, wired as Plan 4 wires
+/// them: the transfer service knows the sync service and the router is the sink.
+pub(crate) fn sync_rig_timed(timing: Timing) -> SyncRig {
+    let peers = Arc::new(FakePeers::default());
+    let events = Arc::new(RecordingSyncEvents::default());
+    let transfer_events = Arc::new(RecordingTransferEvents::default());
+    let audit = Arc::new(RecordingSecurityAuditPublisher::new());
+    let links = Arc::new(FakeLinks::default());
+    let colls = Arc::new(FakeCollections::default());
+    let importer = Arc::new(FakeImporter::default());
+    let staging = Arc::new(FakeStaging::default());
+    let transfer = TransferService::new_with_timing(
+        TransferDeps {
+            network: peers.clone(),
+            export: export_of(default_files()),
+            importer: importer.clone(),
+            staging: staging.clone(),
+            events: transfer_events.clone(),
+            audit: audit.clone(),
+        },
+        timing,
+    );
+    let sync = SyncService::new_with_timing(
+        SyncDeps {
+            network: peers.clone(),
+            links: links.clone(),
+            collections: colls.clone(),
+            events: events.clone(),
+            audit: audit.clone(),
+        },
+        timing,
+    );
+    transfer.set_sync(sync.clone());
+    let router = FrameRouter::new(transfer.clone(), sync.clone());
+    peers.set_transfer_sink(router.clone());
+    SyncRig {
+        sync,
+        transfer,
+        router,
+        peers,
+        events,
+        transfer_events,
+        audit,
+        links,
+        colls,
+        importer,
+        staging,
+    }
+}
+
+impl SyncRig {
+    pub fn audited(&self) -> Vec<AuditEventKind> {
+        self.audit.records().into_iter().map(|r| r.kind).collect()
+    }
+
+    /// A frame from `seed` arrives at this node.
+    pub fn push(&self, seed: u8, message: PeerMessage) {
+        use rocket_network::TransferSink as _;
+        self.router.on_frame(dev(seed), message);
+    }
+
+    pub fn sent(&self, seed: u8) -> Vec<PeerMessage> {
+        self.peers.sent_to(&dev(seed))
+    }
+
+    pub fn aborts(&self, seed: u8) -> Vec<SyncAbortReason> {
+        self.sent(seed)
+            .into_iter()
+            .filter_map(|m| match m {
+                PeerMessage::SyncAbort { reason, .. } => Some(reason),
+                _ => None,
+            })
+            .collect()
+    }
+
+    pub fn results(&self, seed: u8) -> Vec<SyncOutcome> {
+        self.sent(seed)
+            .into_iter()
+            .filter_map(|m| match m {
+                PeerMessage::SyncResult { outcome, .. } => Some(outcome),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Ana is paired and online, `orders` holds `mine`, and link `link` with Ana has base `base`.
+    pub fn linked(&self, link: &LinkId, base: &Files, mine: &Files) {
+        self.peers.add(dev(ANA), "Ana");
+        self.colls.add(ORDERS, mine.clone());
+        let base_files: Vec<(String, Vec<u8>)> =
+            base.iter().map(|(p, b)| (p.clone(), b.clone())).collect();
+        self.links
+            .save(&record(link, ANA, base), &base_files)
+            .expect("link saved");
+    }
+}
+
+// ----- the scripted peer -----
+
+/// The fields of one `SyncOffer` frame.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Offered {
+    pub sync_id: String,
+    pub link_id: String,
+    pub base_hash: String,
+    pub kind: SyncPayloadKind,
+    pub transfer_id: String,
+    pub size_bytes: u64,
+    pub chunk_count: u32,
+    pub sha256: String,
+}
+
+pub(crate) fn as_offer(m: &PeerMessage) -> Option<Offered> {
+    match m {
+        PeerMessage::SyncOffer {
+            sync_id,
+            link_id,
+            base_hash,
+            kind,
+            transfer_id,
+            size_bytes,
+            chunk_count,
+            sha256,
+        } => Some(Offered {
+            sync_id: sync_id.clone(),
+            link_id: link_id.clone(),
+            base_hash: base_hash.clone(),
+            kind: *kind,
+            transfer_id: transfer_id.clone(),
+            size_bytes: *size_bytes,
+            chunk_count: *chunk_count,
+            sha256: sha256.clone(),
+        }),
+        _ => None,
+    }
+}
+
+pub(crate) fn offer_frame(o: &Offered) -> PeerMessage {
+    PeerMessage::SyncOffer {
+        sync_id: o.sync_id.clone(),
+        link_id: o.link_id.clone(),
+        base_hash: o.base_hash.clone(),
+        kind: o.kind,
+        transfer_id: o.transfer_id.clone(),
+        size_bytes: o.size_bytes,
+        chunk_count: o.chunk_count,
+        sha256: o.sha256.clone(),
+    }
+}
+
+/// The offer the scripted peer makes for `bytes`.
+pub(crate) fn offered(
+    sync_id: &str,
+    link: &LinkId,
+    base_hash: &str,
+    kind: SyncPayloadKind,
+    transfer_id: &str,
+    bytes: &[u8],
+) -> Offered {
+    Offered {
+        sync_id: sync_id.to_string(),
+        link_id: link.as_str().to_string(),
+        base_hash: base_hash.to_string(),
+        kind,
+        transfer_id: transfer_id.to_string(),
+        size_bytes: bytes.len() as u64,
+        chunk_count: chunk_count_for(bytes.len() as u64),
+        sha256: sha(bytes),
+    }
+}
+
+pub(crate) fn chunk_frames(transfer_id: &str, bytes: &[u8]) -> Vec<PeerMessage> {
+    bytes
+        .chunks(CHUNK_BYTES)
+        .enumerate()
+        .map(|(seq, part)| PeerMessage::Chunk {
+            transfer_id: transfer_id.to_string(),
+            seq: seq as u32,
+            data: STANDARD.encode(part),
+        })
+        .collect()
+}
+
+/// The `n`-th (from 0) `SyncOffer` of `kind` this node sent to `seed`.
+pub(crate) async fn nth_offer(rig: &SyncRig, seed: u8, kind: SyncPayloadKind, n: usize) -> Offered {
+    let mut found = None;
+    wait_for("a sync offer", || {
+        found = rig
+            .sent(seed)
+            .iter()
+            .filter_map(as_offer)
+            .filter(|o| o.kind == kind)
+            .nth(n);
+        found.is_some()
+    })
+    .await;
+    found.expect("an offer")
+}
+
+/// Plays the receiving peer of one payload this node offers: answers, takes every chunk,
+/// acks as the real receiver does and returns the bytes.
+pub(crate) async fn take_payload(
+    rig: &SyncRig,
+    seed: u8,
+    kind: SyncPayloadKind,
+    n: usize,
+) -> (Offered, Vec<u8>) {
+    let offer = nth_offer(rig, seed, kind, n).await;
+    rig.push(
+        seed,
+        PeerMessage::OfferAnswer {
+            transfer_id: offer.transfer_id.clone(),
+            accept: true,
+        },
+    );
+    let mut acked = 0u32;
+    for _ in 0..2000 {
+        let chunks: Vec<String> = rig
+            .sent(seed)
+            .into_iter()
+            .filter_map(|m| match m {
+                PeerMessage::Chunk {
+                    transfer_id, data, ..
+                } if transfer_id == offer.transfer_id => Some(data),
+                _ => None,
+            })
+            .collect();
+        let got = chunks.len() as u32;
+        let ack_to = if got == offer.chunk_count {
+            got
+        } else {
+            got - got % ACK_EVERY_CHUNKS
+        };
+        if ack_to > acked {
+            rig.push(
+                seed,
+                PeerMessage::ChunkAck {
+                    transfer_id: offer.transfer_id.clone(),
+                    next_seq: ack_to,
+                },
+            );
+            acked = ack_to;
+        }
+        if got == offer.chunk_count {
+            let mut bytes = Vec::new();
+            for data in chunks {
+                bytes.extend(STANDARD.decode(data).expect("base64"));
+            }
+            return (offer, bytes);
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    panic!("the payload did not arrive");
+}
+
+/// Plays the sending peer of one payload: offers, waits for the answer, sends every chunk.
+pub(crate) async fn give_payload(rig: &SyncRig, seed: u8, offer: &Offered, bytes: &[u8]) {
+    rig.push(seed, offer_frame(offer));
+    wait_for("the answer to the payload", || {
+        rig.sent(seed).iter().any(|m| {
+            matches!(m, PeerMessage::OfferAnswer { transfer_id, accept: true }
+                if *transfer_id == offer.transfer_id)
+        })
+    })
+    .await;
+    for chunk in chunk_frames(&offer.transfer_id, bytes) {
+        rig.push(seed, chunk);
+    }
+}
+
+// ----- two nodes -----
+
+/// Two rigs joined by a relay: Bo (`a`) and Ana (`b`). Frames `a` sends to Ana reach `b`
+/// from Bo, and back. `drop` decides which frames from `a` to `b` are lost.
+pub(crate) struct SyncPair {
+    pub a: SyncRig,
+    pub b: SyncRig,
+    a_seen: usize,
+    b_seen: usize,
+}
+
+impl SyncPair {
+    pub fn new() -> SyncPair {
+        let a = sync_rig();
+        let b = sync_rig();
+        a.peers.add(dev(ANA), "Ana");
+        b.peers.add(dev(BO), "Bo");
+        SyncPair {
+            a,
+            b,
+            a_seen: 0,
+            b_seen: 0,
+        }
+    }
+
+    /// Both hold `orders`, linked by `link` with the same base; Bo has `bo`, Ana has `ana`.
+    pub fn linked(link: &LinkId, base: &Files, bo: &Files, ana: &Files) -> SyncPair {
+        let pair = SyncPair::new();
+        let base_files: Vec<(String, Vec<u8>)> =
+            base.iter().map(|(p, b)| (p.clone(), b.clone())).collect();
+        pair.a.colls.add(ORDERS, bo.clone());
+        pair.b.colls.add(ORDERS, ana.clone());
+        pair.a
+            .links
+            .save(&record(link, ANA, base), &base_files)
+            .expect("a link");
+        pair.b
+            .links
+            .save(&record(link, BO, base), &base_files)
+            .expect("b link");
+        pair
+    }
+
+    pub fn pump(&mut self, drop: &dyn Fn(&PeerMessage) -> bool) -> usize {
+        let from_a = self.a.sent(ANA);
+        let from_b = self.b.sent(BO);
+        let mut moved = 0;
+        for frame in from_a.iter().skip(self.a_seen) {
+            if !drop(frame) {
+                self.b.push(BO, frame.clone());
+            }
+            moved += 1;
+        }
+        for frame in from_b.iter().skip(self.b_seen) {
+            self.a.push(ANA, frame.clone());
+            moved += 1;
+        }
+        self.a_seen = from_a.len();
+        self.b_seen = from_b.len();
+        moved
+    }
+
+    /// Pumps on the real clock until `done` holds. Fails the test after about 5 seconds.
+    pub async fn run_until(&mut self, done: impl Fn(&SyncPair) -> bool) {
+        for _ in 0..500 {
+            self.pump(&|_| false);
+            if done(self) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("the linked sync did not reach the expected state");
     }
 }
 

@@ -554,9 +554,17 @@ impl CollectionImportPort for FakeImporter {
 
 // ----- the rig -----
 
-struct FakeFiles {
+pub(crate) struct FakeFiles {
     files: Vec<(String, Vec<u8>)>,
     calls: Arc<AtomicUsize>,
+}
+
+/// An export service over fixed files, for rigs that need a `TransferService`.
+pub(crate) fn export_of(files: Vec<(String, Vec<u8>)>) -> Arc<CollectionExportService> {
+    Arc::new(CollectionExportService::new(Box::new(FakeFiles {
+        files,
+        calls: Arc::new(AtomicUsize::new(0)),
+    })))
 }
 
 impl CollectionFileSource for FakeFiles {

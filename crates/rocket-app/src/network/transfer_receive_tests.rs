@@ -1052,7 +1052,7 @@ async fn a_dropped_chunk_fails_both_sides_at_the_next_chunk() {
     let mut link = Link::new(&sender, dev(ANA), "Ana", &receiver, dev(BEN), "Ben");
     let id = sender
         .svc
-        .send(&dev(BEN), "orders", false)
+        .send(&dev(BEN), "orders", false, false)
         .await
         .expect("the send starts")
         .transfer_id;
@@ -1102,7 +1102,7 @@ async fn a_stalled_stream_fails_both_sides_within_the_idle_limit() {
     let mut link = Link::new(&sender, dev(ANA), "Ana", &receiver, dev(BEN), "Ben");
     let id = sender
         .svc
-        .send(&dev(BEN), "orders", false)
+        .send(&dev(BEN), "orders", false, false)
         .await
         .expect("the send starts")
         .transfer_id;

@@ -41,7 +41,7 @@ fn rig_with_ana() -> Rig {
 async fn start(rig: &Rig) -> String {
     let started = rig
         .svc
-        .send(&dev(ANA), "orders", false)
+        .send(&dev(ANA), "orders", false, false)
         .await
         .expect("the send starts");
     tokio::time::pause();
@@ -433,7 +433,7 @@ async fn a_second_send_to_the_same_peer_is_refused() {
 
     let err = rig
         .svc
-        .send(&dev(ANA), "orders", false)
+        .send(&dev(ANA), "orders", false, false)
         .await
         .expect_err("one at a time");
 
@@ -455,7 +455,7 @@ async fn an_empty_collection_is_refused_before_any_offer() {
 
     let err = rig
         .svc
-        .send(&dev(ANA), "orders", false)
+        .send(&dev(ANA), "orders", false, false)
         .await
         .expect_err("nothing to send");
 
@@ -481,7 +481,7 @@ async fn a_collection_over_the_limit_is_refused_before_any_offer() {
 
     let err = rig
         .svc
-        .send(&dev(ANA), "orders", false)
+        .send(&dev(ANA), "orders", false, false)
         .await
         .expect_err("too big");
 
@@ -508,7 +508,7 @@ async fn sending_to_an_unpaired_or_offline_node_is_refused() {
 
     let err = rig
         .svc
-        .send(&dev(9), "orders", false)
+        .send(&dev(9), "orders", false, false)
         .await
         .expect_err("not paired");
     assert!(matches!(&err, DomainError::InvalidInput(m) if m == "That node is not paired."));
@@ -516,7 +516,7 @@ async fn sending_to_an_unpaired_or_offline_node_is_refused() {
     rig.peers.set_online(&dev(ANA), false);
     let err = rig
         .svc
-        .send(&dev(ANA), "orders", false)
+        .send(&dev(ANA), "orders", false, false)
         .await
         .expect_err("offline");
     assert!(matches!(&err, DomainError::InvalidInput(m) if m == "That node is offline."));
@@ -535,7 +535,7 @@ async fn a_blank_collection_name_is_refused() {
 
     let err = rig
         .svc
-        .send(&dev(ANA), "   ", false)
+        .send(&dev(ANA), "   ", false, false)
         .await
         .expect_err("blank");
 
@@ -548,13 +548,13 @@ async fn a_peer_can_be_sent_to_again_after_the_send_ended() {
     let rig = rig_with_ana();
     let first = rig
         .svc
-        .send(&dev(ANA), "orders", false)
+        .send(&dev(ANA), "orders", false, false)
         .await
         .expect("the first send starts")
         .transfer_id;
     rig.svc.cancel(&first).await.expect("cancels");
 
-    let second = rig.svc.send(&dev(ANA), "orders", false).await;
+    let second = rig.svc.send(&dev(ANA), "orders", false, false).await;
 
     assert!(second.is_ok(), "the first send freed the peer's slot");
 }
@@ -776,7 +776,7 @@ async fn a_peer_gone_fails_an_unanswered_offer() {
         aborts_sent(&rig).is_empty(),
         "nothing is told to a gone peer"
     );
-    let again = rig.svc.send(&dev(ANA), "orders", false).await;
+    let again = rig.svc.send(&dev(ANA), "orders", false, false).await;
     assert!(again.is_ok(), "the peer's slot is free again");
 }
 
@@ -1081,7 +1081,7 @@ async fn a_bad_collection_name_is_refused_with_the_rename_text() {
     // U+202E turns the rest of the name around on screen.
     let err = rig
         .svc
-        .send(&dev(ANA), "orders\u{202E}gpj", false)
+        .send(&dev(ANA), "orders\u{202E}gpj", false, false)
         .await
         .expect_err("a spoofing name");
 
@@ -1112,7 +1112,7 @@ async fn a_send_without_environments_carries_no_environment_files() {
         rig.peers.add(dev(ANA), "Ana");
         let id = rig
             .svc
-            .send(&dev(ANA), "orders", include)
+            .send(&dev(ANA), "orders", include, false)
             .await
             .expect("the send starts")
             .transfer_id;
@@ -1177,7 +1177,7 @@ async fn a_peer_gone_during_the_offer_write_leaves_no_event_for_the_refused_send
     let rig = rig_with_ana();
     let (reached, release) = rig.peers.hold_offer();
     let svc = rig.svc.clone();
-    let task = tokio::spawn(async move { svc.send(&dev(ANA), "orders", false).await });
+    let task = tokio::spawn(async move { svc.send(&dev(ANA), "orders", false, false).await });
     reached.notified().await;
 
     rig.svc.on_peer_gone(dev(ANA));
@@ -1188,7 +1188,7 @@ async fn a_peer_gone_during_the_offer_write_leaves_no_event_for_the_refused_send
     assert!(result.is_err(), "the caller gets an error");
     assert!(rig.events.finished().is_empty(), "and no id ever finished");
     assert!(rig.audited().is_empty());
-    let again = rig.svc.send(&dev(ANA), "orders", false).await;
+    let again = rig.svc.send(&dev(ANA), "orders", false, false).await;
     assert!(again.is_ok(), "the slot is free");
 }
 

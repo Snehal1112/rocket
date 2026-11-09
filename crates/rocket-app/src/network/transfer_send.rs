@@ -13,8 +13,8 @@ use rocket_audit::AuditEventKind;
 use rocket_export::{ExportAction, ExportReport};
 use rocket_network::limits::{CHUNK_BYTES, MAX_TRANSFER_BYTES};
 use rocket_network::{
-    offer_name_is_valid, AbortReason, DeviceId, Direction, OfferError, Outcome, OutgoingState,
-    OutgoingTransfer, PeerMessage, ResultOutcome, TransferEvent, TransferId,
+    offer_name_is_valid, AbortReason, DeviceId, Direction, LinkId, OfferError, Outcome,
+    OutgoingState, OutgoingTransfer, PeerMessage, ResultOutcome, TransferEvent, TransferId,
 };
 use rocket_shared::error::{DomainError, DomainResult};
 use sha2::{Digest, Sha256};
@@ -38,6 +38,9 @@ pub(super) struct Out {
     pub collection: String,
     pub zip: Vec<u8>,
     pub machine: OutgoingTransfer,
+    /// The link of a linked send (`keep_in_sync`). It is created once the receiver reports
+    /// `completed`.
+    pub link: Option<LinkId>,
     /// The offer, the accept or the last good `ChunkAck`. The idle limit counts from here.
     pub last_ack: Instant,
     /// Wakes the stream when an ack opens the window. `notify_one` keeps a permit.
@@ -140,14 +143,40 @@ fn already_sent() -> DomainError {
     DomainError::InvalidInput("Already sent. Waiting for the result.".to_string())
 }
 
+/// The offer frame of the machine with the link fields of a linked send.
+fn with_link(frame: PeerMessage, link: Option<&LinkId>) -> PeerMessage {
+    match frame {
+        PeerMessage::CollectionOffer {
+            transfer_id,
+            name,
+            size_bytes,
+            chunk_count,
+            sha256,
+            ..
+        } => PeerMessage::CollectionOffer {
+            transfer_id,
+            name,
+            size_bytes,
+            chunk_count,
+            sha256,
+            keep_in_sync: link.is_some(),
+            link_id: link.map(|l| l.as_str().to_string()),
+        },
+        // `offer_message` only builds a `CollectionOffer`; this arm never runs.
+        other => other,
+    }
+}
+
 impl TransferService {
     /// Builds the ZIP, offers it to `device` and returns the transfer id and the export notes.
-    /// The stream starts when the peer accepts.
+    /// The stream starts when the peer accepts. With `keep_in_sync` the offer carries a new
+    /// link id, and both ends create the link from the same ZIP once the import completed.
     pub async fn send(
         &self,
         device: &DeviceId,
         collection: &str,
         include_environments: bool,
+        keep_in_sync: bool,
     ) -> DomainResult<SendStarted> {
         self.ensure_worker();
         let collection = collection.trim().to_string();
@@ -160,6 +189,18 @@ impl TransferService {
         if !offer_name_is_valid(&collection) {
             return Err(offer_error(OfferError::BadName, 0));
         }
+        // Environments are not synced, so they would show as deletions at the first sync.
+        if keep_in_sync && include_environments {
+            return Err(DomainError::InvalidInput(
+                "Keep in sync does not send environments. Turn one of them off.".to_string(),
+            ));
+        }
+        if keep_in_sync && self.sync_service().is_none() {
+            return Err(DomainError::InvalidInput(
+                "Keep in sync is not available.".to_string(),
+            ));
+        }
+        let link = keep_in_sync.then(LinkId::random);
         if self.deps.network.peer_label(device).is_none() {
             return Err(not_paired());
         }
@@ -169,7 +210,7 @@ impl TransferService {
         }
         let id = self.claim_send(device)?;
         let sent = self
-            .export_and_offer(device, &id, &collection, include_environments)
+            .export_and_offer(device, &id, &collection, include_environments, link)
             .await;
         match sent {
             Ok(notes) => Ok(SendStarted {
@@ -205,7 +246,7 @@ impl TransferService {
     ) -> DomainResult<String> {
         self.ensure_worker();
         let id = self.claim_send(device)?;
-        match self.offer_bytes(device, &id, name, bytes).await {
+        match self.offer_bytes(device, &id, name, bytes, None).await {
             Ok(()) => Ok(id.as_str().to_string()),
             Err(e) => {
                 self.lock().limits.release(&id);
@@ -220,6 +261,7 @@ impl TransferService {
         id: &TransferId,
         collection: &str,
         include_environments: bool,
+        link: Option<LinkId>,
     ) -> DomainResult<Vec<String>> {
         let export = Arc::clone(&self.deps.export);
         let name = collection.to_string();
@@ -236,18 +278,20 @@ impl TransferService {
             })
             .await
             .map_err(|e| DomainError::Internal(format!("The export task failed: {e}")))??;
-        self.offer_bytes(device, id, collection, zip).await?;
+        self.offer_bytes(device, id, collection, zip, link).await?;
         Ok(notes)
     }
 
     /// Everything after the export: hash, build the machine, register, send the offer, start
     /// the offer timer. The caller has claimed the slot for `id` and frees it on an error.
+    /// `link` is the link of a linked send.
     pub(super) async fn offer_bytes(
         &self,
         device: &DeviceId,
         id: &TransferId,
         collection: &str,
         zip: Vec<u8>,
+        link: Option<LinkId>,
     ) -> DomainResult<()> {
         let Some((peer_name, _short)) = self.deps.network.peer_label(device) else {
             return Err(not_paired());
@@ -267,7 +311,7 @@ impl TransferService {
         .await
         .map_err(|e| DomainError::Internal(format!("The hash task failed: {e}")))??;
 
-        let offer = machine.offer_message();
+        let offer = with_link(machine.offer_message(), link.as_ref());
         self.lock().outgoing.insert(
             id.clone(),
             Out {
@@ -276,6 +320,7 @@ impl TransferService {
                 collection: collection.to_string(),
                 zip,
                 machine,
+                link,
                 last_ack: now,
                 ack_signal: Arc::new(Notify::new()),
                 acked: 0,
@@ -502,7 +547,8 @@ impl TransferService {
 
     /// The one place a send ends. The caller has already removed the transfer, and the machine
     /// holds the outcome. One audit row is written when at least one chunk went out, whatever
-    /// the outcome; a send that ended before the first chunk writes none.
+    /// the outcome; a send that ended before the first chunk writes none. A linked send that
+    /// ended `Completed` creates its link afterwards; every other outcome creates none.
     fn finish_out(&self, id: &TransferId, out: Out) {
         let outcome = out.machine.outcome().unwrap_or(Outcome::Failed);
         self.emit(TransferEvent::Finished {
@@ -516,9 +562,12 @@ impl TransferService {
         if out.machine.done_bytes() > 0 {
             self.audit(AuditEventKind::NetworkCollectionSent {
                 device_id: out.device.short(),
-                collection: out.collection,
+                collection: out.collection.clone(),
                 outcome: outcome_name(outcome).to_string(),
             });
+        }
+        if let (Outcome::Completed, Some(link)) = (outcome, out.link) {
+            self.spawn_link(link, out.device, out.collection, out.zip);
         }
     }
 

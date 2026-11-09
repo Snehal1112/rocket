@@ -400,3 +400,65 @@ async fn is_online_follows_the_connection() {
     settle().await;
     assert!(!a.svc.is_online(&peer()), "the socket closed");
 }
+
+/// One frame of each of the three sync variants.
+fn sync_frames() -> Vec<PeerMessage> {
+    vec![
+        PeerMessage::SyncOffer {
+            sync_id: "1".repeat(32),
+            link_id: "2".repeat(32),
+            base_hash: "0".repeat(64),
+            kind: rocket_network::SyncPayloadKind::Manifest,
+            transfer_id: transfer_id(),
+            size_bytes: 10,
+            chunk_count: 1,
+            sha256: "0".repeat(64),
+        },
+        PeerMessage::SyncAbort {
+            sync_id: "1".repeat(32),
+            reason: rocket_network::SyncAbortReason::Busy,
+        },
+        PeerMessage::SyncResult {
+            sync_id: "1".repeat(32),
+            outcome: rocket_network::SyncOutcome::Applied,
+        },
+    ]
+}
+
+#[tokio::test(start_paused = true)]
+async fn sync_frames_reach_the_sink_and_count_as_pongs() {
+    let (a, _h) = solo(2).await;
+    let sink = Arc::new(RecordingSink::default());
+    a.svc.set_transfer_sink(sink.clone());
+    let remote = go_online(&a, 2).await;
+
+    // The remote never answers a ping; one sync frame after every ping counts as the answer.
+    for frame in sync_frames().into_iter().cycle().take(4) {
+        tokio::time::advance(PING_INTERVAL).await;
+        settle().await;
+        remote.to_service.send(frame).await.expect("frame sent");
+        settle().await;
+    }
+
+    assert_eq!(row_status(&a, &peer()), Some(NodeStatus::Online));
+    let got: Vec<PeerMessage> = sink.frames().into_iter().map(|(_, m)| m).collect();
+    assert_eq!(got.len(), 4);
+    assert_eq!(got[..3], sync_frames()[..]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_sync_frame_from_a_blocked_device_never_reaches_the_sink() {
+    for frame in sync_frames() {
+        let (a, _h) = solo(2).await;
+        let sink = Arc::new(RecordingSink::default());
+        a.svc.set_transfer_sink(sink.clone());
+        let remote = go_online(&a, 2).await;
+        a.blocked.put(peer(), "Peer");
+
+        remote.to_service.send(frame).await.expect("frame sent");
+        settle().await;
+
+        assert!(sink.frames().is_empty(), "the block list was read");
+        assert_eq!(row_status(&a, &peer()), Some(NodeStatus::Offline));
+    }
+}

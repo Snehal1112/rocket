@@ -387,8 +387,8 @@ impl NetworkService {
                     }
                     // A second Hello is a protocol error.
                     Some(PeerMessage::Hello { .. }) => return SocketEnd::Closed,
-                    // The transfer service owns these frames. Any of them shows the peer is
-                    // alive, so a long stream cannot starve the ping rule.
+                    // The transfer and sync services own these frames. Any of them shows the
+                    // peer is alive, so a long stream cannot starve the ping rule.
                     Some(
                         message @ (PeerMessage::CollectionOffer { .. }
                         | PeerMessage::OfferAnswer { .. }

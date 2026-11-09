@@ -129,6 +129,11 @@ pub fn validate(files: &dyn ImportFiles, path: &Path) -> ImportResult<()> {
     validate_archive(file)
 }
 
+/// The same strict check as `validate`, for a ZIP held in memory (a sync payload).
+pub fn validate_bytes(bytes: &[u8]) -> ImportResult<()> {
+    validate_archive(io::Cursor::new(bytes))
+}
+
 /// Checks the end-of-central-directory record of an archive the reader already accepted. The
 /// zip reader keeps entries in a map keyed by name, so an exact duplicate name silently
 /// collapses into one entry, and it tolerates trailing bytes and zip64 records. This check
@@ -396,6 +401,36 @@ mod tests {
             "opencollection: \"1.0.0\"\ninfo:\n  name: orders\n",
         );
         add_text(w, "orders/get.yml", "info:\n  name: get\n");
+    }
+
+    /// Builds a ZIP in memory from `(name, bytes)` entries.
+    fn zip_in_memory(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut writer = ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        for (name, bytes) in entries {
+            writer.start_file(*name, opts()).expect("start file");
+            writer.write_all(bytes).expect("write file");
+        }
+        writer.finish().expect("finish zip").into_inner()
+    }
+
+    #[test]
+    fn validate_bytes_runs_the_strict_check_in_memory() {
+        let good = zip_in_memory(&[("a.yml", b"x")]);
+        assert!(validate_bytes(&good).is_ok());
+
+        let unsafe_name = zip_in_memory(&[("../a.yml", b"x")]);
+        assert!(is_unsafe(&validate_bytes(&unsafe_name)));
+
+        let twins = zip_in_memory(&[("A.yml", b"x"), ("a.yml", b"y")]);
+        assert!(is_unsafe(&validate_bytes(&twins)));
+
+        let mut trailing = good.clone();
+        trailing.push(0);
+        assert!(
+            validate_bytes(&trailing).is_err(),
+            "a byte after the end record"
+        );
+        assert!(validate_bytes(b"not a zip").is_err());
     }
 
     // ---- validate ----

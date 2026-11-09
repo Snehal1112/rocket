@@ -4,12 +4,19 @@
 //! `rocket-network`, so tests run with fakes and no sockets.
 
 mod connections;
+mod frame_router;
 mod handler;
 mod nodes;
 mod pairing;
 mod service;
 mod status;
+mod sync;
+// The sessions of the next plan tasks use these; until then only tests call them.
+#[allow(dead_code)]
+mod sync_checks;
 pub mod sync_collections;
+#[allow(dead_code)]
+mod sync_payload;
 pub mod sync_ports;
 mod transfer;
 mod transfer_link;
@@ -42,10 +49,13 @@ mod sync_collections_tests;
 #[cfg(test)]
 #[path = "transfer_link_tests.rs"]
 mod transfer_link_tests;
-// Plan 3 reuses the sync fakes, so some helpers are unused here.
+// The sync tests of later tasks reuse these fakes, so some helpers are unused here.
 #[cfg(test)]
-#[allow(dead_code)]
+#[allow(dead_code, clippy::type_complexity)]
 pub(crate) mod sync_fakes;
+#[cfg(test)]
+#[path = "sync_tests.rs"]
+mod sync_tests;
 // The transfer fakes are shared by the send and receive tests.
 #[cfg(test)]
 #[allow(dead_code)]
@@ -57,14 +67,16 @@ mod transfer_receive_tests;
 #[path = "transfer_send_tests.rs"]
 mod transfer_send_tests;
 
+pub use frame_router::FrameRouter;
 pub use nodes::{NodeGroup, NodeStatus, NodeView};
 pub use pairing::{PairingDecision, PairingStarted};
 pub use service::{paired_limit_message, NetworkDeps, NetworkHandle, NetworkService};
 pub use status::{NetworkState, NetworkStatus};
+pub use sync::{ConflictFiles, LinkView, SyncDeps, SyncService};
 pub use sync_collections::ExportBackedSyncCollections;
 pub use sync_ports::{
-    base_from_reader, base_from_zip, manifest_from_zip, sha256_hex, FileChange, SyncCollectionPort,
-    SyncFile, ZipBase,
+    base_from_reader, base_from_zip, is_sync_entry, manifest_from_zip, sha256_hex, FileChange,
+    SyncCollectionPort, SyncFile, ZipBase,
 };
 pub use transfer::{PeerSender, Timing, TransferDeps, TransferService};
 pub use transfer_ports::{

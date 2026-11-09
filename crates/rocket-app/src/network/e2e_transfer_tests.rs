@@ -374,7 +374,7 @@ pub(super) async fn wait_offer(receiver: &Xfer) -> (String, String, u64) {
 async fn push_and_accept(sender: &Xfer, receiver: &Xfer, name: &str) -> String {
     let id = sender
         .svc
-        .send(&receiver.id(), name, false)
+        .send(&receiver.id(), name, false, false)
         .await
         .expect("the offer is sent")
         .transfer_id;
@@ -486,7 +486,7 @@ async fn declining_imports_nothing_and_the_sender_sees_declined() {
 
     let id = a
         .svc
-        .send(&b.id(), "Orders", false)
+        .send(&b.id(), "Orders", false, false)
         .await
         .expect("offer sent")
         .transfer_id;
@@ -521,7 +521,7 @@ async fn an_offer_nobody_answers_expires_on_both_sides_and_a_late_accept_fails()
 
     let id = a
         .svc
-        .send(&b.id(), "Orders", false)
+        .send(&b.id(), "Orders", false, false)
         .await
         .expect("offer sent")
         .transfer_id;
@@ -548,7 +548,7 @@ async fn the_sender_cancels_a_pending_offer_and_the_receiver_closes_it() {
 
     let id = a
         .svc
-        .send(&b.id(), "Orders", false)
+        .send(&b.id(), "Orders", false, false)
         .await
         .expect("offer sent")
         .transfer_id;
@@ -608,7 +608,7 @@ async fn the_receiver_cancels_a_pending_offer_and_the_sender_sees_declined() {
 
     let id = a
         .svc
-        .send(&b.id(), "Orders", false)
+        .send(&b.id(), "Orders", false, false)
         .await
         .expect("offer sent")
         .transfer_id;
@@ -669,7 +669,7 @@ async fn sending_to_an_offline_peer_fails_before_any_offer() {
 
     let err = a
         .svc
-        .send(&b.id(), "Orders", false)
+        .send(&b.id(), "Orders", false, false)
         .await
         .expect_err("the peer is offline");
     assert_eq!(
@@ -680,7 +680,7 @@ async fn sending_to_an_offline_peer_fails_before_any_offer() {
     // the same error.
     let err = a
         .svc
-        .send(&b.id(), "Nope", false)
+        .send(&b.id(), "Nope", false, false)
         .await
         .expect_err("the peer is offline");
     assert_eq!(
@@ -704,7 +704,7 @@ async fn a_collection_with_no_files_is_refused_before_any_offer() {
 
     let err = a
         .svc
-        .send(&b.id(), "Empty", false)
+        .send(&b.id(), "Empty", false, false)
         .await
         .expect_err("an empty collection is refused");
     assert_eq!(
@@ -725,7 +725,7 @@ async fn the_sender_shows_sent_only_after_the_receivers_result() {
 
     let id = a
         .svc
-        .send(&b.id(), "Orders", false)
+        .send(&b.id(), "Orders", false, false)
         .await
         .expect("offer sent")
         .transfer_id;
@@ -821,8 +821,8 @@ async fn two_nodes_pushing_to_each_other_at_once_both_complete() {
 
     let (a_id, b_id) = (a.id(), b.id());
     let (id_ab, id_ba) = tokio::join!(
-        a.svc.send(&b_id, "FromAnn", false),
-        b.svc.send(&a_id, "FromBen", false)
+        a.svc.send(&b_id, "FromAnn", false, false),
+        b.svc.send(&a_id, "FromBen", false, false)
     );
     let id_ab = id_ab.expect("A's offer is sent").transfer_id;
     let id_ba = id_ba.expect("B's offer is sent").transfer_id;
@@ -1017,7 +1017,7 @@ async fn a_dropped_sender_fails_the_receiver_and_clears_staging() {
 
     let id = a
         .svc
-        .send(&b.id(), "Big", false)
+        .send(&b.id(), "Big", false, false)
         .await
         .expect("offer sent")
         .transfer_id;
@@ -1052,7 +1052,7 @@ async fn a_dropped_receiver_fails_the_sender_and_a_restart_leaves_no_staged_file
 
     let id = a
         .svc
-        .send(&b.id(), "Big", false)
+        .send(&b.id(), "Big", false, false)
         .await
         .expect("offer sent")
         .transfer_id;
@@ -1109,7 +1109,7 @@ async fn unpairing_during_a_transfer_ends_both_sides_and_imports_nothing() {
 
     let id = a
         .svc
-        .send(&b.id(), "Big", false)
+        .send(&b.id(), "Big", false, false)
         .await
         .expect("offer sent")
         .transfer_id;
@@ -1152,7 +1152,7 @@ async fn a_tampered_chunk_is_damaged_and_nothing_is_imported() {
 
     let id = a
         .svc
-        .send(&b.id(), "Big", false)
+        .send(&b.id(), "Big", false, false)
         .await
         .expect("offer sent")
         .transfer_id;
@@ -1227,7 +1227,7 @@ async fn a_failing_import_fails_both_sides_and_carries_the_importer_message() {
 
     let id = a
         .svc
-        .send(&b.id(), "Orders", false)
+        .send(&b.id(), "Orders", false, false)
         .await
         .expect("offer sent")
         .transfer_id;
@@ -1273,7 +1273,7 @@ async fn a_collection_over_the_limit_is_refused_before_any_offer() {
 
     let err = a
         .svc
-        .send(&b.id(), "Huge", false)
+        .send(&b.id(), "Huge", false, false)
         .await
         .expect_err("over the limit");
     assert!(
@@ -1315,7 +1315,7 @@ async fn the_fourth_pending_offer_is_told_busy() {
     for (i, sender) in senders.iter().take(MAX_PENDING_INCOMING).enumerate() {
         sender
             .svc
-            .send(&hub.id(), &format!("C{i}"), false)
+            .send(&hub.id(), &format!("C{i}"), false, false)
             .await
             .expect("offer sent");
         wait_until("the hub shows the offer", || hub.offers().len() == i + 1).await;
@@ -1325,7 +1325,7 @@ async fn the_fourth_pending_offer_is_told_busy() {
     let fourth = &senders[MAX_PENDING_INCOMING];
     fourth
         .svc
-        .send(&hub.id(), &format!("C{MAX_PENDING_INCOMING}"), false)
+        .send(&hub.id(), &format!("C{MAX_PENDING_INCOMING}"), false, false)
         .await
         .expect("the offer frame is sent");
     wait_until("the fourth sender is told busy", || {
@@ -1407,7 +1407,7 @@ async fn a_pushed_collection_carries_neither_the_token_nor_the_secret_variable()
     // Environments are included on purpose: their secret values must be blanked too.
     let started = a
         .svc
-        .send(&b.id(), "Secrets", true)
+        .send(&b.id(), "Secrets", true, false)
         .await
         .expect("offer sent");
     let id = started.transfer_id.clone();
@@ -1505,7 +1505,7 @@ async fn a_receiver_gone_after_the_final_ack_leaves_the_sender_unconfirmed() {
 
     let id = a
         .svc
-        .send(&b.id(), "Orders", false)
+        .send(&b.id(), "Orders", false, false)
         .await
         .expect("offer sent")
         .transfer_id;
@@ -1565,7 +1565,7 @@ async fn a_slow_receiver_keeps_the_sender_inside_the_ack_window() {
 
     let id = a
         .svc
-        .send(&b.id(), "Slow", false)
+        .send(&b.id(), "Slow", false, false)
         .await
         .expect("offer sent")
         .transfer_id;
