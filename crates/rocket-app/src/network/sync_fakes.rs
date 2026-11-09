@@ -239,6 +239,11 @@ impl LinkRepository for FakeLinkRepo {
     }
 
     fn read_base_file(&self, id: &LinkId, path: &str) -> DomainResult<Option<Vec<u8>>> {
+        if !rocket_network::link::path_is_valid(path) {
+            return Err(DomainError::InvalidInput(
+                "The base path is not valid.".into(),
+            ));
+        }
         let links = locked(&self.links);
         let Some((record, files)) = links.get(id.as_str()) else {
             return Ok(None);
@@ -453,6 +458,9 @@ mod tests {
         let err = repo
             .save(&rec, &[("c.yml".to_string(), b"one".to_vec())])
             .expect_err("refused");
+        assert!(matches!(err, DomainError::InvalidInput(_)));
+        // A path that is not valid is refused, like the real repository.
+        let err = repo.read_base_file(&id, "../a.yml").expect_err("refused");
         assert!(matches!(err, DomainError::InvalidInput(_)));
         // A copy whose hash no longer matches reads as none.
         repo.save(&rec, &[("a.yml".to_string(), b"one".to_vec())])

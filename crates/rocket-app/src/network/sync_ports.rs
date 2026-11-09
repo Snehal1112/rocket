@@ -20,7 +20,8 @@ pub struct SyncFile {
 /// One change of a sync apply. `apply` runs them in a fixed order, see `SyncCollectionPort`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum FileChange {
-    /// Writes the file. A YAML file is merged into the local one, so local secrets stay.
+    /// Writes the file. A YAML file is merged into the local one, so local secrets stay. Any
+    /// other file (`.js`, `.proto`) is replaced outright.
     Put {
         path: String,
         bytes: Vec<u8>,

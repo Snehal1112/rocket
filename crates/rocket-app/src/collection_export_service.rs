@@ -230,8 +230,12 @@ impl CollectionExportService {
 
     /// The raw files of the collection as the file source lists them, secrets included. The
     /// sync apply reads the local files through this to merge a received file into them. It
-    /// takes no lock, so the caller holds the collection lock.
-    pub fn raw_files(&self, collection: &str) -> DomainResult<Vec<rocket_export::SourceFile>> {
+    /// takes no lock, so the caller holds the collection lock. It stays crate-private: its bytes
+    /// are unscrubbed and must never be sent anywhere.
+    pub(crate) fn raw_files(
+        &self,
+        collection: &str,
+    ) -> DomainResult<Vec<rocket_export::SourceFile>> {
         self.files.list_files(collection)
     }
 

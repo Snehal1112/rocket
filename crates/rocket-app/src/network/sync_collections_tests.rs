@@ -11,7 +11,7 @@ use std::time::Duration;
 use rocket_collection::{CollectionFileTxFactory, CollectionRepository};
 use rocket_export::{bruno_zip, zip_entries, SourceFile};
 use rocket_infra::{FsCollectionFileSource, FsCollectionRepo, FsFileTxFactory};
-use rocket_shared::error::DomainError;
+use rocket_shared::error::{DomainError, DomainResult};
 use tempfile::TempDir;
 
 use super::sync_collections::ExportBackedSyncCollections;
@@ -777,4 +777,214 @@ fn apply_if_unchanged_waits_for_the_lock_and_sees_a_save_made_while_it_waited() 
     let result = worker.join().expect("join");
     assert!(matches!(result, Err(DomainError::Conflict(_))));
     assert!(rig.root.join("users/Get.yml").exists());
+}
+
+/// A factory whose recovery never works, like a crash that leaves its journal behind.
+struct NoRecover(FsFileTxFactory);
+
+impl CollectionFileTxFactory for NoRecover {
+    fn begin(&self, root: &Path) -> DomainResult<Box<dyn rocket_collection::CollectionFileTx>> {
+        self.0.begin(root)
+    }
+    fn recover(&self, _: &Path) -> DomainResult<rocket_collection::RecoveryOutcome> {
+        Err(DomainError::Internal("recovery is blocked".into()))
+    }
+}
+
+fn second_port(rig: &Rig) -> ExportBackedSyncCollections {
+    ExportBackedSyncCollections::new(
+        Arc::clone(&rig.export),
+        rig.repo.clone() as Arc<dyn CollectionRepository>,
+        Arc::new(FsFileTxFactory::new()),
+    )
+}
+
+#[test]
+fn the_manifest_and_export_files_share_one_filter_with_the_zip_base() {
+    let rig = rig();
+    seed(&rig);
+    write(&rig, "Flows/x.yml", "info:\n  name: x\n  type: http\n");
+    write(&rig, "Environments/e.yml", "name: e\nvariables: []\n");
+    write(
+        &rig,
+        "users/.hidden/a.yml",
+        "info:\n  name: a\n  type: http\n",
+    );
+    write(&rig, "Node_Modules/n.yml", "a: 1\n");
+    let sent = rig.export.export_bruno("c", true).expect("exports").bytes;
+    let base = base_from_reader(Cursor::new(sent)).expect("base");
+    let manifest = rig.port.manifest("c").expect("manifest");
+    assert_eq!(manifest, base.manifest);
+    for bad in [
+        "Flows/x.yml",
+        "Environments/e.yml",
+        "users/.hidden/a.yml",
+        "Node_Modules/n.yml",
+    ] {
+        assert!(manifest.get(bad).is_none(), "{bad}");
+        let err = rig
+            .port
+            .export_files("c", &[bad.to_string()])
+            .expect_err("refused");
+        assert!(matches!(err, DomainError::NotFound(_)), "{bad}");
+    }
+}
+
+#[test]
+fn a_journal_left_behind_is_recovered_before_the_next_apply() {
+    let changes = vec![
+        FileChange::Put {
+            path: "new/Fresh.yml".into(),
+            bytes: scrubbed("new/Fresh.yml", "info:\n  name: Fresh\n  type: http\n"),
+        },
+        FileChange::Delete {
+            path: "users/Get.yml".into(),
+        },
+    ];
+    let mut left_behind = 0;
+    for step in 0..40 {
+        let rig = rig_with(Arc::new(NoRecover(FsFileTxFactory::with_crash(step))));
+        seed(&rig);
+        if rig.port.apply("c", &changes).is_ok() {
+            continue;
+        }
+        let next = second_port(&rig);
+        let retry = next.apply(
+            "c",
+            &[FileChange::Delete {
+                path: "Login.yml".into(),
+            }],
+        );
+        assert!(retry.is_ok(), "step {step}: {retry:?}");
+        assert!(!rig.root.join("Login.yml").exists(), "step {step}");
+        left_behind += 1;
+    }
+    assert!(left_behind >= 3, "the crash hooks should fail early steps");
+}
+
+#[test]
+fn apply_if_unchanged_recovers_a_journal_before_it_compares() {
+    let rig = rig_with(Arc::new(NoRecover(FsFileTxFactory::with_crash(6))));
+    seed(&rig);
+    let changes = [
+        FileChange::Delete {
+            path: "users/Get.yml".into(),
+        },
+        FileChange::Delete {
+            path: "Login.yml".into(),
+        },
+    ];
+    let _ = rig.port.apply("c", &changes);
+    let next = second_port(&rig);
+    let expected = next.manifest("c").expect("manifest");
+    // Whatever the half-done apply left, the next call settles it first and then compares.
+    let result = next.apply_if_unchanged("c", &expected, &[]);
+    assert!(result.is_ok() || matches!(result, Err(DomainError::Conflict(_))));
+    next.apply(
+        "c",
+        &[FileChange::Delete {
+            path: "opencollection.yml".into(),
+        }],
+    )
+    .expect("a later apply works");
+}
+
+#[test]
+fn errors_never_quote_the_paths_they_concern() {
+    let rig = rig();
+    seed(&rig);
+    // A symlinked parent makes the existence check fail.
+    let outside = TempDir::new().expect("tempdir");
+    std::os::unix::fs::symlink(outside.path(), rig.root.join("linked")).expect("symlink");
+    // A folder sits where a file is wanted.
+    std::fs::create_dir_all(rig.root.join("FolderPathMarker.yml")).expect("mkdir");
+    let body = b"a: 1\n".to_vec();
+    let probes = [
+        FileChange::PutAs {
+            path: "linked/SymlinkPathMarker.yml".into(),
+            bytes: body.clone(),
+        },
+        FileChange::Put {
+            path: "linked/SymlinkPathMarker.yml".into(),
+            bytes: body.clone(),
+        },
+        FileChange::Put {
+            path: "FolderPathMarker.yml".into(),
+            bytes: body.clone(),
+        },
+        FileChange::Rename {
+            from: "Login.yml".into(),
+            to: "linked/SymlinkPathMarker.yml".into(),
+        },
+    ];
+    for probe in probes {
+        let err = rig.port.apply("c", &[probe]).expect_err("refused");
+        let text = err.to_string();
+        assert!(!text.contains("PathMarker"), "{text}");
+        assert!(!text.contains("linked"), "{text}");
+    }
+    // A failing commit.
+    let changes = [
+        FileChange::Put {
+            path: "new/CommitPathMarker.yml".into(),
+            bytes: scrubbed(
+                "new/CommitPathMarker.yml",
+                "info:\n  name: x\n  type: http\n",
+            ),
+        },
+        FileChange::Put {
+            path: "Login.yml".into(),
+            bytes: scrubbed(
+                "Login.yml",
+                "info:\n  name: Login\n  type: http\nhttp:\n  url: https://changed\n",
+            ),
+        },
+        FileChange::Delete {
+            path: "users/Get.yml".into(),
+        },
+    ];
+    let mut failed = 0;
+    for step in 0..40 {
+        let rig = rig_with(Arc::new(FsFileTxFactory::with_fault(step)));
+        seed(&rig);
+        if let Err(err) = rig.port.apply("c", &changes) {
+            failed += 1;
+            let text = err.to_string();
+            assert!(
+                !text.contains("PathMarker") && !text.contains(".rocket"),
+                "{text}"
+            );
+            assert!(!text.contains("injected"), "{text}");
+        }
+    }
+    assert!(failed >= 3);
+}
+
+#[test]
+fn an_unreadable_export_error_does_not_quote_the_file() {
+    let rig = rig();
+    seed(&rig);
+    write(&rig, "users/BrokenPathMarker.yml", "a: [1, 2");
+    let err = rig.port.manifest("c").expect_err("refused");
+    assert!(!err.to_string().contains("PathMarker"), "{err}");
+}
+
+#[test]
+fn apply_if_unchanged_with_no_changes_still_checks_the_manifest() {
+    let rig = rig();
+    seed(&rig);
+    let expected = rig.port.manifest("c").expect("manifest");
+    rig.port
+        .apply_if_unchanged("c", &expected, &[])
+        .expect("unchanged is fine");
+    write(
+        &rig,
+        "Login.yml",
+        &LOGIN.replace("api.test/login", "api.test/signin"),
+    );
+    let err = rig
+        .port
+        .apply_if_unchanged("c", &expected, &[])
+        .expect_err("conflict");
+    assert!(matches!(err, DomainError::Conflict(_)));
 }

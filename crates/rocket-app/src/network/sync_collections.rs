@@ -29,6 +29,9 @@ pub struct ExportBackedSyncCollections {
 const REFUSED: &str = "The sync names a file it may not write.";
 const TAKEN: &str = "The sync names a file that is already taken.";
 const CASE_TAKEN: &str = "The sync names a file that differs from another only by letter case.";
+const UNREADABLE: &str = "The collection files could not be read.";
+const NOT_WRITTEN: &str = "The sync could not write the collection files.";
+const UNFINISHED: &str = "An earlier sync apply is not finished yet.";
 const CHANGED: &str = "The collection changed while the sync was running.";
 
 /// The state of each touched path after the plan: `Some` is a put, `None` a delete.
@@ -39,6 +42,22 @@ fn checked(path: &str) -> DomainResult<()> {
         return Err(DomainError::InvalidInput(REFUSED.into()));
     }
     validate_rel_path(path).map_err(|_| DomainError::InvalidInput(REFUSED.into()))
+}
+
+/// Logs the kind of an error and returns a fixed sentence of the same kind. The inner texts
+/// quote paths and file contents, which must not reach a peer.
+fn quiet(e: &DomainError, code: &str, fixed: &str) -> DomainError {
+    let (kind, error) = match e {
+        DomainError::NotFound(_) => ("not_found", DomainError::NotFound(fixed.into())),
+        DomainError::InvalidInput(_) => ("invalid_input", DomainError::InvalidInput(fixed.into())),
+        DomainError::AlreadyExists(_) => {
+            ("already_exists", DomainError::AlreadyExists(fixed.into()))
+        }
+        DomainError::Conflict(_) => ("conflict", DomainError::Conflict(fixed.into())),
+        _ => ("other", DomainError::Internal(fixed.into())),
+    };
+    tracing::warn!(code, kind, "a sync step failed");
+    error
 }
 
 fn is_yaml(path: &str) -> bool {
@@ -212,8 +231,17 @@ impl ExportBackedSyncCollections {
 
     /// The export without environments, as `(path, scrubbed bytes)`. No lock.
     fn exported_entries(&self, collection: &str) -> DomainResult<Vec<(String, Vec<u8>)>> {
-        let out = self.export.export_bruno(collection, false)?;
-        zip_entries(Cursor::new(out.bytes))
+        let out = self
+            .export
+            .export_bruno(collection, false)
+            .map_err(|e| quiet(&e, "export", UNREADABLE))?;
+        let entries =
+            zip_entries(Cursor::new(out.bytes)).map_err(|e| quiet(&e, "zip", UNREADABLE))?;
+        // The same filter as the base of a link, so both sides name the same files.
+        Ok(entries
+            .into_iter()
+            .filter(|(path, _)| is_synced_path(path))
+            .collect())
     }
 
     /// The manifest of the export. No lock, so the caller holds it or does not need it.
@@ -231,29 +259,46 @@ impl ExportBackedSyncCollections {
         expected: Option<&Manifest>,
         changes: &[FileChange],
     ) -> DomainResult<()> {
-        if changes.is_empty() {
+        // A plain apply of nothing has nothing to do. A checked one still compares, so the
+        // caller never records a base over a save that landed meanwhile.
+        if changes.is_empty() && expected.is_none() {
             return Ok(());
         }
         self.with_repo(|repo| {
             let root = repo.collection_root_path(collection)?;
             let lock = collection_lock(repo, &root);
             let _guard = lock.lock();
+            // An earlier apply that was cut short is settled before anything is read.
+            self.tx
+                .recover(&root)
+                .map_err(|e| {
+                    quiet(&e, "recover", UNFINISHED);
+                    DomainError::Conflict(UNFINISHED.into())
+                })?;
             if let Some(expected) = expected {
                 // The lock is not reentrant, so this read takes none.
                 if &self.manifest_unlocked(collection)? != expected {
                     return Err(DomainError::Conflict(CHANGED.into()));
                 }
             }
+            if changes.is_empty() {
+                return Ok(());
+            }
             let local: BTreeMap<String, Vec<u8>> = self
                 .export
-                .raw_files(collection)?
+                .raw_files(collection)
+                .map_err(|e| quiet(&e, "raw_files", UNREADABLE))?
                 .into_iter()
                 .map(|file| (file.rel_path, file.bytes))
                 .collect();
             let overlay = plan_changes(&local, changes, &|path| {
                 repo.path_exists(collection, path)
+                    .map_err(|e| quiet(&e, "path_exists", NOT_WRITTEN))
             })?;
-            let mut tx = self.tx.begin(&root)?;
+            let mut tx = self
+                .tx
+                .begin(&root)
+                .map_err(|e| quiet(&e, "begin", NOT_WRITTEN))?;
             for (path, entry) in &overlay {
                 let staged = match entry {
                     Some(bytes) => tx.stage_put(path, bytes),
@@ -261,23 +306,21 @@ impl ExportBackedSyncCollections {
                 };
                 if let Err(e) = staged {
                     tx.abort();
-                    return Err(e);
+                    return Err(quiet(&e, "stage", NOT_WRITTEN));
                 }
             }
             if let Err(e) = tx.commit() {
                 // The staging area was lost or taken over. A journal may be live elsewhere.
                 if matches!(e, DomainError::Conflict(_)) {
-                    return Err(e);
+                    return Err(quiet(&e, "commit", NOT_WRITTEN));
                 }
                 // A failed commit can leave a journal that recovery finishes or undoes.
                 return match self.tx.recover(&root) {
                     Ok(RecoveryOutcome::Finished { .. }) => Ok(()),
-                    Ok(_) => Err(DomainError::Internal(format!("{e}; nothing was changed"))),
+                    Ok(_) => Err(quiet(&e, "commit", "The sync could not be applied; nothing was changed.")),
                     Err(re) => {
-                        tracing::warn!(error = %re, "recovery after a failed sync apply did not finish");
-                        Err(DomainError::Internal(format!(
-                            "{e}; the sync will be finished or undone the next time Rocket starts"
-                        )))
+                        quiet(&re, "recover_after_commit", UNFINISHED);
+                        Err(quiet(&e, "commit", "The sync could not be applied; it will be finished or undone the next time Rocket starts."))
                     }
                 };
             }
