@@ -355,8 +355,8 @@ impl SyncService {
     /// and the review stays open), a decision on a path that is not a conflict is
     /// `InvalidInput("That file is not a conflict.")`, and `keep_both` on a settings file is
     /// `InvalidInput("Keep both is not possible for collection or folder settings.")`.
-    /// Returns `Ok(())` once the final plan is offered or once the session ended for a reason
-    /// of its own, which reaches the user through `Finished`.
+    /// Returns `Ok(())` once the answer is taken; the final step then runs on its own, and a
+    /// reason it ends the session for reaches the user through `Finished`.
     pub async fn review(
         &self,
         sync_id: &SyncId,
@@ -446,19 +446,13 @@ impl SyncService {
             let key = s.key.clone();
             inner.limits.mark_active(&key);
         }
-        let Some(me) = self.arc() else {
-            return Ok(());
-        };
+        // `Finalizing` has no deadline, so the step runs owned: a panic ends the session.
         let sid = sync_id.clone();
-        let done = tokio::task::spawn_blocking(move || {
+        self.spawn_owned(sync_id, move |me| {
             if let Err(stop) = me.finalize(&sid, actions, decisions) {
                 me.stop(&sid, stop, LinkUpdate::Keep);
             }
-        })
-        .await;
-        if done.is_err() {
-            self.stop(sync_id, Stop::Internal, LinkUpdate::Keep);
-        }
+        });
         Ok(())
     }
 

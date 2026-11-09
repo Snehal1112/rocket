@@ -956,11 +956,14 @@ mod rule_tests {
         assert_eq!(check_final(&p, &offered), Ok(expected));
     }
 
+    /// One broken rule: its name, the change to a valid plan, and the stop it must give.
+    type Case = (&'static str, Box<dyn Fn(&mut SyncPlanPayload)>, Stop);
+
     #[test]
     fn a_final_plan_is_refused_for_each_broken_rule() {
         let offered = m(&[("a.yml", 'a'), ("b.yml", 'b')]);
         let any = Some(h('0'));
-        let cases: Vec<(&str, Box<dyn Fn(&mut SyncPlanPayload)>, Stop)> = vec![
+        let cases: Vec<Case> = vec![
             (
                 "unsafe delete",
                 Box::new(|p| p.deletes = vec!["../a.yml".into()]),

@@ -394,7 +394,9 @@ async fn a_local_edit_before_the_export_stops_the_sync() {
 
 #[tokio::test]
 async fn too_big_changes_are_refused_before_any_offer() {
-    let rig = sync_rig();
+    // About 20 MiB pass through the fakes in a debug build, so the clocks are long and the
+    // waits are 30 s: a loaded machine must not fail the test.
+    let rig = sync_rig_timed(slow());
     let mut mine = base();
     mine.insert("big.yml".into(), noise(MAX_TRANSFER_BYTES as usize));
     rig.linked(&lid(L), &base(), &mine);
@@ -402,6 +404,7 @@ async fn too_big_changes_are_refused_before_any_offer() {
 
     ana_sends_plan(&rig, sid.as_str(), 2, &request(&["big.yml"])).await;
 
+    wait_long("the finished event", || !rig.events.finished().is_empty()).await;
     let (finish, message) = wait_finished(&rig).await;
     assert_eq!(finish, SyncFinish::Failed);
     let message = message.expect("a text");
@@ -421,7 +424,7 @@ async fn too_big_changes_are_refused_before_any_offer() {
         .all(|o| o.kind != SyncPayloadKind::Files));
 
     // Just under the cap passes: the files payload is offered and arrives whole.
-    let rig = sync_rig();
+    let rig = sync_rig_timed(slow());
     let mut mine = base();
     mine.insert(
         "big.yml".into(),
@@ -430,6 +433,13 @@ async fn too_big_changes_are_refused_before_any_offer() {
     rig.linked(&lid(L), &base(), &mine);
     let (sid, ..) = bo_starts(&rig).await;
     ana_sends_plan(&rig, sid.as_str(), 2, &request(&["big.yml"])).await;
+    wait_long("the files offer", || {
+        rig.sent(ANA)
+            .iter()
+            .filter_map(as_offer)
+            .any(|o| o.kind == SyncPayloadKind::Files)
+    })
+    .await;
     let (offer, zip) = take_payload(&rig, ANA, SyncPayloadKind::Files, 0).await;
     assert!(offer.size_bytes <= MAX_TRANSFER_BYTES);
     assert_eq!(zip.len() as u64, offer.size_bytes);
@@ -1087,9 +1097,12 @@ async fn a_request_for_a_path_not_offered_is_refused() {
         .all(|o| o.kind != SyncPayloadKind::Files));
 }
 
+/// The deletes and the renames `(from, to)` of one refused final plan.
+type PlanCase = (Vec<&'static str>, Vec<(&'static str, &'static str)>);
+
 #[tokio::test]
 async fn a_final_plan_with_an_unsafe_or_unknown_path_is_refused() {
-    let cases: Vec<(Vec<&str>, Vec<(&str, &str)>)> = vec![
+    let cases: Vec<PlanCase> = vec![
         (vec!["../x.yml"], vec![]),
         (vec!["x.yml"], vec![]),
         (vec![], vec![("a.yml", "f/opencollection.yml")]),
@@ -1893,4 +1906,118 @@ async fn a_refused_offer_frees_its_transfer_id() {
         vec![SyncAbortReason::BaseMismatch],
         "not busy"
     );
+}
+
+#[tokio::test]
+async fn unlinking_during_a_start_is_refused() {
+    // M1: `unlink` reads `starting` under the lock that would end the sync.
+    let rig = sync_rig();
+    rig.linked(&lid(L), &base(), &base());
+    let gate = rig.colls.hold_manifest();
+    let sync = rig.sync.clone();
+    let start = tokio::spawn(async move { sync.start(&lid(L)).await });
+    // The manifest call is parked on the gate, so `starting` holds the peer.
+    wait_for("the start to claim the peer", || {
+        rig.sync.is_starting(&dev(ANA))
+    })
+    .await;
+
+    let err = rig.sync.unlink(&lid(L)).await.expect_err("refused");
+
+    assert!(
+        matches!(&err, DomainError::InvalidInput(m) if m == "The sync is already being applied.")
+    );
+    assert_eq!(rig.links.count(), 1);
+    drop(gate);
+    start.await.expect("joined").expect("started");
+}
+
+#[tokio::test]
+async fn unlinking_during_the_check_ends_it_quietly() {
+    // M3: a sync still in `Checking` was never shown, so it ends with the abort only.
+    let rig = sync_rig();
+    rig.linked(&lid(L), &base(), &base());
+    let gate = rig.links.hold_get();
+    let sid = SyncId::random();
+    let bytes = manifest_of(&without(&base(), "a.yml"))
+        .to_json()
+        .expect("json");
+    let offer = offered(
+        sid.as_str(),
+        &lid(L),
+        &bh(),
+        SyncPayloadKind::Manifest,
+        &ptid(1),
+        &bytes,
+    );
+    rig.push(ANA, offer_frame(&offer));
+    wait_phase(&rig, &sid, Phase::Checking).await;
+
+    rig.sync.unlink(&lid(L)).await.expect("unlinked");
+
+    assert_eq!(rig.sync.phase_of(&sid), None);
+    wait_for("the abort", || {
+        rig.aborts(ANA) == vec![SyncAbortReason::Cancelled]
+    })
+    .await;
+    drop(gate);
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    assert!(
+        rig.events.finished().is_empty(),
+        "no Finished for a sync never shown"
+    );
+    assert!(rig
+        .audited()
+        .iter()
+        .all(|k| !matches!(k, AuditEventKind::NetworkSyncReceived { .. })));
+    assert_eq!(rig.links.count(), 0);
+}
+
+#[tokio::test]
+async fn a_final_step_that_panics_ends_the_sync() {
+    // M4, M5: `finalize` runs owned, so a panic ends the session instead of leaving it in a
+    // phase with no deadline.
+    let rig = sync_rig();
+    rig.linked(&lid(L), &base(), &base());
+    let sid = ana_starts(&rig, &without(&base(), "a.yml")).await;
+    wait_phase(&rig, &sid, Phase::AwaitReview).await;
+    rig.sync
+        .panic_next_step
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+
+    rig.sync.review(&sid, true, vec![]).await.expect("accepted");
+
+    assert_eq!(
+        wait_finished(&rig).await,
+        (SyncFinish::Failed, Some(INTERNAL.to_string()))
+    );
+    wait_for("the abort", || {
+        rig.aborts(ANA) == vec![SyncAbortReason::Failed]
+    })
+    .await;
+    assert_unchanged(&rig, &base());
+}
+
+#[tokio::test]
+async fn a_payload_step_that_panics_ends_the_sync() {
+    // M5: the step after a payload's last chunk runs owned too.
+    let rig = sync_rig();
+    rig.linked(&lid(L), &base(), &base());
+    let (sid, ..) = bo_starts(&rig).await;
+    rig.sync
+        .panic_next_step
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let (plan, _) = final_plan(&base(), &["b.yml"], &[], &[]);
+
+    ana_sends_plan(&rig, sid.as_str(), 2, &plan).await;
+
+    assert_eq!(
+        wait_finished(&rig).await,
+        (SyncFinish::Failed, Some(INTERNAL.to_string()))
+    );
+    wait_for("the abort", || {
+        rig.aborts(ANA) == vec![SyncAbortReason::Failed]
+    })
+    .await;
+    assert!(rig.events.confirms().is_empty());
 }

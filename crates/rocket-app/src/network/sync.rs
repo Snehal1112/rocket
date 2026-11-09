@@ -66,7 +66,8 @@ pub struct LinkView {
     pub updated_at: String,
 }
 
-/// The two texts of a conflict diff, read as lossy UTF-8. `None` for a side without the file.
+/// The two texts of a conflict diff, read as lossy UTF-8 (`String::from_utf8_lossy`: bytes
+/// that are not UTF-8 show as replacement characters). `None` for a side without the file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConflictFiles {
     pub mine: Option<String>,
@@ -322,6 +323,9 @@ pub struct SyncService {
     /// Test hook: how long the step after a payload's last chunk waits before it runs.
     #[cfg(test)]
     pub(super) processing_delay: Mutex<Duration>,
+    /// Test hook: the next step run through `spawn_owned` panics.
+    #[cfg(test)]
+    pub(super) panic_next_step: std::sync::atomic::AtomicBool,
     #[cfg(test)]
     frames_seen: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
@@ -351,6 +355,8 @@ impl SyncService {
             review_gate: Mutex::new(None),
             #[cfg(test)]
             processing_delay: Mutex::new(Duration::ZERO),
+            #[cfg(test)]
+            panic_next_step: std::sync::atomic::AtomicBool::new(false),
             #[cfg(test)]
             frames_seen: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
@@ -544,48 +550,87 @@ impl SyncService {
 
     /// Deletes a link and its base. Audits `NetworkLinkRemoved` and publishes `LinkChanged`.
     /// The peer is not told; it learns at its next sync. A sync of the link that this node's
-    /// user has not answered yet ends `cancelled` first (S17); one that is being applied, or
-    /// still saves the link, refuses the unlink with "The sync is already being applied.", so
-    /// its link save cannot bring the link back. An unknown link is
+    /// user has not answered yet ends `cancelled` first (S17; quietly while it is still
+    /// `Checking`). A sync that is answered, a start with the peer and a link save of the peer
+    /// refuse the unlink with "The sync is already being applied.", so a link save cannot bring
+    /// the link back (`stop_if_unanswered`). An unknown link is
     /// `NotFound("That link does not exist.")`.
     pub async fn unlink(&self, link_id: &LinkId) -> DomainResult<()> {
         self.ensure_worker();
-        let (running, settling) = {
-            let inner = self.lock();
-            let session = inner
-                .sessions
-                .iter()
-                .find(|(_, s)| s.link_id == *link_id)
-                .map(|(sid, s)| (sid.clone(), s.answered || s.reviewing));
-            let settling: HashSet<DeviceId> = inner.settling.iter().copied().collect();
-            match session {
-                Some((_, true)) => return Err(Self::already_applying()),
-                Some((sid, false)) => (Some(sid), settling),
-                None => (None, settling),
-            }
-        };
-        if let Some(sid) = running {
-            self.stop(&sid, Stop::Cancelled, LinkUpdate::Keep);
-        }
         let links = Arc::clone(&self.deps.links);
         let id = link_id.clone();
-        let removed = tokio::task::spawn_blocking(move || -> DomainResult<Option<LinkRecord>> {
-            let Some(record) = links.get(&id)? else {
-                return Ok(None);
-            };
-            if settling.contains(&record.peer_device_id) {
-                return Err(SyncService::already_applying());
-            }
-            links.delete(&id)?;
-            Ok(Some(record))
-        })
-        .await
-        .map_err(|_| DomainError::Internal("The unlink task failed.".to_string()))??;
-        let Some(record) = removed else {
-            return Err(DomainError::NotFound(NO_SUCH_LINK.to_string()));
-        };
+        let record = tokio::task::spawn_blocking(move || links.get(&id))
+            .await
+            .map_err(|_| DomainError::Internal("The unlink task failed.".to_string()))??
+            .ok_or_else(|| DomainError::NotFound(NO_SUCH_LINK.to_string()))?;
+        self.stop_if_unanswered(link_id, &record.peer_device_id)?;
+        // A start that begins after this point may still read the record, but its link save
+        // finds the link gone and saves nothing.
+        let links = Arc::clone(&self.deps.links);
+        let id = link_id.clone();
+        tokio::task::spawn_blocking(move || links.delete(&id))
+            .await
+            .map_err(|_| DomainError::Internal("The unlink task failed.".to_string()))??;
         self.audit_link_removed(&record);
         self.link_changed(&record.link_id);
+        Ok(())
+    }
+
+    /// Before an unlink, under one lock: refuses ("The sync is already being applied.") while
+    /// `peer` starts a sync or saves a link, or while a sync of the link with `peer` is answered
+    /// or its review answer is checked. Otherwise a sync of the link ends `cancelled` with the
+    /// abort sent; one still in `Checking` was never shown, so it ends with the abort only.
+    fn stop_if_unanswered(&self, link_id: &LinkId, peer: &DeviceId) -> DomainResult<()> {
+        let (sync_id, session, quiet) = {
+            let mut inner = self.lock();
+            if inner.settling.contains(peer) || inner.starting.contains(peer) {
+                return Err(Self::already_applying());
+            }
+            let found = inner
+                .sessions
+                .iter()
+                .find(|(_, s)| s.link_id == *link_id && s.peer == *peer)
+                .map(|(sid, s)| (sid.clone(), s.answered || s.reviewing, s.phase));
+            let sync_id = match found {
+                None => return Ok(()),
+                Some((_, true, _)) => return Err(Self::already_applying()),
+                Some((sid, false, _)) => sid,
+            };
+            let Some(session) = inner.take_session(&sync_id) else {
+                return Ok(());
+            };
+            let quiet = session.phase == Phase::Checking;
+            if !quiet {
+                let stop = Stop::Cancelled;
+                self.announce_end(
+                    &mut inner,
+                    &sync_id,
+                    &session,
+                    stop.finish(),
+                    stop.message(),
+                    &LinkUpdate::Keep,
+                );
+            }
+            (sync_id, session, quiet)
+        };
+        if quiet {
+            self.tell_later(
+                session.peer,
+                PeerMessage::SyncAbort {
+                    sync_id: sync_id.as_str().to_string(),
+                    reason: SyncAbortReason::Cancelled,
+                },
+            );
+        } else {
+            let stop = Stop::Cancelled;
+            self.after_end(
+                &sync_id,
+                session,
+                stop.finish(),
+                stop.abort(),
+                LinkUpdate::Keep,
+            );
+        }
         Ok(())
     }
 
@@ -860,10 +905,17 @@ impl SyncService {
         let sid = sync_id.clone();
         drop(tokio::spawn(async move {
             let task = Arc::clone(&me);
-            if tokio::task::spawn_blocking(move || step(&task))
-                .await
-                .is_err()
-            {
+            let run = tokio::task::spawn_blocking(move || {
+                #[cfg(test)]
+                if task
+                    .panic_next_step
+                    .swap(false, std::sync::atomic::Ordering::SeqCst)
+                {
+                    panic!("test hook: the step fails");
+                }
+                step(&task)
+            });
+            if run.await.is_err() {
                 me.stop(&sid, Stop::Internal, LinkUpdate::Keep);
             }
         }));
@@ -914,21 +966,47 @@ impl SyncService {
             let Some(session) = inner.take_session(sync_id) else {
                 return;
             };
-            let saves = !matches!(link, LinkUpdate::Keep);
-            if saves {
-                inner.settling.insert(session.peer);
-            }
-            // Under the lock, so a `Progress` of this session stays before its `Finished`.
-            self.emit(SyncEvent::Finished {
-                sync_id: sync_id.as_str().to_string(),
-                link_id: session.link_id.as_str().to_string(),
-                display_name: session.peer_name.clone(),
-                collection_name: session.collection(),
-                outcome: finish,
-                message,
-            });
+            self.announce_end(&mut inner, sync_id, &session, finish, message, &link);
             session
         };
+        self.after_end(sync_id, session, finish, abort, link);
+    }
+
+    /// The part of an end that runs under the lock, right after `take_session`: the peer goes
+    /// into `settling` when the link is saved, and `Finished` is published (under the lock, so
+    /// a `Progress` of this session stays before it).
+    fn announce_end(
+        &self,
+        inner: &mut SyncInner,
+        sync_id: &SyncId,
+        session: &Session,
+        finish: SyncFinish,
+        message: Option<String>,
+        link: &LinkUpdate,
+    ) {
+        if !matches!(link, LinkUpdate::Keep) {
+            inner.settling.insert(session.peer);
+        }
+        self.emit(SyncEvent::Finished {
+            sync_id: sync_id.as_str().to_string(),
+            link_id: session.link_id.as_str().to_string(),
+            display_name: session.peer_name.clone(),
+            collection_name: session.collection(),
+            outcome: finish,
+            message,
+        });
+    }
+
+    /// The part of an end that runs after the lock: the audit row (S13), the abort frame from
+    /// its own task, and the link update in a blocking task.
+    fn after_end(
+        &self,
+        sync_id: &SyncId,
+        session: Session,
+        finish: SyncFinish,
+        abort: Option<SyncAbortReason>,
+        link: LinkUpdate,
+    ) {
         if session.chunk_out {
             let device_id = session.peer.short();
             let collection = session.collection();
@@ -1306,7 +1384,9 @@ impl SyncService {
         }
     }
 
-    /// The two texts of a conflict, for the diff. Only while the planner's review is open.
+    /// The two texts of a conflict, for the diff, read as lossy UTF-8 (bytes that are not
+    /// UTF-8 show as replacement characters). `None` for a side without the file. Only while
+    /// the planner's review is open.
     pub fn conflict_files(&self, sync_id: &SyncId, path: &str) -> DomainResult<ConflictFiles> {
         let inner = self.lock();
         let s = inner
@@ -1344,6 +1424,12 @@ impl SyncService {
     /// The fixed answer when a sync no longer waits for this answer.
     pub(super) fn not_waiting() -> DomainError {
         DomainError::InvalidInput(NOT_WAITING.to_string())
+    }
+
+    /// Test hook: a `start` with `peer` holds its claim.
+    #[cfg(test)]
+    pub(crate) fn is_starting(&self, peer: &DeviceId) -> bool {
+        self.lock().starting.contains(peer)
     }
 
     /// Test hook: the phase of a session, `None` once it ended.

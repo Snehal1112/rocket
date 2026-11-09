@@ -28,6 +28,7 @@ fn invalid(text: &str) -> DomainError {
 }
 
 /// What the start's blocking step found.
+#[expect(clippy::large_enum_variant, reason = "one short-lived value per step")]
 enum Built {
     FolderChanged,
     Ready(Manifest, super::sync_payload::PayloadOut),
@@ -88,10 +89,10 @@ impl SyncService {
             }
             let mine = me.deps.collections.manifest(&rec.collection_name)?;
             let bytes = mine.to_json()?;
-            // The clocks start once the manifest is built: a large collection takes a while,
-            // and that time must not count against the peer's answer.
-            let now = SyncService::now();
-            let out = build_out(SyncPayloadKind::Manifest, bytes, now, ttl).map_err(|_| {
+            // The clocks start once the manifest is built and hashed (`build_out` reads the
+            // clock): a large collection takes a while, and that time must not count against
+            // the peer's answer.
+            let out = build_out(SyncPayloadKind::Manifest, bytes, ttl).map_err(|_| {
                 DomainError::Internal("The manifest could not be offered.".to_string())
             })?;
             Ok(Built::Ready(mine, out))
@@ -206,6 +207,7 @@ impl SyncService {
             return self.answer_request(sync_id, &plan, &mine, &collection);
         }
         let new_base = check_final(&plan, &mine)?;
+        #[expect(clippy::large_enum_variant, reason = "one short-lived value per step")]
         enum Next {
             Files,
             Apply,

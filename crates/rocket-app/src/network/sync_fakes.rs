@@ -345,6 +345,26 @@ pub(crate) fn fast() -> Timing {
     }
 }
 
+/// Long clocks for tests that move megabytes through the fakes in a debug build.
+pub(crate) fn slow() -> Timing {
+    Timing {
+        offer_ttl: Duration::from_secs(10),
+        idle_limit: Duration::from_secs(10),
+        result_timeout: Duration::from_secs(10),
+    }
+}
+
+/// Polls `check` until it is true. Fails the test after about 30 seconds.
+pub(crate) async fn wait_long(what: &str, mut check: impl FnMut() -> bool) {
+    for _ in 0..3000 {
+        if check() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("timed out waiting for {what}");
+}
+
 pub(crate) fn record(link: &LinkId, peer: u8, base: &Files) -> LinkRecord {
     LinkRecord {
         link_id: link.clone(),
@@ -974,17 +994,19 @@ pub(crate) async fn take_payload(
         },
     );
     let mut acked = 0u32;
-    for _ in 0..2000 {
-        let chunks: Vec<String> = rig
-            .sent(seed)
-            .into_iter()
-            .filter_map(|m| match m {
-                PeerMessage::Chunk {
-                    transfer_id, data, ..
-                } if transfer_id == offer.transfer_id => Some(data),
-                _ => None,
-            })
-            .collect();
+    let mut seen = 0usize;
+    let mut chunks: Vec<String> = Vec::new();
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while std::time::Instant::now() < deadline {
+        // Only the frames sent since the last poll are copied.
+        let fresh = rig.peers.sent_from(seen);
+        seen += fresh.len();
+        chunks.extend(fresh.into_iter().filter_map(|(to, m)| match m {
+            PeerMessage::Chunk {
+                transfer_id, data, ..
+            } if to == dev(seed) && transfer_id == offer.transfer_id => Some(data),
+            _ => None,
+        }));
         let got = chunks.len() as u32;
         let ack_to = if got == offer.chunk_count {
             got

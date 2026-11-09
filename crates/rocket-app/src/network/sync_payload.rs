@@ -50,15 +50,17 @@ pub(super) struct PayloadIn {
     pub acks: Option<mpsc::UnboundedSender<PeerMessage>>,
 }
 
-/// Hashes the bytes and builds the machine. `TooBig` and `Empty` come back as the machine's
-/// `OfferError`; the caller turns `TooBig` into `Stop::TooBig(len)`.
+/// Hashes the bytes and builds the machine. The clock is read after the hash, so a large
+/// payload's hashing does not count against the offer's time to live. `TooBig` and `Empty`
+/// come back as the machine's `OfferError`; the caller turns `TooBig` into
+/// `Stop::TooBig(len)`.
 pub(super) fn build_out(
     kind: SyncPayloadKind,
     bytes: Vec<u8>,
-    now: Instant,
     ttl: Duration,
 ) -> Result<PayloadOut, OfferError> {
     let sha = sha_hex(&bytes);
+    let now = SyncService::now();
     let machine = OutgoingTransfer::new(
         TransferId::random(),
         kind_name(kind),
@@ -196,8 +198,7 @@ impl SyncService {
         phase: Phase,
     ) -> Result<(), Stop> {
         let len = bytes.len();
-        let out = build_out(kind, bytes, Self::now(), self.timing.offer_ttl)
-            .map_err(|e| out_error(e, len))?;
+        let out = build_out(kind, bytes, self.timing.offer_ttl).map_err(|e| out_error(e, len))?;
         let sent = {
             let mut inner = self.lock();
             let id = out.machine.transfer_id().clone();

@@ -191,6 +191,12 @@ impl FakePeers {
         self.sent.lock().expect("sent lock").clone()
     }
 
+    /// The frames sent from position `start` on, so a poll copies only what is new.
+    pub fn sent_from(&self, start: usize) -> Vec<(DeviceId, PeerMessage)> {
+        let sent = self.sent.lock().expect("sent lock");
+        sent.get(start..).map(<[_]>::to_vec).unwrap_or_default()
+    }
+
     pub fn sent_to(&self, device: &DeviceId) -> Vec<PeerMessage> {
         self.sent()
             .into_iter()
