@@ -10,13 +10,13 @@ use rocket_collection::{
         diff::diff_signature,
         repository::{ContractError, ContractRepository, ContractResult},
         snapshot::{ContractSnapshot, RequestSignatureSnapshot},
-        types::{
-            Contract, ContractEnforcementMode, ContractParty, ContractPolicy, ContractScope,
-            ContractStatus,
+        types::{Contract, ContractEnforcementMode, ContractStatus},
+        {
+            apply_transition, snapshot_path, transition_status, walk_folder, ContractEdit,
+            NewContract, StatusEvent,
         },
-        {transition_status, StatusEvent},
     },
-    CollectionItem, CollectionRepository, Folder, Request,
+    CollectionRepository, Request,
 };
 use std::{
     path::{Path, PathBuf},
@@ -73,100 +73,6 @@ fn copy_attachments(
     }
 
     Ok(relative_paths)
-}
-
-/// The key a saved request's snapshot is stored under: the requested path with its last
-/// segment replaced by the file name on disk. The infra layer may have migrated a `.json`
-/// request to `.yml`, and the baseline snapshot was built from the on-disk name, so the key
-/// must follow it. Without a file name the requested path is used as it is.
-pub fn snapshot_path(requested_path: &str, saved_file_name: Option<&str>) -> String {
-    match saved_file_name {
-        Some(file_name) => match Path::new(requested_path).parent() {
-            Some(parent) if !parent.as_os_str().is_empty() => {
-                parent.join(file_name).to_string_lossy().to_string()
-            }
-            _ => file_name.to_string(),
-        },
-        None => requested_path.to_string(),
-    }
-}
-
-/// What a person enters to create a contract. The service fills in the rest.
-#[derive(Debug, Clone)]
-pub struct NewContract {
-    pub title: String,
-    pub provider: ContractParty,
-    pub consumers: Vec<ContractParty>,
-    pub version: String,
-    pub effective_date: chrono::NaiveDate,
-    pub expiry_date: Option<chrono::NaiveDate>,
-    pub scope: ContractScope,
-    pub policy: ContractPolicy,
-    /// `true` makes the contract `Active` with a baseline snapshot, `false` leaves a `Draft`.
-    pub publish_immediately: bool,
-}
-
-impl NewContract {
-    /// The contract before it is stored. `attach_contract` sets the final id, the
-    /// timestamps, the document paths and `endpoint_count`.
-    pub fn into_contract(self) -> Contract {
-        let status = if self.publish_immediately {
-            ContractStatus::Active
-        } else {
-            ContractStatus::Draft
-        };
-        Contract {
-            id: Ulid::new(),
-            title: self.title,
-            provider: self.provider,
-            consumers: self.consumers,
-            // Superseded by the party identities; kept for older files.
-            project: String::new(),
-            version: self.version,
-            status,
-            effective_date: self.effective_date,
-            expiry_date: self.expiry_date,
-            document_paths: vec![],
-            enforcement_mode: ContractEnforcementMode::Informational,
-            scope: self.scope,
-            policy: self.policy,
-            drift_count: 0,
-            breach_count: 0,
-            endpoint_count: 0,
-            created_by: None,
-            created_at: None,
-            updated_at: None,
-        }
-    }
-}
-
-/// The fields a person can change on a stored contract. Scope, status, counters and
-/// creation data are not part of an edit.
-#[derive(Debug, Clone)]
-pub struct ContractEdit {
-    pub title: String,
-    pub provider: ContractParty,
-    pub consumers: Vec<ContractParty>,
-    pub version: String,
-    pub effective_date: chrono::NaiveDate,
-    pub expiry_date: Option<chrono::NaiveDate>,
-    pub policy: ContractPolicy,
-}
-
-impl ContractEdit {
-    /// `existing` with the edited fields replaced.
-    pub fn apply_to(self, existing: Contract) -> Contract {
-        Contract {
-            title: self.title,
-            provider: self.provider,
-            consumers: self.consumers,
-            version: self.version,
-            effective_date: self.effective_date,
-            expiry_date: self.expiry_date,
-            policy: self.policy,
-            ..existing
-        }
-    }
 }
 
 pub struct ContractService {
@@ -1087,17 +993,6 @@ impl ContractService {
     }
 }
 
-/// Runs the status state machine and maps a rejected event to an internal error
-/// that names both the current status and the event.
-fn apply_transition(
-    status: &ContractStatus,
-    event: &StatusEvent,
-) -> ContractResult<ContractStatus> {
-    transition_status(status, event).map_err(|e| {
-        ContractError::Internal(format!("invalid transition: {:?} on {}", e.from, e.event))
-    })
-}
-
 /// The changes of the live request signatures against a snapshot, in snapshot order.
 ///
 /// A request missing from `current` is one `request` entry, `Removed` and always breaking.
@@ -1133,59 +1028,11 @@ fn snapshot_changes(
     changes
 }
 
-/// Recursively collect every request in the folder tree along with its
-/// collection-relative path. Folder segments prefer `dir_name` (the on-disk
-/// directory name) to match the path format the save handler emits.
-/// Requests with no `file_name` (e.g. freshly constructed in memory) are
-/// skipped because we cannot key them the same way the save path will.
-pub(crate) fn walk_folder<'a>(
-    folder: &'a Folder,
-    prefix: &Path,
-    out: &mut Vec<(PathBuf, &'a rocket_collection::Request)>,
-) {
-    for item in &folder.items {
-        match item {
-            CollectionItem::Request(req) => {
-                let Some(file_name) = req.file_name.as_deref() else {
-                    continue;
-                };
-                let path = if prefix.as_os_str().is_empty() {
-                    PathBuf::from(file_name)
-                } else {
-                    prefix.join(file_name)
-                };
-                out.push((path, req.as_ref()));
-            }
-            CollectionItem::Folder(sub) => {
-                // Skip folders with no on-disk name. build_folder_tree always
-                // sets dir_name; None here means a malformed in-memory tree.
-                let Some(segment) = sub.dir_name.as_deref() else {
-                    continue;
-                };
-                let next = if prefix.as_os_str().is_empty() {
-                    PathBuf::from(segment)
-                } else {
-                    prefix.join(segment)
-                };
-                walk_folder(sub, &next, out);
-            }
-            // Contracts describe HTTP request signatures only.
-            CollectionItem::GraphQl(_) => {}
-            CollectionItem::WebSocket(_) => {}
-            CollectionItem::Grpc(_) => {}
-            CollectionItem::OpaqueItem(_) => {}
-            // Summary items carry no file content; skip for contract audit.
-            CollectionItem::Summary(_) => {}
-            // Script files are not requests; skip for contract audit.
-            CollectionItem::ScriptFile(_) => {}
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use chrono::Utc;
+    use rocket_collection::{contract::types::ContractScope, Folder};
     use rocket_collection::{
         contract::{
             repository::ContractError,
@@ -2099,29 +1946,7 @@ mod tests {
         c
     }
 
-    // ─── snapshot_path and audit_saved_request ─────────────────────────
-
-    #[test]
-    fn snapshot_path_replaces_file_name_keeping_folders() {
-        assert_eq!(
-            snapshot_path("Users/get.json", Some("get.yml")),
-            "Users/get.yml"
-        );
-        assert_eq!(
-            snapshot_path("a/b/get.json", Some("get.yml")),
-            "a/b/get.yml"
-        );
-    }
-
-    #[test]
-    fn snapshot_path_without_folder() {
-        assert_eq!(snapshot_path("get.json", Some("get.yml")), "get.yml");
-    }
-
-    #[test]
-    fn snapshot_path_falls_back_to_requested_path() {
-        assert_eq!(snapshot_path("Users/get.json", None), "Users/get.json");
-    }
+    // ─── audit_saved_request ───────────────────────────────────────────
 
     #[test]
     fn audit_saved_request_records_a_changelog_entry_for_a_covered_request() {
@@ -2188,71 +2013,6 @@ mod tests {
                 ..ContractPolicy::default()
             },
         }
-    }
-
-    #[test]
-    fn into_contract_publish_immediately_is_active() {
-        assert_eq!(
-            new_contract(true).into_contract().status,
-            ContractStatus::Active
-        );
-    }
-
-    #[test]
-    fn into_contract_otherwise_is_draft() {
-        assert_eq!(
-            new_contract(false).into_contract().status,
-            ContractStatus::Draft
-        );
-    }
-
-    #[test]
-    fn into_contract_starts_with_zero_counters_and_informational_mode() {
-        let c = new_contract(true).into_contract();
-        assert_eq!(c.enforcement_mode, ContractEnforcementMode::Informational);
-        assert_eq!((c.drift_count, c.breach_count, c.endpoint_count), (0, 0, 0));
-        assert!(c.project.is_empty());
-        assert!(c.document_paths.is_empty());
-        assert!(c.created_by.is_none() && c.created_at.is_none() && c.updated_at.is_none());
-    }
-
-    #[test]
-    fn apply_to_keeps_scope_status_counters_and_creation_fields() {
-        let mut existing = make_contract_with_status(ContractStatus::Paused);
-        existing.scope = ContractScope::Folder {
-            rel_path: PathBuf::from("auth"),
-        };
-        existing.drift_count = 3;
-        existing.breach_count = 1;
-        existing.endpoint_count = 7;
-        existing.project = "Project X".into();
-        existing.created_by = Some("me".into());
-        let id = existing.id;
-
-        let edited = contract_edit("Renamed").apply_to(existing);
-
-        assert_eq!(edited.id, id);
-        assert_eq!(edited.status, ContractStatus::Paused);
-        assert_eq!(
-            edited.scope,
-            ContractScope::Folder {
-                rel_path: PathBuf::from("auth")
-            }
-        );
-        assert_eq!(
-            (
-                edited.drift_count,
-                edited.breach_count,
-                edited.endpoint_count
-            ),
-            (3, 1, 7)
-        );
-        assert_eq!(edited.project, "Project X");
-        assert_eq!(edited.created_by.as_deref(), Some("me"));
-        assert_eq!(edited.title, "Renamed");
-        assert_eq!(edited.version, "v2.0");
-        assert_eq!(edited.policy.notice_days, 30);
-        assert!(edited.consumers.is_empty());
     }
 
     #[test]
@@ -2965,17 +2725,6 @@ mod tests {
         let tags = &doc["paths"]["/login"]["get"]["tags"];
         assert!(tags.is_sequence());
         assert_eq!(tags[0].as_str(), Some("auth"));
-    }
-
-    #[test]
-    fn walk_folder_skips_grpc_items() {
-        let mut folder = Folder::new("root");
-        folder.items.push(CollectionItem::Grpc(Box::new(
-            rocket_collection::GrpcRequest::new("Say Hello", "localhost:50051"),
-        )));
-        let mut out = Vec::new();
-        walk_folder(&folder, Path::new(""), &mut out);
-        assert!(out.is_empty());
     }
 }
 

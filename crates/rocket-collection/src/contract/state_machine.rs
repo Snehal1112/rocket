@@ -1,3 +1,4 @@
+use super::repository::{ContractError, ContractResult};
 use super::types::ContractStatus;
 
 #[derive(Debug)]
@@ -90,6 +91,17 @@ pub fn transition(
     };
 
     Ok(next)
+}
+
+/// Runs the status state machine and maps a rejected event to an internal error
+/// that names both the current status and the event.
+pub fn apply_transition(
+    status: &ContractStatus,
+    event: &StatusEvent,
+) -> ContractResult<ContractStatus> {
+    transition(status, event).map_err(|e| {
+        ContractError::Internal(format!("invalid transition: {:?} on {}", e.from, e.event))
+    })
 }
 
 #[cfg(test)]
@@ -220,5 +232,27 @@ mod tests {
     fn archived_does_not_expire() {
         let result = transition(&ContractStatus::Archived, &StatusEvent::ExpiryLapsed);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn apply_transition_names_status_and_event_on_a_rejected_event() {
+        let err = apply_transition(&ContractStatus::Draft, &StatusEvent::Renew)
+            .expect_err("a draft cannot renew");
+        assert_eq!(
+            err.to_string(),
+            ContractError::Internal(format!(
+                "invalid transition: {:?} on Renew",
+                ContractStatus::Draft
+            ))
+            .to_string()
+        );
+    }
+
+    #[test]
+    fn apply_transition_returns_the_next_status() {
+        assert_eq!(
+            apply_transition(&ContractStatus::Draft, &StatusEvent::Publish).ok(),
+            Some(ContractStatus::Active)
+        );
     }
 }

@@ -10,7 +10,8 @@ use crate::commands::contract_dtos::{
     summary::{ContractDriftSummaryDto, ContractSummaryDto},
     types::{ContractDto, ContractPartyDto, ContractPolicyDto, ContractScopeDto},
 };
-use rocket_app::{ContractEdit, ContractService, NewContract};
+use rocket_app::ContractService;
+use rocket_collection::contract::{ContractEdit, NewContract};
 use std::path::PathBuf;
 use tauri::State;
 use ulid::Ulid;
