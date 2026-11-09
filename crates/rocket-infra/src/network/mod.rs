@@ -4,6 +4,7 @@
 
 pub mod client;
 pub mod identity_store;
+pub mod links;
 pub(crate) mod lock;
 pub mod mdns;
 #[cfg(test)]
@@ -18,6 +19,7 @@ pub mod transport;
 
 pub use client::RustlsPeerConnector;
 pub use identity_store::KeychainDeviceIdentity;
+pub use links::FsLinkRepo;
 pub use mdns::MdnsDiscovery;
 pub use repos::{
     FsBlockedDeviceRepo, FsManualAddressRepo, FsNetworkSettingsRepo, FsPairedDeviceRepo,
