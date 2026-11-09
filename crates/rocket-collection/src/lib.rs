@@ -6,6 +6,7 @@ mod events;
 pub mod file_tx;
 pub mod folder;
 pub mod folder_settings;
+pub mod graphql_document;
 pub mod graphql_request;
 pub mod grpc_request;
 pub mod names;

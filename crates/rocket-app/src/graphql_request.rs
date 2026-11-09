@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::execution_service::{
     ExecuteRequestInput, ExecuteRequestOutput, RequestExecutionService,
 };
-use crate::graphql_document::select_operation;
+use rocket_collection::graphql_document::select_operation;
 
 /// What a GraphQL operation looks like on the wire.
 #[derive(Debug, Clone, PartialEq)]

@@ -274,6 +274,19 @@ mod tests {
     }
 
     #[test]
+    fn graphql_operation_json_shape_is_unchanged() {
+        let ops = list_operations("query A { a }\nmutation { b }\nsubscription C { c }");
+        assert_eq!(
+            serde_json::to_value(&ops).expect("serialize"),
+            serde_json::json!([
+                { "name": "A", "kind": "query" },
+                { "name": null, "kind": "mutation" },
+                { "name": "C", "kind": "subscription" },
+            ])
+        );
+    }
+
+    #[test]
     fn select_operation_uses_the_only_operation() {
         assert_eq!(
             select_operation("query A { a }", None, false).expect("select"),

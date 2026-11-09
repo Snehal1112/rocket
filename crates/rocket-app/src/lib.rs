@@ -50,7 +50,6 @@ pub mod flow_service;
 pub(crate) mod flow_trace;
 pub(crate) mod flow_wait;
 pub mod git_service;
-pub mod graphql_document;
 pub mod graphql_request;
 pub mod graphql_schema;
 pub mod graphql_subscription;

@@ -26,12 +26,12 @@ use tokio::sync::oneshot;
 
 use crate::execution_service::websocket_resolution::{WebSocketConnectInput, WebSocketScope};
 use crate::execution_service::RequestExecutionService;
-use crate::graphql_document::select_operation;
 use crate::graphql_request::resolve_json_text;
 use protocol::{
     init_message, interpret, pong_message, start_message, stop_messages, Dialect, Incoming,
     SUBPROTOCOL_LEGACY, SUBPROTOCOL_TRANSPORT,
 };
+use rocket_collection::graphql_document::select_operation;
 
 /// How long to wait for `connection_ack` before giving up.
 const DEFAULT_ACK_TIMEOUT: Duration = Duration::from_secs(10);

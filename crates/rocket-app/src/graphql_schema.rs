@@ -394,7 +394,7 @@ mod tests {
 
     #[test]
     fn both_queries_define_exactly_one_operation() {
-        use crate::graphql_document::list_operations;
+        use rocket_collection::graphql_document::list_operations;
         assert_eq!(list_operations(INTROSPECTION_QUERY).len(), 1);
         assert_eq!(list_operations(INTROSPECTION_QUERY_COMPAT).len(), 1);
     }

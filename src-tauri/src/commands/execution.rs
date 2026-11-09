@@ -1,8 +1,8 @@
-use rocket_app::graphql_document::{list_operations, GraphQlOperation};
 use rocket_app::{
     ExecuteGraphQlInput, ExecuteRequestInput, ExecuteRequestOutput, RequestExecutionService,
     SentRequest,
 };
+use rocket_collection::graphql_document::{list_operations, GraphQlOperation};
 use rocket_scripting::{ConsoleLevel, TestStatus};
 use rocket_shared::error::DomainError;
 use serde::Serialize;
