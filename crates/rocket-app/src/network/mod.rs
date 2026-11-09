@@ -9,6 +9,8 @@ mod nodes;
 mod pairing;
 mod service;
 mod status;
+pub mod sync_collections;
+pub mod sync_ports;
 mod transfer;
 mod transfer_link;
 pub mod transfer_ports;
@@ -35,8 +37,15 @@ mod pairing_tests;
 #[path = "service_tests.rs"]
 mod service_tests;
 #[cfg(test)]
+#[path = "sync_collections_tests.rs"]
+mod sync_collections_tests;
+#[cfg(test)]
 #[path = "transfer_link_tests.rs"]
 mod transfer_link_tests;
+// Plan 3 reuses the sync fakes, so some helpers are unused here.
+#[cfg(test)]
+#[allow(dead_code)]
+pub(crate) mod sync_fakes;
 // The transfer fakes are shared by the send and receive tests.
 #[cfg(test)]
 #[allow(dead_code)]
@@ -52,6 +61,11 @@ pub use nodes::{NodeGroup, NodeStatus, NodeView};
 pub use pairing::{PairingDecision, PairingStarted};
 pub use service::{paired_limit_message, NetworkDeps, NetworkHandle, NetworkService};
 pub use status::{NetworkState, NetworkStatus};
+pub use sync_collections::ExportBackedSyncCollections;
+pub use sync_ports::{
+    base_from_reader, base_from_zip, manifest_from_zip, sha256_hex, FileChange, SyncCollectionPort,
+    SyncFile, ZipBase,
+};
 pub use transfer::{PeerSender, Timing, TransferDeps, TransferService};
 pub use transfer_ports::{
     receiver_display_name, CollectionImportPort, ImportedCollection, StagedFile, StagedZip,

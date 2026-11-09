@@ -228,6 +228,13 @@ impl CollectionExportService {
         Ok(files)
     }
 
+    /// The raw files of the collection as the file source lists them, secrets included. The
+    /// sync apply reads the local files through this to merge a received file into them. It
+    /// takes no lock, so the caller holds the collection lock.
+    pub fn raw_files(&self, collection: &str) -> DomainResult<Vec<rocket_export::SourceFile>> {
+        self.files.list_files(collection)
+    }
+
     pub fn export_bruno(
         &self,
         collection: &str,
@@ -581,6 +588,14 @@ mod tests {
         let service = CollectionExportService::new(Box::new(OneFile));
         let out = service.export_bruno("My API", true).expect("exports");
         assert_eq!(out.file_name, "my-api.zip");
+    }
+
+    #[test]
+    fn raw_files_returns_the_unscrubbed_files() {
+        let service = CollectionExportService::new(Box::new(OneFile));
+        let files = service.raw_files("my-api").expect("lists");
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].rel_path, "opencollection.yml");
     }
 
     #[test]
