@@ -13,19 +13,19 @@ use crate::report::{ExportAction, ExportNote, ExportReport};
 use crate::scrub::{scrub_yaml, strip_rocket_namespace};
 
 pub(crate) fn is_noise(rel_path: &str) -> bool {
-    if rel_path.eq_ignore_ascii_case("workspace.yml") {
+    if rel_path == "workspace.yml" {
         return true;
     }
     rel_path
         .split('/')
-        .any(|part| part.eq_ignore_ascii_case(".git") || part.eq_ignore_ascii_case("node_modules"))
+        .any(|part| part == ".git" || part == "node_modules")
 }
 
 /// The top-level directory of a Rocket-only file, which Bruno cannot read: `flows/` and
 /// any hidden directory such as `.rocket/` (contract snapshots).
 pub(crate) fn rocket_only_root(rel_path: &str) -> Option<&str> {
     let (first, _) = rel_path.split_once('/')?;
-    (first.eq_ignore_ascii_case("flows") || first.starts_with('.')).then_some(first)
+    (first == "flows" || first.starts_with('.')).then_some(first)
 }
 
 /// Removes saved request examples, which hold captured responses that may contain
@@ -58,26 +58,32 @@ fn is_yaml(rel_path: &str) -> bool {
     matches!(extension(rel_path), "yml" | "yaml")
 }
 
-/// True for a collection-relative path that the Bruno export without environments carries.
-/// The sync uses this one rule for its manifests and its apply, so it cannot drift from the
-/// export. It also refuses a leading slash and any `..` segment.
+/// True for a collection-relative path that the sync carries. It is the export rule (the
+/// Bruno export without environments) plus stricter checks: names are compared without case,
+/// a hidden segment is refused at any depth, and empty, `.`, `..`, `\` and `:` segments are
+/// refused, as is a leading slash. The export keeps its exact-case rule.
 pub fn is_synced_path(rel_path: &str) -> bool {
-    let odd = |part: &str| {
-        part.is_empty() || part.starts_with('.') || part.contains('\\') || part.contains(':')
-    };
-    // A hidden segment at any depth also covers `.`, `..` and `.git`.
-    if rel_path.starts_with('/') || rel_path.split('/').any(odd) {
+    if rel_path.starts_with('/') || rel_path.split('/').any(is_odd_segment) {
         return false;
     }
-    if is_noise(rel_path) || rocket_only_root(rel_path).is_some() {
+    if rel_path.eq_ignore_ascii_case("workspace.yml")
+        || rel_path
+            .split('/')
+            .any(|part| part.eq_ignore_ascii_case("node_modules"))
+    {
         return false;
     }
     if let Some((first, _)) = rel_path.split_once('/') {
-        if first.eq_ignore_ascii_case("environments") {
+        if first.eq_ignore_ascii_case("environments") || first.eq_ignore_ascii_case("flows") {
             return false;
         }
     }
     matches!(extension(rel_path), "yml" | "yaml" | "proto" | "js")
+}
+
+/// A segment the sync never accepts. A hidden name also covers `.`, `..` and `.git`.
+fn is_odd_segment(part: &str) -> bool {
+    part.is_empty() || part.starts_with('.') || part.contains('\\') || part.contains(':')
 }
 
 /// Records one `Preserved` note per file that has a `rok.` script.
@@ -195,9 +201,7 @@ pub fn bruno_zip(
         if !matches!(ext, "yml" | "yaml" | "proto" | "js") {
             continue;
         }
-        let in_env = rel
-            .split_once('/')
-            .is_some_and(|(first, _)| first.eq_ignore_ascii_case("environments"));
+        let in_env = rel.starts_with("environments/");
         if in_env && !include_environments {
             continue;
         }
@@ -453,6 +457,28 @@ mod tests {
         ];
         let (bytes, _) = bruno_zip(files, "a", true).expect("zip builds");
         assert_eq!(names(&bytes), vec!["a/protos/a.proto", "a/shared/util.js"]);
+    }
+
+    #[test]
+    fn bruno_zip_matches_special_folders_by_exact_case() {
+        let files = vec![
+            file("Flows/a.yml", "a: 1\n"),
+            file("FLOWS/b.yml", "a: 1\n"),
+            file("Node_Modules/c.yml", "a: 1\n"),
+            file("Environments/d.yml", "a: 1\n"),
+            file("Workspace.yml", "a: 1\n"),
+        ];
+        let (bytes, _) = bruno_zip(files, "a", false).expect("zip builds");
+        assert_eq!(
+            names(&bytes),
+            vec![
+                "a/Environments/d.yml",
+                "a/FLOWS/b.yml",
+                "a/Flows/a.yml",
+                "a/Node_Modules/c.yml",
+                "a/Workspace.yml",
+            ]
+        );
     }
 
     #[test]
