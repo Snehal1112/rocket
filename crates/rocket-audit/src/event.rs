@@ -95,6 +95,21 @@ pub enum AuditEventKind {
         collection: String,
         outcome: String,
     },
+    /// A contract check this node started ended. `device_id` is the short id, `contract` the
+    /// contract name. `outcome` is `answered`, `declined`, `busy` or `expired`. Never paths or
+    /// field values.
+    NetworkContractCheckSent {
+        device_id: String,
+        contract: String,
+        outcome: String,
+    },
+    /// A contract check a paired node started ended on this node. Same words as
+    /// `NetworkContractCheckSent`.
+    NetworkContractCheckReceived {
+        device_id: String,
+        contract: String,
+        outcome: String,
+    },
     /// A link was removed here (Unlink or the pairing was removed). The files stay. The fields
     /// are the short device id and the collection name, never paths or file contents.
     NetworkLinkRemoved {
@@ -122,6 +137,8 @@ impl AuditEventKind {
             Self::NetworkCollectionReceived { .. } => "network_collection_received",
             Self::NetworkSyncSent { .. } => "network_sync_sent",
             Self::NetworkSyncReceived { .. } => "network_sync_received",
+            Self::NetworkContractCheckSent { .. } => "network_contract_check_sent",
+            Self::NetworkContractCheckReceived { .. } => "network_contract_check_received",
             Self::NetworkLinkRemoved { .. } => "network_link_removed",
         }
     }
@@ -337,6 +354,27 @@ mod tests {
             let back: AuditEventKind = serde_json::from_value(value).expect("kind round trips");
             assert_eq!(back, kind);
         }
+    }
+
+    #[test]
+    fn network_contract_check_kinds_have_stable_tags() {
+        let sent = AuditEventKind::NetworkContractCheckSent {
+            device_id: "ABCD-EFGH".into(),
+            contract: "Orders API".into(),
+            outcome: "answered".into(),
+        };
+        let received = AuditEventKind::NetworkContractCheckReceived {
+            device_id: "ABCD-EFGH".into(),
+            contract: "Orders API".into(),
+            outcome: "declined".into(),
+        };
+        assert_eq!(sent.tag(), "network_contract_check_sent");
+        assert_eq!(received.tag(), "network_contract_check_received");
+        let value = serde_json::to_value(&sent).expect("json");
+        assert_eq!(value["kind"], "network_contract_check_sent");
+        assert_eq!(value["contract"], "Orders API");
+        let back: AuditEventKind = serde_json::from_value(value).expect("round trips");
+        assert_eq!(back, sent);
     }
 
     #[test]

@@ -398,7 +398,9 @@ impl NetworkService {
                         | PeerMessage::TransferResult { .. }
                         | PeerMessage::SyncOffer { .. }
                         | PeerMessage::SyncAbort { .. }
-                        | PeerMessage::SyncResult { .. }),
+                        | PeerMessage::SyncResult { .. }
+                        | PeerMessage::ContractCheckOffer { .. }
+                        | PeerMessage::ContractCheckResult { .. }),
                     ) => {
                         self.with_conn(id, |c| c.presence.on_pong());
                         self.deliver_transfer_frame(id, message);

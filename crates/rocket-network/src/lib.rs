@@ -21,7 +21,8 @@ pub mod wire;
 pub use device::DeviceId;
 pub use dialer::{keep_dialed_by, should_dial, DialHint};
 pub use events::{
-    ConflictView, NetworkEvent, SyncEvent, SyncFinish, SyncRole, SyncSummary, TransferEvent,
+    ConflictView, ContractCheckEvent, ContractCheckRowDto, NetworkEvent, SyncEvent, SyncFinish,
+    SyncRole, SyncSummary, TransferEvent,
 };
 pub use identity::{DeviceKeyMaterial, PeerIdentity};
 pub use link::{

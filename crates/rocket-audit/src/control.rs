@@ -43,6 +43,8 @@ pub static CONTROL_CATALOG: &[ControlEntry] = &[
             "network_collection_received",
             "network_sync_sent",
             "network_sync_received",
+            "network_contract_check_sent",
+            "network_contract_check_received",
         ],
     },
     ControlEntry {
@@ -224,5 +226,27 @@ mod tests {
                 .any(|c| c.framework == Framework::Soc2 && c.code == "CC6.1"),
             "network_link_removed missing from CC6.1"
         );
+    }
+
+    #[test]
+    fn the_contract_check_kinds_are_listed_in_the_catalog() {
+        for tag in [
+            "network_contract_check_sent",
+            "network_contract_check_received",
+        ] {
+            let controls = controls_for_kind(tag);
+            assert!(
+                controls
+                    .iter()
+                    .any(|c| c.framework == Framework::Soc2 && c.code == "CC6.7"),
+                "{tag} missing from CC6.7"
+            );
+            assert!(
+                !controls
+                    .iter()
+                    .any(|c| c.framework == Framework::Soc2 && c.code == "CC6.1"),
+                "{tag} must not be in CC6.1"
+            );
+        }
     }
 }

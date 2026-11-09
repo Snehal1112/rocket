@@ -4,6 +4,7 @@
 //! Do not rename them: the frontend listeners read these keys.
 //! `TransferEvent` and `SyncEvent` follow the same rule on their own channels.
 
+use crate::messages::ContractVerdict;
 use crate::planner::ConflictKind;
 use crate::transfer::{Direction, Outcome};
 use rocket_shared::published_event::PublishedEvent;
@@ -212,6 +213,52 @@ pub enum SyncEvent {
 impl PublishedEvent for SyncEvent {
     fn channel(&self) -> &'static str {
         "network-sync"
+    }
+
+    fn to_json(&self) -> Result<serde_json::Value, serde_json::Error> {
+        serde_json::to_value(self)
+    }
+
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
+
+/// One verdict row for the provider view. An IPC DTO, so its keys are camelCase.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContractCheckRowDto {
+    pub index: u32,
+    pub verdict: ContractVerdict,
+}
+
+/// Events about contract checks between nodes. Channel `network-contract-check`.
+///
+/// Same wire rule as `NetworkEvent`: camelCase tag, snake_case fields.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum ContractCheckEvent {
+    /// A paired node asked this node to check a contract change. The frontend asks the user.
+    OfferReceived {
+        check_id: String,
+        device_id: String,
+        contract: String,
+        change_count: u32,
+    },
+    /// The consumer answered. `outcome` is the snake_case `ContractCheckOutcome`.
+    ResultReceived {
+        check_id: String,
+        device_id: String,
+        outcome: String,
+        rows: Vec<ContractCheckRowDto>,
+    },
+    /// A check ran out of time.
+    Expired { check_id: String },
+}
+
+impl PublishedEvent for ContractCheckEvent {
+    fn channel(&self) -> &'static str {
+        "network-contract-check"
     }
 
     fn to_json(&self) -> Result<serde_json::Value, serde_json::Error> {
@@ -859,5 +906,99 @@ mod tests {
         assert!(event.as_any().downcast_ref::<SyncEvent>().is_some());
         assert!(event.as_any().downcast_ref::<TransferEvent>().is_none());
         assert!(event.as_any().downcast_ref::<NetworkEvent>().is_none());
+    }
+
+    fn contract_check_cases() -> Vec<(ContractCheckEvent, &'static [&'static str])> {
+        vec![
+            (
+                ContractCheckEvent::OfferReceived {
+                    check_id: "C".into(),
+                    device_id: "ID".into(),
+                    contract: "Orders API".into(),
+                    change_count: 3,
+                },
+                &["type", "check_id", "device_id", "contract", "change_count"][..],
+            ),
+            (
+                ContractCheckEvent::ResultReceived {
+                    check_id: "C".into(),
+                    device_id: "ID".into(),
+                    outcome: "answered".into(),
+                    rows: vec![ContractCheckRowDto {
+                        index: 0,
+                        verdict: ContractVerdict::NotUsed,
+                    }],
+                },
+                &["type", "check_id", "device_id", "outcome", "rows"][..],
+            ),
+            (
+                ContractCheckEvent::Expired {
+                    check_id: "C".into(),
+                },
+                &["type", "check_id"][..],
+            ),
+        ]
+    }
+
+    #[test]
+    fn contract_check_events_use_one_channel() {
+        for (event, _) in contract_check_cases() {
+            assert_eq!(event.channel(), "network-contract-check", "event {event:?}");
+            assert!(event.also_emit_on().is_empty());
+            assert!(event.written_collections().is_empty());
+        }
+    }
+
+    // Wire contract: tag is camelCase, fields stay snake_case. A rename here
+    // breaks the frontend listeners and needs its own decision.
+    #[test]
+    fn wire_contract_contract_check_events() {
+        for (event, expected) in contract_check_cases() {
+            let mut want: Vec<String> = expected.iter().map(|k| k.to_string()).collect();
+            want.sort();
+            let value = event.to_json().expect("serializes");
+            assert_eq!(value_keys(&value), want, "event {event:?}");
+        }
+    }
+
+    #[test]
+    fn wire_contract_contract_check_tags_are_camel_case() {
+        let tags: Vec<String> = contract_check_cases()
+            .iter()
+            .map(|(event, _)| {
+                event.to_json().expect("serializes")["type"]
+                    .as_str()
+                    .expect("tag")
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(tags, ["offerReceived", "resultReceived", "expired"]);
+    }
+
+    #[test]
+    fn wire_contract_contract_check_row_dto_is_camel_case() {
+        let event = ContractCheckEvent::ResultReceived {
+            check_id: "C".into(),
+            device_id: "ID".into(),
+            outcome: "answered".into(),
+            rows: vec![ContractCheckRowDto {
+                index: 2,
+                verdict: ContractVerdict::Break,
+            }],
+        };
+        let value = event.to_json().expect("serializes");
+        assert_eq!(value["rows"], json!([{"index": 2, "verdict": "break"}]));
+    }
+
+    #[test]
+    fn contract_check_events_are_not_other_events() {
+        let event: Box<dyn PublishedEvent> = Box::new(ContractCheckEvent::Expired {
+            check_id: "C".into(),
+        });
+        assert!(event
+            .as_any()
+            .downcast_ref::<ContractCheckEvent>()
+            .is_some());
+        assert!(event.as_any().downcast_ref::<SyncEvent>().is_none());
     }
 }

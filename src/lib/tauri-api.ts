@@ -2854,6 +2854,13 @@ export type AuditEventKind =
   | { kind: 'network_collection_received'; device_id: string; collection: string; outcome: string }
   | { kind: 'network_sync_sent'; device_id: string; collection: string; outcome: string }
   | { kind: 'network_sync_received'; device_id: string; collection: string; outcome: string }
+  | { kind: 'network_contract_check_sent'; device_id: string; contract: string; outcome: string }
+  | {
+      kind: 'network_contract_check_received';
+      device_id: string;
+      contract: string;
+      outcome: string;
+    }
   | { kind: 'network_link_removed'; device_id: string; collection: string };
 
 export interface SecurityAuditEvent {

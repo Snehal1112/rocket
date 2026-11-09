@@ -65,6 +65,10 @@ function summarize(event: SecurityAuditEvent): string {
       return `Sent sync changes for ${k.collection} to device ${shortDeviceId(k.device_id)}${outcomeSuffix(k.outcome)}`;
     case 'network_sync_received':
       return `Received sync changes for ${k.collection} from device ${shortDeviceId(k.device_id)}${outcomeSuffix(k.outcome)}`;
+    case 'network_contract_check_sent':
+      return `Checked contract ${k.contract} with device ${shortDeviceId(k.device_id)}${outcomeSuffix(k.outcome)}`;
+    case 'network_contract_check_received':
+      return `Contract ${k.contract} checked for device ${shortDeviceId(k.device_id)}${outcomeSuffix(k.outcome)}`;
     case 'network_link_removed':
       return `Unlinked collection ${k.collection} from device ${shortDeviceId(k.device_id)}`;
   }
