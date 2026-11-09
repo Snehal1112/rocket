@@ -707,6 +707,7 @@ async fn both_ends_of_a_linked_send_store_the_same_base_hash() {
 #[tokio::test]
 async fn the_first_send_base_leaves_out_what_the_sync_does_not_carry() {
     let rig = sync_rig();
+    rig.peers.add(dev(ANA), "Ana");
     rig.colls.add(ORDERS, base());
     let mut sent = base();
     sent.insert("environments/dev.yml".into(), b"name: dev\n".to_vec());
@@ -744,6 +745,86 @@ async fn a_first_send_zip_that_fails_the_strict_validator_is_not_linked() {
     }
     assert_eq!(rig.links.count(), 0);
     assert_eq!(rig.events.link_changes(), 0);
+}
+
+#[tokio::test]
+async fn a_first_send_link_needs_the_peer_still_paired() {
+    let rig = sync_rig();
+    rig.colls.add(ORDERS, base());
+    let zip = rooted_zip(ORDERS, &base());
+
+    let err = rig
+        .sync
+        .link_first_transfer(lid(5), dev(ANA), ORDERS, &zip)
+        .expect_err("not paired");
+
+    assert!(
+        matches!(&err, DomainError::InvalidInput(m) if m == "The sent collection cannot be linked.")
+    );
+    assert_eq!(rig.links.count(), 0, "no orphan link after an unpair");
+}
+
+#[tokio::test]
+async fn create_link_lets_only_one_of_two_racing_creates_win() {
+    let rig = sync_rig();
+    let record = super::sync_fakes::record(&lid(6), ANA, &base());
+    let files: Vec<(String, Vec<u8>)> = base().into_iter().collect();
+    let (a, b) = (rig.sync.clone(), rig.sync.clone());
+    let (ra, fa, rb, fb) = (record.clone(), files.clone(), record, files);
+    let one = std::thread::spawn(move || a.create_link(ra, fa));
+    let two = std::thread::spawn(move || b.create_link(rb, fb));
+    let results = [
+        one.join().expect("first thread"),
+        two.join().expect("second thread"),
+    ];
+    assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1);
+    assert!(results
+        .iter()
+        .any(|r| matches!(r, Err(DomainError::AlreadyExists(_)))));
+}
+
+fn refused_failed(sent: &[PeerMessage]) -> bool {
+    sent.iter().any(|m| {
+        matches!(
+            m,
+            PeerMessage::TransferAbort {
+                reason: rocket_network::AbortReason::Failed,
+                ..
+            }
+        )
+    })
+}
+
+#[tokio::test]
+async fn a_linked_offer_without_a_sync_service_is_refused() {
+    let rig = super::transfer_fakes::rig();
+    rig.peers.add(dev(ANA), "Ana");
+    let zip = rooted_zip(ORDERS, &base());
+
+    rig.svc
+        .on_frame(dev(ANA), collection_offer(&ptid(1), &zip, Some(&lid(4))));
+
+    wait_for("the refusal", || {
+        refused_failed(&rig.peers.sent_to(&dev(ANA)))
+    })
+    .await;
+    assert!(rig.events.all().is_empty(), "never shown");
+}
+
+#[tokio::test]
+async fn a_collection_offer_reusing_a_sync_payload_id_is_refused() {
+    let rig = sync_rig();
+    rig.peers.add(dev(ANA), "Ana");
+    let id = rig.sync.claim_transfer_for_test(dev(BEN));
+    let zip = rooted_zip(ORDERS, &base());
+
+    rig.push(ANA, collection_offer(&id, &zip, None));
+
+    wait_for("the refusal", || refused_failed(&rig.sent(ANA))).await;
+    assert!(rig.transfer_events.all().is_empty(), "never shown");
+    assert!(!rig
+        .transfer
+        .has_transfer(&rocket_network::TransferId::parse(&id).expect("an id")));
 }
 
 #[test]

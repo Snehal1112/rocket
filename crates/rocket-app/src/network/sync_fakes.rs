@@ -25,7 +25,7 @@ use super::frame_router::FrameRouter;
 use super::sync::{SyncDeps, SyncService};
 use super::sync_collections::plan_changes;
 use super::sync_payload::pack_zip;
-use super::sync_ports::{sha256_hex, FileChange, SyncCollectionPort, SyncFile};
+use super::sync_ports::{is_sync_entry, sha256_hex, FileChange, SyncCollectionPort, SyncFile};
 use super::test_support::identity;
 use super::transfer::{PeerSender, Timing, TransferDeps, TransferService};
 pub(crate) use super::transfer_fakes::wait_for;
@@ -546,7 +546,7 @@ impl FakeCollections {
         }
         let mut colls = locked(&self.colls);
         let c = colls.get_mut(collection).ok_or_else(missing)?;
-        if &FakeSyncCollections::manifest_of(&c.files)? != expected {
+        if &synced_manifest(&c.files)? != expected {
             return Err(DomainError::Conflict(
                 "The collection changed while the sync was running.".into(),
             ));
@@ -572,6 +572,15 @@ impl FakeCollections {
         }
         Ok(())
     }
+}
+
+/// The manifest of the files the sync carries, with the real port's filter (`is_sync_entry`).
+fn synced_manifest(files: &Files) -> DomainResult<Manifest> {
+    let mut manifest = Manifest::new();
+    for (path, bytes) in files.iter().filter(|(p, _)| is_sync_entry(p)) {
+        manifest.insert(path, &sha256_hex(bytes))?;
+    }
+    Ok(manifest)
 }
 
 impl SyncCollectionPort for FakeCollections {
@@ -608,7 +617,7 @@ impl SyncCollectionPort for FakeCollections {
             self.put(collection, &path, &bytes);
         }
         let colls = locked(&self.colls);
-        FakeSyncCollections::manifest_of(&colls.get(collection).ok_or_else(missing)?.files)
+        synced_manifest(&colls.get(collection).ok_or_else(missing)?.files)
     }
 
     fn export_files(&self, collection: &str, paths: &[String]) -> DomainResult<Vec<SyncFile>> {
@@ -1067,6 +1076,153 @@ impl SyncPair {
         }
         panic!("the linked sync did not reach the expected state");
     }
+}
+
+// ----- flow helpers shared by the Task 2 and Task 3 tests -----
+
+/// The link every flow test uses.
+pub(crate) const L: u8 = 1;
+
+pub(crate) fn base() -> Files {
+    files(&[
+        ("opencollection.yml", "name: orders\n"),
+        ("a.yml", "url: a\n"),
+        ("b.yml", "url: b\n"),
+    ])
+}
+
+pub(crate) fn with(f: &Files, path: &str, text: &str) -> Files {
+    let mut f = f.clone();
+    f.insert(path.to_string(), text.as_bytes().to_vec());
+    f
+}
+
+pub(crate) fn without(f: &Files, path: &str) -> Files {
+    let mut f = f.clone();
+    f.remove(path);
+    f
+}
+
+pub(crate) fn bh() -> String {
+    manifest_of(&base()).base_hash()
+}
+
+pub(crate) fn empty_plan() -> rocket_network::SyncPlanPayload {
+    rocket_network::SyncPlanPayload {
+        wanted: vec![],
+        deletes: vec![],
+        renames: vec![],
+        decisions: vec![],
+        sends: vec![],
+        new_base_hash: None,
+    }
+}
+
+pub(crate) fn request(wanted: &[&str]) -> rocket_network::SyncPlanPayload {
+    let mut p = empty_plan();
+    p.wanted = wanted.iter().map(|s| s.to_string()).collect();
+    p
+}
+
+/// A final plan for a starter that offered `offered`, and the files the starter has after it.
+/// The new base hash is the one the starter must reach.
+pub(crate) fn final_plan(
+    offered: &Files,
+    deletes: &[&str],
+    renames: &[(&str, &str)],
+    sends: &[(&str, &str)],
+) -> (rocket_network::SyncPlanPayload, Files) {
+    let mut p = empty_plan();
+    p.deletes = deletes.iter().map(|s| s.to_string()).collect();
+    p.renames = renames
+        .iter()
+        .map(|(from, to)| rocket_network::PlanRename {
+            from: from.to_string(),
+            to: to.to_string(),
+        })
+        .collect();
+    p.sends = sends
+        .iter()
+        .map(|(path, text)| rocket_network::PlanFile {
+            path: path.to_string(),
+            sha256: sha(text.as_bytes()),
+        })
+        .collect();
+    let mut after = offered.clone();
+    for d in deletes {
+        after.remove(*d);
+    }
+    for (from, to) in renames {
+        if let Some(bytes) = after.remove(*from) {
+            after.insert(to.to_string(), bytes);
+        }
+    }
+    for (path, text) in sends {
+        after.insert(path.to_string(), text.as_bytes().to_vec());
+    }
+    p.new_base_hash = Some(manifest_of(&after).base_hash());
+    (p, after)
+}
+
+/// Bo starts the sync of link `L`; the scripted Ana takes the manifest.
+pub(crate) async fn bo_starts(rig: &SyncRig) -> (rocket_network::SyncId, Offered, Vec<u8>) {
+    let sid = rig.sync.start(&lid(L)).await.expect("started");
+    let (offer, bytes) = take_payload(rig, ANA, SyncPayloadKind::Manifest, 0).await;
+    (sid, offer, bytes)
+}
+
+pub(crate) async fn ana_sends_plan(
+    rig: &SyncRig,
+    sid: &str,
+    n: u8,
+    plan: &rocket_network::SyncPlanPayload,
+) {
+    let bytes = plan.to_json().expect("json");
+    let offer = offered(sid, &lid(L), &bh(), SyncPayloadKind::Plan, &ptid(n), &bytes);
+    give_payload(rig, ANA, &offer, &bytes).await;
+}
+
+pub(crate) async fn ana_sends_files(rig: &SyncRig, sid: &str, n: u8, zip: &[u8]) {
+    let offer = offered(sid, &lid(L), &bh(), SyncPayloadKind::Files, &ptid(n), zip);
+    give_payload(rig, ANA, &offer, zip).await;
+}
+
+/// The scripted Ana starts a sync with Bo as the planner. Returns the sync id.
+pub(crate) async fn ana_starts(rig: &SyncRig, theirs: &Files) -> rocket_network::SyncId {
+    let sid = rocket_network::SyncId::random();
+    let bytes = manifest_of(theirs).to_json().expect("json");
+    let offer = offered(
+        sid.as_str(),
+        &lid(L),
+        &bh(),
+        SyncPayloadKind::Manifest,
+        &ptid(1),
+        &bytes,
+    );
+    give_payload(rig, ANA, &offer, &bytes).await;
+    sid
+}
+
+pub(crate) async fn wait_finished(rig: &SyncRig) -> (SyncFinish, Option<String>) {
+    wait_for("the finished event", || !rig.events.finished().is_empty()).await;
+    let (_, finish, message) = rig.events.finished().remove(0);
+    (finish, message)
+}
+
+pub(crate) async fn wait_phase(
+    rig: &SyncRig,
+    sid: &rocket_network::SyncId,
+    phase: super::sync::Phase,
+) {
+    wait_for("the phase", || rig.sync.phase_of(sid) == Some(phase)).await;
+}
+
+pub(crate) async fn wait_link(rig: &SyncRig, check: impl Fn(&LinkRecord) -> bool) -> LinkRecord {
+    wait_for("the link update", || {
+        rig.links.record(&lid(L)).is_some_and(|r| check(&r))
+    })
+    .await;
+    rig.links.record(&lid(L)).expect("the link")
 }
 
 #[cfg(test)]

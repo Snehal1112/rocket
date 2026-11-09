@@ -263,6 +263,9 @@ impl TransferService {
     ) -> Admit {
         let now = Self::now();
         let ttl = self.timing.offer_ttl;
+        // Read before the transfer lock, so the two service locks are never nested.
+        let sync = self.sync_service();
+        let id_taken = sync.as_ref().is_some_and(|s| s.holds_transfer(id));
         let mut guard = self.lock();
         let inner = &mut *guard;
         match inner.limits.admit_offer(from, id, now) {
@@ -270,8 +273,14 @@ impl TransferService {
             Admission::Refuse(reason) => return Admit::Refuse(reason),
             Admission::Admit => {}
         }
-        // The rate window already counted the offer. A bad link refuses it like a bad offer.
-        let Ok(link) = offered_link(frame) else {
+        // The rate window already counted the offer. A bad link refuses it like a bad offer,
+        // and so do a link this node cannot make (no sync service) and an id a sync payload
+        // already uses.
+        let link = match offered_link(frame) {
+            Ok(Some(_)) if sync.is_none() => Err(()),
+            other => other,
+        };
+        let Ok(link) = link.and_then(|l| if id_taken { Err(()) } else { Ok(l) }) else {
             inner.limits.release(id);
             return Admit::Refuse(AbortReason::Failed);
         };

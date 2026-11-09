@@ -11,13 +11,12 @@ mod pairing;
 mod service;
 mod status;
 mod sync;
-// The sessions of the next plan tasks use these; until then only tests call them.
-#[allow(dead_code)]
 mod sync_checks;
 pub mod sync_collections;
-#[allow(dead_code)]
 mod sync_payload;
+mod sync_planner;
 pub mod sync_ports;
+mod sync_starter;
 mod transfer;
 mod transfer_link;
 pub mod transfer_ports;
@@ -53,6 +52,9 @@ mod transfer_link_tests;
 #[cfg(test)]
 #[allow(dead_code, clippy::type_complexity)]
 pub(crate) mod sync_fakes;
+#[cfg(test)]
+#[path = "sync_run_tests.rs"]
+mod sync_run_tests;
 #[cfg(test)]
 #[path = "sync_tests.rs"]
 mod sync_tests;
