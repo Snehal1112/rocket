@@ -4473,17 +4473,21 @@ export interface SendStarted {
   notes: string[];
 }
 
-/** Resolves once the offer is on its way. */
+/**
+ * Resolves once the offer is on its way. `keepInSync` asks for a link to be made when the transfer
+ * completes.
+ */
 export const sendNetworkCollection = (
   deviceId: string,
   collection: string,
   includeEnvironments: boolean,
+  keepInSync: boolean,
 ): Promise<SendStarted> =>
   invoke<SendStarted>('network_send_collection', {
     deviceId,
     collection,
     includeEnvironments,
-    keepInSync: false,
+    keepInSync,
   });
 
 export const respondNetworkTransfer = (transferId: string, accept: boolean): Promise<void> =>
@@ -4496,3 +4500,138 @@ export const onNetworkTransfer = (
   handler: (event: NetworkTransferEvent) => void,
 ): Promise<UnlistenFn> =>
   listen<NetworkTransferEvent>('network-transfer', (e) => handler(e.payload));
+
+/** The wire value of `LinkState` in `rocket-network`. */
+export type LinkState = 'in_sync' | 'changes_waiting' | 'out_of_date' | 'broken';
+
+/** One link to a collection on a paired node (`LinkDto`). */
+export interface NetworkLink {
+  linkId: string;
+  deviceId: string;
+  displayName: string;
+  shortId: string;
+  collectionName: string;
+  state: LinkState;
+  /** RFC 3339. */
+  updatedAt: string;
+}
+
+export interface SyncStarted {
+  syncId: string;
+}
+
+export type SyncRole = 'planner' | 'starter';
+export type ConflictKind = 'both_changed' | 'delete_vs_edit' | 'both_added' | 'rename_vs_edit';
+export type SyncResolution = 'keep_mine' | 'keep_theirs' | 'keep_both';
+
+/** One answer for one conflict (`DecisionDto`). */
+export interface SyncDecision {
+  path: string;
+  resolution: SyncResolution;
+}
+
+/** Counts and marks of a planned sync. "Here" is the node that shows the dialog. */
+export interface SyncSummary {
+  addedHere: number;
+  changedHere: number;
+  deletedHere: number;
+  sentAdded: number;
+  sentChanged: number;
+  sentDeleted: number;
+  /** Paths of changed files that contain scripts. */
+  scriptsChanged: string[];
+  /** Paths of changed files that contain auth. */
+  authChanged: string[];
+}
+
+/** A path changed on both sides. A hash is null when that side has no file. */
+export interface ConflictView {
+  path: string;
+  kind: ConflictKind;
+  mineHash: string | null;
+  theirsHash: string | null;
+}
+
+/** How a sync ended. The values are the snake_case `SyncFinish` of `rocket-network`. */
+export type SyncFinish =
+  | 'applied'
+  | 'declined'
+  | 'expired'
+  | 'cancelled'
+  | 'failed'
+  | 'base_mismatch'
+  | 'link_missing'
+  | 'unconfirmed';
+
+/** The two versions of a conflicting file, as exported text. A side is null when it has no file. */
+export interface ConflictFiles {
+  mine: string | null;
+  theirs: string | null;
+}
+
+/** Channel `network-sync`. Fields are snake_case as sent. */
+export type NetworkSyncEvent =
+  | {
+      type: 'reviewReady';
+      sync_id: string;
+      link_id: string;
+      device_id: string;
+      short_id: string;
+      display_name: string;
+      collection_name: string;
+      summary: SyncSummary;
+      conflicts: ConflictView[];
+      role: SyncRole;
+    }
+  | {
+      type: 'confirmNeeded';
+      sync_id: string;
+      link_id: string;
+      device_id: string;
+      short_id: string;
+      display_name: string;
+      collection_name: string;
+      summary: SyncSummary;
+    }
+  | { type: 'progress'; sync_id: string; done_bytes: number; total_bytes: number }
+  | {
+      type: 'finished';
+      sync_id: string;
+      link_id: string;
+      display_name: string;
+      collection_name: string;
+      outcome: SyncFinish;
+      /** A fixed text from the local backend, else null. */
+      message: string | null;
+    }
+  | { type: 'linkChanged'; link_id: string };
+
+export const startNetworkSync = (linkId: string): Promise<SyncStarted> =>
+  invoke<SyncStarted>('network_sync_start', { linkId });
+
+/** The planner answers. Decisions are empty on a decline. */
+export const reviewNetworkSync = (
+  syncId: string,
+  accept: boolean,
+  decisions: SyncDecision[],
+): Promise<void> => invoke<void>('network_sync_review', { syncId, accept, decisions });
+
+/** The starter answers the confirm dialog. */
+export const confirmNetworkSync = (syncId: string, accept: boolean): Promise<void> =>
+  invoke<void>('network_sync_confirm', { syncId, accept });
+
+export const cancelNetworkSync = (syncId: string): Promise<void> =>
+  invoke<void>('network_sync_cancel', { syncId });
+
+export const listNetworkLinks = (): Promise<NetworkLink[]> =>
+  invoke<NetworkLink[]>('network_list_links');
+
+export const unlinkNetworkLink = (linkId: string): Promise<void> =>
+  invoke<void>('network_unlink', { linkId });
+
+/** Reads both versions of a conflicting file. Rejects when the sync no longer waits for an answer. */
+export const getNetworkSyncConflictFiles = (syncId: string, path: string): Promise<ConflictFiles> =>
+  invoke<ConflictFiles>('network_sync_conflict_files', { syncId, path });
+
+export const onNetworkSync = (handler: (event: NetworkSyncEvent) => void): Promise<UnlistenFn> =>
+  listen<NetworkSyncEvent>('network-sync', (e) => handler(e.payload));

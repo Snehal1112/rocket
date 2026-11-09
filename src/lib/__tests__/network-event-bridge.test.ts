@@ -22,6 +22,8 @@ const mocks = vi.hoisted(() => {
       onNetworkChanged: listener('changed'),
       onNetworkPairing: listener('pairing'),
       onNetworkTransfer: listener('transfer'),
+      onNetworkSync: listener('sync'),
+      listNetworkLinks: vi.fn(),
       getNetworkStatus: vi.fn(),
       listNetworkNodes: vi.fn(),
       requestNetworkPairing: vi.fn(),
@@ -40,7 +42,7 @@ async function mountBridge() {
   return view;
 }
 
-function emit(name: 'changed' | 'pairing' | 'transfer', payload: unknown): void {
+function emit(name: 'changed' | 'pairing' | 'transfer' | 'sync', payload: unknown): void {
   const handler = mocks.handlers[name];
   if (!handler) throw new Error(`no ${name} listener`);
   handler(payload);
@@ -69,6 +71,7 @@ describe('useNetworkEventBridge', () => {
     store().reset();
     mocks.api.getNetworkStatus.mockResolvedValue(makeStatus());
     mocks.api.listNetworkNodes.mockResolvedValue([makeNode()]);
+    mocks.api.listNetworkLinks.mockResolvedValue([]);
   });
 
   it('loads the status and the nodes once on mount', async () => {
@@ -78,6 +81,8 @@ describe('useNetworkEventBridge', () => {
     expect(mocks.api.onNetworkChanged).toHaveBeenCalledTimes(1);
     expect(mocks.api.onNetworkPairing).toHaveBeenCalledTimes(1);
     expect(mocks.api.onNetworkTransfer).toHaveBeenCalledTimes(1);
+    expect(mocks.api.onNetworkSync).toHaveBeenCalledTimes(1);
+    expect(mocks.api.listNetworkLinks).toHaveBeenCalledTimes(1);
   });
 
   it('nodesChanged reloads the nodes', async () => {
@@ -210,7 +215,7 @@ describe('useNetworkEventBridge', () => {
   it('ignores events after unmount and stops listening', async () => {
     const view = await mountBridge();
     view.unmount();
-    await waitFor(() => expect(mocks.unlisten).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(mocks.unlisten).toHaveBeenCalledTimes(4));
     emit('changed', { type: 'nodesChanged' });
     emit('pairing', incomingEvent());
     expect(mocks.api.listNetworkNodes).toHaveBeenCalledTimes(1);
@@ -268,6 +273,7 @@ describe('useNetworkEventBridge transfers', () => {
     store().reset();
     mocks.api.getNetworkStatus.mockResolvedValue(makeStatus());
     mocks.api.listNetworkNodes.mockResolvedValue([makeNode()]);
+    mocks.api.listNetworkLinks.mockResolvedValue([]);
   });
 
   it('adds one row for a repeated offer', async () => {
@@ -530,7 +536,7 @@ describe('useNetworkEventBridge transfers', () => {
   it('ignores transfer events after unmount', async () => {
     const view = await mountBridge();
     view.unmount();
-    await waitFor(() => expect(mocks.unlisten).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(mocks.unlisten).toHaveBeenCalledTimes(4));
     emit('transfer', offerEvent());
     emit('transfer', finishedEvent('completed'));
     expect(store().incomingTransfers).toEqual([]);
@@ -541,6 +547,23 @@ describe('useNetworkEventBridge transfers', () => {
     const late = createDeferred<() => void>();
     const lateUnlisten = vi.fn();
     mocks.api.onNetworkTransfer.mockImplementationOnce(() => late.promise);
+    const view = renderHook(() => useNetworkEventBridge());
+    view.unmount();
+    late.resolve(lateUnlisten);
+    await waitFor(() => expect(lateUnlisten).toHaveBeenCalledTimes(1));
+  });
+
+  it('ignores sync events after unmount', async () => {
+    const view = await mountBridge();
+    view.unmount();
+    emit('sync', { type: 'progress', sync_id: 's1', done_bytes: 1, total_bytes: 2 });
+    expect(store().syncProgress).toHaveLength(0);
+  });
+
+  it('stops a sync listener that finishes registering after unmount', async () => {
+    const late = createDeferred<() => void>();
+    const lateUnlisten = vi.fn();
+    mocks.api.onNetworkSync.mockImplementationOnce(() => late.promise);
     const view = renderHook(() => useNetworkEventBridge());
     view.unmount();
     late.resolve(lateUnlisten);

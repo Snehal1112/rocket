@@ -124,7 +124,7 @@ describe('CollectionNode Send to... entry', () => {
       expect(await screen.findByRole('dialog', { name: 'Send my-collection' })).toBeInTheDocument();
       await user.click(screen.getByRole('button', { name: 'Send' }));
       await waitFor(() =>
-        expect(tauriApi.sendNetworkCollection).toHaveBeenCalledWith('DEV1', 'my-collection', false),
+        expect(tauriApi.sendNetworkCollection).toHaveBeenCalledWith('DEV1', 'my-collection', false, false),
       );
     });
 
@@ -137,7 +137,7 @@ describe('CollectionNode Send to... entry', () => {
       await user.click(screen.getByRole('menuitem', { name: /Send to/ }));
       await user.click(await screen.findByRole('button', { name: 'Send' }));
       await waitFor(() =>
-        expect(tauriApi.sendNetworkCollection).toHaveBeenCalledWith('DEV1', name, false),
+        expect(tauriApi.sendNetworkCollection).toHaveBeenCalledWith('DEV1', name, false, false),
       );
     });
   });

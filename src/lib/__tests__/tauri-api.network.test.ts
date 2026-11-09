@@ -4,24 +4,32 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   addNetworkAddress,
   cancelNetworkPairing,
+  cancelNetworkSync,
   cancelNetworkTransfer,
+  confirmNetworkSync,
+  getNetworkSyncConflictFiles,
   getNetworkStatus,
   listNetworkAddresses,
   listNetworkBlocked,
+  listNetworkLinks,
   listNetworkNodes,
   markNetworkIntroSeen,
   onNetworkChanged,
   onNetworkPairing,
+  onNetworkSync,
   onNetworkTransfer,
   removeNetworkAddress,
   removeNetworkPaired,
   requestNetworkPairing,
   respondNetworkPairing,
   respondNetworkTransfer,
+  reviewNetworkSync,
   sendNetworkCollection,
   setNetworkProfile,
   setNetworkVisibility,
+  startNetworkSync,
   unblockNetworkDevice,
+  unlinkNetworkLink,
 } from '../tauri-api';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
@@ -124,7 +132,7 @@ describe('send a collection', () => {
       notes: ['Flows: skipped', 'Auth token: blanked'],
     };
     vi.mocked(invoke).mockResolvedValue(started);
-    await expect(sendNetworkCollection('DEV1', 'Orders "v2" café', true)).resolves.toEqual(started);
+    await expect(sendNetworkCollection('DEV1', 'Orders "v2" café', true, false)).resolves.toEqual(started);
     expect(invoke).toHaveBeenLastCalledWith('network_send_collection', {
       deviceId: 'DEV1',
       collection: 'Orders "v2" café',
@@ -146,7 +154,7 @@ describe('send a collection', () => {
 
   it('passes a rejection through unchanged', async () => {
     vi.mocked(invoke).mockRejectedValue('Invalid input: That node is offline.');
-    await expect(sendNetworkCollection('DEV1', 'Orders', false)).rejects.toBe(
+    await expect(sendNetworkCollection('DEV1', 'Orders', false, false)).rejects.toBe(
       'Invalid input: That node is offline.',
     );
   });
@@ -162,5 +170,91 @@ describe('send a collection', () => {
       payload: { type: 'progress', transfer_id: 't1' },
     });
     expect(handler).toHaveBeenCalledWith({ type: 'progress', transfer_id: 't1' });
+  });
+});
+
+describe('team network sync commands', () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(listen).mockReset();
+  });
+
+  it('sends keepInSync with the collection', async () => {
+    vi.mocked(invoke).mockResolvedValue({ transferId: 't1', notes: [] });
+    await sendNetworkCollection('DEV1', 'Orders', false, true);
+    expect(invoke).toHaveBeenLastCalledWith('network_send_collection', {
+      deviceId: 'DEV1',
+      collection: 'Orders',
+      includeEnvironments: false,
+      keepInSync: true,
+    });
+  });
+
+  it('starts a sync and returns its id', async () => {
+    vi.mocked(invoke).mockResolvedValue({ syncId: 's1' });
+    await expect(startNetworkSync('L1')).resolves.toEqual({ syncId: 's1' });
+    expect(invoke).toHaveBeenLastCalledWith('network_sync_start', { linkId: 'L1' });
+  });
+
+  it('sends the decisions of a review unchanged', async () => {
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    const decisions = [
+      { path: 'Orders "v2"/a.yml', resolution: 'keep_both' as const },
+      { path: 'b.yml', resolution: 'keep_mine' as const },
+    ];
+    await reviewNetworkSync('s1', true, decisions);
+    expect(invoke).toHaveBeenLastCalledWith('network_sync_review', {
+      syncId: 's1',
+      accept: true,
+      decisions,
+    });
+    await reviewNetworkSync('s1', false, []);
+    expect(invoke).toHaveBeenLastCalledWith('network_sync_review', {
+      syncId: 's1',
+      accept: false,
+      decisions: [],
+    });
+  });
+
+  it('confirms, cancels, lists and unlinks', async () => {
+    vi.mocked(invoke).mockResolvedValue(undefined);
+    await confirmNetworkSync('s1', true);
+    expect(invoke).toHaveBeenLastCalledWith('network_sync_confirm', { syncId: 's1', accept: true });
+    await cancelNetworkSync('s1');
+    expect(invoke).toHaveBeenLastCalledWith('network_sync_cancel', { syncId: 's1' });
+    await listNetworkLinks();
+    expect(invoke).toHaveBeenLastCalledWith('network_list_links');
+    await unlinkNetworkLink('L1');
+    expect(invoke).toHaveBeenLastCalledWith('network_unlink', { linkId: 'L1' });
+  });
+
+  it('reads the two versions of a conflict', async () => {
+    vi.mocked(invoke).mockResolvedValue({ mine: 'a', theirs: null });
+    await expect(getNetworkSyncConflictFiles('s1', 'a.yml')).resolves.toEqual({
+      mine: 'a',
+      theirs: null,
+    });
+    expect(invoke).toHaveBeenLastCalledWith('network_sync_conflict_files', {
+      syncId: 's1',
+      path: 'a.yml',
+    });
+  });
+
+  it('passes a rejected command through unchanged', async () => {
+    vi.mocked(invoke).mockRejectedValue('Another sync is already running for this link.');
+    await expect(startNetworkSync('L1')).rejects.toBe(
+      'Another sync is already running for this link.',
+    );
+  });
+
+  it('listens on network-sync and passes the payload', async () => {
+    const unlisten = vi.fn();
+    vi.mocked(listen).mockResolvedValue(unlisten);
+    const handler = vi.fn();
+    await expect(onNetworkSync(handler)).resolves.toBe(unlisten);
+    expect(listen).toHaveBeenCalledWith('network-sync', expect.any(Function));
+    const callback = vi.mocked(listen).mock.calls[0][1] as (e: { payload: unknown }) => void;
+    callback({ payload: { type: 'linkChanged', link_id: 'L1' } });
+    expect(handler).toHaveBeenCalledWith({ type: 'linkChanged', link_id: 'L1' });
   });
 });

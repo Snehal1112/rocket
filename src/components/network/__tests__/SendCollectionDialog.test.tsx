@@ -100,7 +100,7 @@ describe('SendCollectionDialog', () => {
     expect(box).not.toBeChecked();
     await userEvent.click(screen.getByRole('button', { name: 'Send' }));
     await waitFor(() =>
-      expect(mocks.api.sendNetworkCollection).toHaveBeenCalledWith('DEV1', 'Orders', false),
+      expect(mocks.api.sendNetworkCollection).toHaveBeenCalledWith('DEV1', 'Orders', false, false),
     );
   });
 
@@ -109,7 +109,7 @@ describe('SendCollectionDialog', () => {
     await userEvent.click(await screen.findByRole('checkbox', { name: 'Include environments' }));
     await userEvent.click(screen.getByRole('button', { name: 'Send' }));
     await waitFor(() =>
-      expect(mocks.api.sendNetworkCollection).toHaveBeenCalledWith('DEV1', 'Orders', true),
+      expect(mocks.api.sendNetworkCollection).toHaveBeenCalledWith('DEV1', 'Orders', true, false),
     );
   });
 
@@ -124,7 +124,7 @@ describe('SendCollectionDialog', () => {
     setup([ben], name);
     await userEvent.click(await screen.findByRole('button', { name: 'Send' }));
     await waitFor(() =>
-      expect(mocks.api.sendNetworkCollection).toHaveBeenCalledWith('DEV1', name, false),
+      expect(mocks.api.sendNetworkCollection).toHaveBeenCalledWith('DEV1', name, false, false),
     );
   });
 

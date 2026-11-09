@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { toast } from 'sonner';
 import { createListenerScope } from '@/lib/listen-scope';
+import { syncResultToastId, syncWaitingToastId } from '@/lib/network-sync-utils';
 import {
   PAIRING_FAILED_TOAST_ID,
   peerName,
@@ -10,9 +11,11 @@ import {
 import {
   type NetworkChangedEvent,
   type NetworkPairingEvent,
+  type NetworkSyncEvent,
   type NetworkTransferEvent,
   onNetworkChanged,
   onNetworkPairing,
+  onNetworkSync,
   onNetworkTransfer,
 } from '@/lib/tauri-api';
 import { useNetworkStore } from '@/stores/network-store';
@@ -211,8 +214,139 @@ export function handleNetworkTransfer(event: NetworkTransferEvent): void {
   }
 }
 
+type FinishedSync = Extract<NetworkSyncEvent, { type: 'finished' }>;
+
+// Fixed texts, or the local backend message where it has one. A missing row means the user
+// already knows. `declinedHere` and `cancelledHere` are true when the local user did it.
+function describeSyncOutcome(
+  event: FinishedSync,
+  declinedHere: boolean,
+  cancelledHere: boolean,
+): TransferMessage | null {
+  const name = peerName(event.display_name);
+  const backendText = event.message?.trim() || null;
+  switch (event.outcome) {
+    case 'applied':
+      // An empty plan ends applied with "Already in sync.".
+      return backendText
+        ? { kind: 'info', text: backendText }
+        : { kind: 'success', text: `Synced "${event.collection_name}" with ${name}.` };
+    case 'declined':
+      return declinedHere || cancelledHere
+        ? null
+        : { kind: 'info', text: `${name} declined the sync.` };
+    case 'expired':
+      return { kind: 'info', text: 'The request expired.' };
+    case 'cancelled':
+      return cancelledHere ? null : { kind: 'info', text: `${name} cancelled the sync.` };
+    case 'failed':
+      return { kind: 'error', text: backendText ?? 'Sync failed. Try again.' };
+    case 'base_mismatch':
+      return {
+        kind: 'error',
+        text:
+          backendText ??
+          'The two copies disagree about the last agreed version. Unlink and send the collection again.',
+      };
+    case 'link_missing':
+      return {
+        kind: 'error',
+        text:
+          backendText ??
+          'The link is missing on the other side. Unlink and send the collection again.',
+      };
+    case 'unconfirmed':
+      return {
+        kind: 'info',
+        text: backendText ?? 'Applied here, but the other node did not confirm.',
+      };
+    default:
+      // Any outcome added later stays quiet.
+      return null;
+  }
+}
+
+export function handleNetworkSync(event: NetworkSyncEvent): void {
+  const store = useNetworkStore.getState();
+  switch (event.type) {
+    case 'reviewReady':
+      store.addSyncReview({
+        syncId: event.sync_id,
+        linkId: event.link_id,
+        deviceId: event.device_id,
+        shortId: event.short_id,
+        displayName: event.display_name,
+        collectionName: event.collection_name,
+        summary: event.summary,
+        conflicts: event.conflicts,
+        kind: event.role === 'starter' ? 'confirm' : 'review',
+        answered: false,
+      });
+      return;
+    case 'confirmNeeded': {
+      const added = store.addSyncReview({
+        syncId: event.sync_id,
+        linkId: event.link_id,
+        deviceId: event.device_id,
+        shortId: event.short_id,
+        displayName: event.display_name,
+        collectionName: event.collection_name,
+        summary: event.summary,
+        conflicts: [],
+        kind: 'confirm',
+        answered: false,
+      });
+      // The confirm follows the user's own action, so it opens unless another sync dialog is open.
+      if (added && store.dialogSyncId === null) store.openSyncDialog(event.sync_id);
+      return;
+    }
+    case 'progress': {
+      store.setSyncProgress({
+        syncId: event.sync_id,
+        doneBytes: event.done_bytes,
+        totalBytes: event.total_bytes,
+      });
+      const name = store.advanceStartedSync(event.sync_id);
+      // Sonner merges options for a reused id, so the Cancel action stays on the toast.
+      if (name !== null) {
+        toast.info(`Syncing with ${peerName(name)}...`, {
+          id: syncWaitingToastId(event.sync_id),
+          duration: Number.POSITIVE_INFINITY,
+        });
+      }
+      return;
+    }
+    case 'finished': {
+      const id = event.sync_id;
+      // Read these before the finish, which forgets them.
+      const declinedHere = store.wasSyncDeclinedHere(id);
+      const cancelledHere = store.wasSyncCancelledHere(id);
+      const wasPending = store.syncReviews.some((r) => r.syncId === id && !r.answered);
+      // A repeated finish event changes nothing and shows nothing.
+      if (!store.finishSync(id)) return;
+      const message = describeSyncOutcome(event, declinedHere, cancelledHere);
+      // A review that ended before it was answered keeps its dialog, so the dialog can say why.
+      const keepDialog =
+        event.outcome === 'expired' ||
+        (wasPending && event.outcome === 'failed' && Boolean(event.message?.trim()));
+      if (store.dialogSyncId === id) {
+        if (!keepDialog) store.closeSyncDialog();
+        else if (event.outcome === 'failed' && message) store.endSyncDialog(message.text);
+      }
+      // The waiting toast with the Cancel action must not outlive the sync.
+      toast.dismiss(syncWaitingToastId(id));
+      if (message) toast[message.kind](message.text, { id: syncResultToastId(id) });
+      void store.refreshLinks();
+      return;
+    }
+    case 'linkChanged':
+      void store.refreshLinks();
+      return;
+  }
+}
+
 /**
- * Subscribes once, for the app's lifetime, to the three network channels and loads the first
+ * Subscribes once, for the app's lifetime, to the four network channels and loads the first
  * status and node list. Mount it once, next to the other event bridges.
  */
 export function useNetworkEventBridge(): void {
@@ -234,9 +368,15 @@ export function useNetworkEventBridge(): void {
         if (!scope.isDisposed()) handleNetworkTransfer(event);
       }),
     );
+    scope.keep(
+      onNetworkSync((event) => {
+        if (!scope.isDisposed()) handleNetworkSync(event);
+      }),
+    );
 
     void useNetworkStore.getState().refresh();
     void useNetworkStore.getState().refreshNodes();
+    void useNetworkStore.getState().refreshLinks();
 
     return () => scope.dispose();
   }, []);

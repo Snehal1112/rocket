@@ -1,5 +1,5 @@
-import type { NetworkNode, NetworkStatus } from '@/lib/tauri-api';
-import type { IncomingTransfer, PairingIncoming } from '@/stores/network-store';
+import type { NetworkLink, NetworkNode, NetworkStatus, SyncSummary } from '@/lib/tauri-api';
+import type { IncomingTransfer, PairingIncoming, SyncReviewEntry } from '@/stores/network-store';
 
 /** A running status with discovery and the listener available. */
 export function makeStatus(patch: Partial<NetworkStatus> = {}): NetworkStatus {
@@ -56,6 +56,52 @@ export function makeIncomingTransfer(patch: Partial<IncomingTransfer> = {}): Inc
     collectionName: 'Orders',
     sizeBytes: 2048,
     accepted: false,
+    ...patch,
+  };
+}
+
+/** A summary with a few counts and no marks. */
+export function makeSyncSummary(patch: Partial<SyncSummary> = {}): SyncSummary {
+  return {
+    addedHere: 1,
+    changedHere: 2,
+    deletedHere: 0,
+    sentAdded: 0,
+    sentChanged: 1,
+    sentDeleted: 0,
+    scriptsChanged: [],
+    authChanged: [],
+    ...patch,
+  };
+}
+
+/** A review the planner has not answered yet, with no conflicts. */
+export function makeSyncReview(patch: Partial<SyncReviewEntry> = {}): SyncReviewEntry {
+  return {
+    syncId: 's1',
+    linkId: 'L1',
+    deviceId: 'DEV1',
+    shortId: 'AAAA-1111',
+    displayName: 'Ben Ortiz',
+    collectionName: 'Orders',
+    summary: makeSyncSummary(),
+    conflicts: [],
+    kind: 'review',
+    answered: false,
+    ...patch,
+  };
+}
+
+/** A link in sync with an online node. */
+export function makeLink(patch: Partial<NetworkLink> = {}): NetworkLink {
+  return {
+    linkId: 'L1',
+    deviceId: 'DEV1',
+    displayName: 'Ben Ortiz',
+    shortId: 'AAAA-1111',
+    collectionName: 'Orders',
+    state: 'in_sync',
+    updatedAt: '2026-11-08T10:00:00Z',
     ...patch,
   };
 }

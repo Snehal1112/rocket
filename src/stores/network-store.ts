@@ -2,18 +2,23 @@ import { create } from 'zustand';
 import { errorText } from '@/lib/error-text';
 import {
   addNetworkAddress,
+  type ConflictView,
   getNetworkStatus,
+  listNetworkLinks,
   listNetworkNodes,
   markNetworkIntroSeen,
+  type NetworkLink,
   type NetworkNode,
   type NetworkStatus,
   removeNetworkAddress,
   removeNetworkPaired,
   requestNetworkPairing,
+  type SyncSummary,
   setNetworkProfile,
   setNetworkVisibility,
   type TransferDirection,
   unblockNetworkDevice,
+  unlinkNetworkLink,
 } from '@/lib/tauri-api';
 
 /** An incoming request lives this long. It matches the backend pairing lifetime. */
@@ -62,6 +67,28 @@ export interface ActiveTransfer {
   totalBytes: number;
 }
 
+/** A sync another node started (`review`, this node plans) or one this node started and must confirm (`confirm`). */
+export interface SyncReviewEntry {
+  syncId: string;
+  linkId: string;
+  deviceId: string;
+  shortId: string;
+  displayName: string;
+  collectionName: string;
+  summary: SyncSummary;
+  /** Empty for `confirm`. */
+  conflicts: ConflictView[];
+  kind: 'review' | 'confirm';
+  /** The local user answered. An answered entry no longer expires. */
+  answered: boolean;
+}
+
+export interface SyncProgress {
+  syncId: string;
+  doneBytes: number;
+  totalBytes: number;
+}
+
 export interface NetworkState {
   status: NetworkStatus | null;
   nodes: NetworkNode[];
@@ -78,6 +105,14 @@ export interface NetworkState {
   dialogTransferId: string | null;
   /** Why the open offer ended before it was answered, for example "The other node went offline." */
   dialogEndedText: string | null;
+  /** Syncs that wait for a local answer, or were answered and still run. */
+  syncReviews: SyncReviewEntry[];
+  syncProgress: SyncProgress[];
+  /** The sync whose dialog is open. */
+  dialogSyncId: string | null;
+  /** Why the open sync ended before it was answered. */
+  dialogSyncEndedText: string | null;
+  links: NetworkLink[];
   error: string | null;
   refresh: () => Promise<void>;
   refreshNodes: () => Promise<void>;
@@ -116,6 +151,38 @@ export interface NetworkState {
   /** Undoes `markCancelledHere` when the cancel call was refused. */
   unmarkCancelledHere: (transferId: string) => void;
   wasCancelledHere: (transferId: string) => boolean;
+  /** Returns false for a repeated or finished sync, so the caller shows nothing twice. */
+  addSyncReview: (entry: SyncReviewEntry) => boolean;
+  removeSyncReview: (syncId: string) => void;
+  markSyncAnswered: (syncId: string) => void;
+  setSyncProgress: (progress: SyncProgress) => void;
+  /** Removes the sync everywhere. It returns false when the sync had finished before. */
+  finishSync: (syncId: string) => boolean;
+  openSyncDialog: (syncId: string) => void;
+  closeSyncDialog: () => void;
+  endSyncDialog: (text: string) => void;
+  /** A sync started here. Returns false when it had already finished, so no waiting toast is shown. */
+  trackStartedSync: (
+    syncId: string,
+    info: { displayName: string; collectionName: string },
+  ) => boolean;
+  startedSync: (syncId: string) => { displayName: string; collectionName: string } | undefined;
+  /** Moves a started sync from waiting to running. It returns the node name the first time, else null. */
+  advanceStartedSync: (syncId: string) => string | null;
+  /** The local user pressed Cancel. The `cancelled` finish then shows no toast. */
+  markSyncCancelledHere: (syncId: string) => void;
+  /** Undoes `markSyncCancelledHere` when the cancel call was refused. */
+  unmarkSyncCancelledHere: (syncId: string) => void;
+  wasSyncCancelledHere: (syncId: string) => boolean;
+  /** The local user pressed Decline. The `declined` finish then shows no toast. */
+  markSyncDeclinedHere: (syncId: string) => void;
+  /** Undoes `markSyncDeclinedHere` when the answer was refused. */
+  unmarkSyncDeclinedHere: (syncId: string) => void;
+  wasSyncDeclinedHere: (syncId: string) => boolean;
+  /** Reloads the links. It never rejects and keeps the old list on a failure. */
+  refreshLinks: () => Promise<void>;
+  /** Rejects with the backend error and reloads the list either way. */
+  unlink: (linkId: string) => Promise<void>;
   reset: () => void;
 }
 
@@ -130,6 +197,11 @@ const initialState = {
   activeTransfers: [] as ActiveTransfer[],
   dialogTransferId: null as string | null,
   dialogEndedText: null as string | null,
+  syncReviews: [] as SyncReviewEntry[],
+  syncProgress: [] as SyncProgress[],
+  dialogSyncId: null as string | null,
+  dialogSyncEndedText: null as string | null,
+  links: [] as NetworkLink[],
   error: null as string | null,
 };
 
@@ -137,6 +209,7 @@ const initialState = {
 const expiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let statusSeq = 0;
 let nodesSeq = 0;
+let linksSeq = 0;
 
 // A transfer id shares the timer map with pairing ids, so its key has a prefix.
 const transferTimerKey = (transferId: string): string => `transfer:${transferId}`;
@@ -145,13 +218,28 @@ const transferTimerKey = (transferId: string): string => `transfer:${transferId}
 const FINISHED_MEMORY = 100;
 const finishedTransfers = new Set<string>();
 
-function rememberFinished(transferId: string): void {
-  finishedTransfers.add(transferId);
-  if (finishedTransfers.size > FINISHED_MEMORY) {
-    const oldest = finishedTransfers.values().next().value;
-    if (oldest !== undefined) finishedTransfers.delete(oldest);
+// Keeps the newest ids only, so the memory cannot grow without bound.
+function remember(set: Set<string>, id: string): void {
+  set.add(id);
+  if (set.size > FINISHED_MEMORY) {
+    const oldest = set.values().next().value;
+    if (oldest !== undefined) set.delete(oldest);
   }
 }
+
+// A sync id shares the timer map too.
+const syncTimerKey = (syncId: string): string => `sync:${syncId}`;
+const finishedSyncs = new Set<string>();
+
+// Syncs started here, by sync id. `running` turns true on the first progress.
+const startedSyncs = new Map<
+  string,
+  { displayName: string; collectionName: string; running: boolean }
+>();
+
+// Syncs the local user cancelled or declined. Their finish shows no toast about it.
+const cancelledSyncsHere = new Set<string>();
+const declinedSyncsHere = new Set<string>();
 
 // Sends started here, by transfer id. The phase only moves forward.
 type OutgoingPhase = 'waiting' | 'sending' | 'sent';
@@ -302,7 +390,7 @@ export const useNetworkStore = create<NetworkState>()((set, get) => ({
 
   finishTransfer(transferId) {
     if (finishedTransfers.has(transferId)) return false;
-    rememberFinished(transferId);
+    remember(finishedTransfers, transferId);
     clearExpiryTimer(transferTimerKey(transferId));
     outgoing.delete(transferId);
     cancelledHere.delete(transferId);
@@ -338,15 +426,132 @@ export const useNetworkStore = create<NetworkState>()((set, get) => ({
   },
   wasCancelledHere: (transferId) => cancelledHere.has(transferId),
 
+  addSyncReview(entry) {
+    if (finishedSyncs.has(entry.syncId)) return false;
+    // A repeated event neither adds a row nor extends the expiry.
+    if (get().syncReviews.some((r) => r.syncId === entry.syncId)) return false;
+    set({ syncReviews: [...get().syncReviews, entry] });
+    expiryTimers.set(
+      syncTimerKey(entry.syncId),
+      setTimeout(() => get().removeSyncReview(entry.syncId), INCOMING_TTL_MS),
+    );
+    return true;
+  },
+
+  removeSyncReview(syncId) {
+    clearExpiryTimer(syncTimerKey(syncId));
+    if (!get().syncReviews.some((r) => r.syncId === syncId)) return;
+    set({ syncReviews: get().syncReviews.filter((r) => r.syncId !== syncId) });
+  },
+
+  markSyncAnswered(syncId) {
+    if (!get().syncReviews.some((r) => r.syncId === syncId)) return;
+    // An answered sync can run longer than the request lifetime.
+    clearExpiryTimer(syncTimerKey(syncId));
+    set({
+      syncReviews: get().syncReviews.map((r) =>
+        r.syncId === syncId ? { ...r, answered: true } : r,
+      ),
+    });
+  },
+
+  setSyncProgress(progress) {
+    if (finishedSyncs.has(progress.syncId)) return;
+    const known = get().syncProgress.some((p) => p.syncId === progress.syncId);
+    set({
+      syncProgress: known
+        ? get().syncProgress.map((p) => (p.syncId === progress.syncId ? progress : p))
+        : [...get().syncProgress, progress],
+    });
+  },
+
+  finishSync(syncId) {
+    if (finishedSyncs.has(syncId)) return false;
+    remember(finishedSyncs, syncId);
+    clearExpiryTimer(syncTimerKey(syncId));
+    startedSyncs.delete(syncId);
+    cancelledSyncsHere.delete(syncId);
+    declinedSyncsHere.delete(syncId);
+    set({
+      syncReviews: get().syncReviews.filter((r) => r.syncId !== syncId),
+      syncProgress: get().syncProgress.filter((p) => p.syncId !== syncId),
+    });
+    return true;
+  },
+
+  openSyncDialog: (dialogSyncId) => set({ dialogSyncId, dialogSyncEndedText: null }),
+  closeSyncDialog: () => set({ dialogSyncId: null, dialogSyncEndedText: null }),
+  endSyncDialog: (dialogSyncEndedText) => set({ dialogSyncEndedText }),
+
+  trackStartedSync(syncId, info) {
+    if (finishedSyncs.has(syncId)) return false;
+    startedSyncs.set(syncId, { ...info, running: false });
+    return true;
+  },
+
+  startedSync(syncId) {
+    const entry = startedSyncs.get(syncId);
+    return entry
+      ? { displayName: entry.displayName, collectionName: entry.collectionName }
+      : undefined;
+  },
+
+  advanceStartedSync(syncId) {
+    const entry = startedSyncs.get(syncId);
+    if (!entry || entry.running) return null;
+    entry.running = true;
+    return entry.displayName;
+  },
+
+  markSyncCancelledHere: (syncId) => {
+    cancelledSyncsHere.add(syncId);
+  },
+  unmarkSyncCancelledHere: (syncId) => {
+    cancelledSyncsHere.delete(syncId);
+  },
+  wasSyncCancelledHere: (syncId) => cancelledSyncsHere.has(syncId),
+
+  markSyncDeclinedHere: (syncId) => {
+    declinedSyncsHere.add(syncId);
+  },
+  unmarkSyncDeclinedHere: (syncId) => {
+    declinedSyncsHere.delete(syncId);
+  },
+  wasSyncDeclinedHere: (syncId) => declinedSyncsHere.has(syncId),
+
+  async refreshLinks() {
+    const seq = ++linksSeq;
+    try {
+      const links = await listNetworkLinks();
+      if (seq === linksSeq) set({ links });
+    } catch {
+      // The old list stays. A failed load is not a panel error.
+    }
+  },
+
+  async unlink(linkId) {
+    try {
+      await unlinkNetworkLink(linkId);
+    } finally {
+      // The list is the truth, also after a failure. refreshLinks never throws.
+      await get().refreshLinks();
+    }
+  },
+
   reset() {
     for (const timer of expiryTimers.values()) clearTimeout(timer);
     expiryTimers.clear();
     finishedTransfers.clear();
     outgoing.clear();
     cancelledHere.clear();
+    finishedSyncs.clear();
+    startedSyncs.clear();
+    cancelledSyncsHere.clear();
+    declinedSyncsHere.clear();
     // Bumping the counters makes any request still in flight a no-op.
     statusSeq++;
     nodesSeq++;
+    linksSeq++;
     set({ ...initialState });
   },
 }));
