@@ -232,11 +232,11 @@ The largest item by volume. Do it crate by crate, smallest first, and turn on `#
 
 | ID | Crate | Items | Notes | Status |
 |---|---|---|---|---|
-| S-120a | rocket-history | about 25 | `HistoryEntry`, `Template`, both repository traits | open |
+| S-120a | rocket-history | about 25 | `HistoryEntry`, `HistoryRepository` | open |
 | S-120b | rocket-workspace | about 35 | `Workspace`, `WorkspaceRegistry`, `RepositoryId` methods | open |
 | S-120c | rocket-shared | 17 | 16 `pub mod` lines (one `//!`), `DomainResult` | open |
 | S-120d | rocket-environment, rocket-acp, rocket-grpc | 1, 2, 4 | `EnvironmentRepository`, `MAX_IDLE_TIMEOUT_SECS`, `summary()`, `call.rs:36,44,48`, `registry.rs:119` | open |
-| S-120e | rocket-collection | 9 or more | `BACKUP_FILE_VERSION`, `OpenApiBackupRepository`, `OpenApiLocalRepository`, `CollectionFileTxFactory`, `StatusEvent`, `transition`, `ContractRepository` | open |
+| S-120e | rocket-collection | 9 or more | `BACKUP_FILE_VERSION`, `OpenApiBackupRepository`, `OpenApiLocalRepository`, `CollectionFileTxFactory`, `StatusEvent`, `transition`, `ContractRepository`, `Template`, `TemplateRepository` | open |
 | S-120f | rocket-audit | about 22 | `actor.rs:17`, `chain.rs:16`, `control.rs:5,14,20,102`, `event.rs:9,13,57,74,88`, `profile.rs:8,19,27,51`, `publisher.rs:9,32,36`, `repository.rs:5` | open |
 | S-120g | rocket-export, rocket-flow | about 20, 2 | `ports.rs`, `report.rs`, `tree.rs`, `scripts.rs` fields and variants; `node.rs:101-102` | open |
 | S-120h | rocket-http | about 13 | `Cookie`, `CookieRepository`, `HttpResponse`, `RequestOptions`, `SpecFetcher`, `PhaseKind`, `LoadTestPhase`, `SuccessRule` | open |

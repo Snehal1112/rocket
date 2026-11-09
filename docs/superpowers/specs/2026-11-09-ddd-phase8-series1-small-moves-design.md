@@ -1,6 +1,6 @@
 # Phase 8 series 1: small moves and the glossary (D-83, D-84, D-87, D-88)
 
-Status: draft for review. Roadmap: `docs/roadmaps/ddd-roadmap.md` Phase 8. Decisions: `docs/engineering/ddd-decisions.md` (D-02 split by context, D-05 keep `rocket-acp`). Related: series 2 to 4 of Phase 8 (D-80, D-81, D-82, D-86, D-85) have their own specs.
+Status: approved 2026-11-09, implemented. Roadmap: `docs/roadmaps/ddd-roadmap.md` Phase 8. Decisions: `docs/engineering/ddd-decisions.md` (D-02 split by context, D-05 keep `rocket-acp`). Related: series 2 to 4 of Phase 8 (D-80, D-81, D-82, D-86, D-85) have their own specs.
 
 ## Goal
 
