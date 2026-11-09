@@ -37,8 +37,8 @@ fn write_error(err: io::Error) -> DomainError {
 
 /// Refuses a path that either the file rule or the manifest rule rejects.
 fn check_path(path: &str) -> DomainResult<()> {
-    validate_rel_path(path)?;
-    if !path_is_valid(path) {
+    // The file rule quotes the path in its message, so its text is replaced.
+    if validate_rel_path(path).is_err() || !path_is_valid(path) {
         return Err(DomainError::InvalidInput(
             "A base path is not valid.".to_string(),
         ));
@@ -147,8 +147,10 @@ impl FsLinkRepo {
         let stub = broken_stub(id, &bytes);
         let yaml = serde_yaml::to_string(&stub)
             .map_err(|err| DomainError::Serialization(err.to_string()))?;
-        atomic_write(&path, yaml.as_bytes()).map_err(write_error)?;
         *lock_ignore_poison(&self.quarantined) = Some(RECORD_FILE.to_string());
+        if let Err(err) = atomic_write(&path, yaml.as_bytes()) {
+            tracing::warn!(link = %id.as_str(), kind = ?err.kind(), "broken link stub was not saved");
+        }
         tracing::warn!(link = %id.as_str(), "link file was damaged and has been set aside");
         Ok(Some(stub))
     }
@@ -173,8 +175,12 @@ impl LinkRepository for FsLinkRepo {
             let Ok(id) = LinkId::parse(&name) else {
                 continue;
             };
-            if let Some(record) = self.read_record(&id)? {
-                records.push(record);
+            match self.read_record(&id) {
+                Ok(Some(record)) => records.push(record),
+                Ok(None) => {}
+                Err(_) => {
+                    tracing::warn!(link = %id.as_str(), "link could not be read and was skipped");
+                }
             }
         }
         records.sort_by(|a, b| a.link_id.as_str().cmp(b.link_id.as_str()));
@@ -186,6 +192,9 @@ impl LinkRepository for FsLinkRepo {
         self.read_record(id)
     }
 
+    // Order: validate, write the base copies, write link.yml, then prune. A crash in between
+    // leaves old copies that no longer match the record, which read as missing, and
+    // unreferenced copies, which the next save prunes.
     fn save(&self, record: &LinkRecord, base_files: &[(String, Vec<u8>)]) -> DomainResult<()> {
         // Validate everything before the first write, so the save is all or nothing.
         let mut targets = Vec::with_capacity(base_files.len());
@@ -205,18 +214,24 @@ impl LinkRepository for FsLinkRepo {
         let folder = self.folder(&record.link_id);
         let base_root = folder.join("base");
 
-        // A stale copy that differs from a new one only by case would be overwritten by it on a
-        // case-insensitive disk and then pruned, so it goes first.
+        // A stale copy that clashes with a new one goes first: one that differs only by case
+        // (it would be overwritten and then pruned on a case-insensitive disk) or one that is
+        // a file where the new path needs a folder, or the reverse.
         let mut stored = Vec::new();
         walk_files(&base_root, "", &mut stored);
         for stale in stored.iter().filter(|p| record.base.get(p).is_none()) {
-            let collides = base_files
-                .iter()
-                .any(|(path, _)| path.eq_ignore_ascii_case(stale));
+            let stale_lower = stale.to_ascii_lowercase();
+            let collides = base_files.iter().any(|(path, _)| {
+                let new_lower = path.to_ascii_lowercase();
+                new_lower == stale_lower
+                    || new_lower.starts_with(&format!("{stale_lower}/"))
+                    || stale_lower.starts_with(&format!("{new_lower}/"))
+            });
             if collides {
                 let _ = fs::remove_file(self.base_path(&record.link_id, stale)?);
             }
         }
+        remove_empty_dirs(&base_root);
 
         for (target, (_, bytes)) in targets.iter().zip(base_files) {
             atomic_write(target, bytes).map_err(write_error)?;
@@ -503,6 +518,10 @@ mod tests {
             assert!(matches!(err, DomainError::InvalidInput(_)), "{bad}");
             let read = repo.read_base_file(&id, bad).expect_err("refused");
             assert!(matches!(read, DomainError::InvalidInput(_)), "{bad}");
+            if !bad.is_empty() {
+                assert!(!err.to_string().contains(bad), "save quotes {bad}");
+                assert!(!read.to_string().contains(bad), "read quotes {bad}");
+            }
         }
         // Only the links folder may exist next to the temp root contents.
         let names: Vec<String> = std::fs::read_dir(dir.path())
@@ -541,5 +560,51 @@ mod tests {
             repo.read_base_file(&id, "api.yml").expect("reads"),
             Some(b"two\n".to_vec())
         );
+    }
+
+    #[test]
+    fn a_path_that_turns_from_a_file_into_a_folder_can_be_saved() {
+        let (_dir, repo) = repo();
+        let id = LinkId::random();
+        let first: [(&str, &[u8]); 1] = [("users", b"file\n")];
+        repo.save(&record(&id, &first), &owned(&first))
+            .expect("saves");
+        let second: [(&str, &[u8]); 1] = [("users/a.yml", b"a\n")];
+        repo.save(&record(&id, &second), &owned(&second))
+            .expect("saves after the flip");
+        assert_eq!(
+            repo.read_base_file(&id, "users/a.yml").expect("reads"),
+            Some(b"a\n".to_vec())
+        );
+    }
+
+    #[test]
+    fn a_path_that_turns_from_a_folder_into_a_file_can_be_saved() {
+        let (_dir, repo) = repo();
+        let id = LinkId::random();
+        let first: [(&str, &[u8]); 1] = [("users/a.yml", b"a\n")];
+        repo.save(&record(&id, &first), &owned(&first))
+            .expect("saves");
+        let second: [(&str, &[u8]); 1] = [("users", b"file\n")];
+        repo.save(&record(&id, &second), &owned(&second))
+            .expect("saves after the flip");
+        assert_eq!(
+            repo.read_base_file(&id, "users").expect("reads"),
+            Some(b"file\n".to_vec())
+        );
+    }
+
+    #[test]
+    fn an_unreadable_link_does_not_fail_the_list() {
+        let (dir, repo) = repo();
+        let good = LinkId::random();
+        let files: [(&str, &[u8]); 1] = [("a.yml", b"a: 1\n")];
+        let rec = record(&good, &files);
+        repo.save(&rec, &owned(&files)).expect("saves");
+        let bad = LinkId::random();
+        // A folder where the file should be makes the read fail with a non-NotFound error.
+        std::fs::create_dir_all(dir.path().join("links").join(bad.as_str()).join("link.yml"))
+            .expect("mkdir");
+        assert_eq!(repo.list().expect("lists"), vec![rec]);
     }
 }
