@@ -163,13 +163,19 @@ pub async fn network_sync_cancel(
 
 /// The two versions of one conflicted file, for the review dialog.
 #[tauri::command]
-pub fn network_sync_conflict_files(
+pub async fn network_sync_conflict_files(
     sync_id: String,
     path: String,
     svc: State<'_, Arc<SyncService>>,
 ) -> Result<ConflictFilesDto, DomainError> {
     let id = parse_sync_id(&sync_id)?;
-    Ok(conflict_files_dto_from(svc.conflict_files(&id, &path)?))
+    let svc = Arc::clone(&*svc);
+    let files = tauri::async_runtime::spawn_blocking(move || svc.conflict_files(&id, &path))
+        .await
+        .map_err(|_| {
+            DomainError::Internal("The conflict files could not be read.".to_string())
+        })??;
+    Ok(conflict_files_dto_from(files))
 }
 
 /// Every link of this node. The export runs once per link, so it goes to a worker thread.

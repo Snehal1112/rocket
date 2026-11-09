@@ -129,6 +129,7 @@ describe('send a collection', () => {
       deviceId: 'DEV1',
       collection: 'Orders "v2" café',
       includeEnvironments: true,
+      keepInSync: false,
     });
   });
 
