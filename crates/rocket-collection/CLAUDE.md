@@ -62,6 +62,7 @@ All structs use `#[serde(rename_all = "camelCase")]` for JSON serialization. Opt
 - **Serde backward compat:** New optional fields on `Request` must have `#[serde(default)]` so old JSON files without those fields still deserialize correctly.
 - **`request_count()`** on `Folder` is recursive; on `Collection` it delegates to `root`.
 - **`find_request` / `find_folder`** on `Folder` are non-recursive — they search the current level only. Use `subfolder_names()` to get all folder names at current level.
+- **`Folder::dir_or_name()`** returns the on-disk directory name, falling back to the display name. `rocket-acp`'s `proposal_rules.rs` uses it. `rocket-collection` must not depend on `rocket-acp`.
 - **`CollectionItem` serde tag:** Uses `#[serde(tag = "type")]` with values `"request"`, `"folder"`, `"graphql"`, `"grpc"`, `"opaque"`. The `type` field appears in serialized JSON.
 - **`OpaqueProtocolItem.raw`** holds a `serde_yaml::Value` for lossless roundtrip of items without a typed variant — do not parse or transform it.
 - **`CollectionSummary.ref_type`** defaults to `"embedded"`; `"external"` is set by the workspace layer for collections referenced by path rather than owned.
@@ -145,7 +146,6 @@ The trait is **synchronous** (no `async`). Despite `async-trait` being in `Cargo
 ### Snapshot helpers (`snapshot.rs`)
 - `snapshot_path(requested_path, saved_file_name)` rebuilds the snapshot path after a save (the saved file name replaces the last component).
 - `walk_folder(folder, prefix, out)` collects `(path, request)` pairs of a folder tree. It takes HTTP requests only: GraphQL, WebSocket, gRPC and opaque items are skipped, as are requests without a `file_name` and folders without a `dir_name`.
-- `Folder::dir_or_name()` returns the on-disk directory name, falling back to the display name. `rocket-acp`'s `proposal_rules.rs` uses it. `rocket-collection` must not depend on `rocket-acp`.
 
 ### Scope and version rules
 - `ContractScope::covers(request_path)`: a folder scope covers whole path components only (`auth` does not cover `authz/x.yml`), a request scope covers its own path, a collection scope covers every path.

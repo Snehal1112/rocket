@@ -1,9 +1,9 @@
-//! Collection trust: the effective capabilities of a collection, and the one write path
-//! for grants.
+//! Collection trust: the service for the one write path for grants.
 //!
 //! A collection file only requests elevated capabilities. The trust store holds what the
-//! user allowed on this computer. Consumers call `effective_capabilities` and never read
-//! the raw request fields.
+//! user allowed on this computer. The free function `effective_capabilities` lives in
+//! `rocket_collection::trust`, and this module holds the service (locks, events).
+//! Consumers call `effective_capabilities` and never read the raw request fields.
 
 use crate::collection_lock::with_collection_lock;
 use std::sync::Arc;
