@@ -136,6 +136,15 @@ The trait is **synchronous** (no `async`). Despite `async-trait` being in `Cargo
 ### State machine (`state_machine.rs`)
 - `transition(current: &ContractStatus, event: &StatusEvent) -> Result<ContractStatus, InvalidTransition>`
 - Pure function — no I/O. Call from `ContractService` (in `rocket-app`) when handling lifecycle commands.
+- `apply_transition(status, event) -> ContractResult<ContractStatus>` runs `transition` and maps a rejected event to `ContractError::Internal` that names the status and the event.
+
+### Builders (`builders.rs`)
+- `NewContract` (what a person enters) with `into_contract()`, and `ContractEdit` (the editable fields) with `apply_to(existing)`. Both are pure and re-exported as `rocket_collection::contract::{NewContract, ContractEdit}`. `rocket-app` does not re-export them.
+- `ContractService` still sets the final id, timestamps, document paths and `endpoint_count`.
+
+### Snapshot helpers (`snapshot.rs`)
+- `snapshot_path(requested_path, saved_file_name)` rebuilds the snapshot path after a save (the saved file name replaces the last component).
+- `walk_folder(folder, prefix, out)` collects `(path, request)` pairs of a folder tree and skips gRPC items.
 
 ### Scope and version rules
 - `ContractScope::covers(request_path)`: a folder scope covers whole path components only (`auth` does not cover `authz/x.yml`), a request scope covers its own path, a collection scope covers every path.

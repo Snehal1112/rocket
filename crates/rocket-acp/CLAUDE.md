@@ -39,7 +39,7 @@ cargo test -p rocket-acp -j4
 | `mcp_server_spec.rs` | `McpServerSpec` |
 | `proposal.rs` | `AgentProposal`, `ProposalStatus`, `ProposedChange`, `ProposedRequest`, `RequestPatch`, `FolderSettingsPatch`, `ProposedVariable`, `ScriptPhase`: pure proposal data, applied by `rocket-app`'s `ProposalService` |
 | `mode.rs` | `AssistantMode` (`Ask`, `Edit`, `Agent`; ordered `Ask < Edit < Agent`, default `Ask`, serde lowercase) with `label()` and `summary()`. The live session mode. `rocket-app`'s `McpToolService` gates tools by it. |
-| `conversation.rs` | Stored assistant conversations: `ConversationRecord`, `ConversationSummary`, `StoredMessage`, caps (`MAX_CONVERSATIONS`, `MAX_MESSAGES`, `MAX_MESSAGE_TEXT_BYTES`), `validate_conversation_id` (lowercase UUID) and the `ConversationRepository` trait. Persisted as snake_case YAML by `rocket-infra`; see `docs/features/assistant-conversations.md`. Its `ConversationMode` is the mode saved in a file; it has the same variants as `AssistantMode` (see `docs/engineering/glossary.md`). |
+| `conversation.rs` | Stored assistant conversations: `ConversationRecord`, `ConversationSummary`, `StoredMessage`, caps (`MAX_CONVERSATIONS`, `MAX_MESSAGES`, `MAX_MESSAGE_TEXT_BYTES`, `MAX_INPUT_TEXT_BYTES`), the input bound helpers `first_kept_index` and `text_bytes`, `validate_conversation_id` (lowercase UUID) and the `ConversationRepository` trait. Persisted as snake_case YAML by `rocket-infra`; see `docs/features/assistant-conversations.md`. `ConversationRecord.mode` is an `AssistantMode` from `mode.rs` (there is no separate conversation mode type). |
 
 ### Key Design Points
 

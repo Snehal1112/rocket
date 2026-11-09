@@ -43,7 +43,7 @@ Rule: use `Header` for HTTP headers. Do not add another pair type; reuse an exis
 
 | Term | Other names | Reason | Rename |
 |---|---|---|---|
-| `AssistantMode` | `ConversationMode` (`rocket-acp/src/conversation.rs`) | `AssistantMode` (`rocket-acp/src/mode.rs`) is the live session mode: Ask, Edit or Agent. `ConversationMode` is the mode saved in a conversation file. They have the same variants and the same serde shape. `ConversationMode` exists because `rocket-acp` could not see `AssistantMode` when it was in `rocket-app`. D-82 (Phase 8 series 2) owns merging them. | no |
+| `AssistantMode` | none | `AssistantMode` (`rocket-acp/src/mode.rs`) is the session mode: Ask, Edit or Agent. It is also the mode saved in a conversation file (`ConversationRecord.mode`). The old `ConversationMode` copy was merged into it (D-82, 2026-11-09). | no |
 
 ## Saved request blueprint
 
