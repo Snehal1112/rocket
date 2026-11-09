@@ -41,6 +41,15 @@ CollectionSummary         — lightweight listing type (no full tree)
 
 All structs use `#[serde(rename_all = "camelCase")]` for JSON serialization. Optional fields use `#[serde(default, skip_serializing_if = ...)]` to maintain backward compatibility with older saved files.
 
+## Templates (`template.rs`, `template_repository.rs`)
+
+| Type | Description |
+|---|---|
+| `Template` | A saved request blueprint: name, `HttpMethod`, URL, headers, and optional body. Not part of any collection. |
+| `TemplateRepository` | Trait for CRUD on `Template` records (`list`, `get`, `save`, `delete`). Synchronous and `Send + Sync`. `rocket-app`'s `TemplateService` receives it as `Box<dyn TemplateRepository>`. |
+
+`Template` is keyed by `name` (a `String`), not a UUID. The repository `get` and `delete` methods take `&str` names. `Template.method` is the typed `HttpMethod` from `rocket-shared`. The concrete repositories (`FsTemplateRepo`, `SharedPathTemplateRepo`) live in `rocket-infra`.
+
 ## Events
 
 `events.rs` defines `CollectionEvent` (17 variants: collection, request, folder and variable events plus the file watcher events). It implements `PublishedEvent` and overrides `written_collections()`, which the echo guard reads: `TauriEventBus` passes each event to `RecentWrites::record`. Its `wire_contract_*` tests pin the JSON keys. `FileChangeKind` (the file watcher change kind) is defined in the same file and re-exported as `rocket_collection::FileChangeKind`. `rocket-import` has its own unrelated `FileChangeKind` (`Put`, `Delete`).

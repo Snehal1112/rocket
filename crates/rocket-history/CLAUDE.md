@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 # rocket-history
 
-Domain crate for request execution history and reusable request templates. It defines the domain types and repository traits only; no I/O or filesystem logic lives here.
+Domain crate for request execution history only. Saved request templates live in `rocket-collection`. It defines the domain types and repository traits only; no I/O or filesystem logic lives here.
 
 ## Commands
 
@@ -26,21 +26,15 @@ cargo check -p rocket-history
 | `HistoryEntry` | A single recorded HTTP execution: method, URL, status, duration, response size, timestamp, and optional collection/request name. |
 | `HistoryEvent` | `events.rs`. `HistoryCleared`, published on channel `history-changed`. Implements `PublishedEvent`. |
 | `HistoryFilter` | Optional filter criteria (method, URL substring, status range) passed to `HistoryRepository::search`. |
-| `Template` | A saved request template: name, `HttpMethod`, URL, headers, and optional body. Keyed by name, not UUID. |
 | `HistoryRepository` | Trait for persisting and querying `HistoryEntry` records (`list`, `get`, `save`, `clear`, `search`). |
-| `TemplateRepository` | Trait for CRUD on `Template` records (`list`, `get`, `save`, `delete`). |
 
 ## Key Patterns
 
-- Both repository traits are synchronous and `Send + Sync`, allowing `Box<dyn Trait>` use in service structs.
+- `HistoryRepository` is synchronous and `Send + Sync`, allowing `Box<dyn Trait>` use in service structs.
 - All methods return `DomainResult<T>` from `rocket-shared`.
 - All structs derive `serde::{Serialize, Deserialize}` with `#[serde(rename_all = "camelCase")]` to match the frontend JSON convention.
 - `HistoryEntry::new` generates a UUID `id` and captures `Utc::now()` at construction; use `.with_collection()` to attach collection metadata.
-- `Template` is keyed by `name` (a `String`), not a UUID — the repository `get` and `delete` methods accept `&str` names.
-
-### Type asymmetry: `method` field
-
-`HistoryEntry.method` is a plain `String` (e.g. `"GET"`), while `Template.method` is the typed `HttpMethod` enum from `rocket-shared`. Keep this distinction in mind when constructing or matching on entries vs templates.
+- `HistoryEntry.method` is a plain `String` (e.g. `"GET"`), not the typed `HttpMethod` enum from `rocket-shared`.
 
 ### `HistoryFilter` default
 
@@ -48,7 +42,7 @@ cargo check -p rocket-history
 
 ## Workspace Relationships
 
-- Depends only on `rocket-shared` (for `DomainResult`, `HttpMethod`, `Header`, `Body`).
+- Depends only on `rocket-shared` (for `DomainResult`, `RunSource` and `PublishedEvent`).
 - Concrete filesystem implementations live in `rocket-infra`.
-- `rocket-app` services receive `Box<dyn HistoryRepository>` and `Box<dyn TemplateRepository>` via constructor injection.
+- `rocket-app` services receive `Box<dyn HistoryRepository>` via constructor injection.
 - The Tauri shell in `src-tauri` wires the `rocket-infra` implementations to these traits at startup.

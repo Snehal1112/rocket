@@ -27,6 +27,7 @@ Pointers to the feature and engineering docs. Open the one that matches the area
 ## Engineering
 
 - `docs/engineering/ddd-decisions.md` for the DDD rulings (mixed crates, `rocket-app` size, events direction, domain model depth, assistant naming).
+- `docs/engineering/glossary.md` for the preferred name when a concept has several (run summaries, variables, key-value rows, acp versus assistant, assistant mode, templates).
 - `docs/engineering/benchmarks.md` for the Rocket vs Bruno vs Postman benchmark (method, per-run numbers, findings, how to re-run).
 - `docs/engineering/subagents.md` for which subagent type and model to use, the cost model and the limits seen in practice.
 
