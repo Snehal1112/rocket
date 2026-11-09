@@ -1,5 +1,5 @@
 use rocket_app::TemplateService;
-use rocket_history::Template;
+use rocket_collection::Template;
 use rocket_shared::error::DomainError;
 use tauri::State;
 

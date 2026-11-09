@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use crate::atomic_write;
 use crate::yaml_io::{delete_if_exists, read_dir_yaml};
-use rocket_history::{Template, TemplateRepository};
+use rocket_collection::{Template, TemplateRepository};
 use rocket_shared::error::{DomainError, DomainResult};
 
 pub struct FsTemplateRepo {

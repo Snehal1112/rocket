@@ -4,6 +4,7 @@ pub mod agent_config;
 pub mod conversation;
 mod events;
 pub mod mcp_server_spec;
+mod mode;
 mod options;
 pub mod prompt;
 pub mod proposal;
@@ -25,6 +26,7 @@ pub use conversation::{
 };
 pub use events::AcpEvent;
 pub use mcp_server_spec::McpServerSpec;
+pub use mode::AssistantMode;
 pub use options::{PermissionOption, PermissionOptionKind};
 pub use prompt::PromptPart;
 pub use proposal::{

@@ -159,8 +159,7 @@ pub use mcp_read_views::{
     MaskedFolderSettings, MaskedPair, MaskedRequest, MaskedSettings, MaskedVariable,
 };
 pub use mcp_tool_service::{
-    AssistantMode, McpRunResult, McpToolService, OUTLINE_RESOURCE_URI,
-    WORKSPACE_ASSISTANT_INSTRUCTIONS,
+    McpRunResult, McpToolService, OUTLINE_RESOURCE_URI, WORKSPACE_ASSISTANT_INSTRUCTIONS,
 };
 pub use network::{
     paired_limit_message, CollectionImportPort, ConflictFiles, ContractCheckDeps,

@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use rocket_acp::ConfigOption;
+use rocket_acp::{AssistantMode, ConfigOption};
 use rocket_app::{
-    session_plan, AcpSessionService, AssistantMode, ConversationService, McpHttpServerCredentials,
-    McpToolService, PlanInput, WORKSPACE_ASSISTANT_INSTRUCTIONS,
+    session_plan, AcpSessionService, ConversationService, McpHttpServerCredentials, McpToolService,
+    PlanInput, WORKSPACE_ASSISTANT_INSTRUCTIONS,
 };
 use rocket_shared::error::DomainError;
 use tauri::State;

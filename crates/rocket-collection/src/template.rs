@@ -69,6 +69,22 @@ mod tests {
         assert!(round.body.is_none());
     }
 
+    #[test]
+    fn template_json_shape_is_unchanged() {
+        let t = Template::new("t", HttpMethod::Get, "https://x");
+        let value = serde_json::to_value(&t).expect("serialize");
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "name": "t",
+                "method": "GET",
+                "url": "https://x",
+                "headers": [],
+                "body": null,
+            })
+        );
+    }
+
     /// Verifies that a template keyed by name can differentiate between two
     /// templates that share a name but differ only in URL — which matters
     /// for save/overwrite semantics in the repository layer.

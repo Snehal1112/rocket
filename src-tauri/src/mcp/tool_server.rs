@@ -89,7 +89,7 @@ use rocket_acp::proposal::{
     RequestPatch, ScriptPhase,
 };
 use rocket_app::mcp_read_views::HISTORY_LIMIT_MAX;
-use rocket_app::AssistantMode;
+use rocket_acp::AssistantMode;
 use rocket_app::McpToolService;
 use rocket_app::ProposalService;
 use rocket_shared::types::{Body, BodyMode, Header, HttpMethod, QueryParam};

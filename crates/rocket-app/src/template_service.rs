@@ -1,4 +1,4 @@
-use rocket_history::{Template, TemplateRepository};
+use rocket_collection::{Template, TemplateRepository};
 use rocket_shared::error::DomainResult;
 use rocket_shared::events::EventPublisher;
 
@@ -33,7 +33,7 @@ impl TemplateService {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rocket_history::Template;
+    use rocket_collection::Template;
     use rocket_shared::error::{DomainError, DomainResult};
     use rocket_shared::events::NullEventPublisher;
     use rocket_shared::types::HttpMethod;

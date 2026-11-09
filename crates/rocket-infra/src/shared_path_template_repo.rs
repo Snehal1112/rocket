@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use rocket_history::{Template, TemplateRepository};
+use rocket_collection::{Template, TemplateRepository};
 use rocket_shared::error::DomainResult;
 
 use crate::FsTemplateRepo;

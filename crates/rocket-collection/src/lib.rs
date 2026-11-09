@@ -24,6 +24,8 @@ pub mod request_summary;
 mod script_file;
 pub mod settings;
 pub mod summary;
+pub mod template;
+pub mod template_repository;
 pub mod trust;
 pub(crate) mod uid;
 pub mod websocket;
@@ -68,6 +70,8 @@ pub use request_summary::RequestSummary;
 pub use script_file::{normalize_script_name, ScriptFileItem, SCRIPT_TEMPLATE};
 pub use settings::{CollectionSettings, CollectionVariable};
 pub use summary::CollectionSummary;
+pub use template::Template;
+pub use template_repository::TemplateRepository;
 pub use trust::{
     normalize_root, request_fingerprint, resolve_effective, CollectionGrant, CollectionIdentity,
     CollectionTrustStore, DenyAllTrustStore, EffectiveCapabilities, GrantSource, LegacyCollection,

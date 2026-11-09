@@ -27,7 +27,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use rocket_acp::AcpEvent;
+use rocket_acp::{AcpEvent, AssistantMode};
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::EventPublisher;
 
@@ -57,58 +57,6 @@ pub struct McpRunResult {
     pub body: String,
     /// Whether `body` was cut.
     pub body_truncated: bool,
-}
-
-/// The workspace assistant's Rocket mode. Each mode allows everything the
-/// one before it allows, so the derived order (Ask < Edit < Agent) is what
-/// `check_mode` compares. Serialized as "ask", "edit" and "agent".
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Default,
-    serde::Serialize,
-    serde::Deserialize,
-)]
-#[serde(rename_all = "lowercase")]
-pub enum AssistantMode {
-    /// Read tools only. The mode of any session with no recorded mode.
-    #[default]
-    Ask,
-    /// Read tools and proposals.
-    Edit,
-    /// Everything, including `run_request` in collections whose run switch
-    /// is on.
-    Agent,
-}
-
-impl AssistantMode {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Ask => "Ask",
-            Self::Edit => "Edit",
-            Self::Agent => "Agent",
-        }
-    }
-
-    /// One sentence for the agent about what this mode allows.
-    pub fn summary(self) -> &'static str {
-        match self {
-            Self::Ask => {
-                "You can read the workspace. Proposing changes and running requests are not available."
-            }
-            Self::Edit => {
-                "You can read the workspace and propose changes. Running requests is not available."
-            }
-            Self::Agent => {
-                "You can read the workspace, propose changes, and run requests in collections whose run switch is on."
-            }
-        }
-    }
 }
 
 /// The uri of the embedded resource that carries the workspace outline in
