@@ -334,6 +334,7 @@ pub fn check_folder_variables(patch: &FolderSettingsPatch) -> DomainResult<()> {
     Ok(())
 }
 
+/// Stores a script body in the request field for the given phase.
 pub fn set_script(request: &mut Request, phase: ScriptPhase, body: String) {
     match phase {
         ScriptPhase::PreRequest => request.pre_request_script = Some(body),
@@ -351,6 +352,7 @@ pub fn stored_body(body: &Body) -> Option<Body> {
     }
 }
 
+/// Builds a new request from a proposal, with auth left at its default.
 pub fn build_request(proposed: &ProposedRequest) -> Request {
     let mut request = Request::new(
         proposed.name.clone(),
@@ -367,6 +369,7 @@ pub fn build_request(proposed: &ProposedRequest) -> Request {
     request
 }
 
+/// Applies a request patch, keeping descriptions of headers and params that the patch repeats.
 pub fn apply_patch(request: &mut Request, patch: &RequestPatch) {
     if let Some(method) = &patch.method {
         request.method = method.clone();
@@ -411,6 +414,10 @@ pub fn apply_patch(request: &mut Request, patch: &RequestPatch) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rocket_shared::description::Description;
+    use rocket_shared::types::{Header, HttpMethod};
+
+    use crate::proposal::ProposedVariable;
 
     #[test]
     fn names_that_differ_only_in_unicode_normalization_count_as_the_same() {
@@ -424,5 +431,169 @@ mod tests {
         assert_eq!(normalize_path("a//b"), "a/b");
         assert_eq!(normalize_path("/a/b/"), "a/b");
         assert_eq!(normalize_path("///"), "");
+    }
+
+    fn body(mode: BodyMode, content: Option<&str>) -> Body {
+        Body {
+            mode,
+            content: content.map(str::to_string),
+            form_data: None,
+            file_path: None,
+        }
+    }
+
+    fn proposed() -> ProposedRequest {
+        ProposedRequest {
+            name: "List".to_string(),
+            method: HttpMethod::Get,
+            url: "https://x.test".to_string(),
+            headers: vec![Header::new("Accept", "json")],
+            query_params: vec![Header::new("page", "1")],
+            body: Some(body(BodyMode::None, None)),
+            docs: Some("notes".to_string()),
+            pre_request_script: Some("pre".to_string()),
+            post_response_script: Some("post".to_string()),
+            tests: Some("tests".to_string()),
+        }
+    }
+
+    fn variable(key: &str) -> ProposedVariable {
+        ProposedVariable {
+            key: key.to_string(),
+            value: "v".to_string(),
+            enabled: true,
+        }
+    }
+
+    #[test]
+    fn sha256_hex_matches_known_vectors() {
+        assert_eq!(
+            sha256_hex("abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert_eq!(
+            sha256_hex(""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+
+    #[test]
+    fn folder_patch_variables_have_equal_initial_value_and_are_not_secret() {
+        let mut settings = FolderSettings::default();
+        let patch = FolderSettingsPatch {
+            variables: Some(vec![variable("token")]),
+            ..Default::default()
+        };
+        apply_folder_patch(&mut settings, &patch);
+        assert_eq!(settings.variables.len(), 1);
+        assert_eq!(settings.variables[0].value, "v");
+        assert_eq!(settings.variables[0].initial_value, "v");
+        assert!(!settings.variables[0].secret);
+    }
+
+    #[test]
+    fn apply_patch_keeps_query_description_by_exact_key_only() {
+        let mut request = Request::new("r", HttpMethod::Get, "u");
+        let mut old = Header::new("page", "1");
+        old.description = Some(Description::text("which page"));
+        request.query_params = vec![old];
+        let patch = RequestPatch {
+            query_params: Some(vec![Header::new("page", "2"), Header::new("Page", "3")]),
+            ..Default::default()
+        };
+        apply_patch(&mut request, &patch);
+        assert_eq!(
+            request.query_params[0].description,
+            Some(Description::text("which page"))
+        );
+        assert_eq!(request.query_params[1].description, None);
+    }
+
+    #[test]
+    fn apply_patch_keeps_header_description_ignoring_case() {
+        let mut request = Request::new("r", HttpMethod::Get, "u");
+        let mut old = Header::new("Accept", "json");
+        old.description = Some(Description::text("what we take"));
+        request.headers = vec![old];
+        let patch = RequestPatch {
+            headers: Some(vec![Header::new("accept", "xml")]),
+            ..Default::default()
+        };
+        apply_patch(&mut request, &patch);
+        assert_eq!(
+            request.headers[0].description,
+            Some(Description::text("what we take"))
+        );
+    }
+
+    #[test]
+    fn apply_patch_clears_body_for_mode_none_and_sets_docs() {
+        let mut request = Request::new("r", HttpMethod::Post, "u");
+        request.body = Some(body(BodyMode::Text, Some("hi")));
+        let patch = RequestPatch {
+            body: Some(body(BodyMode::None, None)),
+            docs: Some("new docs".to_string()),
+            ..Default::default()
+        };
+        apply_patch(&mut request, &patch);
+        assert!(request.body.is_none());
+        assert_eq!(request.docs, Some(Documentation::text("new docs")));
+    }
+
+    #[test]
+    fn build_request_maps_every_proposed_field() {
+        let request = build_request(&proposed());
+        assert_eq!(request.name, "List");
+        assert_eq!(request.url, "https://x.test");
+        assert_eq!(request.headers.len(), 1);
+        assert_eq!(request.query_params.len(), 1);
+        assert_eq!(request.docs, Some(Documentation::text("notes")));
+        assert_eq!(request.pre_request_script.as_deref(), Some("pre"));
+        assert_eq!(request.post_response_script.as_deref(), Some("post"));
+        assert_eq!(request.tests.as_deref(), Some("tests"));
+        assert!(request.body.is_none());
+    }
+
+    #[test]
+    fn set_script_fills_the_field_of_each_phase() {
+        let mut request = Request::new("r", HttpMethod::Get, "u");
+        set_script(&mut request, ScriptPhase::PreRequest, "a".to_string());
+        set_script(&mut request, ScriptPhase::PostResponse, "b".to_string());
+        set_script(&mut request, ScriptPhase::Tests, "c".to_string());
+        assert_eq!(request.pre_request_script.as_deref(), Some("a"));
+        assert_eq!(request.post_response_script.as_deref(), Some("b"));
+        assert_eq!(request.tests.as_deref(), Some("c"));
+    }
+
+    #[test]
+    fn check_folder_variables_refuses_empty_and_duplicate_names() {
+        let empty = FolderSettingsPatch {
+            variables: Some(vec![variable("  ")]),
+            ..Default::default()
+        };
+        assert_eq!(
+            check_folder_variables(&empty).unwrap_err().to_string(),
+            "Invalid input: variable name cannot be empty"
+        );
+        let dup = FolderSettingsPatch {
+            variables: Some(vec![variable("a"), variable("a")]),
+            ..Default::default()
+        };
+        assert_eq!(
+            check_folder_variables(&dup).unwrap_err().to_string(),
+            "Invalid input: duplicate folder variable 'a'"
+        );
+        let ok = FolderSettingsPatch {
+            variables: Some(vec![variable("a"), variable("b")]),
+            ..Default::default()
+        };
+        assert!(check_folder_variables(&ok).is_ok());
+    }
+
+    #[test]
+    fn stored_body_drops_mode_none_and_keeps_other_bodies() {
+        assert!(stored_body(&body(BodyMode::None, None)).is_none());
+        let text = body(BodyMode::Text, Some("hi"));
+        assert_eq!(stored_body(&text), Some(text));
     }
 }
