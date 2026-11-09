@@ -1,10 +1,10 @@
-use crate::collection_lock::{collection_lock, with_collection_lock};
 use crate::flow_references::FlowReferenceUpdater;
 use rocket_audit::{
     actor::AuditActor,
     event::AuditEventKind,
     publisher::{NullSecurityAuditPublisher, SecurityAuditPublisher},
 };
+use rocket_collection::collection_lock::{collection_lock, with_collection_lock};
 use rocket_collection::CollectionEvent;
 use rocket_collection::{
     Collection, CollectionGrant, CollectionRepository, CollectionSummary, CollectionTrustStore,

@@ -17,7 +17,7 @@ use tempfile::TempDir;
 use super::sync_collections::ExportBackedSyncCollections;
 use super::sync_ports::{base_from_reader, sha256_hex, FileChange, SyncCollectionPort};
 use crate::collection_export_service::CollectionExportService;
-use crate::collection_lock::collection_lock;
+use rocket_collection::collection_lock::collection_lock;
 
 const OC: &str = "opencollection: \"1.0.0\"\nuid: col-uid-1\ninfo:\n  name: c\n";
 const LOGIN: &str = "uid: req-uid-1\ninfo:\n  name: Login\n  type: http\nhttp:\n  method: POST\n  url: https://api.test/login\n  headers:\n    - name: Authorization\n      value: Bearer LOCALSECRET\n    - name: Accept\n      value: application/json\nexamples:\n  - name: ok\n";

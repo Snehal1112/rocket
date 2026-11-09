@@ -1,8 +1,8 @@
 //! The collection lock is shared by editor saves and the sync apply.
 
-use crate::collection_lock::collection_lock;
 use crate::collection_service::CollectionService;
 use crate::test_doubles::{RecordingPublisher, SharedPublisher};
+use rocket_collection::collection_lock::collection_lock;
 use rocket_collection::CollectionEvent;
 use rocket_collection::{CollectionRepository, CollectionSettings, CollectionTrustStore, Request};
 use rocket_infra::{FsCollectionRepo, SharedPathCollectionRepo};

@@ -7,12 +7,12 @@ use rocket_collection::CollectionRepository;
 use rocket_import::{baseline_hash, merge_request, CurrentRequest, ParsedSpec, CONVERTER_VERSION};
 use rocket_shared::error::DomainResult;
 
-use crate::collection_lock::collection_lock;
 use crate::openapi_sync_apply::flatten_requests;
 use crate::openapi_sync_service::OpenApiSyncService;
 use crate::openapi_sync_view::{
     BackupRow, BadgeView, ChangeRow, ChangeValue, ChangesView, OverviewView,
 };
+use rocket_collection::collection_lock::collection_lock;
 
 fn row(
     key: Option<&str>,

@@ -8,13 +8,13 @@ use rocket_collection::{request_filename_for, CollectionRepository};
 use rocket_import::SyncItem;
 use rocket_shared::error::{DomainError, DomainResult};
 
-use crate::collection_lock::collection_lock;
 use crate::openapi_change_link::UNFINISHED;
 use crate::openapi_connect::APPLY_RUNNING;
 use crate::openapi_sync_apply::{
     flatten_requests, to_json, to_yaml, BACKUPS_REL, BASELINE_REL, SOURCE_REL,
 };
 use crate::openapi_sync_service::OpenApiSyncService;
+use rocket_collection::collection_lock::collection_lock;
 
 const NOT_DELETABLE: &str =
     "This request is still part of the spec. Remove it from the spec first.";

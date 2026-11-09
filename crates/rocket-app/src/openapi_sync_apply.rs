@@ -17,9 +17,9 @@ use rocket_import::{
 };
 use rocket_shared::error::{DomainError, DomainResult};
 
-use crate::collection_lock::collection_lock;
 use crate::openapi_sync_service::{sha256_hex, OpenApiSyncService};
 use crate::openapi_sync_view::{PlanView, UnchangedView};
+use rocket_collection::collection_lock::collection_lock;
 
 pub(crate) const SOURCE_REL: &str = ".rocket/openapi-source.yml";
 pub(crate) const BASELINE_REL: &str = ".rocket/openapi-baseline.json";

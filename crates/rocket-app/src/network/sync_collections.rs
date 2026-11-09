@@ -19,7 +19,7 @@ use rocket_shared::error::{DomainError, DomainResult};
 
 use super::sync_ports::{is_sync_entry, sha256_hex, FileChange, SyncCollectionPort, SyncFile};
 use crate::collection_export_service::CollectionExportService;
-use crate::collection_lock::{collection_lock, with_collection_lock};
+use rocket_collection::collection_lock::{collection_lock, with_collection_lock};
 
 pub struct ExportBackedSyncCollections {
     export: Arc<CollectionExportService>,

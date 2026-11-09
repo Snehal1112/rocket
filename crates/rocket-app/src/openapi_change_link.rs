@@ -9,12 +9,12 @@ use rocket_collection::CollectionRepository;
 use rocket_import::{fetch_spec_bundle_from, ParsedSpec};
 use rocket_shared::error::{DomainError, DomainResult};
 
-use crate::collection_lock::collection_lock;
 use crate::openapi_connect::{
     safe_import_message, APPLY_RUNNING, NEEDS_LINK, NOT_A_SPEC, STALE_SPEC,
 };
 use crate::openapi_sync_apply::{to_yaml, PENDING_REL, SOURCE_REL};
 use crate::openapi_sync_service::{sha256_hex, OpenApiSyncService};
+use rocket_collection::collection_lock::collection_lock;
 
 const SAME_LINK: &str = "This is already the spec link.";
 const NOT_CONNECTED: &str = "This collection is not connected to an OpenAPI spec.";

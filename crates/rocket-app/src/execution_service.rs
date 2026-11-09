@@ -2157,7 +2157,11 @@ impl RequestExecutionService {
     /// saves and the sync apply. The root comes from the repository of this send. The closure
     /// never awaits and never calls another locked method.
     fn locked_write<T>(&self, collection: &str, f: impl FnOnce() -> T) -> T {
-        crate::collection_lock::with_collection_lock(&*self.send_collection_repo(), collection, f)
+        rocket_collection::collection_lock::with_collection_lock(
+            &*self.send_collection_repo(),
+            collection,
+            f,
+        )
     }
 
     /// Read-modify-write helper for a single collection variable.
@@ -8730,7 +8734,7 @@ mod tests {
             )),
         ));
         // An apply holds the lock, so the script write must wait and then land.
-        let lock = crate::collection_lock::collection_lock(
+        let lock = rocket_collection::collection_lock::collection_lock(
             &crate::test_doubles::NullCollectionRepo::new(),
             dir.path(),
         );

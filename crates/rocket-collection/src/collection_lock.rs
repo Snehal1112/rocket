@@ -22,13 +22,13 @@ struct Tickets {
 
 /// A fair FIFO lock for one collection root.
 #[derive(Default)]
-pub(crate) struct CollectionLock {
+pub struct CollectionLock {
     tickets: Mutex<Tickets>,
     turn: Condvar,
 }
 
 /// Holds the collection lock and gives it to the next waiter on drop, also while unwinding.
-pub(crate) struct CollectionGuard<'a> {
+pub struct CollectionGuard<'a> {
     lock: &'a CollectionLock,
 }
 
@@ -38,7 +38,7 @@ impl CollectionLock {
     }
 
     /// Waits for every earlier caller, then returns the guard.
-    pub(crate) fn lock(&self) -> CollectionGuard<'_> {
+    pub fn lock(&self) -> CollectionGuard<'_> {
         let mut tickets = self.tickets();
         let mine = tickets.next;
         tickets.next += 1;
@@ -49,8 +49,7 @@ impl CollectionLock {
     }
 
     /// The guard when nobody holds or awaits the lock, else `None`.
-    #[cfg(test)]
-    pub(crate) fn try_lock(&self) -> Option<CollectionGuard<'_>> {
+    pub fn try_lock(&self) -> Option<CollectionGuard<'_>> {
         let mut tickets = self.tickets();
         if tickets.next != tickets.serving {
             return None;
@@ -60,8 +59,7 @@ impl CollectionLock {
     }
 
     /// How many callers hold or await the lock.
-    #[cfg(test)]
-    pub(crate) fn queued(&self) -> u64 {
+    pub fn queued(&self) -> u64 {
         let tickets = self.tickets();
         tickets.next - tickets.serving
     }
@@ -80,15 +78,15 @@ static COLLECTION_LOCKS: std::sync::OnceLock<LockMap> = std::sync::OnceLock::new
 
 /// The lock of one collection, shared by every service in the process (commands build a
 /// sync service per call). It is not reentrant, so a holder must not lock twice.
-pub(crate) fn collection_lock(
-    repo: &dyn rocket_collection::CollectionRepository,
+pub fn collection_lock(
+    repo: &dyn crate::repository::CollectionRepository,
     root: &Path,
 ) -> Arc<CollectionLock> {
     lock_for_key(repo.lock_key(root))
 }
 
 /// The lock registered under `key`. Callers without a repository pass the root as given.
-pub(crate) fn lock_for_key(key: std::path::PathBuf) -> Arc<CollectionLock> {
+pub fn lock_for_key(key: std::path::PathBuf) -> Arc<CollectionLock> {
     let mut map = COLLECTION_LOCKS
         .get_or_init(Default::default)
         .lock()
@@ -99,8 +97,8 @@ pub(crate) fn lock_for_key(key: std::path::PathBuf) -> Arc<CollectionLock> {
 /// Runs `f` while holding the lock of `collection`, found through `repo`. When the repository
 /// has no root for it (a test double, or a missing collection) `f` runs without the lock and
 /// reports its own error. `f` must not take the lock again and must not await.
-pub(crate) fn with_collection_lock<T>(
-    repo: &dyn rocket_collection::CollectionRepository,
+pub fn with_collection_lock<T>(
+    repo: &dyn crate::repository::CollectionRepository,
     collection: &str,
     f: impl FnOnce() -> T,
 ) -> T {
@@ -115,10 +113,146 @@ pub(crate) fn with_collection_lock<T>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_doubles::NullCollectionRepo;
+    use crate::collection::Collection;
+    use crate::repository::CollectionRepository;
+    use crate::request::Request;
+    use crate::settings::{CollectionSettings, CollectionVariable};
+    use crate::summary::CollectionSummary;
+    use rocket_shared::error::{DomainError, DomainResult};
     use std::path::PathBuf;
     use std::sync::mpsc::channel;
     use std::time::Duration;
+
+    /// A repository that implements only `lock_key`; every other method is unused.
+    #[derive(Default)]
+    struct LockRepo {
+        key: Option<fn(&Path) -> PathBuf>,
+    }
+
+    impl LockRepo {
+        fn with_key(key: fn(&Path) -> PathBuf) -> Self {
+            Self { key: Some(key) }
+        }
+    }
+
+    fn unused<T>() -> DomainResult<T> {
+        Err(DomainError::Internal("unused in this test".into()))
+    }
+
+    impl CollectionRepository for LockRepo {
+        fn lock_key(&self, path: &Path) -> PathBuf {
+            match self.key {
+                Some(key) => key(path),
+                None => path.to_path_buf(),
+            }
+        }
+        fn list(&self) -> DomainResult<Vec<CollectionSummary>> {
+            unused()
+        }
+        fn get(&self, _name: &str) -> DomainResult<Collection> {
+            unused()
+        }
+        fn get_summaries(&self, _name: &str) -> DomainResult<Collection> {
+            unused()
+        }
+        fn create(&self, _name: &str) -> DomainResult<Collection> {
+            unused()
+        }
+        fn delete(&self, _name: &str) -> DomainResult<()> {
+            unused()
+        }
+        fn rename(&self, _old_name: &str, _new_name: &str) -> DomainResult<()> {
+            unused()
+        }
+        fn get_request(&self, _collection: &str, _path: &str) -> DomainResult<Request> {
+            unused()
+        }
+        fn save_request(
+            &self,
+            _collection: &str,
+            _path: &str,
+            _request: &Request,
+        ) -> DomainResult<String> {
+            unused()
+        }
+        fn rename_request(
+            &self,
+            _collection: &str,
+            _old_path: &str,
+            _new_path: &str,
+        ) -> DomainResult<()> {
+            unused()
+        }
+        fn delete_request(&self, _collection: &str, _path: &str) -> DomainResult<()> {
+            unused()
+        }
+        fn create_folder(&self, _collection: &str, _path: &str) -> DomainResult<()> {
+            unused()
+        }
+        fn delete_folder(&self, _collection: &str, _path: &str) -> DomainResult<()> {
+            unused()
+        }
+        fn move_item(
+            &self,
+            _src_collection: &str,
+            _src_path: &str,
+            _dst_collection: &str,
+            _dst_path: &str,
+        ) -> DomainResult<()> {
+            unused()
+        }
+        fn reorder_items(
+            &self,
+            _collection: &str,
+            _folder_path: &str,
+            _ordered_names: &[String],
+        ) -> DomainResult<()> {
+            unused()
+        }
+        fn get_settings(&self, _name: &str) -> DomainResult<CollectionSettings> {
+            unused()
+        }
+        fn save_settings(&self, _name: &str, _settings: &CollectionSettings) -> DomainResult<()> {
+            unused()
+        }
+        fn get_folder_chain_variables(
+            &self,
+            _collection: &str,
+            _request_path: &str,
+        ) -> DomainResult<Vec<CollectionVariable>> {
+            unused()
+        }
+        fn get_folder_variables(
+            &self,
+            _collection: &str,
+            _folder_path: &str,
+        ) -> DomainResult<Vec<CollectionVariable>> {
+            unused()
+        }
+        fn save_folder_variables(
+            &self,
+            _collection: &str,
+            _folder_path: &str,
+            _vars: Vec<CollectionVariable>,
+        ) -> DomainResult<()> {
+            unused()
+        }
+        fn get_request_variables(
+            &self,
+            _collection: &str,
+            _request_path: &str,
+        ) -> DomainResult<Vec<CollectionVariable>> {
+            unused()
+        }
+        fn save_request_variables(
+            &self,
+            _collection: &str,
+            _request_path: &str,
+            _vars: Vec<CollectionVariable>,
+        ) -> DomainResult<()> {
+            unused()
+        }
+    }
 
     fn wait_until(cond: impl Fn() -> bool) {
         let start = std::time::Instant::now();
@@ -181,7 +315,7 @@ mod tests {
 
     #[test]
     fn two_spellings_of_one_root_share_a_lock() {
-        let repo = NullCollectionRepo::new().on_lock_key(|p| {
+        let repo = LockRepo::with_key(|p| {
             if p == Path::new("/alias-lock-test/demo") {
                 PathBuf::from("/real-lock-test/demo")
             } else {
@@ -197,7 +331,7 @@ mod tests {
 
     #[test]
     fn a_root_without_an_alias_is_keyed_by_the_given_path() {
-        let repo = NullCollectionRepo::new();
+        let repo = LockRepo::default();
 
         let first = collection_lock(&repo, Path::new("/missing-lock-test/one"));
         let again = collection_lock(&repo, Path::new("/missing-lock-test/one"));

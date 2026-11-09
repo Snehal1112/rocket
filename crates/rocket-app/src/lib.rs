@@ -11,7 +11,6 @@ pub mod auth_code;
 pub mod callback_listener;
 pub(crate) mod client_certificates;
 pub mod collection_export_service;
-pub(crate) mod collection_lock;
 pub mod collection_runner_service;
 pub mod collection_service;
 #[cfg(test)]

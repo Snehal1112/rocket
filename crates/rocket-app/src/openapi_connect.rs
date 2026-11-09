@@ -19,11 +19,11 @@ use rocket_import::{
 };
 use rocket_shared::error::{DomainError, DomainResult};
 
-use crate::collection_lock::collection_lock;
 use crate::openapi_sync_apply::{
     flatten_requests, to_json, to_yaml, APPLIED_REL, BASELINE_REL, LOCAL_REL, SOURCE_REL,
 };
 use crate::openapi_sync_service::{sha256_hex, OpenApiSyncService};
+use rocket_collection::collection_lock::collection_lock;
 
 /// A request of the collection as the Connect screens show it.
 #[derive(Debug, Clone, PartialEq, Eq)]

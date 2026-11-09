@@ -1,4 +1,5 @@
 pub mod collection;
+pub mod collection_lock;
 pub mod contract;
 pub mod discovery;
 pub mod duplicate;

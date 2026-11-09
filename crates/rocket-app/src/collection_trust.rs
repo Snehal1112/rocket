@@ -5,7 +5,7 @@
 //! `rocket_collection::trust`, and this module holds the service (locks, events).
 //! Consumers call `effective_capabilities` and never read the raw request fields.
 
-use crate::collection_lock::with_collection_lock;
+use rocket_collection::collection_lock::with_collection_lock;
 use std::sync::Arc;
 
 use rocket_collection::settings::SandboxMode;

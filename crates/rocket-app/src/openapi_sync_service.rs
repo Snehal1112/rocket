@@ -32,8 +32,8 @@ use rocket_shared::error::{DomainError, DomainResult};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
-use crate::collection_lock::{collection_lock, lock_for_key, CollectionLock};
 use crate::openapi_sync_apply::ApplyDeps;
+use rocket_collection::collection_lock::{collection_lock, lock_for_key, CollectionLock};
 
 const TOKEN_KEY: &str = "token";
 
