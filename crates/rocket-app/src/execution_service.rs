@@ -2421,7 +2421,10 @@ impl RequestExecutionService {
                     .find(&scope, now);
             match found {
                 Ok(list) => {
-                    let entries = list.iter().map(|c| rocket_scripting::to_entry(c, now)).collect();
+                    let entries = list
+                        .iter()
+                        .map(|c| rocket_scripting::to_entry(c, now))
+                        .collect();
                     ctx = ctx.with_cookies(url, entries);
                 }
                 Err(e) => tracing::warn!("could not read the cookies for a script: {e}"),
