@@ -6,7 +6,6 @@ pub mod acp_session_service;
 pub(crate) mod acp_stream;
 pub mod agent_config_service;
 pub mod agent_isolation;
-pub mod assertion_evaluator;
 pub mod assistant_chip_text;
 pub mod auth_code;
 pub mod callback_listener;

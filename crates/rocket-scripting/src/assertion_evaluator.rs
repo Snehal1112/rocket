@@ -1,6 +1,6 @@
+use crate::{AssertionOutcome, TestResult, TestStatus};
 use regex::Regex;
 use rocket_http::HttpResponse;
-use rocket_scripting::{AssertionOutcome, TestResult, TestStatus};
 use rocket_shared::assertion::Assertion;
 use serde_json::Value;
 

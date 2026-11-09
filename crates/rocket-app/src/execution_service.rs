@@ -3394,7 +3394,7 @@ impl RequestExecutionService {
             .with_sandbox_mode(state.sandbox_mode)
             .with_file_scope(state.file_scope.clone())
             .with_collection_name(input.collection.clone())
-            .with_assertion_results(crate::assertion_evaluator::assertion_outcomes(
+            .with_assertion_results(rocket_scripting::assertion_outcomes(
                 &input.assertions,
                 response,
             ));
@@ -3494,8 +3494,7 @@ impl RequestExecutionService {
 
         // ── Declarative assertions ────────────────────────────────────────────
         // Run after tests script so JS test results appear first in TestsPanel.
-        let assertion_results =
-            crate::assertion_evaluator::evaluate_assertions(&input.assertions, &response);
+        let assertion_results = rocket_scripting::evaluate_assertions(&input.assertions, &response);
         state.test_results.extend(assertion_results);
 
         // The request was sent, so a withheld value gets its one Console line now.

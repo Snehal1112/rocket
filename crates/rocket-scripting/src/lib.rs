@@ -1,5 +1,6 @@
 // The async_trait macro triggers this lint on newer toolchains.
 #![allow(clippy::double_must_use)]
+pub mod assertion_evaluator;
 pub mod context;
 pub mod engine;
 pub mod host;
@@ -7,6 +8,7 @@ pub mod phase;
 pub mod result;
 pub mod script_cookie;
 
+pub use assertion_evaluator::{assertion_outcomes, evaluate_assertions};
 pub use context::{ExecutionMode, SandboxMode, ScriptContext, ScriptFileScope};
 pub use engine::ScriptEngine;
 pub use host::{
