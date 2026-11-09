@@ -779,24 +779,135 @@ fn apply_if_unchanged_waits_for_the_lock_and_sees_a_save_made_while_it_waited() 
     assert!(rig.root.join("users/Get.yml").exists());
 }
 
-/// A factory whose recovery never works, like a crash that leaves its journal behind.
-struct NoRecover(FsFileTxFactory);
+/// A crashing factory whose recovery can be switched off, so the journal of a crashed commit
+/// stays on disk until the test switches it on. Off, it reports that there is nothing to do.
+struct Switchable {
+    inner: FsFileTxFactory,
+    recover_off: Arc<AtomicBool>,
+}
 
-impl CollectionFileTxFactory for NoRecover {
+impl CollectionFileTxFactory for Switchable {
     fn begin(&self, root: &Path) -> DomainResult<Box<dyn rocket_collection::CollectionFileTx>> {
-        self.0.begin(root)
+        self.inner.begin(root)
     }
-    fn recover(&self, _: &Path) -> DomainResult<rocket_collection::RecoveryOutcome> {
-        Err(DomainError::Internal("recovery is blocked".into()))
+    fn recover(&self, root: &Path) -> DomainResult<rocket_collection::RecoveryOutcome> {
+        if self.recover_off.load(Ordering::SeqCst) {
+            return Ok(rocket_collection::RecoveryOutcome::Nothing);
+        }
+        self.inner.recover(root)
     }
 }
 
-fn second_port(rig: &Rig) -> ExportBackedSyncCollections {
-    ExportBackedSyncCollections::new(
-        Arc::clone(&rig.export),
-        rig.repo.clone() as Arc<dyn CollectionRepository>,
-        Arc::new(FsFileTxFactory::new()),
-    )
+fn crashing_rig(step: usize) -> (Rig, Arc<AtomicBool>) {
+    let off = Arc::new(AtomicBool::new(true));
+    let factory = Switchable {
+        inner: FsFileTxFactory::with_crash(step),
+        recover_off: Arc::clone(&off),
+    };
+    (rig_with(Arc::new(factory)), off)
+}
+
+fn journal(rig: &Rig) -> PathBuf {
+    rig.root.join(".rocket").join("apply-journal.json")
+}
+
+fn crash_changes() -> Vec<FileChange> {
+    vec![
+        FileChange::Put {
+            path: "new/Fresh.yml".into(),
+            bytes: scrubbed("new/Fresh.yml", "info:\n  name: Fresh\n  type: http\n"),
+        },
+        FileChange::Delete {
+            path: "users/Get.yml".into(),
+        },
+    ]
+}
+
+/// The crashed apply is all or nothing: both of its changes, or neither.
+fn assert_settled(rig: &Rig, step: usize) {
+    let fresh = rig.root.join("new/Fresh.yml").exists();
+    let get_gone = !rig.root.join("users/Get.yml").exists();
+    assert_eq!(fresh, get_gone, "step {step} left a half-applied sync");
+}
+
+#[test]
+fn a_journal_left_behind_is_recovered_before_the_next_apply() {
+    let mut with_journal = 0;
+    for step in 0..40 {
+        let (rig, recover_off) = crashing_rig(step);
+        seed(&rig);
+        if rig.port.apply("c", &crash_changes()).is_ok() {
+            continue;
+        }
+        if !journal(&rig).exists() {
+            continue;
+        }
+        with_journal += 1;
+        recover_off.store(false, Ordering::SeqCst);
+        rig.port
+            .apply(
+                "c",
+                &[FileChange::Delete {
+                    path: "Login.yml".into(),
+                }],
+            )
+            .unwrap_or_else(|e| panic!("step {step}: {e}"));
+        assert!(
+            !journal(&rig).exists(),
+            "step {step}: the journal is still there"
+        );
+        assert!(!rig.root.join("Login.yml").exists(), "step {step}");
+        assert_settled(&rig, step);
+    }
+    assert!(
+        with_journal >= 3,
+        "the crash hooks should leave journals, got {with_journal}"
+    );
+}
+
+#[test]
+fn apply_if_unchanged_recovers_a_journal_before_it_compares() {
+    let mut with_journal = 0;
+    let mut rolled_forward = 0;
+    let mut rolled_back = 0;
+    for step in 0..40 {
+        let (rig, recover_off) = crashing_rig(step);
+        seed(&rig);
+        let expected = rig.port.manifest("c").expect("manifest");
+        if rig.port.apply("c", &crash_changes()).is_ok() || !journal(&rig).exists() {
+            continue;
+        }
+        with_journal += 1;
+        recover_off.store(false, Ordering::SeqCst);
+        let result = rig.port.apply_if_unchanged(
+            "c",
+            &expected,
+            &[FileChange::Delete {
+                path: "Login.yml".into(),
+            }],
+        );
+        assert!(
+            !journal(&rig).exists(),
+            "step {step}: the journal is still there"
+        );
+        assert_settled(&rig, step);
+        if rig.root.join("new/Fresh.yml").exists() {
+            // Rolled forward: the tree moved on, so the old manifest no longer holds.
+            rolled_forward += 1;
+            assert!(
+                matches!(result, Err(DomainError::Conflict(_))),
+                "step {step}: {result:?}"
+            );
+            assert!(rig.root.join("Login.yml").exists(), "step {step}");
+        } else {
+            // Rolled back: the tree is as it was, so the check passes and the change lands.
+            rolled_back += 1;
+            assert_eq!(result, Ok(()), "step {step}");
+            assert!(!rig.root.join("Login.yml").exists(), "step {step}");
+        }
+    }
+    assert!(with_journal >= 3, "got {with_journal}");
+    assert!(rolled_forward + rolled_back == with_journal);
 }
 
 #[test]
@@ -828,65 +939,6 @@ fn the_manifest_and_export_files_share_one_filter_with_the_zip_base() {
             .expect_err("refused");
         assert!(matches!(err, DomainError::NotFound(_)), "{bad}");
     }
-}
-
-#[test]
-fn a_journal_left_behind_is_recovered_before_the_next_apply() {
-    let changes = vec![
-        FileChange::Put {
-            path: "new/Fresh.yml".into(),
-            bytes: scrubbed("new/Fresh.yml", "info:\n  name: Fresh\n  type: http\n"),
-        },
-        FileChange::Delete {
-            path: "users/Get.yml".into(),
-        },
-    ];
-    let mut left_behind = 0;
-    for step in 0..40 {
-        let rig = rig_with(Arc::new(NoRecover(FsFileTxFactory::with_crash(step))));
-        seed(&rig);
-        if rig.port.apply("c", &changes).is_ok() {
-            continue;
-        }
-        let next = second_port(&rig);
-        let retry = next.apply(
-            "c",
-            &[FileChange::Delete {
-                path: "Login.yml".into(),
-            }],
-        );
-        assert!(retry.is_ok(), "step {step}: {retry:?}");
-        assert!(!rig.root.join("Login.yml").exists(), "step {step}");
-        left_behind += 1;
-    }
-    assert!(left_behind >= 3, "the crash hooks should fail early steps");
-}
-
-#[test]
-fn apply_if_unchanged_recovers_a_journal_before_it_compares() {
-    let rig = rig_with(Arc::new(NoRecover(FsFileTxFactory::with_crash(6))));
-    seed(&rig);
-    let changes = [
-        FileChange::Delete {
-            path: "users/Get.yml".into(),
-        },
-        FileChange::Delete {
-            path: "Login.yml".into(),
-        },
-    ];
-    let _ = rig.port.apply("c", &changes);
-    let next = second_port(&rig);
-    let expected = next.manifest("c").expect("manifest");
-    // Whatever the half-done apply left, the next call settles it first and then compares.
-    let result = next.apply_if_unchanged("c", &expected, &[]);
-    assert!(result.is_ok() || matches!(result, Err(DomainError::Conflict(_))));
-    next.apply(
-        "c",
-        &[FileChange::Delete {
-            path: "opencollection.yml".into(),
-        }],
-    )
-    .expect("a later apply works");
 }
 
 #[test]
@@ -955,6 +1007,7 @@ fn errors_never_quote_the_paths_they_concern() {
                 "{text}"
             );
             assert!(!text.contains("injected"), "{text}");
+            assert!(matches!(err, DomainError::Internal(_)), "{err:?}");
         }
     }
     assert!(failed >= 3);
@@ -987,4 +1040,28 @@ fn apply_if_unchanged_with_no_changes_still_checks_the_manifest() {
         .apply_if_unchanged("c", &expected, &[])
         .expect_err("conflict");
     assert!(matches!(err, DomainError::Conflict(_)));
+}
+
+#[test]
+fn a_missing_collection_error_does_not_quote_its_name() {
+    let rig = rig();
+    seed(&rig);
+    let changes = [FileChange::Delete {
+        path: "Login.yml".into(),
+    }];
+    let err = rig
+        .port
+        .apply("MissingMarker", &changes)
+        .expect_err("refused");
+    assert!(!err.to_string().contains("MissingMarker"), "{err}");
+    let err = rig
+        .port
+        .collection_root("MissingMarker")
+        .expect_err("refused");
+    assert!(!err.to_string().contains("MissingMarker"), "{err}");
+    let err = rig
+        .port
+        .collection_uid("MissingMarker")
+        .expect_err("refused");
+    assert!(!err.to_string().contains("MissingMarker"), "{err}");
 }

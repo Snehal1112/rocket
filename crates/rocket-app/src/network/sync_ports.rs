@@ -22,23 +22,15 @@ pub struct SyncFile {
 pub enum FileChange {
     /// Writes the file. A YAML file is merged into the local one, so local secrets stay. Any
     /// other file (`.js`, `.proto`) is replaced outright.
-    Put {
-        path: String,
-        bytes: Vec<u8>,
-    },
+    Put { path: String, bytes: Vec<u8> },
     /// Writes a new file, written as received. The path must be free.
-    PutAs {
-        path: String,
-        bytes: Vec<u8>,
-    },
-    Delete {
-        path: String,
-    },
-    /// Moves a local file. The local bytes move as they are.
-    Rename {
-        from: String,
-        to: String,
-    },
+    PutAs { path: String, bytes: Vec<u8> },
+    /// Deletes the exact path. On a case-insensitive disk that can remove a file that differs
+    /// from it only by case.
+    Delete { path: String },
+    /// Moves a local file. The local bytes move as they are. `from` matches the exact path,
+    /// like `Delete`.
+    Rename { from: String, to: String },
 }
 
 /// The collections a sync reads and writes.

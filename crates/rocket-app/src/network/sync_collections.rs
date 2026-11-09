@@ -265,7 +265,9 @@ impl ExportBackedSyncCollections {
             return Ok(());
         }
         self.with_repo(|repo| {
-            let root = repo.collection_root_path(collection)?;
+            let root = repo
+                .collection_root_path(collection)
+                .map_err(|e| quiet(&e, "root", NOT_WRITTEN))?;
             let lock = collection_lock(repo, &root);
             let _guard = lock.lock();
             // An earlier apply that was cut short is settled before anything is read.
@@ -339,15 +341,18 @@ impl SyncCollectionPort for ExportBackedSyncCollections {
     }
 
     fn collection_uid(&self, collection: &str) -> DomainResult<Option<String>> {
-        self.with_repo(|repo| Ok(repo.collection_identity(collection)?.uid))
+        self.with_repo(|repo| {
+            repo.collection_identity(collection)
+                .map(|identity| identity.uid)
+                .map_err(|e| quiet(&e, "identity", UNREADABLE))
+        })
     }
 
     fn collection_root(&self, collection: &str) -> DomainResult<String> {
         self.with_repo(|repo| {
-            Ok(repo
-                .collection_root_path(collection)?
-                .to_string_lossy()
-                .into_owned())
+            repo.collection_root_path(collection)
+                .map(|root| root.to_string_lossy().into_owned())
+                .map_err(|e| quiet(&e, "root", UNREADABLE))
         })
     }
 
