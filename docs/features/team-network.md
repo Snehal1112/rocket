@@ -25,7 +25,7 @@ Rocket nodes on the same network find each other, pair once with a matching 6-di
 | UI | `src/components/network/`, `src/components/status-bar/NetworkStatusItem.tsx`, `src/components/settings/sections/NetworkSection.tsx` |
 | Shared pieces | `src/lib/error-text.ts`, `src/lib/listen-scope.ts`, `src/hooks/useAsyncAction.ts`, `src/components/ui/search-input.tsx`, `src/components/ui/initials-avatar.tsx`, `src/components/status-bar/StatusBarItem.tsx`, `StatusBarCount.tsx` |
 | Send a collection | Protocol and state machines `crates/rocket-network` (`transfer.rs`, `limits.rs`), `TransferService` in `crates/rocket-app/src/network/`, strict ZIP check `crates/rocket-import/src/transfer_zip.rs`, staging in `crates/rocket-infra`, import adapter and commands in `src-tauri`. Frontend: `src/components/network/SendCollectionDialog.tsx`, `IncomingTransferDialog.tsx`, `IncomingTransferToast.tsx`, `src/hooks/useIncomingTransferNotice.tsx`, the `transfers` slice in `src/stores/network-store.ts`, `handleNetworkTransfer` in `src/lib/network-event-bridge.ts`. |
-| Keep in sync | Protocol and planner in `crates/rocket-network` (`link.rs`, `planner.rs`, `events.rs` `SyncEvent`), `SyncService` and the frame router in `crates/rocket-app/src/network/`, the file merge in `crates/rocket-export/src/sync_merge.rs`, `FsLinkRepo` in `crates/rocket-infra`. Commands in `src-tauri/src/commands/network_sync.rs` (the `keep_in_sync` argument of the send is in `src-tauri/src/commands/network.rs`). Frontend: `src/components/network/SyncReviewDialog.tsx`, `SyncConflictDiff.tsx`, `IncomingSyncToast.tsx`, `UnlinkDialog.tsx`, `LinkList.tsx`, `src/hooks/useIncomingSyncNotice.tsx`, `src/hooks/useCollectionSyncLinks.ts`, `src/components/collections/CollectionSyncMenuItems.tsx`, `src/lib/network-sync-actions.ts`, `src/lib/network-sync-utils.ts`, the `syncs` slice and `links` in `src/stores/network-store.ts`, `handleNetworkSync` in `src/lib/network-event-bridge.ts`. |
+| Keep in sync | Protocol and planner in `crates/rocket-network` (`link.rs`, `planner.rs`, `events.rs` `SyncEvent`), `SyncService` and the frame router in `crates/rocket-app/src/network/`, the file merge in `crates/rocket-export/src/sync_merge.rs`, `FsLinkRepo` in `crates/rocket-infra`. Commands in `src-tauri/src/commands/network_sync.rs` (the `keep_in_sync` argument of the send is in `src-tauri/src/commands/network.rs`). Frontend: `src/components/network/SyncReviewDialog.tsx`, `SyncConflictDiff.tsx`, `IncomingSyncToast.tsx`, `UnlinkDialog.tsx`, `LinkList.tsx`, `src/hooks/useIncomingSyncNotice.tsx`, `src/hooks/useCollectionSyncLinks.ts`, `src/components/collections/CollectionSyncMenuItems.tsx`, `src/lib/network-sync-actions.ts`, `src/lib/network-sync-utils.ts`, the `syncReviews` slice and `links` in `src/stores/network-store.ts`, `handleNetworkSync` in `src/lib/network-event-bridge.ts`. |
 | Data | `~/.rocket-api/network/` (`paired.yml`, `blocked.yml`, `addresses.yml`, `settings.yml`) and `~/.rocket-api/network/links/<link_id>/` (`link.yml` and `base/`). Machine-local. The device key is in the OS keychain, service `com.rocketapi.device-identity`. |
 
 ## Frontend rules
@@ -143,6 +143,8 @@ A collection that was sent can be linked, so the two copies can be merged on req
 
 **Errors.** The texts are in `describeSyncOutcome` (`src/lib/network-event-bridge.ts`) and pinned by `network-event-bridge.sync.test.ts`. For `failed`, `base_mismatch`, `link_missing` and `unconfirmed` the toast shows the message the backend sent, with a fixed fallback. This covers the case clash ("The two copies have file names that differ only by letter case."), a case-only rename, an apply conflict, and "The link is missing on the other side. Unlink and send the collection again." An unconfirmed finish keeps the link `out_of_date`. If the next sync then ends in a base mismatch, the recovery is to unlink and send the collection again.
 
+**Known open items (sync).** The waiting toast of the starter keeps its Cancel action and the text "Waiting for <name> to review the sync." after the planner accepted. A Cancel pressed then is refused by the backend ("The sync is already being applied."), shows that text as an error, and the sync goes on.
+
 **Audit** (wire fields `device_id`, `collection`, `outcome`): `network_sync_sent` and `network_sync_received`, and `network_link_removed` (`device_id`, `collection`). Never file names or contents. The outcome shows in brackets unless it is `applied`.
 
 ## Decisions
@@ -165,7 +167,7 @@ A collection that was sent can be linked, so the two copies can be merged on req
 - Renaming a collection does not sync. The link follows the name it had.
 - A file rename that changes only letter case, and two files whose names differ only by letter case, cannot be synced. The sync ends with the backend text.
 - If a sync ends unconfirmed and the next one ends in a base mismatch, unlink and send the collection again.
-- Links are matched to collections by name in the active workspace.
+- Links are global, but their state is read in the active workspace. A link whose collection is not in the active workspace shows "Not in this workspace" in the link lists, with no unlink advice. Links are matched to collections by name, so a same-named collection in another workspace shows the menu entries of the link.
 
 ## How to test
 
