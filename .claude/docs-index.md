@@ -22,7 +22,7 @@ Pointers to the feature and engineering docs. Open the one that matches the area
 - `docs/features/settings-page.md` for the global Settings page (sections, lock, shortcuts, how to add a section).
 - `docs/features/elevation.md` for the four elevation levels (VS Code colours, shadows, which surface uses which, borders).
 - `docs/features/update-notification.md` for the update notice (schedule, install kinds, settings, manual checks).
-- `docs/features/team-network.md` for the team network (discovery, pairing, presence, Network panel, Settings section, send a collection, limits, manual checks).
+- `docs/features/team-network.md` for the team network (discovery, pairing, presence, Network panel, Settings section, send a collection, keep in sync, limits, manual checks).
 
 ## Engineering
 

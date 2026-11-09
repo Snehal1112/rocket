@@ -1,6 +1,6 @@
 # Team network
 
-Rocket nodes on the same network find each other, pair once with a matching 6-digit code and stay paired until one side removes the pairing. Paired nodes can send each other a collection (see Send a collection). Checking contracts between nodes is a later project. Spec: `docs/superpowers/specs/2026-11-05-team-network-discovery-pairing-design.md`. Send a collection: `docs/superpowers/specs/2026-11-06-team-network-send-collection-design.md`, plans in `docs/superpowers/plans/team-network-send/`. Plans: `docs/superpowers/plans/team-network/`. Roadmap: R-83, project CA-5.
+Rocket nodes on the same network find each other, pair once with a matching 6-digit code and stay paired until one side removes the pairing. Paired nodes can send each other a collection (see Send a collection). A sent collection can be kept in sync (see Keep a collection in sync). Checking contracts between nodes is a later project. Spec: `docs/superpowers/specs/2026-11-05-team-network-discovery-pairing-design.md`. Send a collection: `docs/superpowers/specs/2026-11-06-team-network-send-collection-design.md`, plans in `docs/superpowers/plans/team-network-send/`. Keep in sync: `docs/superpowers/specs/2026-11-08-team-network-sync-collection-design.md`, plans in `docs/superpowers/plans/team-network-sync/`. Plans: `docs/superpowers/plans/team-network/`. Roadmap: R-83, project CA-5.
 
 ## What the user sees
 
@@ -8,7 +8,8 @@ Rocket nodes on the same network find each other, pair once with a matching 6-di
 - The Network panel (a popover): search box (name, initials or short id), open requests at the top, Paired (online first, offline greyed, menu with Remove) and Nearby (Pair button), and Add by address at the bottom.
 - The pairing dialog: both screens show the same code, for example `482 913`. The node that started the pairing sees Accept and Cancel. The other node sees Accept, Decline and Block and also gets a toast.
 - A one-time card after the first launch: "You're visible on this network as '<name>'." with Edit name, Hide my node and OK.
-- Settings, Team network: Hide my node, display name, port in use, device id (short), blocked devices with Unblock, saved addresses with Remove, warnings.
+- Settings, Team network: Hide my node, display name, port in use, device id (short), linked collections with Unlink, blocked devices with Unblock, saved addresses with Remove, warnings.
+- Linked collections also show in the Network panel under Paired and Nearby, with an Unlink button.
 
 ## Where the code lives
 
@@ -24,7 +25,8 @@ Rocket nodes on the same network find each other, pair once with a matching 6-di
 | UI | `src/components/network/`, `src/components/status-bar/NetworkStatusItem.tsx`, `src/components/settings/sections/NetworkSection.tsx` |
 | Shared pieces | `src/lib/error-text.ts`, `src/lib/listen-scope.ts`, `src/hooks/useAsyncAction.ts`, `src/components/ui/search-input.tsx`, `src/components/ui/initials-avatar.tsx`, `src/components/status-bar/StatusBarItem.tsx`, `StatusBarCount.tsx` |
 | Send a collection | Protocol and state machines `crates/rocket-network` (`transfer.rs`, `limits.rs`), `TransferService` in `crates/rocket-app/src/network/`, strict ZIP check `crates/rocket-import/src/transfer_zip.rs`, staging in `crates/rocket-infra`, import adapter and commands in `src-tauri`. Frontend: `src/components/network/SendCollectionDialog.tsx`, `IncomingTransferDialog.tsx`, `IncomingTransferToast.tsx`, `src/hooks/useIncomingTransferNotice.tsx`, the `transfers` slice in `src/stores/network-store.ts`, `handleNetworkTransfer` in `src/lib/network-event-bridge.ts`. |
-| Data | `~/.rocket-api/network/` (`paired.yml`, `blocked.yml`, `addresses.yml`, `settings.yml`). Machine-local. The device key is in the OS keychain, service `com.rocketapi.device-identity`. |
+| Keep in sync | Protocol and planner in `crates/rocket-network` (`link.rs`, `planner.rs`, `events.rs` `SyncEvent`), `SyncService` and the frame router in `crates/rocket-app/src/network/`, the file merge in `crates/rocket-export/src/sync_merge.rs`, `FsLinkRepo` in `crates/rocket-infra`. Commands in `src-tauri/src/commands/network_sync.rs` (the `keep_in_sync` argument of the send is in `src-tauri/src/commands/network.rs`). Frontend: `src/components/network/SyncReviewDialog.tsx`, `SyncConflictDiff.tsx`, `IncomingSyncToast.tsx`, `UnlinkDialog.tsx`, `LinkList.tsx`, `src/hooks/useIncomingSyncNotice.tsx`, `src/hooks/useCollectionSyncLinks.ts`, `src/components/collections/CollectionSyncMenuItems.tsx`, `src/lib/network-sync-actions.ts`, `src/lib/network-sync-utils.ts`, the `syncs` slice and `links` in `src/stores/network-store.ts`, `handleNetworkSync` in `src/lib/network-event-bridge.ts`. |
+| Data | `~/.rocket-api/network/` (`paired.yml`, `blocked.yml`, `addresses.yml`, `settings.yml`) and `~/.rocket-api/network/links/<link_id>/` (`link.yml` and `base/`). Machine-local. The device key is in the OS keychain, service `com.rocketapi.device-identity`. |
 
 ## Frontend rules
 
@@ -114,6 +116,35 @@ Known open items:
 - The importer unpacks a received ZIP into the private system temp folder (0700, random name). The startup purge covers the staging and ZIP-copy folders only, so after a crash the unpacked tree stays in the system temp folder until the OS clears it.
 - The sonner toast action closes the waiting toast even when a cancel is refused. The Cancel then looks done while the transfer goes on (manual check 15).
 
+## Keep a collection in sync
+
+A collection that was sent can be linked, so the two copies can be merged on request. Sync is manual and reviewed. Nothing happens in the background.
+
+**Make a link.** The Send dialog has a **Keep in sync** box, off by default. Only a collection sent now can be linked. Both sides store the link when the transfer completes.
+
+**Sync.** The collection menu (the `...` menu and the right-click menu) shows a status line, **Sync with <name>** while the peer is paired and online, and **Unlink**. The flow follows section 6 of the spec:
+
+1. The starter sends a manifest. The other node plans the merge and shows the review dialog with counts, script and auth marks, and the conflicts. A conflict has a read-only Monaco diff and the choices keep mine, keep theirs and keep both.
+2. After the planner accepts, the starter sees a confirm dialog with the same counts and marks.
+3. Each node applies the changes in one file transaction. "Synced" shows only after the peer's result.
+
+**Frontend rules.**
+
+- The backend owns the state. `syncReviews` is deduped by sync id and an unanswered entry expires after 120 seconds. A late event for another sync is ignored.
+- The planner decides what is a conflict. There is no default choice. Keep both is hidden when a side has no file, and for `opencollection.yml` and `folder.yml` (the backend refuses it there).
+- There is no Cancel once the user has answered (the backend refuses it with "The sync is already being applied."). Cancel stays on the starter's waiting toast.
+- The diff uses `DiffViewer` through `SyncConflictDiff` and loads both versions with `network_sync_conflict_files`. If that fails, the choices still work.
+- `refreshLinks` never throws. It runs at startup, on `linkChanged` and `finished`, when a collection menu opens and when the active workspace changes.
+- Links are matched to a collection by name in the active workspace.
+- A decline or cancel by the local user (Decline, the waiting toast Cancel, Unlink of a pending sync) shows no toast about itself.
+- The review note says that changed scripts run with the current script access of the collection. A sync never changes trust settings.
+
+**Commands.** `network_sync_start`, `network_sync_review`, `network_sync_confirm`, `network_sync_cancel`, `network_sync_conflict_files`, `network_list_links`, `network_unlink`, and `network_send_collection` with `keepInSync`. All are in `src-tauri/app-commands.txt`.
+
+**Errors.** The texts are in `describeSyncOutcome` (`src/lib/network-event-bridge.ts`) and pinned by `network-event-bridge.sync.test.ts`. For `failed`, `base_mismatch`, `link_missing` and `unconfirmed` the toast shows the message the backend sent, with a fixed fallback. This covers the case clash ("The two copies have file names that differ only by letter case."), a case-only rename, an apply conflict, and "The link is missing on the other side. Unlink and send the collection again." An unconfirmed finish keeps the link `out_of_date`. If the next sync then ends in a base mismatch, the recovery is to unlink and send the collection again.
+
+**Audit** (wire fields `device_id`, `collection`, `outcome`): `network_sync_sent` and `network_sync_received`, and `network_link_removed` (`device_id`, `collection`). Never file names or contents. The outcome shows in brackets unless it is `applied`.
+
 ## Decisions
 
 - Visible to everyone on the network by default, with a Hide my node switch (spec section 2). Hiding stops the announcement and refuses new requests. Paired nodes still connect.
@@ -126,7 +157,15 @@ Known open items:
 - 200 paired devices, 50 saved addresses, 256 connections (32 unpaired), 5 pairing requests a minute.
 - A pairing request expires after 2 minutes. A declined device waits 1 minute.
 - Same-network discovery only, plus Add by address. No relay, no internet pairing.
-- No sending of contracts yet. A collection can be sent as described in Send a collection.
+- No sending of contracts yet. A collection can be sent as described in Send a collection. A sent collection can be kept in sync as described in Keep a collection in sync.
+- A link joins two copies. A third copy links to either node separately.
+- Sync is manual and reviewed: no automatic or background sync.
+- Collections sent before this feature, and collections that exist on both sides, cannot be linked.
+- Environments, flows, gRPC and WebSocket requests, client certificates and proxy settings are not synced.
+- Renaming a collection does not sync. The link follows the name it had.
+- A file rename that changes only letter case, and two files whose names differ only by letter case, cannot be synced. The sync ends with the backend text.
+- If a sync ends unconfirmed and the next one ends in a base mismatch, unlink and send the collection again.
+- Links are matched to collections by name in the active workspace.
 
 ## How to test
 
@@ -137,9 +176,12 @@ bunx vitest run src/lib/__tests__/tauri-api.network.test.ts src/stores/__tests__
   src/components/ui src/hooks/__tests__/useIncomingPairingNotice.test.tsx \
   src/hooks/__tests__/useAsyncAction.test.tsx src/components/settings \
   src/lib/__tests__/network-utils.test.ts src/components/collections/__tests__ src/components/audit \
-  src/hooks/__tests__/useIncomingTransferNotice.test.tsx
+  src/hooks/__tests__/useIncomingTransferNotice.test.tsx \
+  src/stores/__tests__/network-store.sync.test.ts src/lib/__tests__/network-event-bridge.sync.test.ts \
+  src/lib/__tests__/network-sync-utils.test.ts src/lib/__tests__/network-sync-actions.test.ts \
+  src/hooks/__tests__/useIncomingSyncNotice.test.tsx
 bun run tsc --noEmit
 bun run check
 ```
 
-Backend tests: `cargo test -j4 -p rocket-network`, `cargo test -j4 -p rocket-infra network`, `cargo test -j4 -p rocket-app network`. Real network checks: `docs/manual-tests/team-network.md`. Send backend tests: `cargo test -j4 -p rocket-network transfer`, `cargo test -j4 -p rocket-import transfer_zip`, `cargo test -j4 -p rocket-app network`. Real transfers: section 11 of `docs/manual-tests/team-network.md`.
+Backend tests: `cargo test -j4 -p rocket-network`, `cargo test -j4 -p rocket-infra network`, `cargo test -j4 -p rocket-app network`. Real network checks: `docs/manual-tests/team-network.md`. Send backend tests: `cargo test -j4 -p rocket-network transfer`, `cargo test -j4 -p rocket-import transfer_zip`, `cargo test -j4 -p rocket-app network`. Real transfers: section 11 of `docs/manual-tests/team-network.md`. Sync backend tests: `cargo test -j4 -p rocket-network`, `cargo test -j4 -p rocket-app network`, `cargo test -j4 -p rocket-export sync_merge`. Real syncs: section 12 of the same file.
