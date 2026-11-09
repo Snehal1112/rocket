@@ -74,9 +74,9 @@ pub use summary::CollectionSummary;
 pub use template::Template;
 pub use template_repository::TemplateRepository;
 pub use trust::{
-    normalize_root, request_fingerprint, resolve_effective, CollectionGrant, CollectionIdentity,
-    CollectionTrustStore, DenyAllTrustStore, EffectiveCapabilities, GrantSource, LegacyCollection,
-    MigrationNoticeEntry, RequestedElevation,
+    effective_capabilities, normalize_root, request_fingerprint, resolve_effective,
+    CollectionGrant, CollectionIdentity, CollectionTrustStore, DenyAllTrustStore,
+    EffectiveCapabilities, GrantSource, LegacyCollection, MigrationNoticeEntry, RequestedElevation,
 };
 pub use uid::generate_uid;
 pub use websocket::{

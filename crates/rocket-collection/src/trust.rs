@@ -7,6 +7,7 @@ use std::path::PathBuf;
 
 use rocket_shared::error::{DomainError, DomainResult};
 
+use crate::repository::CollectionRepository;
 use crate::settings::{CollectionSettings, SandboxMode};
 
 /// The elevated capabilities a collection file asks for.
@@ -149,6 +150,28 @@ pub fn request_fingerprint(req: &RequestedElevation) -> String {
         u8::from(req.developer_mode),
         u8::from(req.agent_run),
         roots.join("|")
+    )
+}
+
+/// The effective capabilities of a collection. Any error (unknown collection, unreadable
+/// identity or settings, corrupt store) gives `EffectiveCapabilities::untrusted()`.
+pub fn effective_capabilities(
+    repo: &dyn CollectionRepository,
+    store: &dyn CollectionTrustStore,
+    collection: &str,
+) -> EffectiveCapabilities {
+    let Ok(identity) = repo.collection_identity(collection) else {
+        return EffectiveCapabilities::untrusted();
+    };
+    let Ok(settings) = repo.get_settings(collection) else {
+        return EffectiveCapabilities::untrusted();
+    };
+    let Ok(grant) = store.grant_for(&identity) else {
+        return EffectiveCapabilities::untrusted();
+    };
+    resolve_effective(
+        &RequestedElevation::from_settings(&settings),
+        grant.as_ref(),
     )
 }
 
@@ -394,5 +417,261 @@ mod tests {
         assert!(DenyAllTrustStore
             .put(&id, CollectionGrant::default())
             .is_err());
+    }
+
+    mod effective {
+        use super::*;
+        use crate::collection::Collection;
+        use crate::repository::CollectionRepository;
+        use crate::request::Request;
+        use crate::settings::CollectionVariable;
+        use crate::summary::CollectionSummary;
+
+        fn unused<T>() -> DomainResult<T> {
+            Err(DomainError::Internal("unused in this test".into()))
+        }
+
+        /// A repository that answers only identity and settings.
+        struct FakeRepo {
+            identity: Option<CollectionIdentity>,
+            settings: Option<CollectionSettings>,
+        }
+
+        impl CollectionRepository for FakeRepo {
+            fn list(&self) -> DomainResult<Vec<CollectionSummary>> {
+                unused()
+            }
+            fn get(&self, _name: &str) -> DomainResult<Collection> {
+                unused()
+            }
+            fn get_summaries(&self, _name: &str) -> DomainResult<Collection> {
+                unused()
+            }
+            fn create(&self, _name: &str) -> DomainResult<Collection> {
+                unused()
+            }
+            fn delete(&self, _name: &str) -> DomainResult<()> {
+                unused()
+            }
+            fn rename(&self, _old_name: &str, _new_name: &str) -> DomainResult<()> {
+                unused()
+            }
+            fn get_request(&self, _collection: &str, _path: &str) -> DomainResult<Request> {
+                unused()
+            }
+            fn save_request(
+                &self,
+                _collection: &str,
+                _path: &str,
+                _request: &Request,
+            ) -> DomainResult<String> {
+                unused()
+            }
+            fn rename_request(
+                &self,
+                _collection: &str,
+                _old_path: &str,
+                _new_path: &str,
+            ) -> DomainResult<()> {
+                unused()
+            }
+            fn delete_request(&self, _collection: &str, _path: &str) -> DomainResult<()> {
+                unused()
+            }
+            fn create_folder(&self, _collection: &str, _path: &str) -> DomainResult<()> {
+                unused()
+            }
+            fn delete_folder(&self, _collection: &str, _path: &str) -> DomainResult<()> {
+                unused()
+            }
+            fn move_item(
+                &self,
+                _src_collection: &str,
+                _src_path: &str,
+                _dst_collection: &str,
+                _dst_path: &str,
+            ) -> DomainResult<()> {
+                unused()
+            }
+            fn reorder_items(
+                &self,
+                _collection: &str,
+                _folder_path: &str,
+                _ordered_names: &[String],
+            ) -> DomainResult<()> {
+                unused()
+            }
+            fn get_settings(&self, _name: &str) -> DomainResult<CollectionSettings> {
+                self.settings
+                    .clone()
+                    .ok_or_else(|| DomainError::Internal("unreadable settings".into()))
+            }
+            fn save_settings(
+                &self,
+                _name: &str,
+                _settings: &CollectionSettings,
+            ) -> DomainResult<()> {
+                unused()
+            }
+            fn get_folder_chain_variables(
+                &self,
+                _collection: &str,
+                _request_path: &str,
+            ) -> DomainResult<Vec<CollectionVariable>> {
+                unused()
+            }
+            fn get_folder_variables(
+                &self,
+                _collection: &str,
+                _folder_path: &str,
+            ) -> DomainResult<Vec<CollectionVariable>> {
+                unused()
+            }
+            fn save_folder_variables(
+                &self,
+                _collection: &str,
+                _folder_path: &str,
+                _vars: Vec<CollectionVariable>,
+            ) -> DomainResult<()> {
+                unused()
+            }
+            fn get_request_variables(
+                &self,
+                _collection: &str,
+                _request_path: &str,
+            ) -> DomainResult<Vec<CollectionVariable>> {
+                unused()
+            }
+            fn save_request_variables(
+                &self,
+                _collection: &str,
+                _request_path: &str,
+                _vars: Vec<CollectionVariable>,
+            ) -> DomainResult<()> {
+                unused()
+            }
+            fn collection_identity(&self, _name: &str) -> DomainResult<CollectionIdentity> {
+                self.identity
+                    .clone()
+                    .ok_or_else(|| DomainError::NotFound("unknown collection".into()))
+            }
+        }
+
+        /// A store with one grant, or an error when `fail` is set.
+        struct FakeStore {
+            grant: Option<CollectionGrant>,
+            fail: bool,
+        }
+
+        impl CollectionTrustStore for FakeStore {
+            fn grant_for(&self, _: &CollectionIdentity) -> DomainResult<Option<CollectionGrant>> {
+                if self.fail {
+                    return Err(DomainError::Internal("corrupt store".into()));
+                }
+                Ok(self.grant.clone())
+            }
+            fn put(&self, _: &CollectionIdentity, _: CollectionGrant) -> DomainResult<()> {
+                unused()
+            }
+            fn remove(&self, _: &CollectionIdentity) -> DomainResult<()> {
+                unused()
+            }
+            fn rekey(&self, _: &CollectionIdentity, _: &CollectionIdentity) -> DomainResult<()> {
+                unused()
+            }
+            fn migrated(&self) -> DomainResult<bool> {
+                unused()
+            }
+            fn complete_migration(
+                &self,
+                _: Vec<(CollectionIdentity, CollectionGrant)>,
+                _: Vec<MigrationNoticeEntry>,
+            ) -> DomainResult<()> {
+                unused()
+            }
+            fn migration_notice(&self) -> DomainResult<Vec<MigrationNoticeEntry>> {
+                unused()
+            }
+            fn dismiss_migration_notice(&self) -> DomainResult<()> {
+                unused()
+            }
+        }
+
+        fn identity() -> CollectionIdentity {
+            CollectionIdentity {
+                canonical_root: PathBuf::from("/tmp/c"),
+                uid: Some("uid".into()),
+            }
+        }
+
+        fn developer_settings() -> CollectionSettings {
+            CollectionSettings {
+                sandbox_mode: SandboxMode::Developer,
+                ..Default::default()
+            }
+        }
+
+        #[test]
+        fn effective_capabilities_is_untrusted_for_an_unknown_collection() {
+            let repo = FakeRepo {
+                identity: None,
+                settings: Some(developer_settings()),
+            };
+            let store = FakeStore {
+                grant: Some(grant(true, &[], false, true)),
+                fail: false,
+            };
+            assert_eq!(
+                effective_capabilities(&repo, &store, "c"),
+                EffectiveCapabilities::untrusted()
+            );
+        }
+
+        #[test]
+        fn effective_capabilities_is_untrusted_for_unreadable_settings() {
+            let repo = FakeRepo {
+                identity: Some(identity()),
+                settings: None,
+            };
+            let store = FakeStore {
+                grant: Some(grant(true, &[], false, true)),
+                fail: false,
+            };
+            assert_eq!(
+                effective_capabilities(&repo, &store, "c"),
+                EffectiveCapabilities::untrusted()
+            );
+        }
+
+        #[test]
+        fn effective_capabilities_is_untrusted_for_a_store_error() {
+            let repo = FakeRepo {
+                identity: Some(identity()),
+                settings: Some(developer_settings()),
+            };
+            let store = FakeStore {
+                grant: Some(grant(true, &[], false, true)),
+                fail: true,
+            };
+            assert_eq!(
+                effective_capabilities(&repo, &store, "c"),
+                EffectiveCapabilities::untrusted()
+            );
+        }
+
+        #[test]
+        fn effective_capabilities_uses_the_grant_for_a_trusted_collection() {
+            let repo = FakeRepo {
+                identity: Some(identity()),
+                settings: Some(developer_settings()),
+            };
+            let store = FakeStore {
+                grant: Some(grant(true, &[], false, true)),
+                fail: false,
+            };
+            let eff = effective_capabilities(&repo, &store, "c");
+            assert_eq!(eff.sandbox_mode, SandboxMode::Developer);
+            assert!(eff.process_env);
+        }
     }
 }

@@ -515,7 +515,7 @@ mod tests {
     use std::io::{self, Read, Write};
     use std::time::Duration;
 
-    use rocket_app::effective_capabilities;
+    use rocket_collection::effective_capabilities;
     use rocket_collection::settings::SandboxMode;
     use rocket_import::{DirEntryInfo, EntryKind, ImportFiles, ReadSeek, WorkDir};
     use rocket_infra::FsCollectionTrustStore;

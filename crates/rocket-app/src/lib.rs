@@ -113,9 +113,7 @@ pub use collection_runner_service::{
     StoppedReason,
 };
 pub use collection_service::CollectionService;
-pub use collection_trust::{
-    effective_capabilities, Capability, CollectionTrustService, TrustStatus,
-};
+pub use collection_trust::{Capability, CollectionTrustService, TrustStatus};
 pub use contract_service::{ContractEdit, ContractService, NewContract};
 pub use conversation_service::{
     ConversationInput, ConversationService, MAX_INPUT_TEXT_BYTES, MAX_SESSION_PINS,

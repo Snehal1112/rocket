@@ -857,7 +857,7 @@ impl RequestExecutionService {
         &self,
         collection: &str,
     ) -> rocket_collection::EffectiveCapabilities {
-        crate::collection_trust::effective_capabilities(
+        rocket_collection::effective_capabilities(
             &*self.send_collection_repo(),
             self.trust_store.as_ref(),
             collection,

@@ -2512,11 +2512,11 @@ mod trust_tests {
         // A collection made through `create` is the control: it has both flags.
         svc.create("made").expect("create");
         let repo = FsCollectionRepo::new_standalone(dir.path().join("collections"));
-        let made = crate::effective_capabilities(&repo, store.as_ref(), "made");
+        let made = rocket_collection::effective_capabilities(&repo, store.as_ref(), "made");
         assert!(made.vault_values && made.vault_certificates);
         // A clone or import writes the folder without going through `create`, so no record exists.
         repo.create("cloned").expect("create folder");
-        let eff = crate::effective_capabilities(&repo, store.as_ref(), "cloned");
+        let eff = rocket_collection::effective_capabilities(&repo, store.as_ref(), "cloned");
         assert!(!eff.vault_values && !eff.vault_certificates);
     }
 

@@ -11,9 +11,9 @@ use std::sync::Arc;
 use rocket_collection::settings::SandboxMode;
 use rocket_collection::CollectionEvent;
 use rocket_collection::{
-    normalize_root, request_fingerprint, resolve_effective, CollectionGrant, CollectionIdentity,
-    CollectionRepository, CollectionTrustStore, EffectiveCapabilities, GrantSource,
-    LegacyCollection, MigrationNoticeEntry, RequestedElevation,
+    effective_capabilities, normalize_root, request_fingerprint, resolve_effective,
+    CollectionGrant, CollectionIdentity, CollectionRepository, CollectionTrustStore,
+    EffectiveCapabilities, GrantSource, LegacyCollection, MigrationNoticeEntry, RequestedElevation,
 };
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::EventPublisher;
@@ -22,28 +22,6 @@ use rocket_shared::events::EventPublisher;
 pub const NOTICE_DEVELOPER_MODE: &str = "developerMode";
 pub const NOTICE_CONTEXT_ROOTS: &str = "contextRoots";
 pub const NOTICE_AGENT_RUN: &str = "agentRun";
-
-/// The effective capabilities of a collection. Any error (unknown collection, unreadable
-/// identity or settings, corrupt store) gives `EffectiveCapabilities::untrusted()`.
-pub fn effective_capabilities(
-    repo: &dyn CollectionRepository,
-    store: &dyn CollectionTrustStore,
-    collection: &str,
-) -> EffectiveCapabilities {
-    let Ok(identity) = repo.collection_identity(collection) else {
-        return EffectiveCapabilities::untrusted();
-    };
-    let Ok(settings) = repo.get_settings(collection) else {
-        return EffectiveCapabilities::untrusted();
-    };
-    let Ok(grant) = store.grant_for(&identity) else {
-        return EffectiveCapabilities::untrusted();
-    };
-    resolve_effective(
-        &RequestedElevation::from_settings(&settings),
-        grant.as_ref(),
-    )
-}
 
 /// A capability a grant can be given or taken away.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

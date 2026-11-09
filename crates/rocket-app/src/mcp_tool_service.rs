@@ -184,7 +184,7 @@ impl McpToolService {
 
     /// Whether the agent may run requests in `collection` on this computer.
     fn run_allowed(&self, collection: &str) -> bool {
-        crate::collection_trust::effective_capabilities(
+        rocket_collection::effective_capabilities(
             self.collection_repo.as_ref(),
             self.trust_store.as_ref(),
             collection,
