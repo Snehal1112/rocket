@@ -113,6 +113,38 @@ describe('SendCollectionDialog', () => {
     );
   });
 
+  it('sends keepInSync true when ticked', async () => {
+    setup();
+    await userEvent.click(await screen.findByRole('checkbox', { name: 'Keep in sync' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() =>
+      expect(mocks.api.sendNetworkCollection).toHaveBeenCalledWith('DEV1', 'Orders', false, true),
+    );
+  });
+
+  it('keeps the two boxes independent', async () => {
+    setup();
+    await userEvent.click(await screen.findByRole('checkbox', { name: 'Include environments' }));
+    expect(screen.getByRole('checkbox', { name: 'Keep in sync' })).not.toBeChecked();
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() =>
+      expect(mocks.api.sendNetworkCollection).toHaveBeenCalledWith('DEV1', 'Orders', true, false),
+    );
+  });
+
+  it('says that only a collection sent now can be linked', async () => {
+    setup();
+    expect(await screen.findByText(/Only a collection you send now can be linked/)).toBeInTheDocument();
+  });
+
+  it('resets the Keep in sync box when the dialog closes', async () => {
+    const { view, onClose } = setup();
+    await userEvent.click(await screen.findByRole('checkbox', { name: 'Keep in sync' }));
+    view.rerender(<SendCollectionDialog open={false} collectionName='Orders' onClose={onClose} />);
+    view.rerender(<SendCollectionDialog open collectionName='Orders' onClose={onClose} />);
+    expect(screen.getByRole('checkbox', { name: 'Keep in sync' })).not.toBeChecked();
+  });
+
   it('explains the checkbox with always-visible help text', async () => {
     setup();
     const box = await screen.findByRole('checkbox', { name: 'Include environments' });

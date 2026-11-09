@@ -13,6 +13,7 @@ import { WorkspaceToolbar } from '@/components/layout/WorkspaceToolbar';
 import { IncomingTransferDialog } from '@/components/network/IncomingTransferDialog';
 import { NetworkIntroCard } from '@/components/network/NetworkIntroCard';
 import { PairingDialog } from '@/components/network/PairingDialog';
+import { SyncReviewDialog } from '@/components/network/SyncReviewDialog';
 import { PaneRenderer } from '@/components/panes/PaneRenderer';
 import { SplashScreen } from '@/components/SplashScreen';
 import { TitleBar } from '@/components/title-bar';
@@ -22,6 +23,7 @@ import { useBackendLogs } from '@/hooks/useBackendLogs';
 import { useFileWatcherFailed } from '@/hooks/useFileWatcherFailed';
 import { useFlowRequestPathEvents } from '@/hooks/useFlowRequestPathEvents';
 import { useIncomingPairingNotice } from '@/hooks/useIncomingPairingNotice';
+import { useIncomingSyncNotice } from '@/hooks/useIncomingSyncNotice';
 import { useIncomingTransferNotice } from '@/hooks/useIncomingTransferNotice';
 import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useUpdateNotice } from '@/hooks/useUpdateNotice';
@@ -75,6 +77,7 @@ function App() {
   useNetworkEventBridge();
   useIncomingPairingNotice();
   useIncomingTransferNotice();
+  useIncomingSyncNotice();
 
   useEffect(() => {
     const init = async () => {
@@ -301,6 +304,7 @@ function App() {
       <TrustMigrationNotice />
       <PairingDialog />
       <IncomingTransferDialog />
+      <SyncReviewDialog />
       <NetworkIntroCard />
       <UpdateDialog />
       <OpenApiSyncNotifier />

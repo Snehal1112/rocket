@@ -35,7 +35,7 @@ export function RemovePairedDialog({ node, onClose }: RemovePairedDialogProps) {
           <AlertDialogTitle>{node ? `Remove ${node.displayName}?` : 'Remove'}</AlertDialogTitle>
           <AlertDialogDescription>
             {node
-              ? `${node.displayName} (${node.shortId}) will no longer be paired with you. You can pair again later with a new code.`
+              ? `${node.displayName} (${node.shortId}) will no longer be paired with you. Links to collections on that node are removed too. You can pair again later with a new code.`
               : ''}
           </AlertDialogDescription>
         </AlertDialogHeader>

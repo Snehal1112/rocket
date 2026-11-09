@@ -37,6 +37,7 @@ describe('RemovePairedDialog', () => {
     render(<RemovePairedDialog node={dana} onClose={onClose} />);
     const dialog = await screen.findByRole('alertdialog', { name: 'Remove Dana Roy?' });
     expect(dialog).toHaveTextContent('DDDD-4444');
+    expect(dialog).toHaveTextContent('Links to collections on that node are removed too.');
     await userEvent.click(screen.getByRole('button', { name: 'Remove' }));
     await waitFor(() => expect(mocks.api.removeNetworkPaired).toHaveBeenCalledWith('P2'));
     await waitFor(() => expect(mocks.api.listNetworkNodes).toHaveBeenCalled());

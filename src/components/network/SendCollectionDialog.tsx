@@ -70,6 +70,7 @@ export function SendCollectionDialog({ open, collectionName, onClose }: SendColl
   const online = useMemo(() => onlinePairedNodes(nodes), [nodes]);
   const [picked, setPicked] = useState<string | null>(null);
   const [includeEnvironments, setIncludeEnvironments] = useState(false);
+  const [keepInSync, setKeepInSync] = useState(false);
   // The export notes of a started send. Null while the form shows.
   const [notes, setNotes] = useState<string[] | null>(null);
   // A failed send shows its text in the dialog.
@@ -84,6 +85,7 @@ export function SendCollectionDialog({ open, collectionName, onClose }: SendColl
     if (open) return;
     setPicked(null);
     setIncludeEnvironments(false);
+    setKeepInSync(false);
     setNotes(null);
     reset();
   }, [open, reset]);
@@ -106,7 +108,12 @@ export function SendCollectionDialog({ open, collectionName, onClose }: SendColl
     let ok = false;
     try {
       ok = await run(async () => {
-        result = await sendNetworkCollection(chosen.deviceId, collectionName, includeEnvironments);
+        result = await sendNetworkCollection(
+          chosen.deviceId,
+          collectionName,
+          includeEnvironments,
+          keepInSync,
+        );
       });
     } finally {
       sending.current = false;
@@ -203,6 +210,27 @@ export function SendCollectionDialog({ open, collectionName, onClose }: SendColl
                   />
                   <Label htmlFor='send-environments-box' className='text-sm font-normal'>
                     Include environments
+                  </Label>
+                </div>
+              )}
+            </FormField>
+            <FormField
+              id='send-sync'
+              group
+              label='Sync'
+              help='Off by default. Lets you and the other user sync later changes, each one reviewed. Only a collection you send now can be linked.'
+            >
+              {(a11y) => (
+                <div className='flex items-center gap-2'>
+                  <Checkbox
+                    id='send-sync-box'
+                    aria-describedby={a11y['aria-describedby']}
+                    checked={keepInSync}
+                    disabled={busy}
+                    onCheckedChange={(v) => setKeepInSync(v === true)}
+                  />
+                  <Label htmlFor='send-sync-box' className='text-sm font-normal'>
+                    Keep in sync
                   </Label>
                 </div>
               )}

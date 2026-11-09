@@ -18,6 +18,10 @@ import {
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import {
+  ContextSyncItems,
+  DropdownSyncItems,
+} from '@/components/collections/CollectionSyncMenuItems';
 import { FlowListItem } from '@/components/collections/FlowListItem';
 import { NewScriptDialog } from '@/components/collections/NewScriptDialog';
 import { ConnectOpenApiDialog } from '@/components/collections/openapi-sync/ConnectOpenApiDialog';
@@ -26,6 +30,7 @@ import { ScriptNode } from '@/components/collections/ScriptNode';
 import { ContractBadge } from '@/components/contract/ContractBadge';
 import { ExportCollectionDialog } from '@/components/export/ExportCollectionDialog';
 import { SendCollectionDialog } from '@/components/network/SendCollectionDialog';
+import { UnlinkDialog } from '@/components/network/UnlinkDialog';
 import { CreateRequestDialog } from '@/components/request/CreateRequestDialog';
 import {
   ContextMenu,
@@ -50,13 +55,22 @@ import {
   TreeItem,
   TreeItemContent,
 } from '@/components/ui/tree';
+import { useCollectionSyncLinks } from '@/hooks/useCollectionSyncLinks';
 import { sortItemsFoldersFirst } from '@/lib/collection-utils';
 import { createRequestErrorMessage } from '@/lib/create-request-error';
+import { toastError } from '@/lib/error-text';
+import { startCollectionSync } from '@/lib/network-sync-actions';
 import { createDefaultRequest } from '@/lib/pane-utils';
 import { useFlows } from '@/lib/queries/flow-queries';
 import { useOpenApiSyncBadges, useOpenApiSyncStatus } from '@/lib/queries/openapi-sync-queries';
 import { useWorkspaces } from '@/lib/queries/workspace-queries';
-import type { Collection, CollectionSummary, Contract, FlowListEntry } from '@/lib/tauri-api';
+import type {
+  Collection,
+  CollectionSummary,
+  Contract,
+  FlowListEntry,
+  NetworkLink,
+} from '@/lib/tauri-api';
 import {
   createRequest,
   getCollectionSummaries,
@@ -130,9 +144,18 @@ export function CollectionNode({
   const [sendOpen, setSendOpen] = useState(false);
   // A boolean selector: the row re-renders only when the answer flips.
   const canSend = useNetworkStore((s) => selectOnlinePairedCount(s) > 0);
+  const syncEntries = useCollectionSyncLinks(summary.name);
+  const [unlinkTarget, setUnlinkTarget] = useState<NetworkLink | null>(null);
+  const syncWith = (link: NetworkLink) => void startCollectionSync(link).catch(toastError);
   const [connectOpen, setConnectOpen] = useState(false);
   // The sync status is only asked for once the row is hovered, focused or a menu opens.
   const [menuSeen, setMenuSeen] = useState(false);
+  // The link state is derived on the backend when the list loads, so a menu reloads it first.
+  const onMenuOpenChange = (o: boolean) => {
+    if (!o) return;
+    setMenuSeen(true);
+    if (syncEntries.length > 0) void useNetworkStore.getState().refreshLinks();
+  };
   const syncBadges = useOpenApiSyncBadges();
   const waitingUpdates = syncBadges.data?.find((b) => b.collection === summary.name)?.waiting ?? 0;
   const openApiSync = useOpenApiSyncStatus(summary.name, false, menuSeen);
@@ -389,7 +412,7 @@ export function CollectionNode({
     : flows;
 
   return (
-    <ContextMenu onOpenChange={(o) => o && setMenuSeen(true)}>
+    <ContextMenu onOpenChange={onMenuOpenChange}>
       <ContextMenuTrigger asChild>
         <div className='group relative flex items-center'>
           <TreeItem
@@ -522,7 +545,7 @@ export function CollectionNode({
             </TreeItemContent>
           </TreeItem>
 
-          <DropdownMenu onOpenChange={(o) => o && setMenuSeen(true)}>
+          <DropdownMenu onOpenChange={onMenuOpenChange}>
             <DropdownMenuTrigger asChild>
               <button
                 type='button'
@@ -564,6 +587,11 @@ export function CollectionNode({
                   <Send aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Send to...
                 </DropdownMenuItem>
               )}
+              <DropdownSyncItems
+                entries={syncEntries}
+                onSync={syncWith}
+                onUnlink={setUnlinkTarget}
+              />
               {(openApiSync.data || openApiSync.isError) && (
                 <DropdownMenuItem onClick={openOpenApiSync}>
                   <GitCompareArrows aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> OpenAPI sync
@@ -642,6 +670,7 @@ export function CollectionNode({
             <Send aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Send to...
           </ContextMenuItem>
         )}
+        <ContextSyncItems entries={syncEntries} onSync={syncWith} onUnlink={setUnlinkTarget} />
         {(openApiSync.data || openApiSync.isError) && (
           <ContextMenuItem onClick={openOpenApiSync}>
             <GitCompareArrows aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> OpenAPI sync
@@ -803,6 +832,7 @@ export function CollectionNode({
           onClose={() => setSendOpen(false)}
         />
       )}
+      <UnlinkDialog link={unlinkTarget} onClose={() => setUnlinkTarget(null)} />
       {(canConnect || connectOpen) && (
         <ConnectOpenApiDialog
           collection={summary.name}
