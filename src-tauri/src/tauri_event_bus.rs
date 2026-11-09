@@ -113,7 +113,10 @@ mod tests {
     use rocket_collection::CollectionEvent;
     use rocket_flow::FlowEvent;
     use rocket_git::GitEvent;
-    use rocket_network::{Direction, Outcome, TransferEvent};
+    use rocket_network::{
+        ConflictKind, ConflictView, Direction, Outcome, SyncEvent, SyncFinish, SyncRole,
+        SyncSummary, TransferEvent,
+    };
 
     #[test]
     fn emit_channels_adds_collection_changed_for_branch_switch_and_merge() {
@@ -502,6 +505,190 @@ mod tests {
         let c = next_seq();
         assert!(a < b && b < c);
         assert!(a >= 1);
+    }
+
+    fn sync_samples() -> Vec<SyncEvent> {
+        let summary = SyncSummary {
+            added_here: 1,
+            changed_here: 2,
+            deleted_here: 0,
+            sent_added: 0,
+            sent_changed: 1,
+            sent_deleted: 0,
+            scripts_changed: vec!["users/get.yml".to_string()],
+            auth_changed: Vec::new(),
+        };
+        vec![
+            SyncEvent::ReviewReady {
+                sync_id: "s1".into(),
+                link_id: "l1".into(),
+                device_id: "dev".into(),
+                short_id: "K7QF-2M9X".into(),
+                display_name: "Ann".into(),
+                collection_name: "Orders".into(),
+                summary: summary.clone(),
+                conflicts: vec![ConflictView {
+                    path: "users/get.yml".into(),
+                    kind: ConflictKind::BothChanged,
+                    mine_hash: Some("aa".repeat(32)),
+                    theirs_hash: None,
+                }],
+                role: SyncRole::Planner,
+            },
+            SyncEvent::ConfirmNeeded {
+                sync_id: "s1".into(),
+                link_id: "l1".into(),
+                device_id: "dev".into(),
+                short_id: "K7QF-2M9X".into(),
+                display_name: "Ann".into(),
+                collection_name: "Orders".into(),
+                summary,
+            },
+            SyncEvent::Progress {
+                sync_id: "s1".into(),
+                done_bytes: 10,
+                total_bytes: 100,
+            },
+            SyncEvent::Finished {
+                sync_id: "s1".into(),
+                link_id: "l1".into(),
+                display_name: "Ann".into(),
+                collection_name: "Orders".into(),
+                outcome: SyncFinish::Applied,
+                message: None,
+            },
+            SyncEvent::LinkChanged {
+                link_id: "l1".into(),
+            },
+        ]
+    }
+
+    fn sorted_keys(value: &serde_json::Value) -> Vec<String> {
+        let mut keys: Vec<String> = value
+            .as_object()
+            .expect("an object")
+            .keys()
+            .cloned()
+            .collect();
+        keys.sort();
+        keys
+    }
+
+    fn sorted(mut names: Vec<&str>) -> Vec<String> {
+        names.sort_unstable();
+        names.into_iter().map(str::to_string).collect()
+    }
+
+    #[test]
+    fn sync_events_emit_on_the_network_sync_channel() {
+        for event in sync_samples() {
+            assert_eq!(emit_channels(&event), vec!["network-sync"]);
+        }
+    }
+
+    #[test]
+    fn wire_contract_sync_events_keep_the_key_styles() {
+        let samples = sync_samples();
+        let envelope_of = |event: &SyncEvent| envelope(event, 7, 1234).expect("envelope");
+
+        let review = envelope_of(&samples[0]);
+        assert_eq!(review["type"], "reviewReady");
+        assert_eq!(review["seq"], 7);
+        assert_eq!(review["tsMs"], 1234);
+        assert_eq!(
+            sorted_keys(&review),
+            sorted(vec![
+                "collection_name",
+                "conflicts",
+                "device_id",
+                "display_name",
+                "link_id",
+                "role",
+                "seq",
+                "short_id",
+                "summary",
+                "sync_id",
+                "tsMs",
+                "type"
+            ])
+        );
+        assert_eq!(
+            sorted_keys(&review["summary"]),
+            sorted(vec![
+                "addedHere",
+                "authChanged",
+                "changedHere",
+                "deletedHere",
+                "scriptsChanged",
+                "sentAdded",
+                "sentChanged",
+                "sentDeleted"
+            ])
+        );
+        assert_eq!(
+            sorted_keys(&review["conflicts"][0]),
+            sorted(vec!["kind", "mineHash", "path", "theirsHash"])
+        );
+        assert!(review["conflicts"][0]["theirsHash"].is_null());
+        assert!(review["role"].is_string());
+
+        let confirm = envelope_of(&samples[1]);
+        assert_eq!(confirm["type"], "confirmNeeded");
+        assert_eq!(
+            sorted_keys(&confirm),
+            sorted(vec![
+                "collection_name",
+                "device_id",
+                "display_name",
+                "link_id",
+                "seq",
+                "short_id",
+                "summary",
+                "sync_id",
+                "tsMs",
+                "type"
+            ])
+        );
+
+        let progress = envelope_of(&samples[2]);
+        assert_eq!(progress["type"], "progress");
+        assert_eq!(
+            sorted_keys(&progress),
+            sorted(vec![
+                "done_bytes",
+                "seq",
+                "sync_id",
+                "total_bytes",
+                "tsMs",
+                "type"
+            ])
+        );
+
+        let finished = envelope_of(&samples[3]);
+        assert_eq!(finished["type"], "finished");
+        assert!(finished["message"].is_null(), "no message is a JSON null");
+        assert!(finished["outcome"].is_string());
+        assert_eq!(
+            sorted_keys(&finished),
+            sorted(vec![
+                "collection_name",
+                "display_name",
+                "link_id",
+                "message",
+                "outcome",
+                "seq",
+                "sync_id",
+                "tsMs",
+                "type"
+            ])
+        );
+
+        let changed = envelope_of(&samples[4]);
+        assert_eq!(changed["type"], "linkChanged");
+        assert_eq!(
+            sorted_keys(&changed),
+            sorted(vec!["link_id", "seq", "tsMs", "type"])
+        );
     }
 
     #[test]

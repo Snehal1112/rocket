@@ -177,6 +177,7 @@ network_cancel_pairing
 network_cancel_transfer
 network_list_addresses
 network_list_blocked
+network_list_links
 network_list_nodes
 network_mark_intro_seen
 network_remove_address
@@ -188,7 +189,13 @@ network_send_collection
 network_set_profile
 network_set_visibility
 network_status
+network_sync_cancel
+network_sync_confirm
+network_sync_conflict_files
+network_sync_review
+network_sync_start
 network_unblock
+network_unlink
 oauth2_decode_jwt
 oauth2_get_token
 oauth2_refresh_token

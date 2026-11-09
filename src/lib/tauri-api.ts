@@ -4479,7 +4479,12 @@ export const sendNetworkCollection = (
   collection: string,
   includeEnvironments: boolean,
 ): Promise<SendStarted> =>
-  invoke<SendStarted>('network_send_collection', { deviceId, collection, includeEnvironments });
+  invoke<SendStarted>('network_send_collection', {
+    deviceId,
+    collection,
+    includeEnvironments,
+    keepInSync: false,
+  });
 
 export const respondNetworkTransfer = (transferId: string, accept: boolean): Promise<void> =>
   invoke<void>('network_respond_transfer', { transferId, accept });

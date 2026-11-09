@@ -302,15 +302,19 @@ impl From<SendStarted> for SendStartedDto {
 }
 
 /// Starts a push of one collection to a paired node. Returns the transfer id and the notes.
+/// With `keep_in_sync` the first send also creates a link on both sides.
 #[tauri::command]
 pub async fn network_send_collection(
     device_id: String,
     collection: String,
     include_environments: bool,
+    keep_in_sync: bool,
     svc: State<'_, Arc<TransferService>>,
 ) -> Result<SendStartedDto, DomainError> {
     let id = parse_device_id(&device_id)?;
-    let started = svc.send(&id, &collection, include_environments, false).await?;
+    let started = svc
+        .send(&id, &collection, include_environments, keep_in_sync)
+        .await?;
     Ok(SendStartedDto::from(started))
 }
 

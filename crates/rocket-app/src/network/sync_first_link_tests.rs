@@ -233,7 +233,7 @@ fn a_suffixed_import_of_a_rich_root_links_in_sync_and_keeps_both_names() {
     let uid = bo.port.collection_uid(&received).expect("uid");
     assert!(uid.is_some(), "the receiver keeps its own uid");
     assert_ne!(uid, ana.port.collection_uid(NAME).expect("uid"));
-    // The receiver's own secret slot from the import stays as imported (blank), docs landed.
+    // The docs of the sent root landed.
     assert_eq!(b["docs"].as_str(), Some("hello team"));
 }
 

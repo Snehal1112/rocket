@@ -413,6 +413,15 @@ mod tests {
     use serde_yaml::Value;
     use std::io::Cursor;
 
+    #[test]
+    fn sync_bytes_refuses_a_malformed_root_file() {
+        let err = sync_bytes("opencollection.yml", b"a: [1".to_vec()).expect_err("refused");
+        assert_eq!(
+            err,
+            DomainError::InvalidInput("The collection file is not valid YAML.".into())
+        );
+    }
+
     fn parse(bytes: &[u8]) -> Value {
         serde_yaml::from_slice(bytes).expect("valid yaml")
     }
