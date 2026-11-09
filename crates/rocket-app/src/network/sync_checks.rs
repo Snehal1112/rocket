@@ -200,7 +200,36 @@ pub(super) fn keep_both_allowed(path: &str) -> bool {
     !path.eq_ignore_ascii_case("opencollection.yml") && !name.eq_ignore_ascii_case("folder.yml")
 }
 
+/// True for the root collection file. Its edits sync; a delete or a rename never does.
+pub(super) fn is_root_file(path: &str) -> bool {
+    path.eq_ignore_ascii_case("opencollection.yml")
+}
+
 // ----- received plans -----
+
+/// Decodes a received plan. A plan the decoder refuses is `Unsafe` when one of its paths is
+/// not allowed and `BadPlan` otherwise, so a bad path reads the same in every payload (S10).
+pub(super) fn decode_plan(bytes: &[u8]) -> Result<SyncPlanPayload, Stop> {
+    if let Ok(plan) = SyncPlanPayload::from_json(bytes) {
+        return Ok(plan);
+    }
+    // The size was capped by the payload machine, so a plain parse is bounded too.
+    let raw: Option<SyncPlanPayload> = serde_json::from_slice(bytes).ok();
+    let bad_path = raw.is_some_and(|plan| {
+        plan.wanted
+            .iter()
+            .chain(&plan.deletes)
+            .chain(plan.renames.iter().flat_map(|r| [&r.from, &r.to]))
+            .chain(plan.decisions.iter().map(|d| &d.path))
+            .chain(plan.sends.iter().map(|f| &f.path))
+            .any(|p| !path_allowed(p))
+    });
+    Err(if bad_path {
+        Stop::Unsafe
+    } else {
+        Stop::BadPlan
+    })
+}
 
 /// A request plan names only paths this node offered, each once, and nothing else.
 pub(super) fn check_request(
@@ -246,6 +275,14 @@ pub(super) fn check_final(plan: &SyncPlanPayload, offered: &Manifest) -> Result<
         if !path_allowed(path) {
             return Err(Stop::Unsafe);
         }
+    }
+    let moves_root = plan
+        .deletes
+        .iter()
+        .chain(plan.renames.iter().flat_map(|r| [&r.from, &r.to]))
+        .any(|p| is_root_file(p));
+    if moves_root {
+        return Err(Stop::Unsafe);
     }
     if plan
         .sends

@@ -428,7 +428,12 @@ impl SyncService {
                 drop(guard);
                 return self.stop(sync_id, Stop::BadPlan, LinkUpdate::Keep);
             };
-            if inner.transfers.contains_key(&id) {
+            // The planner's manifest id is registered for its own session while it checks.
+            if inner
+                .transfers
+                .get(&id)
+                .is_some_and(|(_, sid)| sid != sync_id)
+            {
                 drop(guard);
                 return self.stop(sync_id, Stop::BadPlan, LinkUpdate::Keep);
             }
@@ -549,11 +554,15 @@ impl SyncService {
             Next::Ignore => {}
             Next::Bad => self.stop(sync_id, Stop::Damaged, LinkUpdate::Keep),
             Next::Done(role, kind, bytes, total, sha) => {
-                let Some(me) = self.arc() else {
-                    return;
-                };
+                #[cfg(test)]
+                let delay = *self
+                    .processing_delay
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
                 let sid = sync_id.clone();
-                drop(tokio::task::spawn_blocking(move || {
+                self.spawn_owned(sync_id, move |me| {
+                    #[cfg(test)]
+                    std::thread::sleep(delay);
                     if bytes.len() as u64 != total || !sha.eq_ignore_ascii_case(&sha_hex(&bytes)) {
                         return me.stop(&sid, Stop::Damaged, LinkUpdate::Keep);
                     }
@@ -561,7 +570,7 @@ impl SyncService {
                         Role::Starter => me.starter_payload_received(&sid, kind, bytes),
                         Role::Planner => me.planner_payload_received(&sid, kind, bytes),
                     }
-                }));
+                });
             }
         }
     }

@@ -190,19 +190,6 @@ async fn a_final_plan_with_only_deletes_asks_for_confirmation() {
     );
 }
 
-/// Bo starts, Ana answers with a final plan that sends b2 and n, and Bo confirms.
-async fn starter_confirmed(rig: &SyncRig) -> (rocket_network::SyncId, Files) {
-    rig.linked(&lid(L), &base(), &base());
-    let (sid, ..) = bo_starts(rig).await;
-    let sends = [("b.yml", "url: b2\n"), ("n.yml", "url: n\n")];
-    let (plan, after) = final_plan(&base(), &[], &[], &sends);
-    ana_sends_plan(rig, sid.as_str(), 2, &plan).await;
-    ana_sends_files(rig, sid.as_str(), 3, &zip_of(&files(&sends))).await;
-    wait_phase(rig, &sid, Phase::AwaitConfirm).await;
-    rig.sync.confirm(&sid, true).await.expect("confirmed");
-    (sid, after)
-}
-
 #[tokio::test]
 async fn the_starter_applies_then_reports_and_stores_the_base_on_applied() {
     let rig = sync_rig();
@@ -418,19 +405,6 @@ async fn a_delete_only_plan_is_reviewed_without_a_request() {
         "nothing was requested"
     );
     assert_eq!(rig.sync.phase_of(&sid), Some(Phase::AwaitReview));
-}
-
-/// Bo (planner) renamed b.yml to b2.yml and added n.yml; Ana deleted a.yml. Runs to the
-/// state where Bo waits for the starter. Returns the sync id and Bo's files after the sync.
-async fn planner_waiting(rig: &SyncRig) -> (rocket_network::SyncId, Files) {
-    let mut mine = without(&base(), "b.yml");
-    mine.insert("b2.yml".into(), b"url: b\n".to_vec());
-    let mine = with(&mine, "n.yml", "url: n\n");
-    rig.linked(&lid(L), &base(), &mine);
-    let sid = ana_starts(rig, &without(&base(), "a.yml")).await;
-    wait_phase(rig, &sid, Phase::AwaitReview).await;
-    rig.sync.review(&sid, true, vec![]).await.expect("accepted");
-    (sid, without(&mine, "a.yml"))
 }
 
 #[tokio::test]

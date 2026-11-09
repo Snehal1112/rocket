@@ -12,7 +12,7 @@ use rocket_shared::error::{DomainError, DomainResult};
 
 use super::sync::{LinkUpdate, Phase, Role, Session, SyncService, NO_SUCH_LINK};
 use super::sync_checks::{
-    check_final, check_request, entries_match, starter_summary, Stop, FOLDER_CHANGED,
+    check_final, check_request, decode_plan, entries_match, starter_summary, Stop, FOLDER_CHANGED,
     RESULT_NOT_SENT,
 };
 use super::sync_payload::{build_out, pack_zip, sha_hex, sync_offer, unpack_zip};
@@ -67,9 +67,9 @@ impl SyncService {
             }
             inner.starting.insert(peer);
         }
-        let started = self.start_claimed(record, peer_name).await;
-        self.lock().starting.remove(&peer);
-        started
+        // Frees the claim when the start ends, also when its future is dropped.
+        let _claim = StartingFlag { svc: self, peer };
+        self.start_claimed(record, peer_name).await
     }
 
     /// The part of `start` after the peer is claimed in `starting`.
@@ -79,7 +79,6 @@ impl SyncService {
                 "The sync could not start.".to_string(),
             ));
         };
-        let now = Self::now();
         let ttl = self.timing.offer_ttl;
         let rec = record.clone();
         let built = tokio::task::spawn_blocking(move || -> DomainResult<Built> {
@@ -89,6 +88,9 @@ impl SyncService {
             }
             let mine = me.deps.collections.manifest(&rec.collection_name)?;
             let bytes = mine.to_json()?;
+            // The clocks start once the manifest is built: a large collection takes a while,
+            // and that time must not count against the peer's answer.
+            let now = SyncService::now();
             let out = build_out(SyncPayloadKind::Manifest, bytes, now, ttl).map_err(|_| {
                 DomainError::Internal("The manifest could not be offered.".to_string())
             })?;
@@ -185,7 +187,7 @@ impl SyncService {
 
     /// A request plan (answered with the wanted files) or the final plan.
     fn starter_plan(&self, sync_id: &SyncId, bytes: &[u8]) -> Result<(), Stop> {
-        let plan = SyncPlanPayload::from_json(bytes).map_err(|_| Stop::BadPlan)?;
+        let plan = decode_plan(bytes)?;
         let (mine, collection, asked_before) = {
             let inner = self.lock();
             let Some(s) = inner
@@ -465,6 +467,18 @@ impl SyncService {
                 LinkUpdate::State(LinkState::OutOfDate),
             ),
         }
+    }
+}
+
+/// Clears this node's claim on a peer when `start` ends, also when its future is dropped.
+struct StartingFlag<'a> {
+    svc: &'a SyncService,
+    peer: rocket_network::DeviceId,
+}
+
+impl Drop for StartingFlag<'_> {
+    fn drop(&mut self) {
+        self.svc.lock().starting.remove(&self.peer);
     }
 }
 

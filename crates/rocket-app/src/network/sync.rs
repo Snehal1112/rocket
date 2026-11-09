@@ -42,6 +42,7 @@ pub(super) const NO_SUCH_LINK: &str = "That link does not exist.";
 const CANNOT_LINK: &str = "The sent collection cannot be linked.";
 pub(super) const NOT_WAITING: &str = "The sync is no longer waiting for an answer.";
 const ALREADY_APPLYING: &str = "The sync is already being applied.";
+const REVIEW_CHECKING: &str = "The answer to the review is being checked. Try again in a moment.";
 const NOT_A_CONFLICT: &str = "That file is not a conflict.";
 
 /// Everything the service needs from outside. All of it is a port.
@@ -292,6 +293,14 @@ impl SyncInner {
         if let Some(inc) = &session.inc {
             self.transfers.remove(inc.machine.transfer_id());
         }
+        // The planner registers its manifest id under its limits key while it checks the link.
+        if self
+            .transfers
+            .get(&session.key)
+            .is_some_and(|(_, sid)| sid == sync_id)
+        {
+            self.transfers.remove(&session.key);
+        }
         self.limits.release(&session.key);
         Some(session)
     }
@@ -307,6 +316,12 @@ pub struct SyncService {
     worker: Mutex<Option<mpsc::Receiver<Item>>>,
     /// Serialises `create_link`, so two creates of one id cannot both pass the check.
     create_guard: Mutex<()>,
+    /// Test hook: holds the next `review` check until the sender sends or is dropped.
+    #[cfg(test)]
+    pub(super) review_gate: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+    /// Test hook: how long the step after a payload's last chunk waits before it runs.
+    #[cfg(test)]
+    pub(super) processing_delay: Mutex<Duration>,
     #[cfg(test)]
     frames_seen: std::sync::atomic::AtomicUsize,
     #[cfg(test)]
@@ -332,6 +347,10 @@ impl SyncService {
             frames,
             worker: Mutex::new(Some(queue)),
             create_guard: Mutex::new(()),
+            #[cfg(test)]
+            review_gate: Mutex::new(None),
+            #[cfg(test)]
+            processing_delay: Mutex::new(Duration::ZERO),
             #[cfg(test)]
             frames_seen: std::sync::atomic::AtomicUsize::new(0),
             #[cfg(test)]
@@ -524,15 +543,39 @@ impl SyncService {
     }
 
     /// Deletes a link and its base. Audits `NetworkLinkRemoved` and publishes `LinkChanged`.
-    /// The peer is not told; it learns at its next sync. An unknown link is
+    /// The peer is not told; it learns at its next sync. A sync of the link that this node's
+    /// user has not answered yet ends `cancelled` first (S17); one that is being applied, or
+    /// still saves the link, refuses the unlink with "The sync is already being applied.", so
+    /// its link save cannot bring the link back. An unknown link is
     /// `NotFound("That link does not exist.")`.
     pub async fn unlink(&self, link_id: &LinkId) -> DomainResult<()> {
+        self.ensure_worker();
+        let (running, settling) = {
+            let inner = self.lock();
+            let session = inner
+                .sessions
+                .iter()
+                .find(|(_, s)| s.link_id == *link_id)
+                .map(|(sid, s)| (sid.clone(), s.answered || s.reviewing));
+            let settling: HashSet<DeviceId> = inner.settling.iter().copied().collect();
+            match session {
+                Some((_, true)) => return Err(Self::already_applying()),
+                Some((sid, false)) => (Some(sid), settling),
+                None => (None, settling),
+            }
+        };
+        if let Some(sid) = running {
+            self.stop(&sid, Stop::Cancelled, LinkUpdate::Keep);
+        }
         let links = Arc::clone(&self.deps.links);
         let id = link_id.clone();
         let removed = tokio::task::spawn_blocking(move || -> DomainResult<Option<LinkRecord>> {
             let Some(record) = links.get(&id)? else {
                 return Ok(None);
             };
+            if settling.contains(&record.peer_device_id) {
+                return Err(SyncService::already_applying());
+            }
             links.delete(&id)?;
             Ok(Some(record))
         })
@@ -804,6 +847,28 @@ impl SyncService {
 
     // ----- the session core -----
 
+    /// Runs a step that owns the session's phase (a phase with no deadline) in a blocking task.
+    /// A step that panics ends the session, so such a phase cannot hang.
+    pub(super) fn spawn_owned(
+        &self,
+        sync_id: &SyncId,
+        step: impl FnOnce(&SyncService) + Send + 'static,
+    ) {
+        let Some(me) = self.arc() else {
+            return;
+        };
+        let sid = sync_id.clone();
+        drop(tokio::spawn(async move {
+            let task = Arc::clone(&me);
+            if tokio::task::spawn_blocking(move || step(&task))
+                .await
+                .is_err()
+            {
+                me.stop(&sid, Stop::Internal, LinkUpdate::Keep);
+            }
+        }));
+    }
+
     /// Sends a frame and logs a failure.
     pub(super) async fn tell(&self, device: &DeviceId, message: PeerMessage) {
         if let Err(e) = self.deps.network.send_to(device, message).await {
@@ -1018,13 +1083,17 @@ impl SyncService {
             Phase::AwaitPlan | Phase::AwaitStarter => {
                 Some(s.phase_since + t.offer_ttl + t.idle_limit)
             }
-            Phase::AwaitFiles | Phase::RecvManifest | Phase::RecvPlan | Phase::RecvFiles => {
-                let last = s
-                    .inc
+            Phase::AwaitFiles => Some(
+                s.inc
                     .as_ref()
-                    .map_or(s.phase_since, |i| i.last_activity.max(s.phase_since));
-                Some(last + t.idle_limit)
-            }
+                    .map_or(s.phase_since, |i| i.last_activity.max(s.phase_since))
+                    + t.idle_limit,
+            ),
+            // After the last chunk a step owns the phase and ends it itself (`spawn_owned`).
+            Phase::RecvManifest | Phase::RecvPlan | Phase::RecvFiles => s
+                .inc
+                .as_ref()
+                .map(|i| i.last_activity.max(s.phase_since) + t.idle_limit),
             Phase::SendManifest | Phase::SendRequest | Phase::SendFinal | Phase::SendFiles => {
                 Some(s.out.as_ref().map_or(s.phase_since, |o| o.last_ack) + t.idle_limit)
             }
@@ -1209,15 +1278,20 @@ impl SyncService {
     }
 
     /// Cancels a sync (S17). Before this node's dialog the sync ends `cancelled`; during it,
-    /// it is a decline; after this node's user answered it is refused. An unknown or finished
+    /// it is a decline; after this node's user answered it is refused ("The sync is already
+    /// being applied."). While a `review` answer is being checked it is refused with "The
+    /// answer to the review is being checked. Try again in a moment.". An unknown or finished
     /// sync is not an error.
     pub async fn cancel(&self, sync_id: &SyncId) -> DomainResult<()> {
         let phase = {
             let inner = self.lock();
             match inner.sessions.get(sync_id) {
                 None => return Ok(()),
-                Some(s) if s.answered || s.reviewing => {
-                    return Err(DomainError::InvalidInput(ALREADY_APPLYING.to_string()))
+                Some(s) if s.answered => return Err(Self::already_applying()),
+                // The user's answer is being checked; it either opens the review again or
+                // goes on to the apply, so the cancel cannot decide yet.
+                Some(s) if s.reviewing => {
+                    return Err(DomainError::InvalidInput(REVIEW_CHECKING.to_string()))
                 }
                 Some(s) => s.phase,
             }
@@ -1255,6 +1329,11 @@ impl SyncService {
             mine: text(s.mine_conflicts.get(&mine_path)),
             theirs: text(s.received.get(&theirs_path)),
         })
+    }
+
+    /// The fixed answer once this node's user answered the sync.
+    pub(super) fn already_applying() -> DomainError {
+        DomainError::InvalidInput(ALREADY_APPLYING.to_string())
     }
 
     /// The fixed answer for a decision on a path that is not a conflict.

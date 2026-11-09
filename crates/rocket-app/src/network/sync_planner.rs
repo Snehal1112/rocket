@@ -15,8 +15,9 @@ use rocket_shared::error::{DomainError, DomainResult};
 
 use super::sync::{LinkUpdate, Phase, Role, Session, SyncOfferFields, SyncService};
 use super::sync_checks::{
-    apply_to_manifest, conflict_paths, entries_match, keep_both_allowed, path_allowed,
-    planner_summary, split_actions, starter_new_base, wanted_paths, Stop, ALREADY_IN_SYNC,
+    apply_to_manifest, conflict_paths, entries_match, is_root_file, keep_both_allowed,
+    path_allowed, planner_summary, split_actions, starter_new_base, wanted_paths, Stop,
+    ALREADY_IN_SYNC,
 };
 use super::sync_payload::{pack_zip, sha_hex, unpack_zip};
 use super::sync_ports::FileChange;
@@ -55,7 +56,11 @@ impl SyncService {
             match inner.limits.admit_offer(&from, &tid, Self::now()) {
                 Admission::Duplicate => return,
                 Admission::Refuse(_) => true,
-                Admission::Admit if inner.peer_busy(&from) || inner.sessions.contains_key(&sid) => {
+                Admission::Admit
+                    if inner.peer_busy(&from)
+                        || inner.sessions.contains_key(&sid)
+                        || inner.transfers.contains_key(&tid) =>
+                {
                     inner.limits.release(&tid);
                     true
                 }
@@ -66,10 +71,13 @@ impl SyncService {
                         peer_name,
                         link_id,
                         offer.base_hash.clone(),
-                        tid,
+                        tid.clone(),
                         Phase::Checking,
                         Self::now(),
                     );
+                    // Registered now, so no collection offer can take the id while the link
+                    // is checked (the transfer service refuses an id a sync payload holds).
+                    inner.transfers.insert(tid.clone(), (from, sid.clone()));
                     self.insert_session(&mut inner, sid.clone(), session);
                     false
                 }
@@ -85,12 +93,8 @@ impl SyncService {
             );
             return;
         }
-        let Some(me) = self.arc() else {
-            return;
-        };
-        drop(tokio::task::spawn_blocking(move || {
-            me.planner_check(&sid, from, offer)
-        }));
+        let check = sid.clone();
+        self.spawn_owned(&sid, move |me| me.planner_check(&check, from, offer));
     }
 
     /// The `Checking` step (P3 to P6): the link exists for this peer and is not broken, the
@@ -391,8 +395,20 @@ impl SyncService {
             s.reviewing = true;
             (plan, (s.mine.clone(), theirs.clone()))
         };
+        // A `review` future dropped while it waits clears the flag, so the review stays open.
+        let _reviewing = ReviewingFlag { svc: self, sync_id };
+        #[cfg(test)]
+        let gate = self
+            .review_gate
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
         let given = decisions.clone();
         let resolved = tokio::task::spawn_blocking(move || {
+            #[cfg(test)]
+            if let Some(gate) = gate {
+                let _ = gate.recv();
+            }
             let mut all = taken.0.clone();
             for (path, hash) in taken.1.iter() {
                 if all.get(path).is_none() && all.insert(path, hash).is_err() {
@@ -474,6 +490,9 @@ impl SyncService {
             }
         };
         let split = split_actions(&actions, &view.mine);
+        if touches_root_file(&split) {
+            return Err(Stop::Unsafe);
+        }
         let agreed = new_base(&view.base, &view.mine, &view.theirs, &actions, &decisions);
         if apply_to_manifest(&view.mine, &split, &view.theirs)? != agreed {
             return Err(Stop::Internal);
@@ -544,7 +563,8 @@ impl SyncService {
 
     /// The starter's `SyncResult`. `applied` starts this node's apply; `failed` keeps the old
     /// base and marks the link `out_of_date`. A result in another phase is a bad plan. A
-    /// result that overtakes the final ack of a plan with no files counts as that ack.
+    /// result that overtakes the final ack of the last payload (the final plan with no files,
+    /// or the files) counts as that ack.
     pub(super) fn planner_on_result(
         &self,
         from: &DeviceId,
@@ -557,9 +577,12 @@ impl SyncService {
             let Some(s) = inner.sessions.get_mut(sync_id).filter(|s| s.peer == *from) else {
                 return;
             };
-            let early = s.phase == Phase::SendFinal
-                && s.files_zip.is_none()
-                && s.out.as_ref().is_some_and(|o| o.machine.last_chunk_built());
+            // The last payload is out but its final ack has not come: the starter acks the
+            // last chunk before it acts, so its result can overtake that ack.
+            let last_payload = (s.phase == Phase::SendFinal && s.files_zip.is_none())
+                || s.phase == Phase::SendFiles;
+            let early =
+                last_payload && s.out.as_ref().is_some_and(|o| o.machine.last_chunk_built());
             if early {
                 if let Some(out) = s.out.take() {
                     inner.transfers.remove(out.machine.transfer_id());
@@ -657,6 +680,32 @@ impl SyncService {
             None,
             update,
         );
+    }
+}
+
+/// True when a delete or rename of either side names the root collection file. A collection
+/// without it is no collection, so a sync never takes it away.
+fn touches_root_file(split: &super::sync_checks::Split) -> bool {
+    let renames = split.renames.iter().chain(&split.peer_renames);
+    split
+        .deletes
+        .iter()
+        .chain(&split.peer_deletes)
+        .chain(renames.flat_map(|(from, to)| [from, to]))
+        .any(|p| is_root_file(p))
+}
+
+/// Clears `reviewing` when a `review` call ends, also when its future is dropped.
+struct ReviewingFlag<'a> {
+    svc: &'a SyncService,
+    sync_id: &'a SyncId,
+}
+
+impl Drop for ReviewingFlag<'_> {
+    fn drop(&mut self) {
+        if let Some(s) = self.svc.lock().sessions.get_mut(self.sync_id) {
+            s.reviewing = false;
+        }
     }
 }
 

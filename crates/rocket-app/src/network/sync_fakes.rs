@@ -22,7 +22,7 @@ use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{EventPublisher, PublishedEvent};
 
 use super::frame_router::FrameRouter;
-use super::sync::{SyncDeps, SyncService};
+use super::sync::{Phase, SyncDeps, SyncService};
 use super::sync_collections::plan_changes;
 use super::sync_payload::pack_zip;
 use super::sync_ports::{is_sync_entry, sha256_hex, FileChange, SyncCollectionPort, SyncFile};
@@ -367,6 +367,7 @@ pub(crate) struct FakeLinks {
     repo: FakeLinkRepo,
     pub fail_save: AtomicBool,
     saves: AtomicUsize,
+    get_gate: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
 }
 
 impl FakeLinks {
@@ -396,6 +397,13 @@ impl FakeLinks {
     pub fn list_for_test(&self) -> Vec<LinkRecord> {
         self.list().expect("list")
     }
+
+    /// Holds the next `get` until the returned sender sends or is dropped.
+    pub fn hold_get(&self) -> std::sync::mpsc::Sender<()> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        *locked(&self.get_gate) = Some(rx);
+        tx
+    }
 }
 
 impl LinkRepository for FakeLinks {
@@ -404,6 +412,11 @@ impl LinkRepository for FakeLinks {
     }
 
     fn get(&self, id: &LinkId) -> DomainResult<Option<LinkRecord>> {
+        let gate = locked(&self.get_gate).take();
+        if let Some(gate) = gate {
+            // Callers run in a blocking task, so waiting here does not stall the runtime.
+            let _ = gate.recv();
+        }
         self.repo.get(id)
     }
 
@@ -448,6 +461,7 @@ pub(crate) struct FakeCollections {
     edit_after: Mutex<Option<(usize, String, Vec<u8>)>>,
     edit_before_apply: Mutex<Option<(String, Vec<u8>)>>,
     apply_gate: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+    manifest_gate: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
 }
 
 impl FakeCollections {
@@ -520,6 +534,13 @@ impl FakeCollections {
     /// that lands between the user's answer and the apply.
     pub fn edit_before_apply(&self, path: &str, bytes: &[u8]) {
         *locked(&self.edit_before_apply) = Some((path.to_string(), bytes.to_vec()));
+    }
+
+    /// Holds the next `manifest` until the returned sender sends or is dropped.
+    pub fn hold_manifest(&self) -> std::sync::mpsc::Sender<()> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        *locked(&self.manifest_gate) = Some(rx);
+        tx
     }
 
     /// Holds the next apply until the returned sender sends or is dropped.
@@ -605,6 +626,10 @@ impl SyncCollectionPort for FakeCollections {
     }
 
     fn manifest(&self, collection: &str) -> DomainResult<Manifest> {
+        let gate = locked(&self.manifest_gate).take();
+        if let Some(gate) = gate {
+            let _ = gate.recv();
+        }
         let n = self.manifests.fetch_add(1, Ordering::SeqCst);
         let edit = {
             let mut slot = locked(&self.edit_after);
@@ -985,7 +1010,7 @@ pub(crate) async fn take_payload(
         }
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
-    panic!("the payload did not arrive");
+    panic!("the payload did not arrive: {:?}", rig.events.finished());
 }
 
 /// Plays the sending peer of one payload: offers, waits for the answer, sends every chunk.
@@ -1223,6 +1248,32 @@ pub(crate) async fn wait_link(rig: &SyncRig, check: impl Fn(&LinkRecord) -> bool
     })
     .await;
     rig.links.record(&lid(L)).expect("the link")
+}
+
+/// Bo starts, Ana answers with a final plan that sends b2 and n, and Bo confirms.
+pub(crate) async fn starter_confirmed(rig: &SyncRig) -> (rocket_network::SyncId, Files) {
+    rig.linked(&lid(L), &base(), &base());
+    let (sid, ..) = bo_starts(rig).await;
+    let sends = [("b.yml", "url: b2\n"), ("n.yml", "url: n\n")];
+    let (plan, after) = final_plan(&base(), &[], &[], &sends);
+    ana_sends_plan(rig, sid.as_str(), 2, &plan).await;
+    ana_sends_files(rig, sid.as_str(), 3, &zip_of(&files(&sends))).await;
+    wait_phase(rig, &sid, Phase::AwaitConfirm).await;
+    rig.sync.confirm(&sid, true).await.expect("confirmed");
+    (sid, after)
+}
+
+/// Bo (planner) renamed b.yml to b2.yml and added n.yml; Ana deleted a.yml. Runs to the
+/// state where Bo waits for the starter. Returns the sync id and Bo's files after the sync.
+pub(crate) async fn planner_waiting(rig: &SyncRig) -> (rocket_network::SyncId, Files) {
+    let mut mine = without(&base(), "b.yml");
+    mine.insert("b2.yml".into(), b"url: b\n".to_vec());
+    let mine = with(&mine, "n.yml", "url: n\n");
+    rig.linked(&lid(L), &base(), &mine);
+    let sid = ana_starts(rig, &without(&base(), "a.yml")).await;
+    wait_phase(rig, &sid, Phase::AwaitReview).await;
+    rig.sync.review(&sid, true, vec![]).await.expect("accepted");
+    (sid, without(&mine, "a.yml"))
 }
 
 #[cfg(test)]

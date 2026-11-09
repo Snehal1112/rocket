@@ -56,6 +56,9 @@ pub(crate) mod sync_fakes;
 #[path = "sync_run_tests.rs"]
 mod sync_run_tests;
 #[cfg(test)]
+#[path = "sync_safety_tests.rs"]
+mod sync_safety_tests;
+#[cfg(test)]
 #[path = "sync_tests.rs"]
 mod sync_tests;
 // The transfer fakes are shared by the send and receive tests.
