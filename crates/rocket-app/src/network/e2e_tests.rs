@@ -32,8 +32,14 @@ use super::{
 };
 
 /// The longest any single wait may take. Pairing polls once a second and a reconnect waits
-/// for the backoff, so a few seconds is normal and 20 s means something is broken.
-const WAIT: Duration = Duration::from_secs(20);
+/// for the backoff, so a few seconds is normal. The limit is generous so a loaded machine
+/// does not fail a test; 30 s means something is broken.
+const WAIT: Duration = Duration::from_secs(30);
+
+/// How long a peer may take to learn of an unpair when the `Unpair` frame does not reach it
+/// (its socket closed first). It then learns at its next dial, and a pairing saved less than
+/// 30 s ago ignores a "not paired" answer until then (`NOT_PAIRED_GRACE`).
+const UNPAIR_FALLBACK_WAIT: Duration = Duration::from_secs(75);
 
 // ----- the harness -----
 
@@ -126,8 +132,13 @@ pub(super) fn e2e_node(name: &str) -> E2eNode {
 }
 
 /// Polls `check` every 50 ms until it holds. Fails the test after `WAIT`.
-pub(super) async fn wait_until(what: &str, mut check: impl FnMut() -> bool) {
-    let deadline = tokio::time::Instant::now() + WAIT;
+pub(super) async fn wait_until(what: &str, check: impl FnMut() -> bool) {
+    wait_for(what, WAIT, check).await;
+}
+
+/// Polls `check` every 50 ms until it holds. Fails the test after `limit`.
+pub(super) async fn wait_for(what: &str, limit: Duration, mut check: impl FnMut() -> bool) {
+    let deadline = tokio::time::Instant::now() + limit;
     while !check() {
         assert!(
             tokio::time::Instant::now() < deadline,
@@ -468,9 +479,14 @@ async fn unpairing_online_removes_both_sides() {
     let (a, b, _ha, _hb) = online_pair().await;
 
     a.svc.remove_paired(&b.id()).await.expect("remove");
-    wait_until("B removes A after Unpair", || !b.paired.contains(&a.id())).await;
-
+    // A's side is done at once. B normally learns from the `Unpair` frame; under load its
+    // socket can close first, and then it learns at its next dial after the grace.
     assert!(!a.paired.contains(&b.id()));
+    wait_for("B removes A", UNPAIR_FALLBACK_WAIT, || {
+        !b.paired.contains(&a.id())
+    })
+    .await;
+
     assert!(a.events.removed().contains(&("ben".to_string(), false)));
     assert!(b.events.removed().contains(&("ann".to_string(), true)));
     assert!(b

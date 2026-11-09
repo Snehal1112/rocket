@@ -22,7 +22,7 @@ use rocket_network::{
     PairRequestResponse, PairStatusResponse, PairedDevice, PairedDeviceRepository, PairingId,
     PeerCallError, PeerConnector, PeerError, PeerHandler, PeerIdentity, PeerMessage,
     PeerServerControl, PeerSocket, PeerTransport, PeerTransportFactory, QuarantineReport,
-    TransferEvent,
+    SyncEvent, TransferEvent,
 };
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{EventPublisher, PublishedEvent};
@@ -692,9 +692,18 @@ impl QuarantineReport for FakeQuarantine {
 /// Kept concrete on purpose: its query helpers are specific to `NetworkEvent`, and the recorders
 /// in other crates are private test doubles.
 #[derive(Default)]
-pub(crate) struct RecordingEvents(Mutex<Vec<NetworkEvent>>, Mutex<Vec<TransferEvent>>);
+pub(crate) struct RecordingEvents(
+    Mutex<Vec<NetworkEvent>>,
+    Mutex<Vec<TransferEvent>>,
+    Mutex<Vec<SyncEvent>>,
+);
 
 impl RecordingEvents {
+    /// Every sync event, in order.
+    pub fn syncs(&self) -> Vec<SyncEvent> {
+        self.2.lock().expect("events lock").clone()
+    }
+
     /// Every transfer event, in order.
     pub fn transfers(&self) -> Vec<TransferEvent> {
         self.1.lock().expect("events lock").clone()
@@ -768,6 +777,9 @@ impl EventPublisher for RecordingEvents {
         }
         if let Some(event) = event.downcast_ref::<TransferEvent>() {
             self.1.lock().expect("events lock").push(event.clone());
+        }
+        if let Some(event) = event.downcast_ref::<SyncEvent>() {
+            self.2.lock().expect("events lock").push(event.clone());
         }
     }
 }

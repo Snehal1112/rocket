@@ -31,6 +31,9 @@ pub(crate) mod test_support;
 #[path = "connections_tests.rs"]
 mod connections_tests;
 #[cfg(test)]
+#[path = "e2e_sync_tests.rs"]
+mod e2e_sync_tests;
+#[cfg(test)]
 #[path = "e2e_tests.rs"]
 mod e2e_tests;
 #[cfg(test)]
