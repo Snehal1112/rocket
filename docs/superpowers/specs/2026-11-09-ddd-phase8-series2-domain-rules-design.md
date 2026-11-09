@@ -1,6 +1,6 @@
 # Phase 8 series 2: domain rules out of the app layer (D-86, D-82)
 
-Status: draft for review. Roadmap: `docs/roadmaps/ddd-roadmap.md` Phase 8, D-86 and D-82. Decisions: `docs/engineering/ddd-decisions.md` (D-02 split by context, D-04 narrow domain model). Follows series 1 (`2026-11-09-ddd-phase8-series1-small-moves-design.md`), which moved `AssistantMode` to `rocket-acp`.
+Status: approved 2026-11-09, implemented. Roadmap: `docs/roadmaps/ddd-roadmap.md` Phase 8, D-86 and D-82. Decisions: `docs/engineering/ddd-decisions.md` (D-02 split by context, D-04 narrow domain model). Follows series 1 (`2026-11-09-ddd-phase8-series1-small-moves-design.md`), which moved `AssistantMode` to `rocket-acp`.
 
 ## Goal
 

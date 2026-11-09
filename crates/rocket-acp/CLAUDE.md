@@ -38,6 +38,7 @@ cargo test -p rocket-acp -j4
 | `prompt.rs` | `PromptPart` (text and embedded text resources) |
 | `mcp_server_spec.rs` | `McpServerSpec` |
 | `proposal.rs` | `AgentProposal`, `ProposalStatus`, `ProposedChange`, `ProposedRequest`, `RequestPatch`, `FolderSettingsPatch`, `ProposedVariable`, `ScriptPhase`: pure proposal data, applied by `rocket-app`'s `ProposalService` |
+| `proposal_rules.rs` | Pure structural rules for proposals, used by `rocket-app`'s `ProposalService`. Path rules: `Target`, `locate`, `locate_with`, `is_folder`, `is_free`, `normalize_path(s)`, `validate_relative_path`, `validate_item_name`, `check_reserved_name`, `join_path`, `parent_of`, `move_destination`, `paths_of`. Apply rules: `apply_patch`, `build_request`, `set_script`, `stored_body`, `apply_folder_patch`, `check_folder_variables`. Also `folder_shape` (the folder structure string; `ProposalService`'s `folder_fingerprint` imports it) and `sha256_hex`. No I/O. |
 | `mode.rs` | `AssistantMode` (`Ask`, `Edit`, `Agent`; ordered `Ask < Edit < Agent`, default `Ask`, serde lowercase) with `label()` and `summary()`. The live session mode. `rocket-app`'s `McpToolService` gates tools by it. |
 | `conversation.rs` | Stored assistant conversations: `ConversationRecord`, `ConversationSummary`, `StoredMessage`, caps (`MAX_CONVERSATIONS`, `MAX_MESSAGES`, `MAX_MESSAGE_TEXT_BYTES`, `MAX_INPUT_TEXT_BYTES`), the input bound helpers `first_kept_index` and `text_bytes`, `validate_conversation_id` (lowercase UUID) and the `ConversationRepository` trait. Persisted as snake_case YAML by `rocket-infra`; see `docs/features/assistant-conversations.md`. `ConversationRecord.mode` is an `AssistantMode` from `mode.rs` (there is no separate conversation mode type). |
 
@@ -53,9 +54,11 @@ cargo test -p rocket-acp -j4
   the variable named by `source_env_var` from Rocket's own process env.
   Env names are validated.
 - The env source sees only what Rocket's process was started with.
-- No cross-domain-crate dependencies — other entities are referenced by plain
-  `String` id, not by importing another domain crate's types.
-- `FolderSettingsPatch` has no auth field and uses `ProposedVariable` because this crate must not depend on `rocket-collection`.
+- The only domain crate dependency besides `rocket-shared` is `rocket-collection`
+  (added for `proposal_rules.rs`, which works on `Folder`, `Request` and
+  `FolderSettings`). `rocket-collection` must not depend on `rocket-acp`. Other
+  entities are still referenced by plain `String` id.
+- `FolderSettingsPatch` has no auth field and uses `ProposedVariable`, so `proposal.rs` itself does not import `rocket-collection` types.
 - `AcpSessionClient` must stay object-safe (`rocket-app` holds it as
   `Box<dyn AcpSessionClient>`) and must not depend on `agent-client-protocol`,
   the event enums, or Tauri. `send_prompt` streams typed `AcpUpdate`s through a plain
@@ -82,6 +85,8 @@ cargo test -p rocket-acp -j4
 ### Dependencies
 
 - `rocket-shared` — `DomainResult`
+- `rocket-collection` — `Folder`, `Request` and `FolderSettings`, for `proposal_rules.rs`
+- `sha2` — `sha256_hex` in `proposal_rules.rs`
 - `serde` — serialization derives
 - `async-trait` — async methods on `AcpSessionClient`
 - `tokio` — only the `mpsc::UnboundedSender` channel type

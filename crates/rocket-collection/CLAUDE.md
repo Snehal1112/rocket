@@ -144,7 +144,8 @@ The trait is **synchronous** (no `async`). Despite `async-trait` being in `Cargo
 
 ### Snapshot helpers (`snapshot.rs`)
 - `snapshot_path(requested_path, saved_file_name)` rebuilds the snapshot path after a save (the saved file name replaces the last component).
-- `walk_folder(folder, prefix, out)` collects `(path, request)` pairs of a folder tree and skips gRPC items.
+- `walk_folder(folder, prefix, out)` collects `(path, request)` pairs of a folder tree. It takes HTTP requests only: GraphQL, WebSocket, gRPC and opaque items are skipped, as are requests without a `file_name` and folders without a `dir_name`.
+- `Folder::dir_or_name()` returns the on-disk directory name, falling back to the display name. `rocket-acp`'s `proposal_rules.rs` uses it. `rocket-collection` must not depend on `rocket-acp`.
 
 ### Scope and version rules
 - `ContractScope::covers(request_path)`: a folder scope covers whole path components only (`auth` does not cover `authz/x.yml`), a request scope covers its own path, a collection scope covers every path.
