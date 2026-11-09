@@ -19,10 +19,9 @@ pub use agent_config::{
 };
 pub use conversation::{
     cap_message_text, conversation_title, has_agent_reply, validate_conversation_id,
-    ConversationCollection, ConversationMode, ConversationRecord, ConversationRepository,
-    ConversationSummary, StoredMessage, StoredProposalStatus, StoredToolStatus,
-    CONVERSATION_FORMAT_VERSION, MAX_CONVERSATIONS, MAX_MESSAGES, MAX_MESSAGE_TEXT_BYTES,
-    MAX_TITLE_CHARS, TEXT_CUT_MARKER,
+    ConversationCollection, ConversationRecord, ConversationRepository, ConversationSummary,
+    StoredMessage, StoredProposalStatus, StoredToolStatus, CONVERSATION_FORMAT_VERSION,
+    MAX_CONVERSATIONS, MAX_MESSAGES, MAX_MESSAGE_TEXT_BYTES, MAX_TITLE_CHARS, TEXT_CUT_MARKER,
 };
 pub use events::AcpEvent;
 pub use mcp_server_spec::McpServerSpec;

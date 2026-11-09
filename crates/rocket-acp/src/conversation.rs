@@ -4,6 +4,7 @@
 //! field names, because this is a Rocket-private store, not an
 //! OpenCollection file.
 
+use crate::mode::AssistantMode;
 use rocket_shared::error::{DomainError, DomainResult};
 use serde::{Deserialize, Serialize};
 
@@ -20,15 +21,8 @@ pub const MAX_TITLE_CHARS: usize = 80;
 /// Ends a text that was cut.
 pub const TEXT_CUT_MARKER: &str = "\n\n[cut: longer than 16 KB]";
 
-/// The assistant mode when the conversation was saved.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ConversationMode {
-    #[default]
-    Ask,
-    Edit,
-    Agent,
-}
+/// The most text one save accepts, before any work. A real conversation is far below this.
+pub const MAX_INPUT_TEXT_BYTES: usize = 2 * 1024 * 1024;
 
 /// A tool line's last status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -112,7 +106,7 @@ pub struct ConversationRecord {
     #[serde(default)]
     pub agent_config_id: String,
     #[serde(default)]
-    pub mode: ConversationMode,
+    pub mode: AssistantMode,
     /// Informational. The file's location decides the workspace.
     #[serde(default)]
     pub workspace_id: String,
@@ -135,7 +129,7 @@ pub struct ConversationSummary {
     pub id: String,
     pub title: String,
     pub agent_config_id: String,
-    pub mode: ConversationMode,
+    pub mode: AssistantMode,
     pub created_at: String,
     pub updated_at: String,
     pub message_count: usize,
@@ -219,6 +213,32 @@ pub fn conversation_title(messages: &[StoredMessage]) -> String {
         .collect()
 }
 
+/// Index of the oldest message to keep so the kept text fits `MAX_INPUT_TEXT_BYTES`.
+/// It equals the length when even the newest message alone is over the bound.
+pub fn first_kept_index(messages: &[StoredMessage]) -> usize {
+    let mut total = 0usize;
+    let mut start = messages.len();
+    for (index, message) in messages.iter().enumerate().rev() {
+        total = total.saturating_add(text_bytes(message));
+        if total > MAX_INPUT_TEXT_BYTES {
+            break;
+        }
+        start = index;
+    }
+    start
+}
+
+/// Bytes of the free text of one message.
+pub fn text_bytes(message: &StoredMessage) -> usize {
+    match message {
+        StoredMessage::User { text }
+        | StoredMessage::Agent { text }
+        | StoredMessage::Notice { text } => text.len(),
+        StoredMessage::Tool { title, .. } => title.len(),
+        StoredMessage::Proposal { summary, .. } => summary.len(),
+    }
+}
+
 /// True when the agent has replied with some text.
 pub fn has_agent_reply(messages: &[StoredMessage]) -> bool {
     messages
@@ -269,7 +289,7 @@ mod tests {
             id: ID.to_string(),
             title: String::new(),
             agent_config_id: "claude-code".to_string(),
-            mode: ConversationMode::Ask,
+            mode: AssistantMode::Ask,
             workspace_id: "default".to_string(),
             created_at: "2026-10-11T09:12:00Z".to_string(),
             updated_at: "2026-10-11T09:20:41Z".to_string(),
@@ -298,7 +318,7 @@ mod tests {
             r#"{"kind":"proposal","summary":"Change header X","status":"accepted"}"#
         );
         assert_eq!(
-            serde_json::to_string(&ConversationMode::Agent).expect("serialize"),
+            serde_json::to_string(&AssistantMode::Agent).expect("serialize"),
             r#""agent""#
         );
     }
@@ -309,10 +329,81 @@ mod tests {
             r#"{{"version":1,"id":"{ID}","future_key":true,"messages":[{{"kind":"user","text":"hi"}}]}}"#
         );
         let loaded: ConversationRecord = serde_json::from_str(&json).expect("parse");
-        assert_eq!(loaded.mode, ConversationMode::Ask);
+        assert_eq!(loaded.mode, AssistantMode::Ask);
         assert!(loaded.collections.is_empty());
         assert_eq!(loaded.continued_from, None);
         assert_eq!(loaded.messages, vec![user("hi")]);
+    }
+
+    #[test]
+    fn stored_conversation_loads_each_mode() {
+        for (text, expected) in [
+            ("ask", AssistantMode::Ask),
+            ("edit", AssistantMode::Edit),
+            ("agent", AssistantMode::Agent),
+        ] {
+            let json = format!(r#"{{"version":1,"id":"{ID}","mode":"{text}"}}"#);
+            let loaded: ConversationRecord = serde_json::from_str(&json).expect("parse");
+            assert_eq!(loaded.mode, expected);
+            let back = serde_json::to_value(&loaded).expect("serialize");
+            assert_eq!(back["mode"], text);
+        }
+    }
+
+    #[test]
+    fn conversation_without_a_mode_defaults_to_ask() {
+        let json = format!(r#"{{"version":1,"id":"{ID}"}}"#);
+        let loaded: ConversationRecord = serde_json::from_str(&json).expect("parse");
+        assert_eq!(loaded.mode, AssistantMode::Ask);
+    }
+
+    #[test]
+    fn first_kept_index_keeps_everything_under_the_bound() {
+        let messages = vec![
+            user(&"a".repeat(MAX_INPUT_TEXT_BYTES / 2)),
+            agent(&"b".repeat(MAX_INPUT_TEXT_BYTES / 2)),
+        ];
+        assert_eq!(first_kept_index(&messages), 0);
+        assert_eq!(first_kept_index(&[]), 0);
+    }
+
+    #[test]
+    fn first_kept_index_drops_oldest_when_over() {
+        let messages = vec![
+            user("x"),
+            user(&"a".repeat(MAX_INPUT_TEXT_BYTES / 2)),
+            agent(&"b".repeat(MAX_INPUT_TEXT_BYTES / 2)),
+        ];
+        assert_eq!(first_kept_index(&messages), 1);
+        let one_over = vec![user("x"), agent(&"b".repeat(MAX_INPUT_TEXT_BYTES))];
+        assert_eq!(first_kept_index(&one_over), 1);
+    }
+
+    #[test]
+    fn first_kept_index_is_len_when_newest_alone_is_over() {
+        let messages = vec![user("x"), agent(&"b".repeat(MAX_INPUT_TEXT_BYTES + 1))];
+        assert_eq!(first_kept_index(&messages), messages.len());
+    }
+
+    #[test]
+    fn text_bytes_counts_the_text_of_each_message_kind() {
+        assert_eq!(text_bytes(&user("abc")), 3);
+        assert_eq!(text_bytes(&agent("abcd")), 4);
+        assert_eq!(text_bytes(&StoredMessage::Notice { text: "é".into() }), 2);
+        assert_eq!(
+            text_bytes(&StoredMessage::Tool {
+                title: "run".into(),
+                status: StoredToolStatus::Completed,
+            }),
+            3
+        );
+        assert_eq!(
+            text_bytes(&StoredMessage::Proposal {
+                summary: "sum".into(),
+                status: StoredProposalStatus::Pending,
+            }),
+            3
+        );
     }
 
     #[test]

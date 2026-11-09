@@ -115,9 +115,7 @@ pub use collection_runner_service::{
 pub use collection_service::CollectionService;
 pub use collection_trust::{Capability, CollectionTrustService, TrustStatus};
 pub use contract_service::ContractService;
-pub use conversation_service::{
-    ConversationInput, ConversationService, MAX_INPUT_TEXT_BYTES, MAX_SESSION_PINS,
-};
+pub use conversation_service::{ConversationInput, ConversationService, MAX_SESSION_PINS};
 pub use cookie_service::CookieService;
 pub use environment_service::EnvironmentService;
 pub use environment_services::EnvironmentServices;

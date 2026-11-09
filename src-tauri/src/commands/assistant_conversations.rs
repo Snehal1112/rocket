@@ -6,9 +6,8 @@
 
 use std::sync::Arc;
 
-use rocket_acp::conversation::{
-    ConversationMode, ConversationRecord, ConversationSummary, StoredMessage,
-};
+use rocket_acp::conversation::{ConversationRecord, ConversationSummary, StoredMessage};
+use rocket_acp::AssistantMode;
 use rocket_app::{ConversationInput, ConversationService};
 use rocket_shared::error::DomainError;
 use serde::{Deserialize, Serialize};
@@ -20,7 +19,7 @@ pub struct ConversationSummaryDto {
     pub id: String,
     pub title: String,
     pub agent_config_id: String,
-    pub mode: ConversationMode,
+    pub mode: AssistantMode,
     pub created_at: String,
     pub updated_at: String,
     pub message_count: usize,
@@ -41,7 +40,7 @@ pub struct ConversationRecordDto {
     pub id: String,
     pub title: String,
     pub agent_config_id: String,
-    pub mode: ConversationMode,
+    pub mode: AssistantMode,
     pub workspace_id: String,
     pub created_at: String,
     pub updated_at: String,
@@ -56,7 +55,7 @@ pub struct ConversationRecordDto {
 pub struct ConversationInputDto {
     pub id: String,
     pub agent_config_id: String,
-    pub mode: ConversationMode,
+    pub mode: AssistantMode,
     #[serde(default)]
     pub workspace_id: String,
     #[serde(default)]
@@ -295,7 +294,7 @@ mod tests {
             id: ID.into(),
             title: "t".into(),
             agent_config_id: "a".into(),
-            mode: ConversationMode::Ask,
+            mode: AssistantMode::Ask,
             created_at: "c".into(),
             updated_at: "u".into(),
             message_count: 2,

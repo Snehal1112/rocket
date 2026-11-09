@@ -8,11 +8,11 @@ use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use rocket_acp::conversation::{
-    conversation_title, has_agent_reply, validate_conversation_id, ConversationCollection,
-    ConversationMode, ConversationRecord, ConversationRepository, ConversationSummary,
+    conversation_title, first_kept_index, has_agent_reply, validate_conversation_id,
+    ConversationCollection, ConversationRecord, ConversationRepository, ConversationSummary,
     StoredMessage, CONVERSATION_FORMAT_VERSION, MAX_MESSAGES,
 };
-use rocket_acp::AcpEvent;
+use rocket_acp::{AcpEvent, AssistantMode};
 use rocket_collection::CollectionRepository;
 use rocket_environment::{EnvironmentRepository, EnvironmentRepositoryFactory};
 use rocket_shared::error::{DomainError, DomainResult};
@@ -25,16 +25,13 @@ use crate::redaction::redact_url_secrets;
 /// Sessions whose workspace pin is kept. The oldest pin is dropped first.
 pub const MAX_SESSION_PINS: usize = 16;
 
-/// The most text one save accepts, before any work. A real conversation is far below this.
-pub const MAX_INPUT_TEXT_BYTES: usize = 2 * 1024 * 1024;
-
 /// What the panel sends to save. `collections` are names; the record keeps
 /// their `opencollection.yml` uid.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConversationInput {
     pub id: String,
     pub agent_config_id: String,
-    pub mode: ConversationMode,
+    pub mode: AssistantMode,
     pub workspace_id: String,
     pub collections: Vec<String>,
     pub messages: Vec<StoredMessage>,
@@ -275,31 +272,6 @@ impl crate::acp_session_service::StreamSecretSource for ConversationService {
     }
 }
 
-/// Index of the oldest message to keep so the kept text fits `MAX_INPUT_TEXT_BYTES`.
-/// It equals the length when even the newest message alone is over the bound.
-fn first_kept_index(messages: &[StoredMessage]) -> usize {
-    let mut total = 0usize;
-    let mut start = messages.len();
-    for (index, message) in messages.iter().enumerate().rev() {
-        total = total.saturating_add(text_bytes(message));
-        if total > MAX_INPUT_TEXT_BYTES {
-            break;
-        }
-        start = index;
-    }
-    start
-}
-
-fn text_bytes(message: &StoredMessage) -> usize {
-    match message {
-        StoredMessage::User { text }
-        | StoredMessage::Agent { text }
-        | StoredMessage::Notice { text } => text.len(),
-        StoredMessage::Tool { title, .. } => title.len(),
-        StoredMessage::Proposal { summary, .. } => summary.len(),
-    }
-}
-
 /// Collections by their `opencollection.yml` uid. A name without a uid is left out.
 fn collection_refs(
     collections: &dyn CollectionRepository,
@@ -327,7 +299,8 @@ mod tests {
     use std::sync::Mutex as StdMutex;
 
     use rocket_acp::conversation::{
-        StoredProposalStatus, StoredToolStatus, MAX_MESSAGE_TEXT_BYTES, TEXT_CUT_MARKER,
+        text_bytes, StoredProposalStatus, StoredToolStatus, MAX_INPUT_TEXT_BYTES,
+        MAX_MESSAGE_TEXT_BYTES, TEXT_CUT_MARKER,
     };
     use rocket_collection::{
         Collection, CollectionItem, CollectionSettings, CollectionVariable, Folder, FolderSettings,
@@ -481,7 +454,7 @@ mod tests {
         ConversationInput {
             id: ID.into(),
             agent_config_id: "claude-code".into(),
-            mode: ConversationMode::Edit,
+            mode: AssistantMode::Edit,
             workspace_id: "default".into(),
             collections: vec!["demo".into()],
             messages,
@@ -636,7 +609,7 @@ mod tests {
         assert_eq!(summary.created_at, "2026-10-11T09:00:00Z");
         assert_eq!(summary.updated_at, "2026-10-11T09:01:00Z");
         assert_eq!(summary.message_count, 4);
-        assert_eq!(summary.mode, ConversationMode::Edit);
+        assert_eq!(summary.mode, AssistantMode::Edit);
         svc.delete(ID).expect("delete");
         svc.clear().expect("clear");
         let events: Vec<String> = fx

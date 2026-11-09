@@ -531,7 +531,7 @@ async fn a_started_session_can_save_its_conversation_into_its_workspace() {
             rocket_app::ConversationInput {
                 id: id.into(),
                 agent_config_id: "agent-1".into(),
-                mode: rocket_acp::ConversationMode::Edit,
+                mode: rocket_acp::AssistantMode::Edit,
                 workspace_id: "default".into(),
                 collections: vec!["demo".into()],
                 messages: vec![

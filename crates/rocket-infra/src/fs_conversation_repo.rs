@@ -212,8 +212,9 @@ impl ConversationRepository for FsConversationRepo {
 mod tests {
     use super::*;
     use rocket_acp::conversation::{
-        ConversationMode, StoredMessage, MAX_MESSAGES, MAX_MESSAGE_TEXT_BYTES, TEXT_CUT_MARKER,
+        StoredMessage, MAX_MESSAGES, MAX_MESSAGE_TEXT_BYTES, TEXT_CUT_MARKER,
     };
+    use rocket_acp::AssistantMode;
     use tempfile::TempDir;
 
     fn id(n: u32) -> String {
@@ -226,7 +227,7 @@ mod tests {
             id: id(n),
             title: format!("chat {n}"),
             agent_config_id: "claude-code".into(),
-            mode: ConversationMode::Ask,
+            mode: AssistantMode::Ask,
             workspace_id: "default".into(),
             created_at: updated_at.into(),
             updated_at: updated_at.into(),

@@ -63,7 +63,8 @@ impl ConversationRepository for SharedPathConversationRepo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rocket_acp::conversation::{ConversationMode, StoredMessage, CONVERSATION_FORMAT_VERSION};
+    use rocket_acp::conversation::{StoredMessage, CONVERSATION_FORMAT_VERSION};
+    use rocket_acp::AssistantMode;
 
     const ID: &str = "0b6f3f4e-0000-4000-8000-000000000001";
 
@@ -73,7 +74,7 @@ mod tests {
             id: ID.into(),
             title: "t".into(),
             agent_config_id: "a".into(),
-            mode: ConversationMode::Ask,
+            mode: AssistantMode::Ask,
             workspace_id: "default".into(),
             created_at: "2026-10-11T09:00:00Z".into(),
             updated_at: "2026-10-11T09:00:00Z".into(),
