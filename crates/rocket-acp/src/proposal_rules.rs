@@ -2,10 +2,17 @@
 //! collection-relative path in the summaries tree, normalizing and validating
 //! paths and names, and refusing reserved names. Pure functions, no I/O.
 
-use rocket_collection::{CollectionItem, Folder};
-use rocket_shared::error::{DomainError, DomainResult};
+use std::collections::HashSet;
 
-use crate::proposal::ProposedChange;
+use rocket_collection::{CollectionItem, CollectionVariable, Folder, FolderSettings, Request};
+use rocket_shared::description::Documentation;
+use rocket_shared::error::{DomainError, DomainResult};
+use rocket_shared::types::{Body, BodyMode};
+use sha2::{Digest, Sha256};
+
+use crate::proposal::{
+    FolderSettingsPatch, ProposedChange, ProposedRequest, RequestPatch, ScriptPhase,
+};
 
 /// File names the collection layout reserves, lowercase. A request must never
 /// be saved over one of them. Mirrors `rocket-infra` `is_request_file`.
@@ -263,6 +270,142 @@ pub fn validate_item_name(name: &str) -> DomainResult<()> {
         )));
     }
     Ok(())
+}
+
+/// Lowercase hex SHA-256 of `text`.
+pub fn sha256_hex(text: &str) -> String {
+    Sha256::digest(text.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// Replaces the sections the patch sets. Auth is never touched.
+pub fn apply_folder_patch(settings: &mut FolderSettings, patch: &FolderSettingsPatch) {
+    if let Some(headers) = &patch.headers {
+        settings.headers = headers.clone();
+    }
+    if let Some(variables) = &patch.variables {
+        // An equal initial value means "no initial value" in folder.yml.
+        settings.variables = variables
+            .iter()
+            .map(|v| CollectionVariable {
+                key: v.key.clone(),
+                value: v.value.clone(),
+                initial_value: v.value.clone(),
+                enabled: v.enabled,
+                secret: false,
+            })
+            .collect();
+    }
+    if let Some(script) = &patch.pre_request_script {
+        settings.pre_request_script = Some(script.clone());
+    }
+    if let Some(script) = &patch.post_response_script {
+        settings.post_response_script = Some(script.clone());
+    }
+    if let Some(script) = &patch.tests_script {
+        settings.tests_script = Some(script.clone());
+    }
+    if let Some(docs) = &patch.docs {
+        settings.docs = Some(docs.clone());
+    }
+}
+
+/// Refuses a variable list with an empty or repeated name.
+pub fn check_folder_variables(patch: &FolderSettingsPatch) -> DomainResult<()> {
+    let Some(variables) = &patch.variables else {
+        return Ok(());
+    };
+    let mut seen = HashSet::new();
+    for variable in variables {
+        if variable.key.trim().is_empty() {
+            return Err(DomainError::InvalidInput(
+                "variable name cannot be empty".to_string(),
+            ));
+        }
+        if !seen.insert(variable.key.as_str()) {
+            return Err(DomainError::InvalidInput(format!(
+                "duplicate folder variable '{}'",
+                variable.key
+            )));
+        }
+    }
+    Ok(())
+}
+
+pub fn set_script(request: &mut Request, phase: ScriptPhase, body: String) {
+    match phase {
+        ScriptPhase::PreRequest => request.pre_request_script = Some(body),
+        ScriptPhase::PostResponse => request.post_response_script = Some(body),
+        ScriptPhase::Tests => request.tests = Some(body),
+    }
+}
+
+/// A body of mode `none` is stored as no body, like the request editor does.
+pub fn stored_body(body: &Body) -> Option<Body> {
+    if matches!(body.mode, BodyMode::None) {
+        None
+    } else {
+        Some(body.clone())
+    }
+}
+
+pub fn build_request(proposed: &ProposedRequest) -> Request {
+    let mut request = Request::new(
+        proposed.name.clone(),
+        proposed.method.clone(),
+        proposed.url.clone(),
+    );
+    request.headers = proposed.headers.clone();
+    request.query_params = proposed.query_params.clone();
+    request.body = proposed.body.as_ref().and_then(stored_body);
+    request.docs = proposed.docs.clone().map(Documentation::text);
+    request.pre_request_script = proposed.pre_request_script.clone();
+    request.post_response_script = proposed.post_response_script.clone();
+    request.tests = proposed.tests.clone();
+    request
+}
+
+pub fn apply_patch(request: &mut Request, patch: &RequestPatch) {
+    if let Some(method) = &patch.method {
+        request.method = method.clone();
+    }
+    if let Some(url) = &patch.url {
+        request.url = url.clone();
+    }
+    if let Some(headers) = &patch.headers {
+        let mut merged = headers.clone();
+        for header in &mut merged {
+            if header.description.is_none() {
+                header.description = request
+                    .headers
+                    .iter()
+                    .find(|old| old.key.eq_ignore_ascii_case(&header.key))
+                    .and_then(|old| old.description.clone());
+            }
+        }
+        request.headers = merged;
+    }
+    if let Some(query_params) = &patch.query_params {
+        let mut merged = query_params.clone();
+        for param in &mut merged {
+            if param.description.is_none() {
+                param.description = request
+                    .query_params
+                    .iter()
+                    .find(|old| old.key == param.key)
+                    .and_then(|old| old.description.clone());
+            }
+        }
+        request.query_params = merged;
+    }
+    if let Some(body) = &patch.body {
+        request.body = stored_body(body);
+    }
+    if let Some(docs) = &patch.docs {
+        request.docs = Some(Documentation::text(docs.clone()));
+    }
 }
 
 #[cfg(test)]
