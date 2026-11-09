@@ -83,6 +83,11 @@ hex_id!(
     SyncId,
     "sync id"
 );
+hex_id!(
+    /// One contract check. Made by the provider that sends the offer.
+    ContractCheckId,
+    "contract check id"
+);
 
 /// Whether the text is a lowercase hex SHA-256 (64 characters).
 pub fn is_sha256_hex(text: &str) -> bool {
@@ -458,6 +463,11 @@ mod tests {
         assert_ne!(LinkId::random(), LinkId::random());
         let sync = SyncId::random();
         assert_eq!(SyncId::parse(sync.as_str()).expect("round trip"), sync);
+        let check = ContractCheckId::random();
+        assert_eq!(
+            ContractCheckId::parse(check.as_str()).expect("round trip"),
+            check
+        );
         for bad in [
             "",
             "abc",
@@ -469,6 +479,10 @@ mod tests {
         ] {
             assert!(LinkId::parse(bad).is_err(), "link id {bad:?}");
             assert!(SyncId::parse(bad).is_err(), "sync id {bad:?}");
+            assert!(
+                ContractCheckId::parse(bad).is_err(),
+                "contract check id {bad:?}"
+            );
         }
     }
 

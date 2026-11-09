@@ -3,7 +3,11 @@
 use rocket_shared::error::{DomainError, DomainResult};
 use serde::{Deserialize, Serialize};
 
-use crate::limits::MAX_FRAME_BYTES;
+use crate::limits::{
+    CONTRACT_CHECK_MAX_CHANGES, CONTRACT_FIELD_MAX, CONTRACT_NAME_MAX, CONTRACT_PATH_MAX,
+    CONTRACT_VALUE_MAX, CONTRACT_VERSION_MAX, MAX_FRAME_BYTES,
+};
+use crate::link::ContractCheckId;
 use crate::profile::NodeProfile;
 
 /// Why a transfer stopped. Sent inside `TransferAbort`.
@@ -70,6 +74,79 @@ pub enum SyncAbortReason {
 pub enum SyncOutcome {
     Applied,
     Failed,
+}
+
+/// How strictly the provider treats changes. Sent inside `ContractCheckOffer`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContractPolicyWire {
+    Strict,
+    Lenient,
+    AdditiveOk,
+}
+
+/// What happened to one contract field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContractChangeType {
+    Changed,
+    Added,
+    Removed,
+}
+
+/// The consumer's verdict on one change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContractVerdict {
+    Pass,
+    Break,
+    NotUsed,
+}
+
+/// How a node answered a contract check. Sent inside `ContractCheckResult`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContractCheckOutcome {
+    Answered,
+    Declined,
+    Busy,
+}
+
+/// One contract change in an offer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContractChange {
+    pub method: String,
+    pub path_template: String,
+    pub field: String,
+    pub change_type: ContractChangeType,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub old_value: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub new_value: Option<String>,
+    pub breaking: bool,
+}
+
+impl ContractChange {
+    /// Cuts `old_value` and `new_value` to `CONTRACT_VALUE_MAX` characters.
+    pub fn cut_values(&mut self) {
+        for value in [&mut self.old_value, &mut self.new_value]
+            .into_iter()
+            .flatten()
+        {
+            if let Some((byte, _)) = value.char_indices().nth(CONTRACT_VALUE_MAX) {
+                value.truncate(byte);
+            }
+        }
+    }
+}
+
+/// The verdict for the change at `index` in the offer.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContractCheckRow {
+    pub index: u32,
+    pub verdict: ContractVerdict,
 }
 
 /// Serde helper: skips `keep_in_sync` when it is false, so an offer without a link looks the
@@ -152,6 +229,63 @@ pub enum PeerMessage {
         sync_id: String,
         outcome: SyncOutcome,
     },
+    /// A provider asks a node whether its contract changes break the node's requests.
+    ContractCheckOffer {
+        check_id: String,
+        contract: String,
+        version: String,
+        policy: ContractPolicyWire,
+        changes: Vec<ContractChange>,
+    },
+    /// The node answers a contract check. `rows` is only set for `answered`.
+    ContractCheckResult {
+        check_id: String,
+        outcome: ContractCheckOutcome,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        rows: Vec<ContractCheckRow>,
+    },
+}
+
+/// Whether the text is at most `max` characters.
+fn within(text: &str, max: usize) -> bool {
+    text.chars().count() <= max
+}
+
+/// Checks the shape of a contract check frame. Other frames pass.
+fn validate_contract_check(message: &PeerMessage) -> DomainResult<()> {
+    let bad = || DomainError::InvalidInput("invalid contract check".to_string());
+    match message {
+        PeerMessage::ContractCheckOffer {
+            check_id,
+            contract,
+            version,
+            changes,
+            ..
+        } => {
+            ContractCheckId::parse(check_id)?;
+            let contract_ok = !contract.is_empty()
+                && within(contract, CONTRACT_NAME_MAX)
+                && !contract.chars().any(char::is_control);
+            let count_ok = (1..=CONTRACT_CHECK_MAX_CHANGES).contains(&changes.len());
+            let changes_ok = changes.iter().all(|c| {
+                within(&c.path_template, CONTRACT_PATH_MAX) && within(&c.field, CONTRACT_FIELD_MAX)
+            });
+            if contract_ok && within(version, CONTRACT_VERSION_MAX) && count_ok && changes_ok {
+                Ok(())
+            } else {
+                Err(bad())
+            }
+        }
+        PeerMessage::ContractCheckResult { check_id, rows, .. } => {
+            ContractCheckId::parse(check_id)?;
+            if rows.len() <= CONTRACT_CHECK_MAX_CHANGES {
+                Ok(())
+            } else {
+                Err(bad())
+            }
+        }
+        _ => Ok(()),
+    }
 }
 
 impl PeerMessage {
@@ -177,8 +311,16 @@ impl PeerMessage {
                 version,
                 profile: profile.validated()?,
             }),
-            other => Ok(other),
+            other => {
+                validate_contract_check(&other)?;
+                Ok(other)
+            }
         }
+    }
+
+    /// Whether the encoded frame is within `MAX_FRAME_BYTES`, so the peer will accept it.
+    pub fn fits_frame(&self) -> bool {
+        self.encode().len() <= MAX_FRAME_BYTES
     }
 }
 
@@ -215,6 +357,53 @@ mod tests {
             PeerMessage::SyncResult {
                 sync_id: SYNC_ID.into(),
                 outcome: SyncOutcome::Applied,
+            },
+        ]
+    }
+
+    const CHECK_ID: &str = "aabbccddeeff00112233445566778899";
+
+    fn change() -> ContractChange {
+        ContractChange {
+            method: "GET".into(),
+            path_template: "/users/{id}".into(),
+            field: "status".into(),
+            change_type: ContractChangeType::Changed,
+            old_value: Some("200".into()),
+            new_value: Some("204".into()),
+            breaking: true,
+        }
+    }
+
+    fn contract_offer(changes: Vec<ContractChange>) -> PeerMessage {
+        PeerMessage::ContractCheckOffer {
+            check_id: CHECK_ID.into(),
+            contract: "Orders API".into(),
+            version: "1.2.0".into(),
+            policy: ContractPolicyWire::AdditiveOk,
+            changes,
+        }
+    }
+
+    fn contract_result(rows: Vec<ContractCheckRow>) -> PeerMessage {
+        PeerMessage::ContractCheckResult {
+            check_id: CHECK_ID.into(),
+            outcome: ContractCheckOutcome::Answered,
+            rows,
+        }
+    }
+
+    fn contract_messages() -> Vec<PeerMessage> {
+        vec![
+            contract_offer(vec![change()]),
+            contract_result(vec![ContractCheckRow {
+                index: 0,
+                verdict: ContractVerdict::Break,
+            }]),
+            PeerMessage::ContractCheckResult {
+                check_id: CHECK_ID.into(),
+                outcome: ContractCheckOutcome::Declined,
+                rows: Vec::new(),
             },
         ]
     }
@@ -275,6 +464,18 @@ mod tests {
         ];
         all.extend(transfer_messages());
         all.extend(sync_messages());
+        all.extend(contract_messages());
+        for outcome in [
+            ContractCheckOutcome::Answered,
+            ContractCheckOutcome::Declined,
+            ContractCheckOutcome::Busy,
+        ] {
+            all.push(PeerMessage::ContractCheckResult {
+                check_id: CHECK_ID.into(),
+                outcome,
+                rows: Vec::new(),
+            });
+        }
         for kind in [
             SyncPayloadKind::Manifest,
             SyncPayloadKind::Plan,
@@ -812,5 +1013,146 @@ mod tests {
         let text = widest.encode();
         assert!(text.len() < 512, "a sync offer is a small frame");
         assert_eq!(PeerMessage::decode(&text).expect("decodes"), widest);
+    }
+
+    #[test]
+    fn contract_check_frames_round_trip() {
+        for message in contract_messages() {
+            let text = message.encode();
+            assert_eq!(PeerMessage::decode(&text).expect("decodes"), message);
+        }
+    }
+
+    #[test]
+    fn contract_check_frames_have_the_expected_shape() {
+        let messages = contract_messages();
+        assert_eq!(
+            messages[0].encode(),
+            format!(
+                r#"{{"type":"contract_check_offer","check_id":"{CHECK_ID}","contract":"Orders API","version":"1.2.0","policy":"additive_ok","changes":[{{"method":"GET","path_template":"/users/{{id}}","field":"status","change_type":"changed","old_value":"200","new_value":"204","breaking":true}}]}}"#
+            )
+        );
+        assert_eq!(
+            messages[1].encode(),
+            format!(
+                r#"{{"type":"contract_check_result","check_id":"{CHECK_ID}","outcome":"answered","rows":[{{"index":0,"verdict":"break"}}]}}"#
+            )
+        );
+        assert_eq!(
+            messages[2].encode(),
+            format!(
+                r#"{{"type":"contract_check_result","check_id":"{CHECK_ID}","outcome":"declined"}}"#
+            )
+        );
+        let mut added = change();
+        added.change_type = ContractChangeType::Added;
+        added.old_value = None;
+        added.new_value = None;
+        let text = serde_json::to_string(&added).expect("json");
+        assert!(!text.contains("old_value") && !text.contains("new_value"));
+    }
+
+    #[test]
+    fn contract_check_enums_use_snake_case_names() {
+        for (policy, name) in [
+            (ContractPolicyWire::Strict, "strict"),
+            (ContractPolicyWire::Lenient, "lenient"),
+            (ContractPolicyWire::AdditiveOk, "additive_ok"),
+        ] {
+            assert_eq!(serde_json::to_value(policy).expect("json"), json!(name));
+        }
+        for (kind, name) in [
+            (ContractChangeType::Changed, "changed"),
+            (ContractChangeType::Added, "added"),
+            (ContractChangeType::Removed, "removed"),
+        ] {
+            assert_eq!(serde_json::to_value(kind).expect("json"), json!(name));
+        }
+        for (verdict, name) in [
+            (ContractVerdict::Pass, "pass"),
+            (ContractVerdict::Break, "break"),
+            (ContractVerdict::NotUsed, "not_used"),
+        ] {
+            assert_eq!(serde_json::to_value(verdict).expect("json"), json!(name));
+        }
+        for (outcome, name) in [
+            (ContractCheckOutcome::Answered, "answered"),
+            (ContractCheckOutcome::Declined, "declined"),
+            (ContractCheckOutcome::Busy, "busy"),
+        ] {
+            assert_eq!(serde_json::to_value(outcome).expect("json"), json!(name));
+        }
+    }
+
+    #[test]
+    fn contract_check_frames_reject_bad_values() {
+        let bad_offer = |edit: &dyn Fn(&mut ContractChange), count: usize| {
+            let mut c = change();
+            edit(&mut c);
+            contract_offer(vec![c; count]).encode()
+        };
+        let named = |name: String| {
+            let mut m = contract_offer(vec![change()]);
+            if let PeerMessage::ContractCheckOffer { contract, .. } = &mut m {
+                *contract = name;
+            }
+            m.encode()
+        };
+        let row = ContractCheckRow {
+            index: 0,
+            verdict: ContractVerdict::Pass,
+        };
+        for text in [
+            contract_offer(vec![change()])
+                .encode()
+                .replace(r#""policy""#, r#""extra":1,"policy""#),
+            contract_result(vec![])
+                .encode()
+                .replace(r#""outcome""#, r#""extra":1,"outcome""#),
+            bad_offer(&|_| {}, 0),
+            bad_offer(&|_| {}, 201),
+            named("a".repeat(121)),
+            named("bad\nname".into()),
+            bad_offer(&|c| c.path_template = "p".repeat(513), 1),
+            bad_offer(&|c| c.field = "f".repeat(129), 1),
+            contract_offer(vec![change()])
+                .encode()
+                .replace(CHECK_ID, "nope"),
+            contract_result(vec![row.clone(); 201]).encode(),
+        ] {
+            let err = PeerMessage::decode(&text).expect_err("rejected");
+            assert!(matches!(err, DomainError::InvalidInput(_)));
+        }
+        // The limits themselves are allowed.
+        assert!(PeerMessage::decode(&named("a".repeat(120))).is_ok());
+        assert!(PeerMessage::decode(&bad_offer(&|c| c.field = "f".repeat(128), 1)).is_ok());
+        assert!(PeerMessage::decode(&contract_result(vec![row; 200]).encode()).is_ok());
+    }
+
+    #[test]
+    fn contract_check_values_are_cut_at_256_on_a_char_boundary() {
+        let mut c = change();
+        c.old_value = Some("é".repeat(200));
+        c.new_value = Some("a".repeat(300));
+        c.cut_values();
+        assert_eq!(c.old_value.as_deref().map(|v| v.chars().count()), Some(200));
+        assert_eq!(c.new_value.as_deref().map(|v| v.chars().count()), Some(256));
+        c.old_value = Some("é".repeat(300));
+        c.cut_values();
+        let old = c.old_value.expect("kept");
+        assert_eq!(old.chars().count(), 256);
+        assert!(old.chars().all(|ch| ch == 'é'));
+    }
+
+    #[test]
+    fn contract_check_offer_fits_the_frame_limit_check() {
+        let mut big = change();
+        big.path_template = "p".repeat(512);
+        big.field = "f".repeat(128);
+        big.old_value = Some("o".repeat(256));
+        big.new_value = Some("n".repeat(256));
+        assert!(!contract_offer(vec![big; 200]).fits_frame());
+        assert!(contract_offer(vec![change(); 5]).fits_frame());
+        assert!(PeerMessage::Ping.fits_frame());
     }
 }

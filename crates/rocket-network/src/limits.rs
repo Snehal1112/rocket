@@ -73,6 +73,24 @@ pub const MAX_UNACKED_CHUNKS: u32 = 32;
 pub const MAX_MANIFEST_ENTRIES: usize = 5000;
 /// The longest name a sync payload transfer carries in its offer.
 pub const SYNC_PAYLOAD_NAME_MAX: usize = 32;
+/// The most changes one contract check offer carries.
+pub const CONTRACT_CHECK_MAX_CHANGES: usize = 200;
+/// The longest contract name in an offer, in characters.
+pub const CONTRACT_NAME_MAX: usize = 120;
+/// The longest contract version in an offer, in characters.
+pub const CONTRACT_VERSION_MAX: usize = 32;
+/// The longest path template in a change, in characters.
+pub const CONTRACT_PATH_MAX: usize = 512;
+/// The longest field name in a change, in characters.
+pub const CONTRACT_FIELD_MAX: usize = 128;
+/// The longest old or new value in a change, in characters. Longer values are cut.
+pub const CONTRACT_VALUE_MAX: usize = 256;
+/// How long a contract check offer waits for a result, counted from its creation.
+pub const CONTRACT_CHECK_TTL: Duration = Duration::from_secs(600);
+/// Pending contract checks per peer.
+pub const CONTRACT_CHECK_PER_PEER: usize = 1;
+/// Pending contract checks across all peers.
+pub const CONTRACT_CHECK_TOTAL: usize = 3;
 
 #[cfg(test)]
 mod tests {
@@ -112,6 +130,15 @@ mod tests {
         assert_eq!(MAX_UNACKED_CHUNKS, 32);
         assert_eq!(MAX_MANIFEST_ENTRIES, 5000);
         assert_eq!(SYNC_PAYLOAD_NAME_MAX, 32);
+        assert_eq!(CONTRACT_CHECK_MAX_CHANGES, 200);
+        assert_eq!(CONTRACT_NAME_MAX, 120);
+        assert_eq!(CONTRACT_VERSION_MAX, 32);
+        assert_eq!(CONTRACT_PATH_MAX, 512);
+        assert_eq!(CONTRACT_FIELD_MAX, 128);
+        assert_eq!(CONTRACT_VALUE_MAX, 256);
+        assert_eq!(CONTRACT_CHECK_TTL, Duration::from_secs(600));
+        assert_eq!(CONTRACT_CHECK_PER_PEER, 1);
+        assert_eq!(CONTRACT_CHECK_TOTAL, 3);
     }
 
     #[test]

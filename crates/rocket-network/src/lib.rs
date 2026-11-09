@@ -25,11 +25,13 @@ pub use events::{
 };
 pub use identity::{DeviceKeyMaterial, PeerIdentity};
 pub use link::{
-    is_sha256_hex, path_is_valid, LinkId, LinkRecord, LinkState, Manifest, PlanFile, PlanRename,
-    RenamePair, SyncId, SyncPlanPayload,
+    is_sha256_hex, path_is_valid, ContractCheckId, LinkId, LinkRecord, LinkState, Manifest,
+    PlanFile, PlanRename, RenamePair, SyncId, SyncPlanPayload,
 };
 pub use messages::{
-    AbortReason, PeerMessage, ResultOutcome, SyncAbortReason, SyncOutcome, SyncPayloadKind,
+    AbortReason, ContractChange, ContractChangeType, ContractCheckOutcome, ContractCheckRow,
+    ContractPolicyWire, ContractVerdict, PeerMessage, ResultOutcome, SyncAbortReason, SyncOutcome,
+    SyncPayloadKind,
 };
 pub use pairing::{
     commitment, commitment_from_base64, commitment_to_base64, pairing_code, Nonce, PairingCode,
