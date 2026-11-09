@@ -17,6 +17,7 @@ export async function startCollectionSync(link: NetworkLink): Promise<void> {
     !store.trackStartedSync(syncId, {
       displayName: link.displayName,
       collectionName: link.collectionName,
+      linkId: link.linkId,
     })
   ) {
     return;

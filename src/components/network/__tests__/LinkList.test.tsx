@@ -56,4 +56,29 @@ describe('LinkList', () => {
     const { container } = render(<LinkList links={[]} onUnlink={vi.fn()} />);
     expect(container).toBeEmptyDOMElement();
   });
+
+  it('shows Not in this workspace for a collection that is not here, and keeps Unlink', () => {
+    render(
+      <LinkList
+        links={[makeLink({ state: 'broken' })]}
+        workspaceCollections={['Billing']}
+        onUnlink={vi.fn()}
+      />,
+    );
+    const item = screen.getByRole('listitem');
+    expect(item).toHaveTextContent('Not in this workspace');
+    expect(item).not.toHaveTextContent('Broken');
+    expect(screen.getByRole('button', { name: /^Unlink Orders/ })).toBeInTheDocument();
+  });
+
+  it('shows the state of a collection that is here', () => {
+    render(
+      <LinkList
+        links={[makeLink({ state: 'broken' })]}
+        workspaceCollections={['Orders']}
+        onUnlink={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('listitem')).toHaveTextContent('Broken');
+  });
 });

@@ -28,11 +28,17 @@ export function UnlinkDialog({ link, onClose }: UnlinkDialogProps) {
     const store = useNetworkStore.getState();
     // An unanswered review of this link ends as cancelled. It is the user's own doing, so the
     // bridge shows no toast for it.
-    const pending = store.syncReviews.find((r) => r.linkId === target.linkId && !r.answered);
-    if (pending) store.markSyncCancelledHere(pending.syncId);
+    // The same holds for a sync this node started and for unanswered reviews of this link.
+    const pending = [
+      ...store.syncReviews
+        .filter((r) => r.linkId === target.linkId && !r.answered)
+        .map((r) => r.syncId),
+      ...store.startedSyncIdsForLink(target.linkId),
+    ].filter((id) => !store.wasSyncCancelledHere(id));
+    for (const id of pending) store.markSyncCancelledHere(id);
     const ok = await run(() => useNetworkStore.getState().unlink(target.linkId));
     if (ok) onClose();
-    else if (pending) useNetworkStore.getState().unmarkSyncCancelledHere(pending.syncId);
+    else for (const id of pending) useNetworkStore.getState().unmarkSyncCancelledHere(id);
   }
 
   const name = link ? peerName(link.displayName) : '';

@@ -11,19 +11,27 @@ const mocks = vi.hoisted(() => ({
     getNetworkStatus: vi.fn(),
     listNetworkNodes: vi.fn(),
     requestNetworkPairing: vi.fn(),
+    listNetworkLinks: vi.fn(),
   },
 }));
 
+const workspace = vi.hoisted(() => ({ names: null as string[] | null }));
+
 vi.mock('@/lib/tauri-api', () => mocks.api);
+vi.mock('@/hooks/useWorkspaceCollectionNames', () => ({
+  useWorkspaceCollectionNames: () => workspace.names,
+}));
 vi.mock('sonner', () => ({ toast: mocks.toast }));
 
 describe('NetworkPanel links', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useNetworkStore.getState().reset();
+    mocks.api.listNetworkLinks.mockResolvedValue([]);
   });
 
   it('shows the linked collections and passes Unlink to the host', async () => {
+    mocks.api.listNetworkLinks.mockResolvedValue([makeLink()]);
     useNetworkStore.setState({
       status: makeStatus(),
       nodes: [makeNode({ group: 'paired', status: 'online' })],
@@ -42,5 +50,24 @@ describe('NetworkPanel links', () => {
     useNetworkStore.setState({ status: makeStatus(), nodes: [makeNode()], links: [] });
     render(<NetworkPanel onAddAddress={vi.fn()} onRemove={vi.fn()} onUnlink={vi.fn()} />);
     expect(screen.queryByText(/Linked collections/)).toBeNull();
+  });
+
+  it('says a link is not in this workspace and gives no unlink advice', () => {
+    workspace.names = ['Billing'];
+    useNetworkStore.setState({
+      status: makeStatus(),
+      nodes: [makeNode()],
+      links: [makeLink({ state: 'broken' })],
+    });
+    render(<NetworkPanel onAddAddress={vi.fn()} onRemove={vi.fn()} onUnlink={vi.fn()} />);
+    expect(screen.getByText('Not in this workspace')).toBeInTheDocument();
+    expect(screen.queryByText('Broken')).toBeNull();
+    workspace.names = null;
+  });
+
+  it('reloads the links when the panel opens', () => {
+    useNetworkStore.setState({ status: makeStatus(), nodes: [makeNode()], links: [] });
+    render(<NetworkPanel onAddAddress={vi.fn()} onRemove={vi.fn()} onUnlink={vi.fn()} />);
+    expect(mocks.api.listNetworkLinks).toHaveBeenCalled();
   });
 });

@@ -1,5 +1,5 @@
 import { Plus, Radar } from 'lucide-react';
-import { type ReactNode, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { LinkList } from '@/components/network/LinkList';
 import { ListRow } from '@/components/network/ListRow';
@@ -12,6 +12,7 @@ import { EmptyState } from '@/components/ui/empty-state';
 import { InitialsAvatar } from '@/components/ui/initials-avatar';
 import { SearchInput } from '@/components/ui/search-input';
 import { StateBlock } from '@/components/ui/state-block';
+import { useWorkspaceCollectionNames } from '@/hooks/useWorkspaceCollectionNames';
 import { errorText } from '@/lib/error-text';
 import { formatPairingCode, PAIRING_FAILED_TOAST_ID } from '@/lib/network-utils';
 import type { NetworkLink, NetworkNode } from '@/lib/tauri-api';
@@ -74,8 +75,13 @@ export function NetworkPanel({ onAddAddress, onRemove, onUnlink }: NetworkPanelP
   const nodes = useNetworkStore((s) => s.nodes);
   const incoming = useNetworkStore((s) => s.incoming);
   const links = useNetworkStore((s) => s.links);
+  const workspaceCollections = useWorkspaceCollectionNames();
   const error = useNetworkStore((s) => s.error);
   const [query, setQuery] = useState('');
+  // The link states are derived when the list loads, so opening the panel reloads them.
+  useEffect(() => {
+    void useNetworkStore.getState().refreshLinks();
+  }, []);
   const [pairingDeviceId, setPairingDeviceId] = useState<string | null>(null);
   const groups = useMemo(() => groupNodes(sortNodes(filterNodes(nodes, query))), [nodes, query]);
 
@@ -198,7 +204,11 @@ export function NetworkPanel({ onAddAddress, onRemove, onUnlink }: NetworkPanelP
         {links.length > 0 && onUnlink && (
           <section className='border-t border-border py-1'>
             <SectionLabel className='px-3 py-1'>{`Linked collections (${links.length})`}</SectionLabel>
-            <LinkList links={links} onUnlink={onUnlink} />
+            <LinkList
+              links={links}
+              workspaceCollections={workspaceCollections}
+              onUnlink={onUnlink}
+            />
           </section>
         )}
       </div>

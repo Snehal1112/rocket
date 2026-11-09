@@ -16,7 +16,12 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
+const workspace = vi.hoisted(() => ({ names: null as string[] | null }));
+
 vi.mock('@/lib/tauri-api', () => mocks.api);
+vi.mock('@/hooks/useWorkspaceCollectionNames', () => ({
+  useWorkspaceCollectionNames: () => workspace.names,
+}));
 vi.mock('sonner', () => ({ toast: mocks.toast }));
 
 const dana = makeNode({

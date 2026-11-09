@@ -9,6 +9,14 @@ import {
   syncWaitingToastId,
 } from '@/lib/network-sync-utils';
 
+describe('linkStatusText outside the workspace', () => {
+  it('gives no unlink advice for a collection that is not in the workspace', () => {
+    const text = linkStatusText('broken', 'Ana Lima', false);
+    expect(text).toBe('Linked with Ana Lima. Not in this workspace.');
+    expect(text).not.toMatch(/Unlink/);
+  });
+});
+
 describe('linkStatusText', () => {
   it.each([
     ['in_sync', 'In sync with Ana Lima'],

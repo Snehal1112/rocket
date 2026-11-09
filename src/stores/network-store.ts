@@ -164,8 +164,10 @@ export interface NetworkState {
   /** A sync started here. Returns false when it had already finished, so no waiting toast is shown. */
   trackStartedSync: (
     syncId: string,
-    info: { displayName: string; collectionName: string },
+    info: { displayName: string; collectionName: string; linkId?: string },
   ) => boolean;
+  /** Ids of the syncs started here for one link that are still running. */
+  startedSyncIdsForLink: (linkId: string) => string[];
   startedSync: (syncId: string) => { displayName: string; collectionName: string } | undefined;
   /** Moves a started sync from waiting to running. It returns the node name the first time, else null. */
   advanceStartedSync: (syncId: string) => string | null;
@@ -234,7 +236,7 @@ const finishedSyncs = new Set<string>();
 // Syncs started here, by sync id. `running` turns true on the first progress.
 const startedSyncs = new Map<
   string,
-  { displayName: string; collectionName: string; running: boolean }
+  { displayName: string; collectionName: string; linkId?: string; running: boolean }
 >();
 
 // Syncs the local user cancelled or declined. Their finish shows no toast about it.
@@ -503,8 +505,11 @@ export const useNetworkStore = create<NetworkState>()((set, get) => ({
     return entry.displayName;
   },
 
+  startedSyncIdsForLink: (linkId) =>
+    [...startedSyncs.entries()].filter(([, e]) => e.linkId === linkId).map(([id]) => id),
+
   markSyncCancelledHere: (syncId) => {
-    cancelledSyncsHere.add(syncId);
+    remember(cancelledSyncsHere, syncId);
   },
   unmarkSyncCancelledHere: (syncId) => {
     cancelledSyncsHere.delete(syncId);
@@ -512,7 +517,7 @@ export const useNetworkStore = create<NetworkState>()((set, get) => ({
   wasSyncCancelledHere: (syncId) => cancelledSyncsHere.has(syncId),
 
   markSyncDeclinedHere: (syncId) => {
-    declinedSyncsHere.add(syncId);
+    remember(declinedSyncsHere, syncId);
   },
   unmarkSyncDeclinedHere: (syncId) => {
     declinedSyncsHere.delete(syncId);
@@ -523,7 +528,8 @@ export const useNetworkStore = create<NetworkState>()((set, get) => ({
     const seq = ++linksSeq;
     try {
       const links = await listNetworkLinks();
-      if (seq === linksSeq) set({ links });
+      // An unchanged list keeps the old array, so nothing re-renders.
+      if (seq === linksSeq && JSON.stringify(links) !== JSON.stringify(get().links)) set({ links });
     } catch {
       // The old list stays. A failed load is not a panel error.
     }

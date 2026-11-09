@@ -221,7 +221,7 @@ describe('CollectionNode sync entries', () => {
     });
 
     it('shows the refusal of a start as an error toast', async () => {
-      vi.mocked(tauriApi.startNetworkSync).mockRejectedValue('Another sync is already running for this link.');
+      vi.mocked(tauriApi.startNetworkSync).mockRejectedValue('A sync with that node is already running.');
       useNetworkStore.setState({
         nodes: [ben],
         links: [makeLink({ collectionName: 'my-collection' })],

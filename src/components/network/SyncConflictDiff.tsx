@@ -19,6 +19,19 @@ type LoadState =
   | { status: 'ready'; files: ConflictFiles }
   | { status: 'error' };
 
+function caption(files: ConflictFiles, peerName: string): string {
+  if (files.mine === null) return `You have no copy of this file. Below: the copy of ${peerName}.`;
+  if (files.theirs === null) return `${peerName} has no copy of this file. Below: your copy.`;
+  return `Left: your copy. Right: the copy of ${peerName}.`;
+}
+
+// A missing side is a whole-file add or delete, which the viewer shows inline.
+function diffStatus(files: ConflictFiles): string {
+  if (files.mine === null) return 'added';
+  if (files.theirs === null) return 'deleted';
+  return 'modified';
+}
+
 /**
  * Loads both versions of one conflicting file and shows them in the read-only git diff viewer,
  * mine on the left, theirs on the right. It changes nothing: the choices live in the dialog.
@@ -52,9 +65,7 @@ export function SyncConflictDiff({ syncId, conflict, peerName }: SyncConflictDif
   }
   return (
     <div className='space-y-1'>
-      <p className='text-2xs text-muted-foreground'>
-        {`Left: your copy. Right: the copy of ${peerName}.`}
-      </p>
+      <p className='text-2xs text-muted-foreground'>{caption(state.files, peerName)}</p>
       <div className='h-72 overflow-hidden rounded-md border'>
         {/* The key is needed because DiffViewer copies its prop into state once. */}
         <DiffViewer
@@ -66,7 +77,7 @@ export function SyncConflictDiff({ syncId, conflict, peerName }: SyncConflictDif
             repositoryLabel: 'Sync',
             oldContent: state.files.mine ?? '',
             newContent: state.files.theirs ?? '',
-            status: 'modified',
+            status: diffStatus(state.files),
             isStaged: false,
           }}
         />

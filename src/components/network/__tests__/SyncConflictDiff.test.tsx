@@ -61,6 +61,15 @@ describe('SyncConflictDiff', () => {
     expect(screen.getByTestId('diff-new')).toHaveTextContent('new');
   });
 
+  it('says so when a side has no copy, and marks the diff as added or deleted', async () => {
+    mocks.api.getNetworkSyncConflictFiles.mockResolvedValue({ mine: 'old', theirs: null });
+    render(<SyncConflictDiff syncId='s1' conflict={conflict} peerName='Ben Ortiz' />);
+    expect(await screen.findByTestId('diff')).toHaveAttribute('data-status', 'deleted');
+    expect(
+      screen.getByText('Ben Ortiz has no copy of this file. Below: your copy.'),
+    ).toBeInTheDocument();
+  });
+
   it('shows a loading state first', async () => {
     const files = createDeferred<{ mine: string; theirs: string }>();
     mocks.api.getNetworkSyncConflictFiles.mockReturnValue(files.promise);

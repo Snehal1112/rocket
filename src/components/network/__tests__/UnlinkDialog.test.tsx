@@ -78,4 +78,14 @@ describe('UnlinkDialog', () => {
     expect(mocks.api.unlinkNetworkLink).not.toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();
   });
+
+  it('marks a sync started here for the link as cancelled here', async () => {
+    useNetworkStore
+      .getState()
+      .trackStartedSync('s9', { displayName: 'Ben', collectionName: 'Orders', linkId: 'L1' });
+    render(<UnlinkDialog link={makeLink()} onClose={vi.fn()} />);
+    await userEvent.click(screen.getByRole('button', { name: 'Unlink' }));
+    await waitFor(() => expect(mocks.api.unlinkNetworkLink).toHaveBeenCalledWith('L1'));
+    expect(useNetworkStore.getState().wasSyncCancelledHere('s9')).toBe(true);
+  });
 });

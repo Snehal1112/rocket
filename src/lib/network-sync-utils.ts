@@ -2,8 +2,11 @@ import { peerName } from '@/lib/network-utils';
 import type { ConflictKind, LinkState } from '@/lib/tauri-api';
 
 /** One line about the state of a link, for menus and lists. */
-export function linkStatusText(state: LinkState, displayName: string): string {
+export function linkStatusText(state: LinkState, displayName: string, inWorkspace = true): string {
   const name = peerName(displayName);
+  // The links are global but their state is read in the active workspace. A collection from
+  // another workspace reads as broken there, so it gets no advice that could delete a good link.
+  if (!inWorkspace) return `Linked with ${name}. Not in this workspace.`;
   switch (state) {
     case 'in_sync':
       return `In sync with ${name}`;
@@ -16,6 +19,24 @@ export function linkStatusText(state: LinkState, displayName: string): string {
     default:
       // A state added later gets a neutral text.
       return `Linked with ${name}`;
+  }
+}
+
+/** The badge label of a link in the link list. */
+export function linkStateLabel(state: LinkState, inWorkspace = true): string {
+  if (!inWorkspace) return 'Not in this workspace';
+  switch (state) {
+    case 'in_sync':
+      return 'In sync';
+    case 'changes_waiting':
+      return 'Changes waiting';
+    case 'out_of_date':
+      return 'Out of date';
+    case 'broken':
+      return 'Broken';
+    default:
+      // A state added later gets a neutral label.
+      return 'Linked';
   }
 }
 

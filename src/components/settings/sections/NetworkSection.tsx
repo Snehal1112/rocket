@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { StateBlock } from '@/components/ui/state-block';
 import { Switch } from '@/components/ui/switch';
 import { useAsyncAction } from '@/hooks/useAsyncAction';
+import { useWorkspaceCollectionNames } from '@/hooks/useWorkspaceCollectionNames';
 import { errorText } from '@/lib/error-text';
 import {
   listNetworkAddresses,
@@ -38,6 +39,7 @@ export function NetworkSection() {
   // The lists reload when the node list changes, for example after a Block elsewhere.
   const nodes = useNetworkStore((s) => s.nodes);
   const links = useNetworkStore((s) => s.links);
+  const workspaceCollections = useWorkspaceCollectionNames();
   const [unlinkTarget, setUnlinkTarget] = useState<NetworkLink | null>(null);
   const displayName = status?.displayName ?? '';
   const [name, setName] = useState(displayName);
@@ -51,6 +53,7 @@ export function NetworkSection() {
 
   useEffect(() => {
     void useNetworkStore.getState().refresh();
+    void useNetworkStore.getState().refreshLinks();
   }, []);
 
   // The field follows the stored name after a save or a reload.
@@ -181,7 +184,11 @@ export function NetworkSection() {
             {links.length === 0 ? (
               <StateBlock tone='empty'>No linked collections.</StateBlock>
             ) : (
-              <LinkList links={links} onUnlink={setUnlinkTarget} />
+              <LinkList
+                links={links}
+                workspaceCollections={workspaceCollections}
+                onUnlink={setUnlinkTarget}
+              />
             )}
           </Block>
 

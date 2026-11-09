@@ -22,7 +22,12 @@ const mocks = vi.hoisted(() => ({
   },
 }));
 
+const workspace = vi.hoisted(() => ({ names: null as string[] | null }));
+
 vi.mock('@/lib/tauri-api', () => mocks.api);
+vi.mock('@/hooks/useWorkspaceCollectionNames', () => ({
+  useWorkspaceCollectionNames: () => workspace.names,
+}));
 vi.mock('sonner', () => ({ toast: mocks.toast }));
 
 describe('NetworkSection links', () => {
@@ -37,7 +42,7 @@ describe('NetworkSection links', () => {
 
   it('lists the linked collections and unlinks after a confirmation', async () => {
     mocks.api.unlinkNetworkLink.mockResolvedValue(undefined);
-    mocks.api.listNetworkLinks.mockResolvedValue([]);
+    mocks.api.listNetworkLinks.mockResolvedValue([makeLink()]);
     useNetworkStore.setState({ status: makeStatus(), links: [makeLink()] });
     render(<NetworkSection />);
     expect(screen.getByRole('heading', { name: 'Linked collections' })).toBeInTheDocument();
@@ -48,7 +53,15 @@ describe('NetworkSection links', () => {
     await waitFor(() => expect(mocks.api.unlinkNetworkLink).toHaveBeenCalledWith('L1'));
   });
 
+  it('reloads the links when the section opens', async () => {
+    mocks.api.listNetworkLinks.mockResolvedValue([]);
+    useNetworkStore.setState({ status: makeStatus(), links: [] });
+    render(<NetworkSection />);
+    await waitFor(() => expect(mocks.api.listNetworkLinks).toHaveBeenCalled());
+  });
+
   it('says there are no linked collections', () => {
+    mocks.api.listNetworkLinks.mockResolvedValue([]);
     useNetworkStore.setState({ status: makeStatus(), links: [] });
     render(<NetworkSection />);
     expect(screen.getByText('No linked collections.')).toBeInTheDocument();

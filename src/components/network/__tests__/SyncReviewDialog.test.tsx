@@ -13,7 +13,6 @@ const mocks = vi.hoisted(() => ({
   api: {
     reviewNetworkSync: vi.fn(),
     confirmNetworkSync: vi.fn(),
-    cancelNetworkSync: vi.fn(),
     getNetworkSyncConflictFiles: vi.fn(),
     listNetworkLinks: vi.fn(),
     getNetworkStatus: vi.fn(),
@@ -59,7 +58,6 @@ describe('SyncReviewDialog', () => {
     store().reset();
     mocks.api.reviewNetworkSync.mockResolvedValue(undefined);
     mocks.api.confirmNetworkSync.mockResolvedValue(undefined);
-    mocks.api.cancelNetworkSync.mockResolvedValue(undefined);
     mocks.api.listNetworkLinks.mockResolvedValue([]);
     mocks.api.getNetworkSyncConflictFiles.mockResolvedValue({ mine: 'mine text', theirs: 'their text' });
   });
@@ -242,10 +240,10 @@ describe('SyncReviewDialog', () => {
     });
 
     it('shows the error in a state block and keeps the buttons when the answer fails', async () => {
-      mocks.api.reviewNetworkSync.mockRejectedValue('The sync is no longer running.');
+      mocks.api.reviewNetworkSync.mockRejectedValue('The sync is no longer waiting for an answer.');
       openEntry();
       await userEvent.click(screen.getByRole('button', { name: 'Accept' }));
-      const block = await screen.findByText('The sync is no longer running.');
+      const block = await screen.findByText('The sync is no longer waiting for an answer.');
       expect(block.closest('[data-slot="state-block"]')).toHaveAttribute('data-tone', 'error');
       expect(screen.getByRole('button', { name: 'Accept' })).toBeEnabled();
       expect(screen.getByRole('button', { name: 'Decline' })).toBeEnabled();
@@ -385,6 +383,20 @@ describe('SyncReviewDialog', () => {
       confirm();
       expect(screen.getByRole('dialog', { name: 'Apply 3 changes from Ben Ortiz' })).toBeInTheDocument();
       expect(screen.getByText('Coming to you: 1 added, 1 changed, 1 deleted')).toBeInTheDocument();
+    });
+
+    it('asks to send the changes when nothing comes in', () => {
+      confirm({
+        summary: makeSyncSummary({
+          addedHere: 0,
+          changedHere: 0,
+          deletedHere: 0,
+          sentAdded: 2,
+          sentChanged: 1,
+          sentDeleted: 0,
+        }),
+      });
+      expect(screen.getByRole('dialog', { name: 'Send 3 changes to Ben Ortiz' })).toBeInTheDocument();
     });
 
     it('says one change in the singular', () => {

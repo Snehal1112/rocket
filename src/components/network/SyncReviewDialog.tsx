@@ -182,7 +182,11 @@ export function SyncReviewDialog() {
     title = `${name} wants to sync a collection`;
     description = 'Nothing is saved until you accept.';
   } else {
-    title = `Apply ${changes} ${changes === 1 ? 'change' : 'changes'} from ${name}`;
+    const sent = summary.sentAdded + summary.sentChanged + summary.sentDeleted;
+    title =
+      changes === 0
+        ? `Send ${sent} ${sent === 1 ? 'change' : 'changes'} to ${name}`
+        : `Apply ${changes} ${changes === 1 ? 'change' : 'changes'} from ${name}`;
     description = 'Nothing is saved until you apply.';
   }
 

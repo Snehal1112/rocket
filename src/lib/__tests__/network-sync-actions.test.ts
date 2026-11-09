@@ -62,7 +62,7 @@ describe('startCollectionSync', () => {
   });
 
   it('shows the error and forgets the local cancel when the cancel is refused', async () => {
-    mocks.api.cancelNetworkSync.mockRejectedValue('Already syncing.');
+    mocks.api.cancelNetworkSync.mockRejectedValue('The sync is already being applied.');
     await startCollectionSync(makeLink());
     waitingOptions().action.onClick();
     await vi.waitFor(() => expect(mocks.toast.error).toHaveBeenCalled());
@@ -70,9 +70,9 @@ describe('startCollectionSync', () => {
   });
 
   it('rejects with the backend error and shows no toast', async () => {
-    mocks.api.startNetworkSync.mockRejectedValue('Another sync is already running for this link.');
+    mocks.api.startNetworkSync.mockRejectedValue('A sync with that node is already running.');
     await expect(startCollectionSync(makeLink())).rejects.toBe(
-      'Another sync is already running for this link.',
+      'A sync with that node is already running.',
     );
     expect(mocks.toast.info).not.toHaveBeenCalled();
   });

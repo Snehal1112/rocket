@@ -325,7 +325,9 @@ export function handleNetworkSync(event: NetworkSyncEvent): void {
       const wasPending = store.syncReviews.some((r) => r.syncId === id && !r.answered);
       // A repeated finish event changes nothing and shows nothing.
       if (!store.finishSync(id)) return;
-      const message = describeSyncOutcome(event, declinedHere, cancelledHere);
+      let message = describeSyncOutcome(event, declinedHere, cancelledHere);
+      // An open dialog already says "The request expired.", so the toast would repeat it.
+      if (event.outcome === 'expired' && store.dialogSyncId === id) message = null;
       // A review that ended before it was answered keeps its dialog, so the dialog can say why.
       const keepDialog =
         event.outcome === 'expired' ||

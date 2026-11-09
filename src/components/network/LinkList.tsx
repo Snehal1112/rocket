@@ -3,32 +3,19 @@ import { ListRow } from '@/components/network/ListRow';
 import { NetworkIdentity } from '@/components/network/NetworkIdentity';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { linkStateLabel } from '@/lib/network-sync-utils';
 import { peerName } from '@/lib/network-utils';
 import type { NetworkLink } from '@/lib/tauri-api';
 
 interface LinkListProps {
   links: NetworkLink[];
+  /** Names of the collections in the active workspace. Null while unknown: every link counts as here. */
+  workspaceCollections?: readonly string[] | null;
   onUnlink: (link: NetworkLink) => void;
 }
 
-function stateLabel(state: string): string {
-  switch (state) {
-    case 'in_sync':
-      return 'In sync';
-    case 'changes_waiting':
-      return 'Changes waiting';
-    case 'out_of_date':
-      return 'Out of date';
-    case 'broken':
-      return 'Broken';
-    default:
-      // A state added later gets a neutral label.
-      return 'Linked';
-  }
-}
-
 /** Rows of linked collections: collection name, node with short id, state, and an Unlink button. */
-export function LinkList({ links, onUnlink }: LinkListProps) {
+export function LinkList({ links, workspaceCollections = null, onUnlink }: LinkListProps) {
   if (links.length === 0) return null;
   return (
     <ul aria-label='Linked collections'>
@@ -41,7 +28,10 @@ export function LinkList({ links, onUnlink }: LinkListProps) {
               <NetworkIdentity name={name} shortId={link.shortId} />
             </div>
             <Badge variant='secondary' className='px-1.5 py-0 text-2xs'>
-              {stateLabel(link.state)}
+              {linkStateLabel(
+                link.state,
+                workspaceCollections?.includes(link.collectionName) ?? true,
+              )}
             </Badge>
             <Button
               size='sm'

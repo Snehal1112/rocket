@@ -359,6 +359,13 @@ describe('handleNetworkSync', () => {
       expect(store().dialogSyncId).toBe('s1');
     });
 
+    it('shows no expired toast while the dialog says it', () => {
+      handleNetworkSync(reviewReady());
+      store().openSyncDialog('s1');
+      handleNetworkSync(finished({ outcome: 'expired' }));
+      expect(mocks.toast.info).not.toHaveBeenCalled();
+    });
+
     it('closes an answered dialog on a failure', () => {
       handleNetworkSync(reviewReady());
       store().markSyncAnswered('s1');

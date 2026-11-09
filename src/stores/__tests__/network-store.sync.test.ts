@@ -188,4 +188,28 @@ describe('network store sync slice', () => {
     expect(store().links).toHaveLength(0);
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it('keeps the same links array when a reload returns the same list', async () => {
+    mocks.api.listNetworkLinks.mockResolvedValue([makeLink()]);
+    await store().refreshLinks();
+    const before = store().links;
+    mocks.api.listNetworkLinks.mockResolvedValue([makeLink()]);
+    await store().refreshLinks();
+    expect(store().links).toBe(before);
+  });
+
+  it('lists the syncs started here for one link', () => {
+    store().trackStartedSync('s1', { displayName: 'Ben', collectionName: 'Orders', linkId: 'L1' });
+    store().trackStartedSync('s2', { displayName: 'Cara', collectionName: 'Billing', linkId: 'L2' });
+    expect(store().startedSyncIdsForLink('L1')).toEqual(['s1']);
+  });
+
+  it('forgets the oldest local cancel marks after many syncs', () => {
+    for (let i = 0; i < 150; i++) store().markSyncCancelledHere(`c${i}`);
+    expect(store().wasSyncCancelledHere('c0')).toBe(false);
+    expect(store().wasSyncCancelledHere('c149')).toBe(true);
+    for (let i = 0; i < 150; i++) store().markSyncDeclinedHere(`d${i}`);
+    expect(store().wasSyncDeclinedHere('d0')).toBe(false);
+    expect(store().wasSyncDeclinedHere('d149')).toBe(true);
+  });
 });
