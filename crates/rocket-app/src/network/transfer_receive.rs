@@ -18,6 +18,7 @@ use rocket_network::{
 use rocket_shared::error::{DomainError, DomainResult};
 use tokio::sync::mpsc;
 
+use super::sync::LinkEnd;
 use super::transfer::{outcome_name, Inner, TransferService};
 use super::transfer_ports::{receiver_display_name, StagedFile, StagedZip, UNSAFE_ZIP_MESSAGE};
 
@@ -536,7 +537,13 @@ impl TransferService {
             Ok(imported) => {
                 // The link is made only after a successful import, under the imported name.
                 if let Some((link, bytes)) = view.keep {
-                    self.spawn_link(link, view.device, imported.clone(), bytes);
+                    self.spawn_link(
+                        link,
+                        view.device,
+                        imported.clone(),
+                        bytes,
+                        LinkEnd::Receiver,
+                    );
                 }
                 self.conclude(id, Outcome::Completed, None, Some(imported), true)
             }

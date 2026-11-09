@@ -17,7 +17,7 @@ Pure logic that turns a Rocket collection into a Bruno ZIP or a Postman Collecti
 | `events.rs` | `request_events`, `folder_events`: build the `prerequest` and `test` event blocks |
 | `postman_env.rs` | `postman_environment`, `environment_notes`, `postman_bundle` (collection plus environments ZIP) |
 | `names.rs` | `slug` for file names |
-| `sync_merge.rs` | `merge_file(local, received)`: the sync's file merge (peer wins; a local filled scalar is kept over a blank only where the export would blank that slot, so a peer clear of a plain value lands; `uid`, `info.uid`, `extensions.rocketapi`, `examples` stay local; lists replaced, rows matched by name and type) |
+| `sync_merge.rs` | `merge_synced_file(path, local, received)` (and `merge_file` for a file that is not the root): the sync's file merge (peer wins; a local filled scalar is kept over a blank only where the export would blank that slot, so a peer clear of a plain value lands; `uid`, `info.uid`, `extensions.rocketapi`, `examples` stay local, and so does `info.name` of the root `opencollection.yml` only, so renaming a collection does not sync; lists replaced, rows matched by name and type). `sync_bytes(path, bytes)` is the sync view of an exported file: the root file without `info.name`, others unchanged; manifests and link bases hash it |
 | `sync_zip.rs` | `zip_entries`: reads a Bruno ZIP and strips its single root folder; `bruno.rs` also holds `is_synced_path`, the one path filter of the sync |
 | `report.rs` | `ExportReport`, `ExportNote`, `ExportAction` (`Translated`, `Blanked`, `Skipped`, `Preserved`) |
 

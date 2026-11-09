@@ -14,7 +14,7 @@ use rocket_network::{
 };
 use rocket_shared::error::DomainError;
 
-use super::sync::{SyncDeps, SyncService};
+use super::sync::{LinkEnd, SyncDeps, SyncService};
 use super::sync_fakes::*;
 use super::sync_ports::base_from_reader;
 use super::transfer_fakes::FakePeers;
@@ -715,7 +715,7 @@ async fn the_first_send_base_leaves_out_what_the_sync_does_not_carry() {
     let zip = rooted_zip(ORDERS, &sent);
 
     rig.sync
-        .link_first_transfer(lid(5), dev(ANA), ORDERS, &zip)
+        .link_first_transfer(lid(5), dev(ANA), ORDERS, &zip, LinkEnd::Sender)
         .expect("linked");
 
     let link = rig.links.record(&lid(5)).expect("a link");
@@ -737,7 +737,7 @@ async fn a_first_send_zip_that_fails_the_strict_validator_is_not_linked() {
     ] {
         let err = rig
             .sync
-            .link_first_transfer(lid(5), dev(ANA), ORDERS, &zip)
+            .link_first_transfer(lid(5), dev(ANA), ORDERS, &zip, LinkEnd::Sender)
             .expect_err("refused");
         assert!(
             matches!(&err, DomainError::InvalidInput(m) if m == "The sent collection cannot be linked.")
@@ -755,7 +755,7 @@ async fn a_first_send_link_needs_the_peer_still_paired() {
 
     let err = rig
         .sync
-        .link_first_transfer(lid(5), dev(ANA), ORDERS, &zip)
+        .link_first_transfer(lid(5), dev(ANA), ORDERS, &zip, LinkEnd::Sender)
         .expect_err("not paired");
 
     assert!(

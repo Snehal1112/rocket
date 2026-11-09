@@ -26,7 +26,7 @@ use tokio::sync::mpsc;
 use crate::collection_export_service::CollectionExportService;
 
 use super::service::NetworkService;
-use super::sync::SyncService;
+use super::sync::{LinkEnd, SyncService};
 use super::transfer_ports::{CollectionImportPort, TransferStaging};
 use super::transfer_receive::{In, OfferFrame};
 use super::transfer_send::Out;
@@ -214,6 +214,7 @@ impl TransferService {
         peer: DeviceId,
         collection: String,
         zip: Vec<u8>,
+        end: LinkEnd,
     ) {
         let Some(sync) = self.sync_service() else {
             tracing::warn!(code = "network_link_create_failed", "no sync service");
@@ -221,7 +222,7 @@ impl TransferService {
         };
         drop(tokio::spawn(async move {
             let made = tokio::task::spawn_blocking(move || {
-                sync.link_first_transfer(link, peer, &collection, &zip)
+                sync.link_first_transfer(link, peer, &collection, &zip, end)
             })
             .await;
             match made {

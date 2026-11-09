@@ -26,6 +26,6 @@ pub use scrub::{
     scrub_typed_rows, scrub_yaml, strip_rocket_namespace,
 };
 pub use sensitive::is_sensitive_name;
-pub use sync_merge::merge_file;
+pub use sync_merge::{is_root_file, merge_file, merge_synced_file, sync_bytes, ROOT_FILE};
 pub use sync_zip::zip_entries;
 pub use tree::{CollectionExportTree, ExportFolder, ExportItem};

@@ -27,8 +27,9 @@ use tokio::sync::mpsc;
 
 use super::sync_checks::{conflict_paths, finish_name, Stop, UNCONFIRMED};
 use super::sync_payload::{sha_hex, PayloadIn, PayloadOut};
-use super::sync_ports::{base_from_reader, FileChange, SyncCollectionPort};
+use super::sync_ports::{base_from_reader, sha256_hex, FileChange, SyncCollectionPort};
 use super::transfer::{PeerSender, Timing};
+use rocket_export::is_root_file;
 
 /// Items that may wait for the worker. A full queue drops a frame (S4).
 const SYNC_FRAME_QUEUE: usize = 256;
@@ -52,6 +53,15 @@ pub struct SyncDeps {
     pub collections: Arc<dyn SyncCollectionPort>,
     pub events: Arc<dyn EventPublisher>,
     pub audit: Arc<dyn SecurityAuditPublisher>,
+}
+
+/// The end of the first linked send that makes a link.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LinkEnd {
+    /// The node that sent the collection.
+    Sender,
+    /// The node that imported it.
+    Receiver,
 }
 
 /// One link as the frontend lists it. `state` is derived, see `SyncService::links`.
@@ -457,12 +467,17 @@ impl SyncService {
         peer: DeviceId,
         collection: &str,
         zip: &[u8],
+        end: LinkEnd,
     ) -> DomainResult<()> {
         let cannot = || DomainError::InvalidInput(CANNOT_LINK.to_string());
         rocket_import::transfer_zip::validate_bytes(zip).map_err(|_| cannot())?;
         let base = base_from_reader(Cursor::new(zip)).map_err(|_| cannot())?;
         if self.deps.network.peer_label(&peer).is_none() {
             return Err(cannot());
+        }
+        if end == LinkEnd::Receiver {
+            self.align_received_root(collection, &base.files)
+                .map_err(|_| cannot())?;
         }
         let collections = &self.deps.collections;
         let record = LinkRecord {
@@ -476,6 +491,36 @@ impl SyncService {
             updated_at: chrono::Utc::now().to_rfc3339(),
         };
         self.create_link(record, base.files)
+    }
+
+    /// Writes the sent root file over the imported one, through the checked apply, so the
+    /// receiver's export of it is the base. The importer rewrites the root (key order, a
+    /// suffixed name); the merge keeps the local `uid` and `info.name`. Blocks.
+    fn align_received_root(
+        &self,
+        collection: &str,
+        base_files: &[(String, Vec<u8>)],
+    ) -> DomainResult<()> {
+        let Some((path, bytes)) = base_files.iter().find(|(p, _)| is_root_file(p)) else {
+            return Ok(());
+        };
+        let collections = &self.deps.collections;
+        let manifest = collections.manifest(collection)?;
+        if manifest.get(path) == Some(sha256_hex(bytes).as_str()) {
+            return Ok(());
+        }
+        let change = FileChange::Put {
+            path: path.clone(),
+            bytes: bytes.clone(),
+        };
+        collections
+            .apply_if_unchanged(collection, &manifest, &[change])
+            .inspect_err(|_| {
+                tracing::warn!(
+                    code = "network_link_root_not_aligned",
+                    "root file not written"
+                );
+            })
     }
 
     /// Every link with its derived state (S15), sorted by collection name then link id. Nothing

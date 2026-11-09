@@ -88,8 +88,8 @@ pub(crate) fn is_nested_collection_file(path: &str) -> bool {
 }
 
 /// Reads the base from a ZIP. Paths the sync does not carry (environments, a nested
-/// `opencollection.yml`) are left out. A name that clashes with another by letter case is
-/// refused by the manifest.
+/// `opencollection.yml`) are left out, and the root file loses `info.name` (`sync_bytes`).
+/// A name that clashes with another by letter case is refused by the manifest.
 pub fn base_from_reader<R: Read + Seek>(reader: R) -> DomainResult<ZipBase> {
     let mut manifest = Manifest::new();
     let mut files = Vec::new();
@@ -97,6 +97,8 @@ pub fn base_from_reader<R: Read + Seek>(reader: R) -> DomainResult<ZipBase> {
         if !is_sync_entry(&path) {
             continue;
         }
+        // The sync view of the file, as the export side hashes it (no root `info.name`).
+        let bytes = rocket_export::sync_bytes(&path, bytes)?;
         manifest.insert(&path, &sha256_hex(&bytes))?;
         files.push((path, bytes));
     }

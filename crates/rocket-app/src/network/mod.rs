@@ -53,6 +53,9 @@ mod transfer_link_tests;
 #[allow(dead_code, clippy::type_complexity)]
 pub(crate) mod sync_fakes;
 #[cfg(test)]
+#[path = "sync_first_link_tests.rs"]
+mod sync_first_link_tests;
+#[cfg(test)]
 #[path = "sync_run_tests.rs"]
 mod sync_run_tests;
 #[cfg(test)]

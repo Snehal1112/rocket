@@ -1,7 +1,8 @@
 //! The real `SyncCollectionPort`, backed by the export and the file transaction.
 //!
-//! The manifest and the exported files come from `export_bruno(collection, false)`, so a hash
-//! is the hash of the scrubbed bytes a peer would receive. `apply` plans every change against
+//! The manifest and the exported files come from `export_bruno(collection, false)` seen
+//! through `sync_bytes` (the root file without `info.name`), so a hash is the hash of the
+//! scrubbed bytes a peer would receive. `apply` plans every change against
 //! the local files first, so a failing change touches nothing, then stages the result in one
 //! file transaction. All methods block.
 
@@ -12,7 +13,7 @@ use std::sync::Arc;
 use rocket_collection::{
     validate_rel_path, CollectionFileTxFactory, CollectionRepository, RecoveryOutcome,
 };
-use rocket_export::{merge_file, zip_entries};
+use rocket_export::{merge_synced_file, sync_bytes, zip_entries};
 use rocket_network::link::Manifest;
 use rocket_shared::error::{DomainError, DomainResult};
 
@@ -155,7 +156,7 @@ impl Plan<'_> {
             return Err(DomainError::AlreadyExists(TAKEN.into()));
         }
         let merged = if is_yaml(path) {
-            merge_file(existing.as_deref(), bytes)?
+            merge_synced_file(path, existing.as_deref(), bytes)?
         } else {
             bytes.to_vec()
         };
@@ -172,7 +173,7 @@ impl Plan<'_> {
             return Err(DomainError::AlreadyExists(TAKEN.into()));
         }
         let written = if is_yaml(path) {
-            merge_file(None, bytes)?
+            merge_synced_file(path, None, bytes)?
         } else {
             bytes.to_vec()
         };
@@ -243,12 +244,18 @@ impl ExportBackedSyncCollections {
             .map_err(|e| quiet(&e, "export", UNREADABLE))?;
         let entries =
             zip_entries(Cursor::new(out.bytes)).map_err(|e| quiet(&e, "zip", UNREADABLE))?;
-        // The same filter as the base of a link, so both sides name the same files. A nested
-        // collection file is left out too, because apply refuses it.
-        Ok(entries
+        // The same filter and the same view as the base of a link, so both sides name and
+        // hash the same bytes. A nested collection file is left out too, because apply
+        // refuses it.
+        entries
             .into_iter()
             .filter(|(path, _)| is_sync_entry(path))
-            .collect())
+            .map(|(path, bytes)| {
+                let bytes =
+                    sync_bytes(&path, bytes).map_err(|e| quiet(&e, "sync_bytes", UNREADABLE))?;
+                Ok((path, bytes))
+            })
+            .collect()
     }
 
     /// The manifest of the export. No lock, so the caller holds it or does not need it.

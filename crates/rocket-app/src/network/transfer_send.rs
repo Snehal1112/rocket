@@ -20,6 +20,7 @@ use rocket_shared::error::{DomainError, DomainResult};
 use sha2::{Digest, Sha256};
 use tokio::sync::Notify;
 
+use super::sync::LinkEnd;
 use super::transfer::{outcome_name, TransferService};
 
 const MIB: u64 = 1024 * 1024;
@@ -567,7 +568,7 @@ impl TransferService {
             });
         }
         if let (Outcome::Completed, Some(link)) = (outcome, out.link) {
-            self.spawn_link(link, out.device, out.collection, out.zip);
+            self.spawn_link(link, out.device, out.collection, out.zip, LinkEnd::Sender);
         }
     }
 

@@ -14,11 +14,55 @@ const MIN_BUDGET: u64 = 1024 * 1024;
 /// The budget cost of one node, so many tiny aliased nodes cannot grow without a bound.
 const NODE_COST: u64 = 16;
 
-/// Merges a received (scrubbed) file into the local file.
+/// The collection root file. Its `info.name` is local-only for the sync.
+pub const ROOT_FILE: &str = "opencollection.yml";
+
+/// True when a collection-relative path names the root collection file.
+pub fn is_root_file(path: &str) -> bool {
+    path.eq_ignore_ascii_case(ROOT_FILE)
+}
+
+/// The bytes of one exported file as the sync hashes and sends them. The root file loses
+/// `info.name`, so each node keeps its own collection name. Any other file is unchanged.
+pub fn sync_bytes(path: &str, bytes: Vec<u8>) -> DomainResult<Vec<u8>> {
+    if !is_root_file(path) {
+        return Ok(bytes);
+    }
+    let mut value = parse_received(&bytes)
+        .map_err(|_| DomainError::InvalidInput("The collection file is not valid YAML.".into()))?;
+    let removed = match &mut value {
+        Value::Mapping(map) => match map.get_mut("info") {
+            Some(Value::Mapping(info)) => info.remove("name").is_some(),
+            _ => false,
+        },
+        _ => false,
+    };
+    if removed {
+        write_yaml(&value)
+    } else {
+        Ok(bytes)
+    }
+}
+
+/// Merges a received (scrubbed) synced file into the local file at `path`. The root file
+/// also keeps its local `info.name`.
+pub fn merge_synced_file(
+    path: &str,
+    local: Option<&[u8]>,
+    received: &[u8],
+) -> DomainResult<Vec<u8>> {
+    merge_with(local, received, is_root_file(path))
+}
+
+/// Merges a received (scrubbed) file into the local file. It is not the root file.
 pub fn merge_file(local: Option<&[u8]>, received: &[u8]) -> DomainResult<Vec<u8>> {
+    merge_with(local, received, false)
+}
+
+fn merge_with(local: Option<&[u8]>, received: &[u8], root_file: bool) -> DomainResult<Vec<u8>> {
     let received_value = parse_received(received)?;
     let Some(local) = local else {
-        let stripped = take_received(&received_value, "", &mut Vec::new());
+        let stripped = take_received(&received_value, "", &mut KeyPath::new(root_file));
         if stripped == received_value {
             return Ok(received.to_vec());
         }
@@ -39,7 +83,7 @@ pub fn merge_file(local: Option<&[u8]>, received: &[u8]) -> DomainResult<Vec<u8>
         &local_value,
         &received_value,
         Some(&scrubbed),
-        &mut Vec::new(),
+        &mut KeyPath::new(root_file),
     );
     write_yaml(&merged)
 }
@@ -168,7 +212,7 @@ fn merge_value(
     local: &Value,
     received: &Value,
     scrub: Option<&Value>,
-    path: &mut Vec<String>,
+    path: &mut KeyPath,
 ) -> Value {
     match (local, received) {
         (Value::Mapping(l), Value::Mapping(r)) => {
@@ -193,12 +237,7 @@ fn merge_value(
     }
 }
 
-fn fallback(
-    local: &Value,
-    received: &Value,
-    scrub: Option<&Value>,
-    path: &mut Vec<String>,
-) -> Value {
+fn fallback(local: &Value, received: &Value, scrub: Option<&Value>, path: &mut KeyPath) -> Value {
     if is_blank(received) && is_filled_scalar(local) && scrub.is_some_and(is_blank) {
         local.clone()
     } else {
@@ -218,20 +257,46 @@ fn is_filled_scalar(value: &Value) -> bool {
     }
 }
 
-/// The keys the export removes. They always come from the local file.
-fn is_local_owned(path: &[String], key: &str) -> bool {
-    let path: Vec<&str> = path.iter().map(String::as_str).collect();
-    matches!(
-        (path.as_slice(), key),
-        ([], "uid") | (["info"], "uid") | (["extensions"], "rocketapi") | (_, "examples")
-    )
+/// The keys above the merged slot, and whether the file is the root collection file.
+struct KeyPath {
+    keys: Vec<String>,
+    root_file: bool,
+}
+
+impl KeyPath {
+    fn new(root_file: bool) -> KeyPath {
+        KeyPath {
+            keys: Vec::new(),
+            root_file,
+        }
+    }
+
+    fn push(&mut self, key: String) {
+        self.keys.push(key);
+    }
+
+    fn pop(&mut self) {
+        self.keys.pop();
+    }
+}
+
+/// The keys the export or the sync removes. They always come from the local file. The root
+/// file's `info.name` is one of them, so a node's collection name never syncs.
+fn is_local_owned(path: &KeyPath, key: &str) -> bool {
+    let keys: Vec<&str> = path.keys.iter().map(String::as_str).collect();
+    let root_name = path.root_file && keys.as_slice() == ["info"] && key == "name";
+    root_name
+        || matches!(
+            (keys.as_slice(), key),
+            ([], "uid") | (["info"], "uid") | (["extensions"], "rocketapi") | (_, "examples")
+        )
 }
 
 fn merge_map(
     local: &Mapping,
     received: &Mapping,
     scrub: Option<&Mapping>,
-    path: &mut Vec<String>,
+    path: &mut KeyPath,
 ) -> Mapping {
     let mut out = Mapping::new();
     for (key, value) in received {
@@ -272,7 +337,7 @@ fn merge_map(
 
 /// Takes a received value that has no local twin. Received local-owned keys are dropped,
 /// because the local file owns them even when it lacks the parent key.
-fn take_received(value: &Value, name: &str, path: &mut Vec<String>) -> Value {
+fn take_received(value: &Value, name: &str, path: &mut KeyPath) -> Value {
     match value {
         Value::Mapping(map) => {
             let pushed = !name.is_empty();
@@ -304,7 +369,7 @@ fn merge_rows(
     local: &[Value],
     received: &[Value],
     scrub: Option<&[Value]>,
-    path: &mut Vec<String>,
+    path: &mut KeyPath,
 ) -> Vec<Value> {
     // The export keeps every row, so the scrubbed rows line up with the local ones.
     let scrub = scrub.filter(|rows| rows.len() == local.len());
@@ -845,5 +910,100 @@ examples:
         assert!(text.contains("LOCALSECRET"));
         // ... and the export of the merged file is the received file, so both sides hash alike.
         assert_eq!(exported("Login.yml", &text), received);
+    }
+
+    /// The sync view of one exported file.
+    fn synced(rel: &str, raw: &str) -> Vec<u8> {
+        sync_bytes(rel, exported(rel, raw)).expect("sync view")
+    }
+
+    #[test]
+    fn the_sync_view_of_the_root_file_has_no_collection_name() {
+        let root =
+            "opencollection: 1.0.0\nuid: c1\ninfo:\n  name: Orders\n  version: '2'\ndocs: hi\n";
+        let v = parse(&synced("opencollection.yml", root));
+        assert!(v["info"]["name"].is_null());
+        assert_eq!(v["info"]["version"].as_str(), Some("2"));
+        assert_eq!(v["docs"].as_str(), Some("hi"));
+        // Two roots that differ only by name look the same to the sync.
+        let other = root.replace("name: Orders", "name: Orders (from Ana)");
+        assert_eq!(
+            synced("opencollection.yml", root),
+            synced("opencollection.yml", &other)
+        );
+    }
+
+    #[test]
+    fn the_sync_view_of_other_files_is_the_export() {
+        let request = "info:\n  name: get\n  type: http\nhttp:\n  url: https://x\n";
+        let folder = "info:\n  name: users\n  type: folder\n";
+        assert_eq!(synced("get.yml", request), exported("get.yml", request));
+        assert_eq!(
+            synced("users/folder.yml", folder),
+            exported("users/folder.yml", folder)
+        );
+        // A root without a name is left as it is.
+        let bare = exported("opencollection.yml", "docs: hi\n");
+        assert_eq!(
+            sync_bytes("opencollection.yml", bare.clone()).expect("view"),
+            bare
+        );
+    }
+
+    #[test]
+    fn the_root_file_keeps_its_local_name_and_a_request_takes_the_peers_name() {
+        let local_root = "uid: c1\ninfo:\n  name: Orders (from Ana)\n  version: '1'\n";
+        let received = synced(
+            "opencollection.yml",
+            "info:\n  name: Orders\n  version: '2'\n",
+        );
+        let out = merge_synced_file("opencollection.yml", Some(local_root.as_bytes()), &received)
+            .expect("merges");
+        let v = parse(&out);
+        assert_eq!(v["info"]["name"].as_str(), Some("Orders (from Ana)"));
+        assert_eq!(v["info"]["version"].as_str(), Some("2"));
+        assert_eq!(v["uid"].as_str(), Some("c1"));
+        // A received root name is ignored too.
+        let named = b"info:\n  name: Evil\n";
+        let out = merge_synced_file("opencollection.yml", Some(local_root.as_bytes()), named)
+            .expect("merges");
+        assert_eq!(
+            parse(&out)["info"]["name"].as_str(),
+            Some("Orders (from Ana)")
+        );
+        // A request and a folder sync their names.
+        for path in ["get.yml", "users/folder.yml"] {
+            let out =
+                merge_synced_file(path, Some(b"info:\n  name: old\n"), b"info:\n  name: new\n")
+                    .expect("merges");
+            assert_eq!(parse(&out)["info"]["name"].as_str(), Some("new"), "{path}");
+        }
+    }
+
+    #[test]
+    fn a_new_root_file_is_written_without_the_peers_name() {
+        let out = merge_synced_file(
+            "opencollection.yml",
+            None,
+            b"info:\n  name: Evil\n  version: '1'\n",
+        )
+        .expect("merges");
+        let v = parse(&out);
+        assert!(v["info"]["name"].is_null());
+        assert_eq!(v["info"]["version"].as_str(), Some("1"));
+    }
+
+    #[test]
+    fn a_merged_root_file_has_the_received_sync_view() {
+        // The local root has its keys in another order and its own name, uid and settings.
+        let local = "opencollection: 1.0.0\nuid: c2\ninfo:\n  name: Orders (from Ana)\nextensions:\n  rocketapi:\n    sandboxMode: developer\nrequest:\n  auth:\n    type: bearer\n    token: MINE\ndocs: old\nconfig:\n  proxy:\n    disabled: true\n";
+        let peer = "opencollection: 1.0.0\nuid: c1\ninfo:\n  name: Orders\nconfig:\n  proxy:\n    disabled: true\ndocs: new\nrequest:\n  auth:\n    type: bearer\n    token: THEIRS\n";
+        let received = synced("opencollection.yml", peer);
+        let out = merge_synced_file("opencollection.yml", Some(local.as_bytes()), &received)
+            .expect("merges");
+        let text = String::from_utf8(out).expect("utf8");
+        assert!(text.contains("MINE"));
+        assert!(text.contains("Orders (from Ana)"));
+        assert_eq!(synced("opencollection.yml", &text), received);
     }
 }
