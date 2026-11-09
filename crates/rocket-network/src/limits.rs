@@ -75,6 +75,8 @@ pub const MAX_MANIFEST_ENTRIES: usize = 5000;
 pub const SYNC_PAYLOAD_NAME_MAX: usize = 32;
 /// The most changes one contract check offer carries.
 pub const CONTRACT_CHECK_MAX_CHANGES: usize = 200;
+/// The longest HTTP method in a change, in characters.
+pub const CONTRACT_METHOD_MAX: usize = 16;
 /// The longest contract name in an offer, in characters.
 pub const CONTRACT_NAME_MAX: usize = 120;
 /// The longest contract version in an offer, in characters.
@@ -131,6 +133,7 @@ mod tests {
         assert_eq!(MAX_MANIFEST_ENTRIES, 5000);
         assert_eq!(SYNC_PAYLOAD_NAME_MAX, 32);
         assert_eq!(CONTRACT_CHECK_MAX_CHANGES, 200);
+        assert_eq!(CONTRACT_METHOD_MAX, 16);
         assert_eq!(CONTRACT_NAME_MAX, 120);
         assert_eq!(CONTRACT_VERSION_MAX, 32);
         assert_eq!(CONTRACT_PATH_MAX, 512);
