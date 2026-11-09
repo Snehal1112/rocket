@@ -99,6 +99,14 @@ All structs use `#[serde(rename_all = "camelCase")]` for JSON serialization. Opt
 - `chain_scripts` orders one phase's scripts for a `ScriptFlow`, request script included, blanks skipped.
 - `CollectionRepository::{get_folder_settings, save_folder_settings, get_folder_chain_settings}` have defaults so test doubles keep compiling.
 
+## GraphQL documents (`graphql_document.rs`)
+
+`list_operations(document)` lists the operations of a GraphQL document in order. `select_operation(document, requested, fallback_first)` picks the `operationName` to send: a requested name must exist, a single operation is chosen without a request, and with several the send path fails while the runner (`fallback_first`) takes the first. Pure text rules, moved here from `rocket-app` (D-86).
+
+## Trust (`trust.rs`)
+
+`resolve_effective` combines what a collection file requests with what the user granted. `effective_capabilities(repo, store, collection)` reads the identity, settings and grant through `CollectionRepository` and `CollectionTrustStore` and resolves them; any error gives `EffectiveCapabilities::untrusted()`. It moved here from `rocket-app` (D-86). `CollectionTrustService` and the write path for grants stay in `rocket-app/src/collection_trust.rs`.
+
 ## Duplicate rules (`duplicate.rs`)
 
 `duplicate_candidate(source_path, source_name, n)` gives the path and name of the nth copy (`Login copy`, then `Login copy 2`). The path keeps the folder and file stem and always ends in `.yml`; the name keeps the source name. `duplicate_of(source, name)` clones a request with a new uid, no `seq` and no `file_name`. `CollectionService` owns the retry loop (`MAX_DUPLICATE_ATTEMPTS` = 1000, then `Conflict`).

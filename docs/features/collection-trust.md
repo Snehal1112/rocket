@@ -17,7 +17,7 @@ A collection file only requests elevated access. `~/.rocket-api/trust.yml` holds
 
 ## Rules
 
-- Never read `.sandbox_mode`, `.script_context_roots` or `.agent_autonomy_enabled` outside `collection_trust.rs` (a guard test enforces it). Use `effective_capabilities`.
+- Never read `.sandbox_mode`, `.script_context_roots` or `.agent_autonomy_enabled` outside `collection_trust.rs` (a guard test enforces it). Use `rocket_collection::effective_capabilities`.
 - `save_collection_settings` never grants and keeps the three file fields as they are. Only `CollectionTrustService` writes capabilities.
 - The banner approves with the fingerprint the user saw (`grant_requested_capabilities`). Freeze it when the review opens.
 - Services built without a trust store deny everything (`DenyAllTrustStore`). Tests that need access use `InMemoryTrustStore::allow_all()`.
