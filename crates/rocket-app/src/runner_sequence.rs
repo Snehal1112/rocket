@@ -78,7 +78,7 @@ pub fn flatten_run_set(
                 .items
                 .iter()
                 .find_map(|item| match item {
-                    CollectionItem::Folder(f) if folder_dir_name(f) == segment => Some(f),
+                    CollectionItem::Folder(f) if f.dir_or_name() == segment => Some(f),
                     _ => None,
                 })
                 .ok_or_else(|| {
@@ -116,7 +116,7 @@ fn collect_items(folder: &Folder, prefix: &str, out: &mut Vec<RunItem>) {
                 ));
             }
             CollectionItem::Folder(sub) => {
-                let sub_prefix = format!("{prefix}{}/", folder_dir_name(sub));
+                let sub_prefix = format!("{prefix}{}/", sub.dir_or_name());
                 collect_items(sub, &sub_prefix, out);
             }
             CollectionItem::GraphQl(gql) => {
@@ -152,11 +152,6 @@ fn collect_items(folder: &Folder, prefix: &str, out: &mut Vec<RunItem>) {
             | CollectionItem::ScriptFile(_) => {}
         }
     }
-}
-
-/// On-disk directory name for a folder, falling back to its display name.
-pub(crate) fn folder_dir_name(folder: &Folder) -> &str {
-    folder.dir_name.as_deref().unwrap_or(&folder.name)
 }
 
 /// Builds the execution input for one run step.

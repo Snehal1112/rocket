@@ -24,7 +24,6 @@ use rocket_shared::types::{Auth, Body, BodyMode, FormDataEntry, Header, QueryPar
 use serde_json::Value;
 
 use crate::redaction::{is_sensitive_header, redact_url_secrets, redaction_forms, REDACTED};
-use crate::runner_sequence::folder_dir_name;
 
 /// Most request entries the outline lists before it falls back to counts.
 pub const OUTLINE_ENTRY_CAP: usize = 400;
@@ -276,7 +275,7 @@ pub(crate) fn find_folder<'a>(root: &'a Folder, path: &str) -> Option<&'a Folder
     let mut folder = root;
     for segment in path.split('/').filter(|s| !s.is_empty()) {
         folder = folder.items.iter().find_map(|item| match item {
-            CollectionItem::Folder(sub) if folder_dir_name(sub) == segment => Some(sub),
+            CollectionItem::Folder(sub) if sub.dir_or_name() == segment => Some(sub),
             _ => None,
         })?;
     }
@@ -290,7 +289,7 @@ pub(crate) fn folder_children(folder: &Folder) -> Vec<FolderChildView> {
         .iter()
         .filter_map(|item| match item {
             CollectionItem::Folder(sub) => Some(FolderChildView {
-                name: folder_dir_name(sub).to_string(),
+                name: sub.dir_or_name().to_string(),
                 kind: "folder",
             }),
             CollectionItem::Summary(summary) => {
@@ -868,7 +867,7 @@ pub(crate) fn normalize_folder(folder: &str) -> DomainResult<Option<String>> {
 }
 
 /// Every HTTP request in a summary tree, depth first, with paths built from
-/// folder directory names (`folder_dir_name`), so they match what
+/// folder directory names (`Folder::dir_or_name`), so they match what
 /// `get_request` and `run_request` expect. Non-HTTP items are skipped, as
 /// the old `list_collection_requests` did.
 pub(crate) fn outline_entries(root: &Folder) -> Vec<OutlineEntry> {
@@ -893,7 +892,7 @@ fn walk_outline(folder: &Folder, prefix: &str, out: &mut Vec<OutlineEntry>) {
                 });
             }
             CollectionItem::Folder(sub) => {
-                let sub_prefix = format!("{prefix}{}/", folder_dir_name(sub));
+                let sub_prefix = format!("{prefix}{}/", sub.dir_or_name());
                 walk_outline(sub, &sub_prefix, out);
             }
             CollectionItem::Request(_)

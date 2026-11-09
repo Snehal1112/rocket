@@ -8,6 +8,7 @@ mod mode;
 mod options;
 pub mod prompt;
 pub mod proposal;
+pub mod proposal_rules;
 pub mod session;
 pub mod session_info;
 pub mod update;

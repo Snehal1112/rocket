@@ -9,8 +9,6 @@ use rocket_environment::{
 };
 use rocket_shared::error::{DomainError, DomainResult};
 
-use crate::runner_sequence::folder_dir_name;
-
 /// Every secret variable value of the workspace: global environments, and
 /// for each collection its variables (value and initial value), its
 /// environments, and the variables of every folder and request. A read
@@ -112,9 +110,9 @@ fn walk_folder(
             CollectionItem::Grpc(r) => add_variable_secrets(out, &r.variables),
             CollectionItem::Folder(child) => {
                 let child_path = if path.is_empty() {
-                    folder_dir_name(child).to_string()
+                    child.dir_or_name().to_string()
                 } else {
-                    format!("{path}/{}", folder_dir_name(child))
+                    format!("{path}/{}", child.dir_or_name())
                 };
                 match collections.get_folder_settings(collection, &child_path) {
                     Ok(settings) => add_variable_secrets(out, &settings.variables),

@@ -75,6 +75,11 @@ impl Folder {
         }
     }
 
+    /// On-disk directory name for a folder, falling back to its display name.
+    pub fn dir_or_name(&self) -> &str {
+        self.dir_name.as_deref().unwrap_or(&self.name)
+    }
+
     pub fn add_request(&mut self, request: Request) {
         self.items.push(CollectionItem::Request(Box::new(request)));
     }
@@ -176,6 +181,19 @@ mod tests {
         let v = serde_json::to_value(&folder.items[1]).expect("serialize");
         assert_eq!(v["type"], "graphql");
         assert_eq!(v["name"], "Q");
+    }
+
+    #[test]
+    fn folder_dir_or_name_falls_back_to_the_name() {
+        let folder = Folder::new("Auth");
+        assert_eq!(folder.dir_or_name(), "Auth");
+    }
+
+    #[test]
+    fn folder_dir_or_name_prefers_the_dir_name() {
+        let mut folder = Folder::new("Auth");
+        folder.dir_name = Some("auth-dir".to_string());
+        assert_eq!(folder.dir_or_name(), "auth-dir");
     }
 
     #[test]
