@@ -29,7 +29,8 @@ pub enum FileChange {
     /// from it only by case.
     Delete { path: String },
     /// Moves a local file. The local bytes move as they are. `from` matches the exact path,
-    /// like `Delete`.
+    /// like `Delete`. A rename that changes only letter case is refused (`InvalidInput`), so
+    /// the service must show the user that such a rename cannot be synced.
     Rename { from: String, to: String },
 }
 
@@ -46,6 +47,9 @@ pub trait SyncCollectionPort: Send + Sync {
     /// Applies the changes all or nothing. The order is fixed whatever the input order:
     /// renames, then deletes, then puts and put-as. A Put, PutAs or Rename target that equals
     /// a different existing path ignoring case is refused.
+    ///
+    /// The sync service never calls this: it has no check against a local save that landed
+    /// since the manifest was read. It uses `apply_if_unchanged`.
     fn apply(&self, collection: &str, changes: &[FileChange]) -> DomainResult<()>;
     /// Like `apply`, but inside the collection lock it reads the manifest again without taking
     /// the lock a second time. When that manifest differs from `expected` nothing is applied

@@ -32,6 +32,7 @@ const CASE_TAKEN: &str = "The sync names a file that differs from another only b
 const UNREADABLE: &str = "The collection files could not be read.";
 const NOT_WRITTEN: &str = "The sync could not write the collection files.";
 const UNFINISHED: &str = "An earlier sync apply is not finished yet.";
+const CASE_ONLY_RENAME: &str = "A file cannot be renamed by letter case alone.";
 const CHANGED: &str = "The collection changed while the sync was running.";
 
 /// The state of each touched path after the plan: `Some` is a put, `None` a delete.
@@ -39,6 +40,13 @@ pub(super) type Overlay = BTreeMap<String, Option<Vec<u8>>>;
 
 fn checked(path: &str) -> DomainResult<()> {
     if !is_synced_path(path) {
+        return Err(DomainError::InvalidInput(REFUSED.into()));
+    }
+    // Only the collection root file is a collection file. A nested one is refused.
+    let nested = path
+        .rsplit_once('/')
+        .is_some_and(|(_, name)| name.eq_ignore_ascii_case("opencollection.yml"));
+    if nested {
         return Err(DomainError::InvalidInput(REFUSED.into()));
     }
     validate_rel_path(path).map_err(|_| DomainError::InvalidInput(REFUSED.into()))
@@ -112,6 +120,10 @@ impl Plan<'_> {
     fn rename(&mut self, from: &str, to: &str) -> DomainResult<()> {
         checked(from)?;
         checked(to)?;
+        // A rename that changes only letter case cannot apply on a case-insensitive disk.
+        if from != to && from.to_lowercase() == to.to_lowercase() {
+            return Err(DomainError::InvalidInput(CASE_ONLY_RENAME.into()));
+        }
         let Some(bytes) = self.lookup(from).cloned() else {
             return Err(DomainError::NotFound(
                 "The sync moves a file that is not there.".into(),
@@ -336,7 +348,7 @@ impl SyncCollectionPort for ExportBackedSyncCollections {
         self.with_repo(|repo| match repo.collection_root_path(collection) {
             Ok(_) => Ok(true),
             Err(DomainError::NotFound(_)) => Ok(false),
-            Err(e) => Err(e),
+            Err(e) => Err(quiet(&e, "exists", UNREADABLE)),
         })
     }
 

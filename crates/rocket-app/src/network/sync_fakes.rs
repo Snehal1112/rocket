@@ -27,7 +27,9 @@ struct FakeCollection {
 
 /// Collections kept in memory. `apply` plans with the same code as the real port (so the
 /// order, the merge and the case rule match) and swaps all files at once, so it is atomic.
-/// `fail_next_apply` makes the next apply fail before any change.
+/// `fail_next_apply` makes the next apply fail before any change. The fake stores merged bytes
+/// and serves them as its export view, so a secret kept by a merge shows in `manifest` here
+/// while the real port hashes the scrubbed export. Keep secrets out of fake fixtures.
 #[derive(Default)]
 pub(crate) struct FakeSyncCollections {
     state: Mutex<HashMap<String, FakeCollection>>,
@@ -273,11 +275,11 @@ mod tests {
             "c",
             Some("u"),
             &[
-                ("a.yml", "http:\n  url: https://a\n  token: s\n"),
+                ("a.yml", "http:\n  url: https://a\nauth:\n  token: s\n"),
                 ("b.yml", "x: 1\n"),
             ],
         );
-        let received = b"http:\n  url: https://b\n  token: ''\n".to_vec();
+        let received = b"http:\n  url: https://b\nauth:\n  token: ''\n".to_vec();
         fake.apply(
             "c",
             &[FileChange::Put {

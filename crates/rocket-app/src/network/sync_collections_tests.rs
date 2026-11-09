@@ -439,6 +439,8 @@ fn apply_refuses_paths_the_export_does_not_carry() {
         "notes.txt",
         "/abs.yml",
         "",
+        "users/opencollection.yml",
+        "Users/OpenCollection.yml",
     ] {
         let put = rig.port.apply(
             "c",
@@ -1064,4 +1066,24 @@ fn a_missing_collection_error_does_not_quote_its_name() {
         .collection_uid("MissingMarker")
         .expect_err("refused");
     assert!(!err.to_string().contains("MissingMarker"), "{err}");
+}
+
+#[test]
+fn a_rename_by_letter_case_alone_is_refused_with_a_fixed_sentence() {
+    let rig = rig();
+    seed(&rig);
+    let before = snapshot(&rig.root);
+    let err = rig
+        .port
+        .apply(
+            "c",
+            &[FileChange::Rename {
+                from: "Login.yml".into(),
+                to: "login.yml".into(),
+            }],
+        )
+        .expect_err("refused");
+    assert!(matches!(err, DomainError::InvalidInput(_)), "{err:?}");
+    assert!(!err.to_string().contains("ogin"), "{err}");
+    assert_eq!(snapshot(&rig.root), before);
 }
