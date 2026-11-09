@@ -6,7 +6,8 @@
 use std::sync::{Arc, Mutex};
 
 use reqwest::Client;
-use rocket_app::{AssistantMode, McpToolService};
+use rocket_acp::AssistantMode;
+use rocket_app::McpToolService;
 use rocket_collection::{
     request::Request as CollectionRequest, settings::CollectionSettings, CollectionGrant,
     CollectionRepository, CollectionTrustStore,

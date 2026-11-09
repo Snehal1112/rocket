@@ -13,12 +13,12 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use rocket_acp::{
-    AcpSessionClient, AcpUpdate, AgentConfig, AgentConfigRepository, ConfigOption, McpServerSpec,
-    PromptCapabilities, PromptPart, SessionInfo,
+    AcpSessionClient, AcpUpdate, AgentConfig, AgentConfigRepository, AssistantMode, ConfigOption,
+    McpServerSpec, PromptCapabilities, PromptPart, SessionInfo,
 };
 use rocket_app::{
-    isolation_meta, AcpSessionService, AssistantMode, ConversationService, McpToolService,
-    SessionCleanup, ISOLATION_ENV_CONFIG_DIR, WORKSPACE_ASSISTANT_INSTRUCTIONS,
+    isolation_meta, AcpSessionService, ConversationService, McpToolService, SessionCleanup,
+    ISOLATION_ENV_CONFIG_DIR, WORKSPACE_ASSISTANT_INSTRUCTIONS,
 };
 use rocket_collection::CollectionRepository;
 use rocket_environment::external_secret::ExternalSecretRef;
