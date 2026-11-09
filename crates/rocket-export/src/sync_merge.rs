@@ -7,6 +7,8 @@ use rocket_shared::error::{DomainError, DomainResult};
 use serde::de::{self, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use serde_yaml::{Mapping, Number, Value};
 
+use crate::bruno::export_transform;
+
 /// The smallest budget for a received file, in bytes.
 const MIN_BUDGET: u64 = 1024 * 1024;
 /// The budget cost of one node, so many tiny aliased nodes cannot grow without a bound.
@@ -24,7 +26,21 @@ pub fn merge_file(local: Option<&[u8]>, received: &[u8]) -> DomainResult<Vec<u8>
     };
     let local_value: Value = serde_yaml::from_slice(local)
         .map_err(|_| DomainError::InvalidInput("The local file is not valid YAML.".into()))?;
-    let merged = merge_value(&local_value, &received_value, &mut Vec::new());
+    if local_value.is_mapping() && !received_value.is_mapping() {
+        return Err(DomainError::InvalidInput(
+            "The received file is not shaped like the local one.".into(),
+        ));
+    }
+    // The export blanks secrets. A local value is kept over a blank only where the export
+    // would have blanked it, so a deliberate clear by the peer still lands.
+    let mut scrubbed = local_value.clone();
+    export_transform(&mut scrubbed);
+    let merged = merge_value(
+        &local_value,
+        &received_value,
+        Some(&scrubbed),
+        &mut Vec::new(),
+    );
     write_yaml(&merged)
 }
 
@@ -147,25 +163,43 @@ impl<'de> Visitor<'de> for Budgeted<'_> {
     }
 }
 
-fn merge_value(local: &Value, received: &Value, path: &mut Vec<String>) -> Value {
+/// Merges one slot. `scrub` is the same slot of the local file after the export transform.
+fn merge_value(
+    local: &Value,
+    received: &Value,
+    scrub: Option<&Value>,
+    path: &mut Vec<String>,
+) -> Value {
     match (local, received) {
-        (Value::Mapping(l), Value::Mapping(r)) => Value::Mapping(merge_map(l, r, path)),
-        (Value::Sequence(l), Value::Sequence(r)) => Value::Sequence(merge_rows(l, r, path)),
+        (Value::Mapping(l), Value::Mapping(r)) => {
+            Value::Mapping(merge_map(l, r, scrub.and_then(Value::as_mapping), path))
+        }
+        (Value::Sequence(l), Value::Sequence(r)) => Value::Sequence(merge_rows(
+            l,
+            r,
+            scrub.and_then(Value::as_sequence).map(Vec::as_slice),
+            path,
+        )),
         (Value::Mapping(l), r) => {
             // The local owned keys must not be lost to a non-mapping value.
-            let kept = merge_map(l, &Mapping::new(), path);
+            let kept = merge_map(l, &Mapping::new(), None, path);
             if kept.is_empty() {
-                fallback(local, r, path)
+                fallback(local, r, scrub, path)
             } else {
                 Value::Mapping(kept)
             }
         }
-        (l, r) => fallback(l, r, path),
+        (l, r) => fallback(l, r, scrub, path),
     }
 }
 
-fn fallback(local: &Value, received: &Value, path: &mut Vec<String>) -> Value {
-    if is_blank(received) && is_filled_scalar(local) {
+fn fallback(
+    local: &Value,
+    received: &Value,
+    scrub: Option<&Value>,
+    path: &mut Vec<String>,
+) -> Value {
+    if is_blank(received) && is_filled_scalar(local) && scrub.is_some_and(is_blank) {
         local.clone()
     } else {
         take_received(received, "", path)
@@ -193,7 +227,12 @@ fn is_local_owned(path: &[String], key: &str) -> bool {
     )
 }
 
-fn merge_map(local: &Mapping, received: &Mapping, path: &mut Vec<String>) -> Mapping {
+fn merge_map(
+    local: &Mapping,
+    received: &Mapping,
+    scrub: Option<&Mapping>,
+    path: &mut Vec<String>,
+) -> Mapping {
     let mut out = Mapping::new();
     for (key, value) in received {
         let name = key.as_str().unwrap_or("");
@@ -203,7 +242,7 @@ fn merge_map(local: &Mapping, received: &Mapping, path: &mut Vec<String>) -> Map
         let merged = match local.get(key) {
             Some(l) => {
                 path.push(name.to_string());
-                let v = merge_value(l, value, path);
+                let v = merge_value(l, value, scrub.and_then(|m| m.get(key)), path);
                 path.pop();
                 v
             }
@@ -220,7 +259,7 @@ fn merge_map(local: &Mapping, received: &Mapping, path: &mut Vec<String>) -> Map
             // The peer dropped this key. Only owned keys deeper down are kept.
             if let Value::Mapping(inner) = value {
                 path.push(name.to_string());
-                let kept = merge_map(inner, &Mapping::new(), path);
+                let kept = merge_map(inner, &Mapping::new(), None, path);
                 path.pop();
                 if !kept.is_empty() {
                     out.insert(key.clone(), Value::Mapping(kept));
@@ -240,13 +279,13 @@ fn take_received(value: &Value, name: &str, path: &mut Vec<String>) -> Value {
             if pushed {
                 path.push(name.to_string());
             }
-            let kept = merge_map(&Mapping::new(), map, path);
+            let kept = merge_map(&Mapping::new(), map, None, path);
             if pushed {
                 path.pop();
             }
             Value::Mapping(kept)
         }
-        Value::Sequence(rows) => Value::Sequence(merge_rows(&[], rows, path)),
+        Value::Sequence(rows) => Value::Sequence(merge_rows(&[], rows, None, path)),
         other => other.clone(),
     }
 }
@@ -261,7 +300,14 @@ fn row_id(row: &Mapping) -> Option<(String, Option<String>)> {
     Some((name.to_string(), kind))
 }
 
-fn merge_rows(local: &[Value], received: &[Value], path: &mut Vec<String>) -> Vec<Value> {
+fn merge_rows(
+    local: &[Value],
+    received: &[Value],
+    scrub: Option<&[Value]>,
+    path: &mut Vec<String>,
+) -> Vec<Value> {
+    // The export keeps every row, so the scrubbed rows line up with the local ones.
+    let scrub = scrub.filter(|rows| rows.len() == local.len());
     let mut used = vec![false; local.len()];
     let mut out = Vec::with_capacity(received.len());
     for row in received {
@@ -275,7 +321,10 @@ fn merge_rows(local: &[Value], received: &[Value], path: &mut Vec<String>) -> Ve
         match found {
             Some((i, Value::Mapping(l))) => {
                 used[i] = true;
-                out.push(Value::Mapping(merge_map(l, r, path)));
+                let scrub_row = scrub
+                    .and_then(|rows| rows.get(i))
+                    .and_then(Value::as_mapping);
+                out.push(Value::Mapping(merge_map(l, r, scrub_row, path)));
             }
             _ => out.push(take_received(row, "", path)),
         }
@@ -368,9 +417,9 @@ mod tests {
 
     #[test]
     fn a_secret_variable_data_survives_a_blank() {
-        let local = "variables:\n  - name: api\n    value:\n      type: secret\n      data: abc\n";
+        let local = "variables:\n  - name: api\n    secret: true\n    value:\n      type: secret\n      data: abc\n";
         let received =
-            "variables:\n  - name: api\n    value:\n      type: secret\n      data: ''\n";
+            "variables:\n  - name: api\n    secret: true\n    value:\n      type: secret\n      data: ''\n";
         let v = merged(local, received);
         assert_eq!(v["variables"][0]["value"]["data"].as_str(), Some("abc"));
     }
@@ -446,8 +495,8 @@ mod tests {
 
     #[test]
     fn a_blank_row_value_keeps_the_local_value_of_the_row_with_the_same_name() {
-        let local = "http:\n  headers:\n    - name: Authorization\n      value: tok\n    - name: X-Dup\n      value: one\n    - name: X-Dup\n      value: two\n    - name: Old\n      value: gone\n";
-        let received = "http:\n  headers:\n    - name: X-Dup\n      value: ''\n    - name: Authorization\n      value: ''\n    - name: X-Dup\n      value: ''\n    - name: New\n      value: ''\n";
+        let local = "http:\n  headers:\n    - name: Authorization\n      value: tok\n    - name: X-Token\n      value: one\n    - name: X-Token\n      value: two\n    - name: Old\n      value: gone\n";
+        let received = "http:\n  headers:\n    - name: X-Token\n      value: ''\n    - name: Authorization\n      value: ''\n    - name: X-Token\n      value: ''\n    - name: New\n      value: ''\n";
         let v = merged(local, received);
         let rows = v["http"]["headers"].as_sequence().expect("list");
         let got: Vec<(&str, &str)> = rows
@@ -463,9 +512,9 @@ mod tests {
         assert_eq!(
             got,
             vec![
-                ("X-Dup", "one"),
+                ("X-Token", "one"),
                 ("Authorization", "tok"),
-                ("X-Dup", "two"),
+                ("X-Token", "two"),
                 ("New", "")
             ]
         );
@@ -473,18 +522,48 @@ mod tests {
 
     #[test]
     fn rows_with_the_same_name_and_another_type_do_not_mix() {
-        let local = "http:\n  params:\n    - name: id\n      type: query\n      value: q\n    - name: id\n      type: path\n      value: '7'\n";
-        let received = "http:\n  params:\n    - name: id\n      type: path\n      value: ''\n    - name: id\n      type: query\n      value: ''\n";
+        let local = "http:\n  params:\n    - name: token\n      type: query\n      value: q\n    - name: token\n      type: path\n      value: '7'\n";
+        let received = "http:\n  params:\n    - name: token\n      type: path\n      value: ''\n    - name: token\n      type: query\n      value: ''\n";
         let v = merged(local, received);
         assert_eq!(v["http"]["params"][0]["value"].as_str(), Some("7"));
         assert_eq!(v["http"]["params"][1]["value"].as_str(), Some("q"));
     }
 
     #[test]
-    fn a_peer_that_clears_a_plain_value_does_not_clear_it_here() {
-        // Known limit: a blank cannot be told from an empty value.
+    fn a_peer_that_clears_a_plain_value_clears_it_here() {
+        // The export does not blank these slots, so an empty value is a deliberate clear.
         let v = merged("docs:\n  content: old\n", "docs:\n  content: ''\n");
-        assert_eq!(v["docs"]["content"].as_str(), Some("old"));
+        assert_eq!(v["docs"]["content"].as_str(), Some(""));
+        let v = merged(
+            "http:\n  url: https://a\n  headers:\n    - name: Accept\n      value: json\n",
+            "http:\n  url: ''\n  headers:\n    - name: Accept\n      value: ''\n",
+        );
+        assert_eq!(v["http"]["url"].as_str(), Some(""));
+        assert_eq!(v["http"]["headers"][0]["value"].as_str(), Some(""));
+    }
+
+    #[test]
+    fn merging_an_export_gives_back_the_export() {
+        let fixtures = [
+            (
+                "uid: u\ninfo:\n  name: A\n  type: http\nhttp:\n  url: https://a/?token=SECRET&x=1\n  headers:\n    - name: Authorization\n      value: Bearer S\n    - name: Accept\n      value: json\ndocs:\n  content: old\nauth:\n  type: bearer\n  token: T\n",
+                "info:\n  name: A\n  type: http\nhttp:\n  url: https://b/?token=&x=2\n  headers:\n    - name: Authorization\n      value: ''\n    - name: Accept\n      value: ''\ndocs:\n  content: ''\nauth:\n  type: bearer\n  token: ''\n",
+            ),
+            (
+                "info:\n  name: F\nvariables:\n  - name: api\n    secret: true\n    value: abc\n  - name: plain\n    value: keep\nexamples:\n  - name: e\n",
+                "info:\n  name: F\nvariables:\n  - name: api\n    secret: true\n    value: ''\n  - name: plain\n    value: ''\n",
+            ),
+            (
+                "extensions:\n  rocketapi:\n    sandboxMode: developer\nrequest:\n  auth:\n    type: basic\n    password: pw\n",
+                "request:\n  auth:\n    type: basic\n    password: ''\n",
+            ),
+        ];
+        for (local, peer) in fixtures {
+            let sent = exported("f.yml", peer);
+            let out = merge_file(Some(local.as_bytes()), &sent).expect("merges");
+            let text = String::from_utf8(out).expect("utf8");
+            assert_eq!(exported("f.yml", &text), sent, "{local}");
+        }
     }
 
     #[test]
@@ -646,9 +725,6 @@ http:
 ",
             "info: 5
 ",
-            "",
-            "~
-",
             "x: 1
 ",
         ] {
@@ -671,6 +747,15 @@ http:
 ",
         );
         assert!(v["docs"].is_null());
+    }
+
+    #[test]
+    fn a_received_top_level_that_is_not_a_mapping_is_refused_for_a_mapping_local() {
+        for received in ["", "~\n", "[1, 2]\n", "text\n"] {
+            let err = merge_file(Some(b"a: 1\n"), received.as_bytes()).expect_err("refused");
+            assert!(matches!(err, DomainError::InvalidInput(_)), "{received}");
+            assert!(!err.to_string().contains("text"));
+        }
     }
 
     #[test]

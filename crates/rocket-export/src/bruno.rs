@@ -177,6 +177,15 @@ fn strip_uids(value: &mut Value) -> bool {
     removed
 }
 
+/// The export transform of one parsed YAML file, without the legacy folder rewrite and the
+/// report. The sync merge uses it to learn which local slots the export blanks.
+pub(crate) fn export_transform(value: &mut Value) {
+    strip_uids(value);
+    strip_rocket_namespace(value);
+    drop_examples(value);
+    scrub_yaml("", value, &mut Vec::new());
+}
+
 /// Builds a Bruno-readable ZIP with one root folder named after the collection.
 pub fn bruno_zip(
     files: Vec<SourceFile>,
