@@ -163,7 +163,7 @@ Results on the provider side are kept in memory and are lost when the app restar
 
 **What leaves the node.**
 
-- Provider to teammate: contract name and version, policy and the change list (method, path template, field, kind, old and new value cut to 256 characters, breaking flag). Values of sensitive fields (auth fields, tokens, sensitive headers) are sent as `[hidden]`. The offer must fit 64 KiB, or the provider sees "Check fewer changes at a time." and nothing is sent.
+- Provider to teammate: contract name and version, policy and the change list. Each change has the method, the path of the request (not the scheme, user info, host, query or fragment, and not a leading `{{base}}` variable), the field name, the change type, the old and new value cut to 256 characters, and the breaking flag. Values of fields with a sensitive name (tokens, keys, passwords, sensitive headers), auth credentials (`auth_detail`) and all body values are sent as `[hidden]`. Auth type names (bearer, basic, apikey and so on) are sent as they are, so a teammate can see an auth type change. The offer must fit 64 KiB, or the provider sees "Check fewer changes at a time." and nothing is sent.
 - Teammate to provider: only a verdict (pass, break or not used) per change index, or declined or busy. No request name, path or collection. The provider maps the index to its own change list to show the field.
 
 **Limits.**
