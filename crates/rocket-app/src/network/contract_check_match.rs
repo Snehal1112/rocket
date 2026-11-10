@@ -51,6 +51,7 @@ pub fn normalize_path(url: &str) -> Vec<String> {
 
 /// Whether `url` has the shape of `template`: segment by segment, case-sensitive, and `*` on
 /// either side matches any one segment.
+/// A path without a leading slash loses its first segment as the host.
 pub fn paths_match(template: &str, url: &str) -> bool {
     let a = normalize_path(template);
     let b = normalize_path(url);
@@ -96,8 +97,8 @@ pub fn verdicts(
         .collect()
 }
 
-/// Replaces the old and new values with `[hidden]` for `auth` and for sensitive field names.
-/// A value that is `None` stays `None`.
+/// Replaces the old and new values with `[hidden]` for auth fields, body fields and sensitive
+/// field names. A value that is `None` stays `None`.
 pub fn redact_change(mut change: ContractChange) -> ContractChange {
     if is_sensitive_field(&change.field) {
         for value in [&mut change.old_value, &mut change.new_value]
@@ -110,9 +111,13 @@ pub fn redact_change(mut change: ContractChange) -> ContractChange {
     change
 }
 
-/// Whether a change field holds a secret: `auth`, or a name the export name rule flags.
+/// Whether a change field may hold a secret.
+///
+/// A field whose first word is `auth` (any case, words split at `:`, `.` and `_`) and every body
+/// field always may. Other fields follow the export name rule.
 fn is_sensitive_field(field: &str) -> bool {
-    if field == "auth" || field.starts_with("auth:") {
+    let first = field.split([':', '.', '_']).next().unwrap_or_default();
+    if first.eq_ignore_ascii_case("auth") || is_body_field(field) {
         return true;
     }
     let name = field.split_once(':').map_or(field, |(_, name)| name);
@@ -136,8 +141,18 @@ enum Field<'a> {
     Unknown,
 }
 
+/// Whether the field is `body` or a `body:<path>` field.
+fn is_body_field(field: &str) -> bool {
+    field == "body" || field.starts_with("body:")
+}
+
+/// Whether a value is unknown here: a `{{variable}}` or a value the provider hid.
+fn is_unknown_value(value: &str) -> bool {
+    value.contains("{{") || value == HIDDEN
+}
+
 fn parse_field(field: &str) -> Field<'_> {
-    if field == "body" || field.starts_with("body:") {
+    if is_body_field(field) {
         return Field::Body;
     }
     if field == "auth" {
@@ -209,8 +224,8 @@ fn breaks_entry(kind: ContractChangeType, sent: Option<&str>, new: Option<&str>)
         (ContractChangeType::Removed, sent) => sent.is_some(),
         (ContractChangeType::Changed, None) => false,
         (ContractChangeType::Changed, Some(value)) => match new {
-            // A variable is resolved at send time, so its value is unknown here.
-            Some(new) => !value.contains("{{") && value != new,
+            // A variable or a hidden new value cannot be compared, so it never breaks.
+            Some(new) => !is_unknown_value(value) && new != HIDDEN && value != new,
             None => false,
         },
     }
@@ -229,7 +244,8 @@ fn breaks_auth(kind: ContractChangeType, local: &str, new: Option<&str>) -> bool
     match kind {
         ContractChangeType::Removed => true,
         ContractChangeType::Added | ContractChangeType::Changed => {
-            new.is_some_and(|new| !new.trim().eq_ignore_ascii_case(local))
+            // A hidden new value is unknown, so it never breaks.
+            new.is_some_and(|new| new != HIDDEN && !new.trim().eq_ignore_ascii_case(local))
         }
     }
 }

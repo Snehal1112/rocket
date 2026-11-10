@@ -136,8 +136,9 @@ fn verdict_table() {
     json_body.body_content = Some("{\"a\":1}".into());
     let mut form_body = sig("GET", url);
     form_body.form_fields = vec![kv("password", "x"), kv("name", "n")];
-    let mut path_named = sig("GET", "/users/{{id}}");
-    path_named.url_pattern = "/users/{{id}}".into();
+    let path_named = sig("GET", "/users/{{id}}");
+    let mut with_token = sig("GET", url);
+    with_token.headers = vec![kv("Authorization", "Bearer abc")];
     let literal_path = sig("GET", "/users/42");
 
     let table: Vec<(
@@ -320,6 +321,54 @@ fn verdict_table() {
             plain.clone(),
             Pass,
         ),
+        (
+            "changed header with a hidden new value is unknown",
+            change(
+                "header:Authorization",
+                Changed,
+                Some("[hidden]"),
+                Some("[hidden]"),
+                true,
+            ),
+            with_token.clone(),
+            Pass,
+        ),
+        (
+            "changed header with a real differing value",
+            change(
+                "header:Authorization",
+                Changed,
+                None,
+                Some("Bearer x"),
+                true,
+            ),
+            with_token.clone(),
+            Break,
+        ),
+        (
+            "auth changed to a hidden value is unknown",
+            change("auth", Changed, Some("[hidden]"), Some("[hidden]"), true),
+            bearer.clone(),
+            Pass,
+        ),
+        (
+            "auth added with a hidden value is unknown",
+            change("auth", Added, None, Some("[hidden]"), true),
+            bearer.clone(),
+            Pass,
+        ),
+        (
+            "auth changed to a real differing value",
+            change("auth", Changed, None, Some("basic"), true),
+            bearer.clone(),
+            Break,
+        ),
+        (
+            "auth added with a real differing value",
+            change("auth", Added, None, Some("basic"), true),
+            bearer.clone(),
+            Break,
+        ),
     ];
     for (name, c, s, want) in table {
         assert_eq!(verdict_of(c, s), want, "{name}");
@@ -374,6 +423,14 @@ fn redaction_table() {
         "form:password",
         "form:pass",
         "body:$.user.password",
+        "auth_type",
+        "auth_detail",
+        "Auth",
+        "AUTH:x",
+        "auth.x",
+        "body",
+        "body:$.password",
+        "body:$.a.b",
     ] {
         let c = change(
             field,
