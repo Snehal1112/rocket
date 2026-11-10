@@ -8,13 +8,13 @@ use std::path::Path;
 use rocket_collection::contract::changelog::{ChangeType, ChangelogEntry};
 use rocket_collection::contract::snapshot::RequestSignatureSnapshot;
 use rocket_collection::contract::types::BreakingChangePolicy;
+use rocket_collection::contract::walk_folder;
 use rocket_collection::Collection;
 use rocket_network::limits::{CONTRACT_FIELD_MAX, CONTRACT_METHOD_MAX, CONTRACT_PATH_MAX};
 use rocket_network::{is_format_char, ContractChange, ContractChangeType, ContractPolicyWire};
 use rocket_shared::error::DomainResult;
 
 use super::contract_check_match::{path_only, LocalRequest};
-use crate::contract_service::walk_folder;
 
 /// A contract with the changes since its signed snapshot, as the offer carries them.
 ///

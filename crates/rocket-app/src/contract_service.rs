@@ -1038,7 +1038,7 @@ mod tests {
             repository::ContractError,
             types::{ContractParty, ContractPolicy},
         },
-        Collection, Request,
+        Collection, CollectionItem, Request,
     };
     use rocket_shared::error::DomainError;
     use rocket_shared::types::HttpMethod;
