@@ -7,6 +7,7 @@ import {
   cancelNetworkSync,
   cancelNetworkTransfer,
   confirmNetworkSync,
+  declineContractCheck,
   getNetworkSyncConflictFiles,
   getNetworkStatus,
   listNetworkAddresses,
@@ -15,18 +16,22 @@ import {
   listNetworkNodes,
   markNetworkIntroSeen,
   onNetworkChanged,
+  onNetworkContractCheck,
   onNetworkPairing,
   onNetworkSync,
   onNetworkTransfer,
   removeNetworkAddress,
+  replyContractCheck,
   removeNetworkPaired,
   requestNetworkPairing,
   respondNetworkPairing,
   respondNetworkTransfer,
+  reviewContractCheck,
   reviewNetworkSync,
   sendNetworkCollection,
   setNetworkProfile,
   setNetworkVisibility,
+  startContractCheck,
   startNetworkSync,
   unblockNetworkDevice,
   unlinkNetworkLink,
@@ -256,5 +261,39 @@ describe('team network sync commands', () => {
     const callback = vi.mocked(listen).mock.calls[0][1] as (e: { payload: unknown }) => void;
     callback({ payload: { type: 'linkChanged', link_id: 'L1' } });
     expect(handler).toHaveBeenCalledWith({ type: 'linkChanged', link_id: 'L1' });
+  });
+});
+
+describe('team network contract check commands', () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockReset();
+    vi.mocked(listen).mockReset();
+  });
+
+  it('sends camelCase arguments', async () => {
+    vi.mocked(invoke).mockResolvedValue({ checks: [], changes: [] });
+    await startContractCheck('/c', 'orders', ['DEV1']);
+    expect(invoke).toHaveBeenLastCalledWith('network_contract_check_start', {
+      collectionRoot: '/c',
+      contractId: 'orders',
+      deviceIds: ['DEV1'],
+    });
+    await reviewContractCheck('c1');
+    expect(invoke).toHaveBeenLastCalledWith('network_contract_check_review', { checkId: 'c1' });
+    await replyContractCheck('c1');
+    expect(invoke).toHaveBeenLastCalledWith('network_contract_check_reply', { checkId: 'c1' });
+    await declineContractCheck('c1');
+    expect(invoke).toHaveBeenLastCalledWith('network_contract_check_decline', { checkId: 'c1' });
+  });
+
+  it('listens on network-contract-check and passes the payload', async () => {
+    const unlisten = vi.fn();
+    vi.mocked(listen).mockResolvedValue(unlisten);
+    const handler = vi.fn();
+    await expect(onNetworkContractCheck(handler)).resolves.toBe(unlisten);
+    expect(listen).toHaveBeenCalledWith('network-contract-check', expect.any(Function));
+    const callback = vi.mocked(listen).mock.calls[0][1] as (e: { payload: unknown }) => void;
+    callback({ payload: { type: 'expired', check_id: 'c1' } });
+    expect(handler).toHaveBeenCalledWith({ type: 'expired', check_id: 'c1' });
   });
 });

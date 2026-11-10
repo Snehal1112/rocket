@@ -4645,3 +4645,102 @@ export const getNetworkSyncConflictFiles = (syncId: string, path: string): Promi
 
 export const onNetworkSync = (handler: (event: NetworkSyncEvent) => void): Promise<UnlistenFn> =>
   listen<NetworkSyncEvent>('network-sync', (e) => handler(e.payload));
+
+// ----- Team network contract check -----
+
+export type ContractVerdict = 'pass' | 'break' | 'not_used';
+export type ContractCheckOutcome = 'answered' | 'declined' | 'busy';
+export type ContractChangeKind = 'changed' | 'added' | 'removed';
+export type ContractCheckPolicy = 'strict' | 'lenient' | 'additive_ok';
+
+/** One offered change. Values are already redacted by the provider. */
+export interface ContractChange {
+  method: string;
+  pathTemplate: string;
+  field: string;
+  changeType: ContractChangeKind;
+  oldValue: string | null;
+  newValue: string | null;
+  breaking: boolean;
+}
+
+export interface StartedContractCheck {
+  deviceId: string;
+  checkId: string;
+}
+
+export interface ContractCheckStarted {
+  checks: StartedContractCheck[];
+  changes: ContractChange[];
+}
+
+/** A local request that matched a change. It never leaves this node. */
+export interface LocalMatch {
+  collection: string;
+  name: string;
+}
+
+export interface ReviewedContractChange extends ContractChange {
+  index: number;
+  verdict: ContractVerdict;
+  matches: LocalMatch[];
+}
+
+export interface ContractCheckReview {
+  checkId: string;
+  deviceId: string;
+  contract: string;
+  version: string;
+  policy: ContractCheckPolicy;
+  changes: ReviewedContractChange[];
+}
+
+export interface ContractCheckRowDto {
+  index: number;
+  verdict: ContractVerdict;
+}
+
+/** Channel `network-contract-check`. Fields are snake_case as sent, rows are camelCase. */
+export type NetworkContractCheckEvent =
+  | {
+      type: 'offerReceived';
+      check_id: string;
+      device_id: string;
+      contract: string;
+      change_count: number;
+    }
+  | {
+      type: 'resultReceived';
+      check_id: string;
+      device_id: string;
+      outcome: ContractCheckOutcome;
+      rows: ContractCheckRowDto[];
+    }
+  | { type: 'expired'; check_id: string };
+
+export const startContractCheck = (
+  collectionRoot: string,
+  contractId: string,
+  deviceIds: string[],
+): Promise<ContractCheckStarted> =>
+  invoke<ContractCheckStarted>('network_contract_check_start', {
+    collectionRoot,
+    contractId,
+    deviceIds,
+  });
+
+/** Matches an incoming check against the local requests. Nothing is sent. */
+export const reviewContractCheck = (checkId: string): Promise<ContractCheckReview> =>
+  invoke<ContractCheckReview>('network_contract_check_review', { checkId });
+
+/** Sends the reviewed verdicts to the provider. */
+export const replyContractCheck = (checkId: string): Promise<void> =>
+  invoke<void>('network_contract_check_reply', { checkId });
+
+export const declineContractCheck = (checkId: string): Promise<void> =>
+  invoke<void>('network_contract_check_decline', { checkId });
+
+export const onNetworkContractCheck = (
+  handler: (event: NetworkContractCheckEvent) => void,
+): Promise<UnlistenFn> =>
+  listen<NetworkContractCheckEvent>('network-contract-check', (e) => handler(e.payload));

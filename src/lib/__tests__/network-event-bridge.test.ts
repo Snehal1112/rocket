@@ -24,6 +24,7 @@ const mocks = vi.hoisted(() => {
       onNetworkPairing: listener('pairing'),
       onNetworkTransfer: listener('transfer'),
       onNetworkSync: listener('sync'),
+      onNetworkContractCheck: listener('contractCheck'),
       listNetworkLinks: vi.fn(),
       getNetworkStatus: vi.fn(),
       listNetworkNodes: vi.fn(),

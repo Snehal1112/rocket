@@ -3,6 +3,8 @@ import { errorText } from '@/lib/error-text';
 import {
   addNetworkAddress,
   type ConflictView,
+  type ContractCheckOutcome,
+  type ContractCheckRowDto,
   getNetworkStatus,
   listNetworkLinks,
   listNetworkNodes,
@@ -89,6 +91,21 @@ export interface SyncProgress {
   totalBytes: number;
 }
 
+/** A contract check another node offered. It waits for the local user. */
+export interface IncomingContractCheck {
+  checkId: string;
+  deviceId: string;
+  /** Peer text. Render it as plain text only. */
+  contract: string;
+  changeCount: number;
+}
+
+/** What a node answered. A node that has not answered has no entry. */
+export interface ContractCheckResult {
+  outcome: ContractCheckOutcome | 'expired';
+  rows: ContractCheckRowDto[];
+}
+
 export interface NetworkState {
   status: NetworkStatus | null;
   nodes: NetworkNode[];
@@ -112,6 +129,12 @@ export interface NetworkState {
   dialogSyncId: string | null;
   /** Why the open sync ended before it was answered. */
   dialogSyncEndedText: string | null;
+  /** Contract checks other nodes offered that wait for a local answer. */
+  contractChecksIncoming: IncomingContractCheck[];
+  /** Results the provider got, by check id and then device id. */
+  contractCheckResults: Record<string, Record<string, ContractCheckResult>>;
+  /** The incoming check whose dialog is open. */
+  dialogContractCheckId: string | null;
   links: NetworkLink[];
   error: string | null;
   refresh: () => Promise<void>;
@@ -185,6 +208,16 @@ export interface NetworkState {
   refreshLinks: () => Promise<void>;
   /** Rejects with the backend error and reloads the list either way. */
   unlink: (linkId: string) => Promise<void>;
+  /** A repeated offer changes nothing. */
+  addIncomingContractCheck: (check: IncomingContractCheck) => void;
+  removeIncomingContractCheck: (checkId: string) => void;
+  setContractCheckResult: (checkId: string, deviceId: string, result: ContractCheckResult) => void;
+  /** Remembers the node a started check went to, so an expiry can mark its result. */
+  trackContractCheck: (checkId: string, deviceId: string) => void;
+  /** Drops the incoming check and marks an unanswered result as expired. */
+  expireContractCheck: (checkId: string) => void;
+  openContractCheckDialog: (checkId: string) => void;
+  closeContractCheckDialog: () => void;
   reset: () => void;
 }
 
@@ -203,9 +236,15 @@ const initialState = {
   syncProgress: [] as SyncProgress[],
   dialogSyncId: null as string | null,
   dialogSyncEndedText: null as string | null,
+  contractChecksIncoming: [] as IncomingContractCheck[],
+  contractCheckResults: {} as Record<string, Record<string, ContractCheckResult>>,
+  dialogContractCheckId: null as string | null,
   links: [] as NetworkLink[],
   error: null as string | null,
 };
+
+// The node each started contract check went to, by check id.
+const startedContractChecks = new Map<string, string>();
 
 // Expiry timers by pairing id, and the request counters that drop stale responses.
 const expiryTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -524,6 +563,41 @@ export const useNetworkStore = create<NetworkState>()((set, get) => ({
   },
   wasSyncDeclinedHere: (syncId) => declinedSyncsHere.has(syncId),
 
+  addIncomingContractCheck(check) {
+    if (get().contractChecksIncoming.some((c) => c.checkId === check.checkId)) return;
+    set({ contractChecksIncoming: [...get().contractChecksIncoming, check] });
+  },
+
+  removeIncomingContractCheck(checkId) {
+    if (!get().contractChecksIncoming.some((c) => c.checkId === checkId)) return;
+    set({
+      contractChecksIncoming: get().contractChecksIncoming.filter((c) => c.checkId !== checkId),
+    });
+  },
+
+  setContractCheckResult(checkId, deviceId, result) {
+    const current = get().contractCheckResults;
+    set({
+      contractCheckResults: { ...current, [checkId]: { ...current[checkId], [deviceId]: result } },
+    });
+  },
+
+  trackContractCheck(checkId, deviceId) {
+    startedContractChecks.set(checkId, deviceId);
+  },
+
+  expireContractCheck(checkId) {
+    get().removeIncomingContractCheck(checkId);
+    const deviceId = startedContractChecks.get(checkId);
+    if (deviceId === undefined) return;
+    // An answered node keeps its answer.
+    if (get().contractCheckResults[checkId]?.[deviceId]) return;
+    get().setContractCheckResult(checkId, deviceId, { outcome: 'expired', rows: [] });
+  },
+
+  openContractCheckDialog: (dialogContractCheckId) => set({ dialogContractCheckId }),
+  closeContractCheckDialog: () => set({ dialogContractCheckId: null }),
+
   async refreshLinks() {
     const seq = ++linksSeq;
     try {
@@ -554,6 +628,7 @@ export const useNetworkStore = create<NetworkState>()((set, get) => ({
     startedSyncs.clear();
     cancelledSyncsHere.clear();
     declinedSyncsHere.clear();
+    startedContractChecks.clear();
     // Bumping the counters makes any request still in flight a no-op.
     statusSeq++;
     nodesSeq++;

@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { toast } from 'sonner';
 import { createListenerScope } from '@/lib/listen-scope';
+import { contractCheckToastId, offerToastText } from '@/lib/network-contract-check-utils';
 import { syncResultToastId, syncWaitingToastId } from '@/lib/network-sync-utils';
 import {
   PAIRING_FAILED_TOAST_ID,
@@ -10,10 +11,12 @@ import {
 } from '@/lib/network-utils';
 import {
   type NetworkChangedEvent,
+  type NetworkContractCheckEvent,
   type NetworkPairingEvent,
   type NetworkSyncEvent,
   type NetworkTransferEvent,
   onNetworkChanged,
+  onNetworkContractCheck,
   onNetworkPairing,
   onNetworkSync,
   onNetworkTransfer,
@@ -348,6 +351,40 @@ export function handleNetworkSync(event: NetworkSyncEvent): void {
   }
 }
 
+export function handleNetworkContractCheck(event: NetworkContractCheckEvent): void {
+  const store = useNetworkStore.getState();
+  switch (event.type) {
+    case 'offerReceived': {
+      store.addIncomingContractCheck({
+        checkId: event.check_id,
+        deviceId: event.device_id,
+        contract: event.contract,
+        changeCount: event.change_count,
+      });
+      const known = store.nodes.find((n) => n.deviceId === event.device_id)?.displayName.trim();
+      toast.info(offerToastText(known || null, event.contract, event.change_count), {
+        id: contractCheckToastId(event.check_id),
+        duration: Number.POSITIVE_INFINITY,
+        action: {
+          label: 'Review',
+          onClick: () => useNetworkStore.getState().openContractCheckDialog(event.check_id),
+        },
+      });
+      return;
+    }
+    case 'resultReceived':
+      store.setContractCheckResult(event.check_id, event.device_id, {
+        outcome: event.outcome,
+        rows: event.rows,
+      });
+      return;
+    case 'expired':
+      store.expireContractCheck(event.check_id);
+      toast.dismiss(contractCheckToastId(event.check_id));
+      return;
+  }
+}
+
 /**
  * Subscribes once, for the app's lifetime, to the four network channels and loads the first
  * status and node list. Mount it once, next to the other event bridges.
@@ -374,6 +411,11 @@ export function useNetworkEventBridge(): void {
     scope.keep(
       onNetworkSync((event) => {
         if (!scope.isDisposed()) handleNetworkSync(event);
+      }),
+    );
+    scope.keep(
+      onNetworkContractCheck((event) => {
+        if (!scope.isDisposed()) handleNetworkContractCheck(event);
       }),
     );
 
