@@ -2,7 +2,7 @@
 
 use std::time::{Duration, Instant};
 
-use rocket_audit::AuditEventKind;
+use rocket_audit::{AuditActor, AuditEventKind};
 use rocket_network::limits::{CONTRACT_CHECK_TTL, CONTRACT_VALUE_MAX};
 use rocket_network::{
     ContractChange, ContractChangeType, ContractCheckEvent, ContractCheckId, ContractCheckOutcome,
@@ -374,10 +374,63 @@ async fn second_offer_from_same_peer_gets_busy() {
     assert_eq!(offers_received(&rig), vec![first.as_str().to_string()]);
     wait_for("busy", || busy_sent(&rig, ANA, &second)).await;
     assert_eq!(rig.sent(ANA).len(), 1);
+    assert_eq!(received_audits(&rig), vec!["busy".to_string()]);
     // A replay of the pending offer's id is busy too, and the first check stays.
     rig.push(ANA, offer(&first, two_changes()));
     wait_for("busy again", || busy_sent(&rig, ANA, &first)).await;
     assert!(rig.svc.review(&first).is_ok());
+    assert_eq!(offers_received(&rig).len(), 1, "no busy offer is shown");
+    assert_eq!(received_audits(&rig).len(), 1, "one busy row per window");
+}
+
+#[tokio::test]
+async fn busy_audit_is_written_once_per_peer_per_window() {
+    let rig = check_rig(pending(Vec::new()));
+    rig.push(ANA, offer(&ContractCheckId::random(), two_changes()));
+    for _ in 0..5 {
+        rig.push(ANA, offer(&ContractCheckId::random(), two_changes()));
+    }
+    wait_for("five busy frames", || rig.sent(ANA).len() == 5).await;
+    assert_eq!(received_audits(&rig), vec!["busy".to_string()]);
+    let actors: Vec<String> = rig.audit.records().into_iter().map(|r| r.actor).collect();
+    assert_eq!(actors, vec![String::from(AuditActor::System)]);
+    // Still inside the window, a sweep keeps the mark.
+    rig.svc.sweep(Instant::now());
+    rig.push(ANA, offer(&ContractCheckId::random(), two_changes()));
+    wait_for("six busy frames", || rig.sent(ANA).len() == 6).await;
+    assert_eq!(received_audits(&rig).len(), 1);
+    // After the window another row is written. The pending check is still in time.
+    rig.svc.advance(Duration::from_secs(61));
+    rig.push(ANA, offer(&ContractCheckId::random(), two_changes()));
+    wait_for("seven busy frames", || rig.sent(ANA).len() == 7).await;
+    assert_eq!(received_audits(&rig).len(), 2);
+}
+
+#[tokio::test]
+async fn decline_after_expiry_without_sweep_fails_and_emits_expired() {
+    let rig = check_rig(pending(Vec::new()));
+    let id = ContractCheckId::random();
+    rig.push(ANA, offer(&id, two_changes()));
+    rig.svc.advance(CONTRACT_CHECK_TTL + Duration::from_secs(1));
+    let err = rig.svc.decline(&id).expect_err("expired");
+    assert_eq!(message_of(err), NOT_WAITING);
+    let expired = ContractCheckEvent::Expired {
+        check_id: id.as_str().to_string(),
+    };
+    assert_eq!(
+        rig.events.all().iter().filter(|e| **e == expired).count(),
+        1
+    );
+    // A later sweep does not expire it twice.
+    rig.svc
+        .sweep(Instant::now() + CONTRACT_CHECK_TTL + Duration::from_secs(2));
+    assert_eq!(
+        rig.events.all().iter().filter(|e| **e == expired).count(),
+        1
+    );
+    settle().await;
+    assert!(rig.peers.sent().is_empty());
+    assert!(rig.audited().is_empty());
 }
 
 #[tokio::test]
@@ -485,6 +538,8 @@ async fn reply_sends_one_row_per_change_in_order_and_audits_once() {
             outcome: "answered".into(),
         }]
     );
+    let actors: Vec<String> = rig.audit.records().into_iter().map(|r| r.actor).collect();
+    assert_eq!(actors, vec![String::from(AuditActor::User)]);
     // A second reply finds nothing to answer.
     let err = rig.svc.reply(&id).expect_err("answered once");
     assert_eq!(message_of(err), NOT_WAITING);
@@ -627,6 +682,21 @@ async fn accepted_result_emits_result_received_and_audits_sent() {
         sent_audits(&rig),
         vec![(dev(ANA).short(), "Orders API".into(), "answered".into())]
     );
+    let actors: Vec<String> = rig.audit.records().into_iter().map(|r| r.actor).collect();
+    assert_eq!(actors, vec![String::from(AuditActor::System)]);
+}
+
+#[tokio::test]
+async fn result_after_expiry_without_sweep_dropped() {
+    let rig = check_rig(pending(two_changes()));
+    let (ana_id, _) = started(&rig).await;
+    rig.svc.advance(CONTRACT_CHECK_TTL + Duration::from_secs(1));
+    rig.push(ANA, result(&ana_id, ContractCheckOutcome::Declined, vec![]));
+    assert!(results_received(&rig).is_empty());
+    assert!(rig.audited().is_empty());
+    assert!(rig.events.all().contains(&ContractCheckEvent::Expired {
+        check_id: ana_id.clone()
+    }));
 }
 
 #[tokio::test]

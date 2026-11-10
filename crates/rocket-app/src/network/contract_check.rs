@@ -11,8 +11,9 @@
 //! quotes a peer string.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use rocket_audit::{AuditActor, AuditEventKind, SecurityAuditPublisher};
 use rocket_network::limits::{
@@ -40,6 +41,10 @@ const NO_NAME: &str = "The contract needs a name to be checked.";
 const CANNOT_SEND: &str = "This contract change cannot be sent.";
 const NOT_REVIEWED: &str = "Review the check before you send the result.";
 const LOCALS_UNREADABLE: &str = "The requests of this workspace could not be read.";
+
+/// At most one `busy` audit row per peer in this window, so a flood of offers cannot grow the
+/// audit log. The busy frame is still sent every time.
+const BUSY_AUDIT_WINDOW: Duration = Duration::from_secs(60);
 
 /// Everything the service needs from outside. All of it is a port.
 pub struct ContractCheckDeps {
@@ -108,12 +113,17 @@ struct Incoming {
 struct State {
     outgoing: HashMap<ContractCheckId, Outgoing>,
     incoming: HashMap<ContractCheckId, Incoming>,
+    /// When the last `busy` audit row was written per peer. Only paired peers reach it, and
+    /// `sweep` and `on_peer_gone` clean it, so it stays small.
+    busy_audited: HashMap<DeviceId, Instant>,
 }
 
 /// The two sides of the contract check. See the module comment.
 pub struct ContractCheckService {
     deps: ContractCheckDeps,
     state: Mutex<State>,
+    /// Test clock offset in milliseconds. Always zero outside tests.
+    skew_ms: AtomicU64,
 }
 
 impl ContractCheckService {
@@ -121,7 +131,46 @@ impl ContractCheckService {
         Arc::new(ContractCheckService {
             deps,
             state: Mutex::new(State::default()),
+            skew_ms: AtomicU64::new(0),
         })
+    }
+
+    fn now(&self) -> Instant {
+        Instant::now() + Duration::from_millis(self.skew_ms.load(Ordering::SeqCst))
+    }
+
+    /// Test hook: moves this service's clock forward.
+    #[cfg(test)]
+    pub(crate) fn advance(&self, by: Duration) {
+        let ms = u64::try_from(by.as_millis()).unwrap_or(u64::MAX);
+        self.skew_ms.fetch_add(ms, Ordering::SeqCst);
+    }
+
+    /// Ends the check now when its deadline passed and the sweep has not run yet, with its
+    /// `Expired` event, so every path sees the same expiry.
+    fn expire_due(&self, check_id: &ContractCheckId) {
+        let now = self.now();
+        let ended = {
+            let mut state = self.lock();
+            let incoming = state
+                .incoming
+                .get(check_id)
+                .is_some_and(|c| c.deadline <= now);
+            let outgoing = state
+                .outgoing
+                .get(check_id)
+                .is_some_and(|c| c.deadline <= now);
+            if incoming {
+                state.incoming.remove(check_id);
+            }
+            if outgoing {
+                state.outgoing.remove(check_id);
+            }
+            incoming || outgoing
+        };
+        if ended {
+            self.emit_expired(vec![check_id.clone()]);
+        }
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -134,6 +183,9 @@ impl ContractCheckService {
     ///
     /// Every node must be paired and online, the contract must have 1 to 200 changes, and the
     /// offer must fit one frame. Otherwise nothing is sent. Values are redacted first.
+    ///
+    /// Must run inside the tokio runtime (Task 3 calls it in `spawn_blocking`), because the
+    /// offers leave from spawned tasks.
     pub fn start(
         &self,
         collection_root: &str,
@@ -200,7 +252,7 @@ impl ContractCheckService {
             }
             offers.push((device, id, offer));
         }
-        let deadline = Instant::now() + CONTRACT_CHECK_TTL;
+        let deadline = self.now() + CONTRACT_CHECK_TTL;
         {
             let mut state = self.lock();
             for (device, id, _) in &offers {
@@ -236,10 +288,15 @@ impl ContractCheckService {
             tracing::debug!(code = "network_contract_result_bad_id", "result dropped");
             return;
         };
+        // A result after the deadline is dropped even before the sweep ran.
+        self.expire_due(&id);
+        let now = self.now();
         let taken = {
             let mut state = self.lock();
             let valid = state.outgoing.get(&id).is_some_and(|o| {
-                o.device == from && rows_are_valid(outcome, &rows, o.change_count)
+                o.deadline > now
+                    && o.device == from
+                    && rows_are_valid(outcome, &rows, o.change_count)
             });
             if valid {
                 state.outgoing.remove(&id)
@@ -267,8 +324,9 @@ impl ContractCheckService {
                 outcome: outcome_name(outcome).to_string(),
                 rows,
             });
+        // The peer's frame triggered this row, not a user act.
         self.deps.audit.publish(
-            AuditActor::User.into(),
+            AuditActor::System.into(),
             None,
             AuditEventKind::NetworkContractCheckSent {
                 device_id: from.short(),
@@ -307,15 +365,23 @@ impl ContractCheckService {
         let change_count = changes.len();
         enum Next {
             Wait,
-            Busy,
+            Busy { audit: bool },
             Drop,
         }
+        let now = self.now();
         let next = {
             let mut state = self.lock();
             let from_peer = state.incoming.values().filter(|c| c.device == from).count();
             if from_peer >= CONTRACT_CHECK_PER_PEER || state.incoming.len() >= CONTRACT_CHECK_TOTAL
             {
-                Next::Busy
+                let audit = state
+                    .busy_audited
+                    .get(&from)
+                    .is_none_or(|at| now.saturating_duration_since(*at) >= BUSY_AUDIT_WINDOW);
+                if audit {
+                    state.busy_audited.insert(from, now);
+                }
+                Next::Busy { audit }
             } else if state.incoming.contains_key(&id) {
                 Next::Drop
             } else {
@@ -327,7 +393,7 @@ impl ContractCheckService {
                         version,
                         policy,
                         changes,
-                        deadline: Instant::now() + CONTRACT_CHECK_TTL,
+                        deadline: now + CONTRACT_CHECK_TTL,
                         reviewed: None,
                     },
                 );
@@ -344,7 +410,7 @@ impl ContractCheckService {
                     contract,
                     change_count: u32::try_from(change_count).unwrap_or(u32::MAX),
                 }),
-            Next::Busy => {
+            Next::Busy { audit } => {
                 self.tell_later(
                     from,
                     PeerMessage::ContractCheckResult {
@@ -353,7 +419,15 @@ impl ContractCheckService {
                         rows: Vec::new(),
                     },
                 );
-                self.audit_received(from, contract, ContractCheckOutcome::Busy);
+                if audit {
+                    // The peer's offer triggered this row, not a user act.
+                    self.audit_received(
+                        AuditActor::System,
+                        from,
+                        contract,
+                        ContractCheckOutcome::Busy,
+                    );
+                }
             }
             Next::Drop => {
                 tracing::debug!(code = "network_contract_offer_id_taken", "offer dropped");
@@ -365,9 +439,10 @@ impl ContractCheckService {
     ///
     /// The verdicts are kept, so `reply` sends what the user saw.
     pub fn review(&self, check_id: &ContractCheckId) -> DomainResult<ContractCheckReview> {
+        self.expire_due(check_id);
         let (device, contract, version, policy, changes) = {
             let state = self.lock();
-            let check = waiting(&state, check_id)?;
+            let check = waiting(&state, check_id, self.now())?;
             (
                 check.device,
                 check.contract.clone(),
@@ -382,11 +457,12 @@ impl ContractCheckService {
         })?;
         let found = verdicts(&changes, policy, &locals);
         {
+            let now = self.now();
             let mut state = self.lock();
             let check = state
                 .incoming
                 .get_mut(check_id)
-                .filter(|c| c.deadline > Instant::now())
+                .filter(|c| c.deadline > now)
                 .ok_or_else(|| invalid(NOT_WAITING))?;
             check.reviewed = Some(found.iter().map(|(v, _)| *v).collect());
         }
@@ -417,11 +493,15 @@ impl ContractCheckService {
     }
 
     /// Sends the reviewed verdicts, one row per change in offer order.
+    ///
+    /// The audit row records the user's decision, even if the frame cannot be sent later.
     pub fn reply(&self, check_id: &ContractCheckId) -> DomainResult<()> {
+        self.expire_due(check_id);
         self.check_online(check_id)?;
+        let now = self.now();
         let (device, contract, rows) = {
             let mut state = self.lock();
-            let check = waiting(&state, check_id)?;
+            let check = waiting(&state, check_id, now)?;
             let Some(reviewed) = check.reviewed.clone() else {
                 return Err(invalid(NOT_REVIEWED));
             };
@@ -436,7 +516,7 @@ impl ContractCheckService {
             let check = state
                 .incoming
                 .remove(check_id)
-                .filter(|c| c.deadline > Instant::now())
+                .filter(|c| c.deadline > now)
                 .ok_or_else(|| invalid(NOT_WAITING))?;
             (check.device, check.contract, rows)
         };
@@ -451,14 +531,19 @@ impl ContractCheckService {
     }
 
     /// Answers `declined`. Needs no review.
+    ///
+    /// The audit row records the user's decision, even if the frame cannot be sent later.
     pub fn decline(&self, check_id: &ContractCheckId) -> DomainResult<()> {
+        self.expire_due(check_id);
         self.check_online(check_id)?;
+        let now = self.now();
         let (device, contract) = {
             let mut state = self.lock();
+            waiting(&state, check_id, now)?;
             let check = state
                 .incoming
                 .remove(check_id)
-                .filter(|c| c.deadline > Instant::now())
+                .filter(|c| c.deadline > now)
                 .ok_or_else(|| invalid(NOT_WAITING))?;
             (check.device, check.contract)
         };
@@ -475,7 +560,8 @@ impl ContractCheckService {
     /// Fails when the check no longer waits or its node is offline. The network is asked
     /// after the lock is released.
     fn check_online(&self, check_id: &ContractCheckId) -> DomainResult<()> {
-        let device = waiting(&self.lock(), check_id)?.device;
+        let now = self.now();
+        let device = waiting(&self.lock(), check_id, now)?.device;
         if self.deps.network.is_online(&device) {
             Ok(())
         } else {
@@ -499,12 +585,19 @@ impl ContractCheckService {
                 rows,
             },
         );
-        self.audit_received(device, contract, outcome);
+        // Reply and decline are the user's acts.
+        self.audit_received(AuditActor::User, device, contract, outcome);
     }
 
-    fn audit_received(&self, device: DeviceId, contract: String, outcome: ContractCheckOutcome) {
+    fn audit_received(
+        &self,
+        actor: AuditActor,
+        device: DeviceId,
+        contract: String,
+        outcome: ContractCheckOutcome,
+    ) {
         self.deps.audit.publish(
-            AuditActor::User.into(),
+            actor.into(),
             None,
             AuditEventKind::NetworkContractCheckReceived {
                 device_id: device.short(),
@@ -556,6 +649,7 @@ impl ContractCheckService {
                 }
                 keep
             });
+            state.busy_audited.remove(&device);
             ended
         };
         self.emit_expired(ended);
@@ -580,6 +674,9 @@ impl ContractCheckService {
                 }
                 keep
             });
+            state
+                .busy_audited
+                .retain(|_, at| now.saturating_duration_since(*at) < BUSY_AUDIT_WINDOW);
             ended
         };
         self.emit_expired(ended);
@@ -613,11 +710,15 @@ fn invalid(message: &str) -> DomainError {
 }
 
 /// The incoming check, if it still waits for an answer.
-fn waiting<'a>(state: &'a State, check_id: &ContractCheckId) -> DomainResult<&'a Incoming> {
+fn waiting<'a>(
+    state: &'a State,
+    check_id: &ContractCheckId,
+    now: Instant,
+) -> DomainResult<&'a Incoming> {
     state
         .incoming
         .get(check_id)
-        .filter(|c| c.deadline > Instant::now())
+        .filter(|c| c.deadline > now)
         .ok_or_else(|| invalid(NOT_WAITING))
 }
 
