@@ -5613,6 +5613,7 @@ dependencies = [
  "rocket-import",
  "rocket-infra",
  "rocket-network",
+ "rocket-openapi",
  "rocket-scripting",
  "rocket-shared",
  "rocket-workspace",
@@ -5682,6 +5683,7 @@ dependencies = [
  "rocket-import",
  "rocket-infra",
  "rocket-network",
+ "rocket-openapi",
  "rocket-scripting",
  "rocket-shared",
  "rocket-workspace",
@@ -5964,6 +5966,16 @@ dependencies = [
  "tokio",
  "uuid",
  "zeroize",
+]
+
+[[package]]
+name = "rocket-openapi"
+version = "0.1.0"
+dependencies = [
+ "rocket-import",
+ "rocket-shared",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

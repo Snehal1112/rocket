@@ -10,8 +10,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::openapi_sync_events::OpenApiSyncEvent;
 use chrono::{DateTime, Utc};
+use rocket_openapi::events::OpenApiSyncEvent;
 use rocket_shared::error::DomainError;
 use rocket_shared::events::EventPublisher;
 use tokio::sync::watch;

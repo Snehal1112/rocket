@@ -27,6 +27,7 @@ rocket-history.workspace = true
 rocket-app.workspace = true
 rocket-audit.workspace = true
 rocket-network.workspace = true
+rocket-openapi.workspace = true
 rocket-flow.workspace = true
 rocket-git.workspace = true
 rocket-infra.workspace = true

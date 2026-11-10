@@ -1,9 +1,9 @@
 //! Tests for the read-only spec view. They reuse the world of the apply tests.
 
 use super::*;
-use crate::openapi_sync_view::SpecViewState;
+use rocket_openapi::view::SpecViewState;
 
-fn keys(view: &crate::openapi_sync_view::SpecView) -> Vec<(&str, bool)> {
+fn keys(view: &rocket_openapi::view::SpecView) -> Vec<(&str, bool)> {
     view.groups
         .iter()
         .flat_map(|g| g.operations.iter())

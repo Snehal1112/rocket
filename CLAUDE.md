@@ -37,6 +37,7 @@ bun run tauri build          # release build
 | `rocket-http` | `HttpExecutor` trait, `ReqwestExecutor`, auth, cookies |
 | `rocket-git` | `GitService` trait + `Git2Service` (libgit2) |
 | `rocket-network` | Team network domain: device id, pairing, presence, peer messages, ports (pure, no I/O) |
+| `rocket-openapi` | OpenAPI sync context: events and view DTOs (service and apply move here in later plans) |
 | `rocket-app` | Orchestration — wires domain traits, no I/O |
 | `rocket-infra` | Filesystem impls of all repository/service traits |
 | `rocket-import` | Bruno importer (`.bru`/`.yml` → domain types) |

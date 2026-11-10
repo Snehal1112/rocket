@@ -109,7 +109,6 @@ mod tests {
     use super::*;
     use rocket_acp::AcpEvent;
     use rocket_app::execution_events::ExecutionEvent;
-    use rocket_app::openapi_sync_events::OpenApiSyncEvent;
     use rocket_collection::CollectionEvent;
     use rocket_flow::FlowEvent;
     use rocket_git::GitEvent;
@@ -117,6 +116,7 @@ mod tests {
         ConflictKind, ConflictView, Direction, Outcome, SyncEvent, SyncFinish, SyncRole,
         SyncSummary, TransferEvent,
     };
+    use rocket_openapi::events::OpenApiSyncEvent;
 
     #[test]
     fn emit_channels_adds_collection_changed_for_branch_switch_and_merge() {

@@ -9,10 +9,10 @@ use rocket_shared::error::DomainResult;
 
 use crate::openapi_sync_apply::flatten_requests;
 use crate::openapi_sync_service::OpenApiSyncService;
-use crate::openapi_sync_view::{
+use rocket_collection::collection_lock::collection_lock;
+use rocket_openapi::view::{
     BackupRow, BadgeView, ChangeRow, ChangeValue, ChangesView, OverviewView,
 };
-use rocket_collection::collection_lock::collection_lock;
 
 fn row(
     key: Option<&str>,

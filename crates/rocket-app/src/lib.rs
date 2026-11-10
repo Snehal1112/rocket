@@ -63,7 +63,6 @@ pub mod openapi_connect;
 pub mod openapi_sync_apply;
 pub mod openapi_sync_changes;
 pub mod openapi_sync_delete;
-pub mod openapi_sync_events;
 #[cfg(test)]
 mod openapi_sync_lock_tests;
 pub mod openapi_sync_reset;
@@ -72,7 +71,6 @@ pub mod openapi_sync_service;
 pub mod openapi_sync_skips;
 pub mod openapi_sync_spec_source;
 pub mod openapi_sync_spec_view;
-pub mod openapi_sync_view;
 mod process_env;
 pub mod proposal_service;
 pub mod proxy_settings_service;
@@ -178,10 +176,6 @@ pub use openapi_sync_service::{
     safe_message, CheckOutcome, OpenApiSyncService, SyncStatusView, SyncTarget,
 };
 pub use openapi_sync_skips::SkippedRow;
-pub use openapi_sync_view::{
-    BackupRow, BadgeView, ChangeRow, ChangeValue, ChangesView, OverviewView, PlanView, SpecOpRow,
-    SpecSource, SpecSourceFormat, SpecTagGroup, SpecView, SpecViewState, UnchangedView,
-};
 pub use process_env::{ProcessEnv, ProcessEnvScopeInput};
 pub use proposal_service::ProposalService;
 pub use proxy_settings_service::{PasswordChange, ProxySettingsService, ProxySettingsView};

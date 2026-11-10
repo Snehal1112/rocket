@@ -627,7 +627,7 @@ fn header(key: &str, value: &str) -> rocket_shared::types::Header {
 
 async fn changed_values(
     edit: impl FnOnce(&mut rocket_collection::Request),
-) -> Vec<crate::ChangeValue> {
+) -> Vec<rocket_openapi::view::ChangeValue> {
     let w = world().await;
     let path = path_of(&w, "getPet");
     let mut request = w.repo.get_request(&w.name, &path).expect("get");

@@ -1,0 +1,11 @@
+[package]
+name = "rocket-openapi"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+rocket-shared.workspace = true
+rocket-import.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+

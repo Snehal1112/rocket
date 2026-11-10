@@ -7,10 +7,9 @@ use std::sync::{Arc, Mutex};
 use std::collections::BTreeMap;
 
 use rocket_app::{
-    safe_message, BackupRow, BadgeView, ChangeLinkOutcome, ChangeLinkPreview, ChangeRow,
-    ChangeValue, ChangesView, CheckOutcome, ConnectOperationRow, ConnectOutcome, ConnectPreview,
-    ConnectRequestRow, ConnectRow, DeleteTarget, OpenApiSyncService, OverviewView, PlanView,
-    ResetReport, SkippedRow, SpecSource, SpecSourceFormat, SpecView, SpecViewState, SyncStatusView,
+    safe_message, ChangeLinkOutcome, ChangeLinkPreview, CheckOutcome, ConnectOperationRow,
+    ConnectOutcome, ConnectPreview, ConnectRequestRow, ConnectRow, DeleteTarget,
+    OpenApiSyncService, ResetReport, SkippedRow, SyncStatusView,
 };
 use rocket_collection::openapi_source::{SyncInterval, SyncStatus};
 use rocket_collection::ConsentState;
@@ -18,6 +17,10 @@ use rocket_http::SpecFetcher;
 use rocket_import::{
     AppliedKind, ApplyReport, ApprovedItem, Choice, FieldChange, FieldOutcome, Selection,
     SkipRequest, SyncItem, VariableApproval, VariableChange, VariableKind,
+};
+use rocket_openapi::view::{
+    BackupRow, BadgeView, ChangeRow, ChangeValue, ChangesView, OverviewView, PlanView, SpecSource,
+    SpecSourceFormat, SpecView, SpecViewState,
 };
 use rocket_shared::error::DomainError;
 use rocket_shared::events::EventPublisher;
@@ -1587,7 +1590,7 @@ pub async fn openapi_sync_check_now(
                 _ => "failed",
             };
             crate::tauri_event_bus::TauriEventBus::new(app).publish(
-                &rocket_app::openapi_sync_events::OpenApiSyncEvent::OpenApiSyncChecked {
+                &rocket_openapi::events::OpenApiSyncEvent::OpenApiSyncChecked {
                     collection,
                     status: status.to_string(),
                 },
@@ -1607,7 +1610,7 @@ fn publish_applied(
 ) {
     if let Ok(report) = result {
         events.publish(
-            &rocket_app::openapi_sync_events::OpenApiSyncEvent::OpenApiSyncApplied {
+            &rocket_openapi::events::OpenApiSyncEvent::OpenApiSyncApplied {
                 collection: collection.to_string(),
                 applied: report.applied.len(),
                 stale: report.stale.len(),
@@ -1774,9 +1777,9 @@ pub async fn openapi_sync_apply(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rocket_app::UnchangedView;
     use rocket_collection::Request;
     use rocket_import::{MergeOutcome, SyncPlan};
+    use rocket_openapi::view::UnchangedView;
     use rocket_shared::types::HttpMethod;
     use serde_json::json;
 
@@ -2065,12 +2068,11 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct Recorded(Mutex<Vec<rocket_app::openapi_sync_events::OpenApiSyncEvent>>);
+    struct Recorded(Mutex<Vec<rocket_openapi::events::OpenApiSyncEvent>>);
 
     impl EventPublisher for Recorded {
         fn publish(&self, event: &dyn rocket_shared::events::PublishedEvent) {
-            let Some(event) =
-                event.downcast_ref::<rocket_app::openapi_sync_events::OpenApiSyncEvent>()
+            let Some(event) = event.downcast_ref::<rocket_openapi::events::OpenApiSyncEvent>()
             else {
                 panic!(
                     "recorder got a non-OpenApiSyncEvent on channel {}",
@@ -2101,7 +2103,7 @@ mod tests {
 
     #[test]
     fn apply_publishes_one_event() {
-        use rocket_app::openapi_sync_events::OpenApiSyncEvent;
+        use rocket_openapi::events::OpenApiSyncEvent;
         let events = Recorded::default();
         publish_applied(&events, "api", &Ok(report(3, 1)));
         let seen = events.0.lock().expect("lock");
@@ -2214,9 +2216,9 @@ mod tests {
             version: Some("2".to_string()),
             fetched_at: Some("2026-10-27T10:00:00+00:00".to_string()),
             state: SpecViewState::UpdatesWaiting,
-            groups: vec![rocket_app::SpecTagGroup {
+            groups: vec![rocket_openapi::view::SpecTagGroup {
                 tag: "pets".to_string(),
-                operations: vec![rocket_app::SpecOpRow {
+                operations: vec![rocket_openapi::view::SpecOpRow {
                     key: "listPets".to_string(),
                     method: "GET".to_string(),
                     path: "/pets".to_string(),

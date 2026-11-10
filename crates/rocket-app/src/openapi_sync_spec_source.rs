@@ -5,8 +5,8 @@ use rocket_collection::CollectionRepository;
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::openapi_sync_service::OpenApiSyncService;
-use crate::openapi_sync_view::{SpecSource, SpecSourceFormat};
 use rocket_collection::collection_lock::collection_lock;
+use rocket_openapi::view::{SpecSource, SpecSourceFormat};
 
 /// The largest spec copy whose text is sent to the page.
 pub const MAX_SOURCE_BYTES: usize = 12 * 1024 * 1024;

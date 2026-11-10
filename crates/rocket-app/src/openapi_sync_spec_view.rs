@@ -8,8 +8,8 @@ use rocket_import::ParsedSpec;
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::openapi_sync_service::OpenApiSyncService;
-use crate::openapi_sync_view::{SpecOpRow, SpecTagGroup, SpecView, SpecViewState};
 use rocket_collection::collection_lock::collection_lock;
+use rocket_openapi::view::{SpecOpRow, SpecTagGroup, SpecView, SpecViewState};
 
 /// Schema nodes the whole view carries over IPC. Schemas past it are sent as left out, so a huge
 /// spec cannot make the page heavy.
