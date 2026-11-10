@@ -56,6 +56,15 @@ describe('network store contract check slice', () => {
     expect(store().contractCheckResults.c1.DEV1.outcome).toBe('declined');
   });
 
+  it('expiry forgets the started check', () => {
+    store().trackContractCheck('c1', 'DEV1');
+    store().expireContractCheck('c1');
+    useNetworkStore.setState({ contractCheckResults: {} });
+    // A second expiry finds no started check, so it marks nothing.
+    store().expireContractCheck('c1');
+    expect(store().contractCheckResults.c1).toBeUndefined();
+  });
+
   it('opens and closes the dialog', () => {
     store().openContractCheckDialog('c1');
     expect(store().dialogContractCheckId).toBe('c1');

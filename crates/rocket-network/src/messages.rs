@@ -251,14 +251,52 @@ fn within(text: &str, max: usize) -> bool {
     text.chars().count() <= max
 }
 
-/// Whether the text is non-empty, at most `max` characters and has no control characters.
+/// Whether the character is a Unicode format character (general category Cf), such as a bidi
+/// control or a zero-width space.
+pub fn is_format_char(c: char) -> bool {
+    matches!(
+        c,
+        '\u{ad}'
+            | '\u{600}'..='\u{605}'
+            | '\u{61c}'
+            | '\u{6dd}'
+            | '\u{70f}'
+            | '\u{890}'..='\u{891}'
+            | '\u{8e2}'
+            | '\u{180e}'
+            | '\u{200b}'..='\u{200f}'
+            | '\u{202a}'..='\u{202e}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{206f}'
+            | '\u{feff}'
+            | '\u{fff9}'..='\u{fffb}'
+            | '\u{110bd}'
+            | '\u{110cd}'
+            | '\u{13430}'..='\u{1343f}'
+            | '\u{1bca0}'..='\u{1bca3}'
+            | '\u{1d173}'..='\u{1d17a}'
+            | '\u{e0001}'
+            | '\u{e0020}'..='\u{e007f}'
+    )
+}
+
+/// Whether the text has no control and no format characters.
+fn clean_text(text: &str) -> bool {
+    !text.chars().any(|c| c.is_control() || is_format_char(c))
+}
+
+/// Whether the text is non-empty, at most `max` characters and has no control or format
+/// characters.
 fn plain_text(text: &str, max: usize) -> bool {
-    !text.is_empty() && within(text, max) && !text.chars().any(char::is_control)
+    !text.is_empty() && within(text, max) && clean_text(text)
 }
 
 /// Whether one change in an offer is within every limit.
 fn change_is_valid(c: &ContractChange) -> bool {
-    let value_ok = |v: &Option<String>| v.as_deref().is_none_or(|v| within(v, CONTRACT_VALUE_MAX));
+    let value_ok = |v: &Option<String>| {
+        v.as_deref()
+            .is_none_or(|v| within(v, CONTRACT_VALUE_MAX) && clean_text(v))
+    };
     plain_text(&c.method, CONTRACT_METHOD_MAX)
         && plain_text(&c.path_template, CONTRACT_PATH_MAX)
         && plain_text(&c.field, CONTRACT_FIELD_MAX)
@@ -282,6 +320,7 @@ fn validate_contract_check(message: &PeerMessage) -> DomainResult<()> {
             let count_ok = (1..=CONTRACT_CHECK_MAX_CHANGES).contains(&changes.len());
             if plain_text(contract, CONTRACT_NAME_MAX)
                 && within(version, CONTRACT_VERSION_MAX)
+                && clean_text(version)
                 && count_ok
                 && changes.iter().all(change_is_valid)
             {
@@ -1208,6 +1247,14 @@ mod tests {
             offer_with(&|c| c.method = "G\tT".into()),
             offer_with(&|c| c.field = "a\nb".into()),
             offer_with(&|c| c.path_template = "/a\u{7}".into()),
+            named("Orders\u{202E}", "1"),
+            named("Orders", "1\u{200B}"),
+            named("Orders", "1\n"),
+            offer_with(&|c| c.old_value = Some("a\u{202E}b".into())),
+            offer_with(&|c| c.new_value = Some("a\u{7}b".into())),
+            offer_with(&|c| c.method = "G\u{200B}ET".into()),
+            offer_with(&|c| c.field = "header:X\u{FEFF}".into()),
+            offer_with(&|c| c.path_template = "/a\u{2066}".into()),
         ] {
             match PeerMessage::decode(&text).expect_err("rejected") {
                 DomainError::InvalidInput(m) => {
@@ -1228,6 +1275,29 @@ mod tests {
         match PeerMessage::decode(&bad_id).expect_err("rejected") {
             DomainError::InvalidInput(m) => assert_eq!(m, "invalid peer message"),
             other => panic!("expected InvalidInput, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn format_chars_are_category_cf() {
+        for c in [
+            '\u{ad}',
+            '\u{600}',
+            '\u{61c}',
+            '\u{200b}',
+            '\u{200f}',
+            '\u{202e}',
+            '\u{2060}',
+            '\u{206f}',
+            '\u{feff}',
+            '\u{fffb}',
+            '\u{e0001}',
+            '\u{e007f}',
+        ] {
+            assert!(is_format_char(c), "{c:?}");
+        }
+        for c in ['a', ' ', '\u{e9}', '/', '{', '\u{2028}', '\u{fffc}'] {
+            assert!(!is_format_char(c), "{c:?}");
         }
     }
 }

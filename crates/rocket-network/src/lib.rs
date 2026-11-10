@@ -30,9 +30,9 @@ pub use link::{
     PlanFile, PlanRename, RenamePair, SyncId, SyncPlanPayload,
 };
 pub use messages::{
-    AbortReason, ContractChange, ContractChangeType, ContractCheckOutcome, ContractCheckRow,
-    ContractPolicyWire, ContractVerdict, PeerMessage, ResultOutcome, SyncAbortReason, SyncOutcome,
-    SyncPayloadKind,
+    is_format_char, AbortReason, ContractChange, ContractChangeType, ContractCheckOutcome,
+    ContractCheckRow, ContractPolicyWire, ContractVerdict, PeerMessage, ResultOutcome,
+    SyncAbortReason, SyncOutcome, SyncPayloadKind,
 };
 pub use pairing::{
     commitment, commitment_from_base64, commitment_to_base64, pairing_code, Nonce, PairingCode,

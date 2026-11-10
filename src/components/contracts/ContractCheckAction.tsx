@@ -138,8 +138,9 @@ export function ContractCheckAction({
           <DialogHeader>
             <DialogTitle>Check with the team</DialogTitle>
             <DialogDescription>
-              Each teammate sees the changed fields and checks them against their own requests.
-              Secret values are hidden. Nothing is saved on either side.
+              Each teammate sees the changed fields and checks them against their own requests. Only
+              request paths are sent. Secret values and bodies are hidden. Nothing is saved on
+              either side.
             </DialogDescription>
           </DialogHeader>
           {online.length === 0 ? (

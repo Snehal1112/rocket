@@ -96,8 +96,9 @@ pub enum AuditEventKind {
         outcome: String,
     },
     /// A contract check this node started ended. `device_id` is the short id, `contract` the
-    /// contract name. `outcome` is `answered`, `declined`, `busy` or `expired`. Never paths or
-    /// field values.
+    /// contract name. `outcome` is `answered`, `declined` or `busy`, as the node's result says.
+    /// The row is written when the result arrives, so a check that expires unanswered writes
+    /// none. Never paths or field values.
     NetworkContractCheckSent {
         device_id: String,
         contract: String,

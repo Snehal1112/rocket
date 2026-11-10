@@ -28,7 +28,7 @@ use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::EventPublisher;
 
 use super::contract_check_match::{redact_change, verdicts};
-use super::contract_check_ports::{ContractChangesPort, LocalRequestsPort};
+use super::contract_check_ports::{strip_control, ContractChangesPort, LocalRequestsPort};
 use super::transfer::PeerSender;
 
 pub(super) const TOO_LARGE: &str = "Check fewer changes at a time.";
@@ -745,8 +745,8 @@ fn outcome_name(outcome: ContractCheckOutcome) -> &'static str {
     }
 }
 
-/// The text without control characters, trimmed and cut to `max` characters.
+/// The text without control and format characters, trimmed and cut to `max` characters.
 fn clean(text: &str, max: usize) -> String {
-    let plain: String = text.chars().filter(|c| !c.is_control()).collect();
+    let plain = strip_control(text);
     plain.trim().chars().take(max).collect()
 }

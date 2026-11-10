@@ -64,6 +64,12 @@ describe('ContractCheckAction', () => {
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
   });
 
+  it('says what stays hidden', async () => {
+    setup();
+    await userEvent.click(screen.getByRole('button', { name: 'Check with the team' }));
+    expect(screen.getByText(/Only request paths are sent\. Secret values and bodies are hidden\./)).toBeInTheDocument();
+  });
+
   it('shows an empty state and keeps Send disabled with no online node', async () => {
     setup();
     useNetworkStore.setState({ nodes: [] });

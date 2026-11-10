@@ -6,10 +6,14 @@
 
 use rocket_collection::contract::RequestSignatureSnapshot;
 use rocket_export::is_sensitive_name;
+use rocket_network::limits::CONTRACT_VALUE_MAX;
 use rocket_network::{ContractChange, ContractChangeType, ContractPolicyWire, ContractVerdict};
 
 /// The value that replaces a sensitive old or new value.
 const HIDDEN: &str = "[hidden]";
+
+/// The wire field of the auth type.
+const AUTH_TYPE_FIELD: &str = "auth";
 
 /// The segment that matches any one segment.
 const WILDCARD: &str = "*";
@@ -27,6 +31,28 @@ pub struct LocalRequest {
 /// the scheme) starts with a host or a `{{base}}` variable, so its first segment is dropped.
 /// `{{var}}`, `:id` and `{id}` segments become `*`. Empty segments are skipped.
 pub fn normalize_path(url: &str) -> Vec<String> {
+    path_segments(url)
+        .map(|s| {
+            if variable_name(s).is_some() {
+                WILDCARD.to_string()
+            } else {
+                s.to_string()
+            }
+        })
+        .collect()
+}
+
+/// The path of a URL as it is sent in an offer, with the same rule as `normalize_path`.
+///
+/// The scheme, user info, host, query and fragment are dropped, and so is a leading
+/// `{{base}}` segment. Segments are kept as written. The result starts with `/`.
+pub fn path_only(url: &str) -> String {
+    let segments: Vec<&str> = path_segments(url).collect();
+    format!("/{}", segments.join("/"))
+}
+
+/// The non-empty path segments of a URL, written as they are.
+fn path_segments(url: &str) -> impl Iterator<Item = &str> {
     let url = url.trim();
     let url = url.split(['?', '#']).next().unwrap_or_default();
     let (rest, has_host) = match url.find("://") {
@@ -37,16 +63,7 @@ pub fn normalize_path(url: &str) -> Vec<String> {
     if has_host {
         segments.next();
     }
-    segments
-        .filter(|s| !s.is_empty())
-        .map(|s| {
-            if variable_name(s).is_some() {
-                WILDCARD.to_string()
-            } else {
-                s.to_string()
-            }
-        })
-        .collect()
+    segments.filter(|s| !s.is_empty())
 }
 
 /// Whether `url` has the shape of `template`: segment by segment, case-sensitive, and `*` on
@@ -97,7 +114,7 @@ pub fn verdicts(
         .collect()
 }
 
-/// Replaces the old and new values with `[hidden]` for auth fields, body fields and sensitive
+/// Replaces the old and new values with `[hidden]` for auth details, body fields and sensitive
 /// field names. A value that is `None` stays `None`.
 pub fn redact_change(mut change: ContractChange) -> ContractChange {
     if is_sensitive_field(&change.field) {
@@ -113,9 +130,14 @@ pub fn redact_change(mut change: ContractChange) -> ContractChange {
 
 /// Whether a change field may hold a secret.
 ///
-/// A field whose first word is `auth` (any case, words split at `:`, `.` and `_`) and every body
-/// field always may. Other fields follow the export name rule.
+/// The field `auth` holds the auth type name (bearer, basic, apikey), which is not a secret.
+/// Every other field whose first word is `auth` (any case, words split at `:`, `.` and `_`),
+/// such as `auth_detail`, and every body field always may. Other fields follow the export name
+/// rule.
 fn is_sensitive_field(field: &str) -> bool {
+    if field == AUTH_TYPE_FIELD {
+        return false;
+    }
     let first = field.split([':', '.', '_']).next().unwrap_or_default();
     if first.eq_ignore_ascii_case("auth") || is_body_field(field) {
         return true;
@@ -151,11 +173,17 @@ fn is_unknown_value(value: &str) -> bool {
     value.contains("{{") || value == HIDDEN
 }
 
+/// Whether a new value from the provider cannot be compared: it was hidden or cut to the wire
+/// limit, so its full text is not known.
+fn is_unknown_new_value(value: &str) -> bool {
+    value == HIDDEN || value.chars().count() >= CONTRACT_VALUE_MAX
+}
+
 fn parse_field(field: &str) -> Field<'_> {
     if is_body_field(field) {
         return Field::Body;
     }
-    if field == "auth" {
+    if field == AUTH_TYPE_FIELD {
         return Field::Auth;
     }
     match field.split_once(':') {
@@ -224,8 +252,8 @@ fn breaks_entry(kind: ContractChangeType, sent: Option<&str>, new: Option<&str>)
         (ContractChangeType::Removed, sent) => sent.is_some(),
         (ContractChangeType::Changed, None) => false,
         (ContractChangeType::Changed, Some(value)) => match new {
-            // A variable or a hidden new value cannot be compared, so it never breaks.
-            Some(new) => !is_unknown_value(value) && new != HIDDEN && value != new,
+            // A variable, a hidden or a cut new value cannot be compared, so it never breaks.
+            Some(new) => !is_unknown_value(value) && !is_unknown_new_value(new) && value != new,
             None => false,
         },
     }
@@ -244,8 +272,10 @@ fn breaks_auth(kind: ContractChangeType, local: &str, new: Option<&str>) -> bool
     match kind {
         ContractChangeType::Removed => true,
         ContractChangeType::Added | ContractChangeType::Changed => {
-            // A hidden new value is unknown, so it never breaks.
-            new.is_some_and(|new| new != HIDDEN && !new.trim().eq_ignore_ascii_case(local))
+            // A hidden or cut new value is unknown, so it never breaks.
+            new.is_some_and(|new| {
+                !is_unknown_new_value(new) && !new.trim().eq_ignore_ascii_case(local)
+            })
         }
     }
 }

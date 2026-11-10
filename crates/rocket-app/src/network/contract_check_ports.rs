@@ -10,10 +10,10 @@ use rocket_collection::contract::snapshot::RequestSignatureSnapshot;
 use rocket_collection::contract::types::BreakingChangePolicy;
 use rocket_collection::Collection;
 use rocket_network::limits::{CONTRACT_FIELD_MAX, CONTRACT_METHOD_MAX, CONTRACT_PATH_MAX};
-use rocket_network::{ContractChange, ContractChangeType, ContractPolicyWire};
+use rocket_network::{is_format_char, ContractChange, ContractChangeType, ContractPolicyWire};
 use rocket_shared::error::DomainResult;
 
-use super::contract_check_match::LocalRequest;
+use super::contract_check_match::{path_only, LocalRequest};
 use crate::contract_service::walk_folder;
 
 /// A contract with the changes since its signed snapshot, as the offer carries them.
@@ -52,17 +52,17 @@ pub fn policy_to_wire(policy: &BreakingChangePolicy) -> ContractPolicyWire {
 
 /// The wire changes of changelog entries, in order.
 ///
-/// An entry is skipped when its field has no wire name (`method`, `url_pattern`, `request`,
-/// legacy `body_field.*`) or when its method, path or field is empty or too long after control
-/// characters are stripped, because the receiver refuses such an offer. Values are cut with
-/// `ContractChange::cut_values`.
+/// Only the path of the request URL is sent. An entry is skipped when its field has no wire
+/// name (`method`, `url_pattern`, `request`, legacy `body_field.*`) or when its method, path or
+/// field is empty or too long after control and format characters are stripped, because the
+/// receiver refuses such an offer. Values are cut with `ContractChange::cut_values`.
 pub fn wire_changes(entries: &[ChangelogEntry]) -> Vec<ContractChange> {
     entries.iter().filter_map(wire_change).collect()
 }
 
 fn wire_change(entry: &ChangelogEntry) -> Option<ContractChange> {
     let method = plain(entry.request_method.as_deref()?, CONTRACT_METHOD_MAX)?;
-    let path_template = plain(entry.http_path.as_deref()?, CONTRACT_PATH_MAX)?;
+    let path_template = plain(&sent_path(entry.http_path.as_deref()?)?, CONTRACT_PATH_MAX)?;
     let field = plain(
         &wire_field(&strip_control(&entry.field))?,
         CONTRACT_FIELD_MAX,
@@ -97,20 +97,36 @@ fn wire_field(field: &str) -> Option<String> {
         return named("form", name);
     }
     match field {
-        "auth_type" | "auth_detail" => Some("auth".into()),
+        "auth_type" => Some("auth".into()),
+        "auth_detail" => Some("auth_detail".into()),
         "body" => Some("body".into()),
         _ => None,
     }
 }
 
-/// The text without control characters, when it is not empty and at most `max` characters.
+/// The path of a request URL, or `None` when the URL is empty after control and format
+/// characters are stripped.
+///
+/// Only the path leaves the node: the scheme, user info, host, query and fragment can hold
+/// secrets, and the consumer ignores them when it matches.
+fn sent_path(url: &str) -> Option<String> {
+    let url = strip_control(url);
+    (!url.trim().is_empty()).then(|| path_only(&url))
+}
+
+/// The text without control and format characters, when it is not empty and at most `max`
+/// characters.
 fn plain(text: &str, max: usize) -> Option<String> {
     let text = strip_control(text);
     (!text.is_empty() && text.chars().count() <= max).then_some(text)
 }
 
-fn strip_control(text: &str) -> String {
-    text.chars().filter(|c| !c.is_control()).collect()
+/// The text without control characters and Unicode format characters, which the receiver
+/// refuses.
+pub(super) fn strip_control(text: &str) -> String {
+    text.chars()
+        .filter(|&c| !c.is_control() && !is_format_char(c))
+        .collect()
 }
 
 /// Every HTTP request of a collection with its signature. Names stay on this node.

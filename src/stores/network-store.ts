@@ -590,6 +590,8 @@ export const useNetworkStore = create<NetworkState>()((set, get) => ({
     get().removeIncomingContractCheck(checkId);
     const deviceId = startedContractChecks.get(checkId);
     if (deviceId === undefined) return;
+    // An expired check is over, so it is no longer tracked.
+    startedContractChecks.delete(checkId);
     // An answered node keeps its answer.
     if (get().contractCheckResults[checkId]?.[deviceId]) return;
     get().setContractCheckResult(checkId, deviceId, { outcome: 'expired', rows: [] });

@@ -195,6 +195,26 @@ async fn start_sends_one_offer_per_device_with_redacted_values() {
 }
 
 #[tokio::test]
+async fn start_strips_format_characters_from_the_contract_name_and_version() {
+    let mut contract = pending(two_changes());
+    contract.name = "Orders\u{202E} API".into();
+    contract.version = "1.2\u{200B}.0".into();
+    let rig = check_rig(contract);
+    rig.svc
+        .start("/root", "contract-1", &[dev(ANA)])
+        .expect("started");
+    wait_for("offer", || rig.sent(ANA).len() == 1).await;
+    let PeerMessage::ContractCheckOffer {
+        contract, version, ..
+    } = &rig.sent(ANA)[0]
+    else {
+        panic!("an offer");
+    };
+    assert_eq!(contract, "Orders API");
+    assert_eq!(version, "1.2.0");
+}
+
+#[tokio::test]
 async fn start_refuses_too_large_offer_with_the_fixed_sentence() {
     let long = "v".repeat(CONTRACT_VALUE_MAX);
     let changes: Vec<ContractChange> = (0..200)

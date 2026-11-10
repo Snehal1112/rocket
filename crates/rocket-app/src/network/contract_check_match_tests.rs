@@ -130,6 +130,8 @@ fn verdict_table() {
     bearer.auth_type = "bearer".into();
     let mut basic = sig("GET", url);
     basic.auth_type = "basic".into();
+    let mut apikey = sig("GET", url);
+    apikey.auth_type = "apikey".into();
     let mut inherit = sig("GET", url);
     inherit.auth_type = "inherit".into();
     let mut json_body = sig("GET", url);
@@ -369,6 +371,54 @@ fn verdict_table() {
             bearer.clone(),
             Break,
         ),
+        (
+            "auth type apikey to bearer, request uses apikey",
+            change("auth", Changed, Some("apikey"), Some("bearer"), true),
+            apikey.clone(),
+            Break,
+        ),
+        (
+            "auth type apikey to bearer, request uses bearer",
+            change("auth", Changed, Some("apikey"), Some("Bearer"), true),
+            bearer.clone(),
+            Pass,
+        ),
+        (
+            "auth detail changed is never judged",
+            redact_change(change(
+                "auth_detail",
+                Changed,
+                Some("old-token"),
+                Some("new-token"),
+                true,
+            )),
+            apikey.clone(),
+            Pass,
+        ),
+        (
+            "changed header with a cut new value is unknown",
+            change(
+                "header:X-Tenant",
+                Changed,
+                Some("acme"),
+                Some(&"z".repeat(256)),
+                true,
+            ),
+            with_tenant.clone(),
+            Pass,
+        ),
+        (
+            "changed header with a long uncut new value",
+            change(
+                "header:X-Tenant",
+                Changed,
+                Some("acme"),
+                Some(&"z".repeat(255)),
+                true,
+            ),
+            with_tenant.clone(),
+            Break,
+        ),
     ];
     for (name, c, s, want) in table {
         assert_eq!(verdict_of(c, s), want, "{name}");
@@ -419,7 +469,6 @@ fn redaction_table() {
     for field in [
         "header:Authorization",
         "query:api_key",
-        "auth",
         "form:password",
         "form:pass",
         "body:$.user.password",
@@ -427,6 +476,8 @@ fn redaction_table() {
         "auth_detail",
         "Auth",
         "AUTH:x",
+        "Auth:x",
+        "auth:x",
         "auth.x",
         "body",
         "body:$.password",
@@ -459,6 +510,15 @@ fn redaction_table() {
         true,
     );
     assert_eq!(redact_change(accept.clone()), accept);
+    // The auth type names are not credentials, so they are sent.
+    let auth = change(
+        "auth",
+        ContractChangeType::Changed,
+        Some("apikey"),
+        Some("bearer"),
+        true,
+    );
+    assert_eq!(redact_change(auth.clone()), auth);
     let none = change("auth", ContractChangeType::Removed, None, None, true);
     assert_eq!(redact_change(none.clone()), none);
 }

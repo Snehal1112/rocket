@@ -4,9 +4,10 @@ use chrono::Utc;
 use rocket_collection::contract::changelog::{ChangeType, ChangelogEntry};
 use rocket_collection::contract::types::BreakingChangePolicy;
 use rocket_collection::{Collection, Folder, Request};
-use rocket_network::{ContractChange, ContractChangeType, ContractPolicyWire};
+use rocket_network::{ContractChange, ContractChangeType, ContractPolicyWire, PeerMessage};
 use rocket_shared::types::{Header, HttpMethod};
 
+use super::contract_check_match::{normalize_path, paths_match, redact_change};
 use super::contract_check_ports::{local_requests_of, policy_to_wire, wire_changes};
 
 fn entry(field: &str, change_type: ChangeType) -> ChangelogEntry {
@@ -62,7 +63,7 @@ fn adapter_converts_field_names_to_the_wire_convention() {
         ("query_param.page", "query:page"),
         ("form_field.email", "form:email"),
         ("auth_type", "auth"),
-        ("auth_detail", "auth"),
+        ("auth_detail", "auth_detail"),
         ("body", "body"),
     ];
     for (from, to) in cases {
@@ -166,4 +167,99 @@ fn local_requests_walk_every_http_request_of_a_collection() {
         locals[1].signature.request_path,
         PathBuf::from("admin/delete.yml")
     );
+}
+
+fn sent_path(url: &str) -> String {
+    let mut e = entry("header.X-Trace", ChangeType::Added);
+    e.http_path = Some(url.into());
+    let changes = wire_changes(&[e]);
+    assert_eq!(changes.len(), 1, "{url}");
+    changes[0].path_template.clone()
+}
+
+#[test]
+fn adapter_sends_only_the_path_of_the_request_url() {
+    let cases = [
+        (
+            "https://user:pw@api.corp/v1/orders?api_key=sk_live_123#x",
+            "/v1/orders",
+        ),
+        ("{{base}}/users/{id}?x=1", "/users/{id}"),
+        ("/users/:id", "/users/:id"),
+        ("https://api.corp", "/"),
+        ("https://api.corp/?token=abc", "/"),
+        ("user:pw@api.corp/v1#frag", "/v1"),
+        ("/a//b/", "/a/b"),
+    ];
+    for (url, want) in cases {
+        assert_eq!(sent_path(url), want, "{url}");
+    }
+}
+
+#[test]
+fn adapter_offer_never_carries_url_secrets() {
+    let mut header = entry("header.X-Trace", ChangeType::Added);
+    header.http_path = Some("https://user:pw@api.corp/v1/orders?api_key=sk_live_123#frag".into());
+    let mut detail = entry("auth_detail", ChangeType::Changed);
+    detail.http_path = header.http_path.clone();
+    detail.old_value = Some("tok_old_secret".into());
+    detail.new_value = Some("tok_new_secret".into());
+    let changes = wire_changes(&[header, detail])
+        .into_iter()
+        .map(redact_change)
+        .collect();
+    let offer = PeerMessage::ContractCheckOffer {
+        check_id: "aabbccddeeff00112233445566778899".into(),
+        contract: "Orders".into(),
+        version: "1".into(),
+        policy: ContractPolicyWire::Strict,
+        changes,
+    }
+    .encode();
+    for secret in [
+        "user",
+        "pw",
+        "api.corp",
+        "api_key",
+        "sk_live_123",
+        "frag",
+        "https",
+        "tok_old_secret",
+        "tok_new_secret",
+    ] {
+        assert!(!offer.contains(secret), "{secret} in {offer}");
+    }
+    assert!(offer.contains("/v1/orders"));
+}
+
+#[test]
+fn adapter_sent_path_still_matches_the_consumer_request() {
+    let url = "https://user:pw@api.corp/v1/orders/{id}?api_key=sk_live_123#x";
+    let sent = sent_path(url);
+    assert_eq!(normalize_path(&sent), normalize_path(url));
+    assert!(paths_match(&sent, "{{base}}/v1/orders/42"));
+    assert!(paths_match(
+        &sent,
+        "https://other.host/v1/orders/{{id}}?q=1"
+    ));
+    assert!(!paths_match(&sent, "/v1/orders"));
+}
+
+#[test]
+fn adapter_strips_format_characters() {
+    let mut e = entry("header.X-\u{200B}Trace", ChangeType::Changed);
+    e.request_method = Some("G\u{202E}ET".into());
+    e.http_path = Some("/users/\u{FEFF}{id}".into());
+    e.old_value = Some("a\u{202E}b".into());
+    e.new_value = Some("c\u{2066}d".into());
+
+    let changes = wire_changes(&[e]);
+
+    assert_eq!(changes.len(), 1);
+    let c = &changes[0];
+    assert_eq!(c.method, "GET");
+    assert_eq!(c.path_template, "/users/{id}");
+    assert_eq!(c.field, "header:X-Trace");
+    assert_eq!(c.old_value.as_deref(), Some("ab"));
+    assert_eq!(c.new_value.as_deref(), Some("cd"));
 }
