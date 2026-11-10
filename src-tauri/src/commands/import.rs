@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use rocket_app::OpenApiSyncService;
 use rocket_environment::SecretStore;
 use rocket_http::SpecFetcher;
 use rocket_import::{GroupBy, ImportReport, OpenApiImportResult};
@@ -9,6 +8,7 @@ use rocket_infra::{
     FsFileTxFactory, FsOpenApiBaselineRepo, FsOpenApiConsentRepo, FsOpenApiLocalRepo,
     FsOpenApiSourceRepo, FsRequestRenderer, KeyringSecretStore, SharedPathCollectionRepo,
 };
+use rocket_openapi::OpenApiSyncService;
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
 
@@ -189,7 +189,7 @@ pub(crate) fn make_sync_service(
         .with_consent(openapi_consent_store())
         .with_reader(Arc::new(rocket_infra::FsLocalSpecReader))
         .with_backups(Arc::new(rocket_infra::FsOpenApiBackupRepo))
-        .with_apply(rocket_app::ApplyDeps {
+        .with_apply(rocket_openapi::ApplyDeps {
             collections: Box::new(SharedPathCollectionRepo::new(active_workspace_path)),
             baselines: Box::new(FsOpenApiBaselineRepo),
             locals: Box::new(FsOpenApiLocalRepo),

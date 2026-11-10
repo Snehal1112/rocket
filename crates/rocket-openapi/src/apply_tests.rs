@@ -1,7 +1,7 @@
 //! Tests for applying a spec through the file transaction, on a real temporary workspace.
 
 use super::*;
-use crate::openapi_sync_service::{sha256_hex, CheckOutcome};
+use crate::service::{sha256_hex, CheckOutcome};
 use async_trait::async_trait;
 use rocket_collection::openapi_source::{OpenApiSourceRepository, SyncInterval, SyncStatus};
 use rocket_environment::SecretStore;
@@ -1226,7 +1226,7 @@ async fn a_changed_referenced_file_applies_the_new_parameter_and_keeps_user_edit
     assert_eq!(w.source().remote_refs[0].etag.as_deref(), Some("\"r2\""));
 }
 
-#[path = "openapi_sync_plan_tests.rs"]
+#[path = "plan_tests.rs"]
 mod plan_tests;
 
 #[tokio::test]
@@ -1249,34 +1249,34 @@ async fn a_finalized_apply_clears_the_failure_message() {
 }
 
 #[cfg(test)]
-#[path = "openapi_sync_changes_tests.rs"]
+#[path = "changes_tests.rs"]
 mod changes_tests;
 
 #[cfg(test)]
-#[path = "openapi_sync_spec_view_tests.rs"]
+#[path = "spec_view_tests.rs"]
 mod spec_view_tests;
 
 #[cfg(test)]
-#[path = "openapi_sync_spec_source_tests.rs"]
+#[path = "spec_source_tests.rs"]
 mod spec_source_tests;
 
 #[cfg(test)]
-#[path = "openapi_sync_reset_tests.rs"]
+#[path = "reset_tests.rs"]
 mod reset_tests;
 
-#[path = "openapi_sync_skips_tests.rs"]
+#[path = "skips_tests.rs"]
 mod skips_tests;
 
-#[path = "openapi_file_source_tests.rs"]
+#[path = "file_source_tests.rs"]
 mod file_source_tests;
 
-#[path = "openapi_sync_delete_tests.rs"]
+#[path = "delete_tests.rs"]
 mod delete_tests;
 
 #[cfg(test)]
-#[path = "openapi_connect_tests.rs"]
+#[path = "connect_tests.rs"]
 mod connect_tests;
 
 #[cfg(test)]
-#[path = "openapi_change_link_tests.rs"]
+#[path = "change_link_tests.rs"]
 mod change_link_tests;

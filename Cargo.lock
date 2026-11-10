@@ -5972,10 +5972,22 @@ dependencies = [
 name = "rocket-openapi"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "chrono",
+ "rocket-collection",
+ "rocket-environment",
+ "rocket-http",
  "rocket-import",
+ "rocket-infra",
  "rocket-shared",
  "serde",
  "serde_json",
+ "serde_yaml",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "zeroize",
 ]
 
 [[package]]

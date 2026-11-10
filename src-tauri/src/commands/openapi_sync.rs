@@ -6,11 +6,6 @@ use std::sync::{Arc, Mutex};
 
 use std::collections::BTreeMap;
 
-use rocket_app::{
-    safe_message, ChangeLinkOutcome, ChangeLinkPreview, CheckOutcome, ConnectOperationRow,
-    ConnectOutcome, ConnectPreview, ConnectRequestRow, ConnectRow, DeleteTarget,
-    OpenApiSyncService, ResetReport, SkippedRow, SyncStatusView,
-};
 use rocket_collection::openapi_source::{SyncInterval, SyncStatus};
 use rocket_collection::ConsentState;
 use rocket_http::SpecFetcher;
@@ -21,6 +16,11 @@ use rocket_import::{
 use rocket_openapi::view::{
     BackupRow, BadgeView, ChangeRow, ChangeValue, ChangesView, OverviewView, PlanView, SpecSource,
     SpecSourceFormat, SpecView, SpecViewState,
+};
+use rocket_openapi::{
+    safe_message, ChangeLinkOutcome, ChangeLinkPreview, CheckOutcome, ConnectOperationRow,
+    ConnectOutcome, ConnectPreview, ConnectRequestRow, ConnectRow, DeleteTarget,
+    OpenApiSyncService, ResetReport, SkippedRow, SyncStatusView,
 };
 use rocket_shared::error::DomainError;
 use rocket_shared::events::EventPublisher;
@@ -743,7 +743,7 @@ fn connect_operation_dto(o: ConnectOperationRow) -> ConnectOperationDto {
     }
 }
 
-fn connect_pair_dto(p: rocket_app::ConnectPair) -> ConnectPairDto {
+fn connect_pair_dto(p: rocket_openapi::ConnectPair) -> ConnectPairDto {
     ConnectPairDto {
         request: connect_request_dto(p.request),
         operation: connect_operation_dto(p.operation),
@@ -2371,7 +2371,7 @@ mod tests {
             spec_version: Some("1".to_string()),
             digest: "abc".to_string(),
             spec_sha256: "def".to_string(),
-            matched: vec![rocket_app::ConnectPair {
+            matched: vec![rocket_openapi::ConnectPair {
                 request: request.clone(),
                 operation: operation.clone(),
             }],

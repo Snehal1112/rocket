@@ -17,9 +17,9 @@ use rocket_import::{
 };
 use rocket_shared::error::{DomainError, DomainResult};
 
-use crate::openapi_sync_service::{sha256_hex, OpenApiSyncService};
+use crate::service::{sha256_hex, OpenApiSyncService};
+use crate::view::{PlanView, UnchangedView};
 use rocket_collection::collection_lock::collection_lock;
-use rocket_openapi::view::{PlanView, UnchangedView};
 
 pub(crate) const SOURCE_REL: &str = ".rocket/openapi-source.yml";
 pub(crate) const BASELINE_REL: &str = ".rocket/openapi-baseline.json";
@@ -489,7 +489,7 @@ impl OpenApiSyncService {
         &self,
         collection: &str,
         include_token: bool,
-    ) -> DomainResult<crate::SyncStatusView> {
+    ) -> DomainResult<crate::service::SyncStatusView> {
         let deps = self.deps()?;
         let pinned = deps.collections.pinned();
         let repo: &dyn CollectionRepository =
@@ -558,5 +558,5 @@ impl OpenApiSyncService {
 }
 
 #[cfg(test)]
-#[path = "openapi_sync_apply_tests.rs"]
+#[path = "apply_tests.rs"]
 mod tests;

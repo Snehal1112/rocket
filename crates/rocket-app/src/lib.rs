@@ -58,19 +58,9 @@ pub mod mcp_read_views;
 pub mod mcp_tool_service;
 pub mod network;
 pub mod oauth2_service;
-pub mod openapi_change_link;
-pub mod openapi_connect;
-pub mod openapi_sync_apply;
-pub mod openapi_sync_changes;
-pub mod openapi_sync_delete;
 #[cfg(test)]
 mod openapi_sync_lock_tests;
-pub mod openapi_sync_reset;
 pub mod openapi_sync_scheduler;
-pub mod openapi_sync_service;
-pub mod openapi_sync_skips;
-pub mod openapi_sync_spec_source;
-pub mod openapi_sync_spec_view;
 mod process_env;
 pub mod proposal_service;
 pub mod proxy_settings_service;
@@ -161,21 +151,9 @@ pub use network::{
     TransferService, TransferStaging,
 };
 pub use oauth2_service::OAuth2Service;
-pub use openapi_change_link::{ChangeLinkOutcome, ChangeLinkPreview};
-pub use openapi_connect::{
-    request_digest, ConnectAmbiguous, ConnectOperationRow, ConnectOutcome, ConnectPair,
-    ConnectPreview, ConnectRequestRow, ConnectRow,
-};
-pub use openapi_sync_apply::{ApplyDeps, RendererFactory};
-pub use openapi_sync_delete::DeleteTarget;
-pub use openapi_sync_reset::ResetReport;
 pub use openapi_sync_scheduler::{
     OpenApiSyncScheduler, SchedulerConfig, SchedulerHandle, ServiceFactory,
 };
-pub use openapi_sync_service::{
-    safe_message, CheckOutcome, OpenApiSyncService, SyncStatusView, SyncTarget,
-};
-pub use openapi_sync_skips::SkippedRow;
 pub use process_env::{ProcessEnv, ProcessEnvScopeInput};
 pub use proposal_service::ProposalService;
 pub use proxy_settings_service::{PasswordChange, ProxySettingsService, ProxySettingsView};

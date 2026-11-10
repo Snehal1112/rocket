@@ -1,7 +1,7 @@
 //! Tests for connecting a hand-made collection to a spec. They reuse the world of the apply tests.
 
 use super::*;
-use crate::openapi_connect::{request_digest, ConnectOutcome, ConnectPreview, ConnectRow};
+use crate::connect::{request_digest, ConnectOutcome, ConnectPreview, ConnectRow};
 use rocket_collection::openapi_source::SyncInterval;
 use rocket_collection::ConsentState;
 use rocket_import::MatchRequest;
@@ -572,7 +572,7 @@ async fn confirm_stores_the_applied_copy_so_view_spec_works() {
     hand_made(&w, &[]);
     confirm(&w, Vec::new(), None).await.expect("confirm");
     let view = w.svc.spec_view(HAND).expect("view");
-    assert_eq!(view.state, rocket_openapi::view::SpecViewState::InSync);
+    assert_eq!(view.state, crate::view::SpecViewState::InSync);
     assert_eq!(
         view.groups
             .iter()

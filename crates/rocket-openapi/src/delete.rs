@@ -8,12 +8,10 @@ use rocket_collection::{request_filename_for, CollectionRepository};
 use rocket_import::SyncItem;
 use rocket_shared::error::{DomainError, DomainResult};
 
-use crate::openapi_change_link::UNFINISHED;
-use crate::openapi_connect::APPLY_RUNNING;
-use crate::openapi_sync_apply::{
-    flatten_requests, to_json, to_yaml, BACKUPS_REL, BASELINE_REL, SOURCE_REL,
-};
-use crate::openapi_sync_service::OpenApiSyncService;
+use crate::apply::{flatten_requests, to_json, to_yaml, BACKUPS_REL, BASELINE_REL, SOURCE_REL};
+use crate::change_link::UNFINISHED;
+use crate::connect::APPLY_RUNNING;
+use crate::service::OpenApiSyncService;
 use rocket_collection::collection_lock::collection_lock;
 
 const NOT_DELETABLE: &str =

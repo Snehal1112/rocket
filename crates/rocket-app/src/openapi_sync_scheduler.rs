@@ -16,8 +16,8 @@ use rocket_shared::error::DomainError;
 use rocket_shared::events::EventPublisher;
 use tokio::sync::watch;
 
-use crate::openapi_sync_service::{CheckOutcome, OpenApiSyncService};
 use crate::stop_signal::sleep_or_stop;
+use rocket_openapi::service::{CheckOutcome, OpenApiSyncService};
 
 /// First retry delay for a check that returned an error, then doubled up to the cap.
 const ERROR_BACKOFF_BASE_SECS: i64 = 15 * 60;

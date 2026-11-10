@@ -5,11 +5,15 @@ use crate::test_doubles::{RecordingPublisher, SharedPublisher};
 use rocket_collection::collection_lock::collection_lock;
 use rocket_collection::CollectionEvent;
 use rocket_collection::{CollectionRepository, CollectionSettings, CollectionTrustStore, Request};
-use rocket_infra::{FsCollectionRepo, SharedPathCollectionRepo};
+use rocket_environment::SecretStore;
+use rocket_http::spec_fetch::{SpecFetchFailure, SpecFetchOutcome, SpecFetchRequest, SpecFetcher};
+use rocket_infra::{FsCollectionRepo, FsOpenApiSourceRepo, SharedPathCollectionRepo};
+use rocket_openapi::service::OpenApiSyncService;
+use rocket_shared::error::DomainResult;
 use rocket_shared::events::EventPublisher;
 use rocket_shared::events::PublishedEvent;
 use rocket_shared::types::HttpMethod;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -252,4 +256,49 @@ fn apply_and_the_service_use_the_same_lock_key_for_a_collection() {
         &collection_lock(apply_repo, &apply_root),
         &collection_lock(&standalone, &service_root)
     ));
+}
+
+struct NoFetch;
+
+#[async_trait::async_trait]
+impl SpecFetcher for NoFetch {
+    async fn fetch(&self, _: SpecFetchRequest) -> Result<SpecFetchOutcome, SpecFetchFailure> {
+        panic!("this test never fetches");
+    }
+}
+
+struct NoSecrets;
+
+impl SecretStore for NoSecrets {
+    fn get(&self, _: &str, _: &str) -> DomainResult<Option<String>> {
+        Ok(None)
+    }
+    fn set(&self, _: &str, _: &str, _: &str) -> DomainResult<()> {
+        Ok(())
+    }
+    fn delete(&self, _: &str, _: &str) -> DomainResult<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn a_service_without_apply_deps_keys_its_lock_through_the_lock_key_repo() {
+    let keys = crate::test_doubles::NullCollectionRepo::new().on_lock_key(|p| {
+        if p == Path::new("/alias-sync-test/demo") {
+            PathBuf::from("/real-sync-test/demo")
+        } else {
+            p.to_path_buf()
+        }
+    });
+    let svc = OpenApiSyncService::new(
+        Arc::new(NoFetch),
+        Box::new(FsOpenApiSourceRepo),
+        Arc::new(NoSecrets),
+    )
+    .with_lock_keys(Arc::new(keys));
+
+    let alias = svc.lock_of(Path::new("/alias-sync-test/demo"));
+    let real = svc.lock_of(Path::new("/real-sync-test/demo"));
+
+    assert!(Arc::ptr_eq(&alias, &real));
 }

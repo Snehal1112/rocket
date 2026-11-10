@@ -3,7 +3,7 @@
 
 use super::connect_tests::snapshot;
 use super::*;
-use crate::openapi_sync_service::sha256_hex;
+use crate::service::sha256_hex;
 use rocket_collection::openapi_source::SpecLocation;
 use std::sync::atomic::Ordering;
 

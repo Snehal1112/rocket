@@ -1,7 +1,7 @@
 //! Tests for deleting requests from the sync page. They reuse the apply world.
 
 use super::*;
-use crate::openapi_sync_delete::DeleteTarget;
+use crate::delete::DeleteTarget;
 use rocket_collection::openapi_baseline::OpenApiBaselineRepository;
 use std::sync::atomic::Ordering;
 

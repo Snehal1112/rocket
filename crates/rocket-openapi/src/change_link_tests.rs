@@ -2,7 +2,7 @@
 
 use super::connect_tests::snapshot;
 use super::*;
-use crate::openapi_change_link::ChangeLinkPreview;
+use crate::change_link::ChangeLinkPreview;
 use rocket_collection::openapi_backup::{OpenApiBackupRepository, OpenApiBackups};
 use rocket_collection::openapi_source::SpecLocation;
 use rocket_collection::ConsentState;
@@ -33,7 +33,7 @@ async fn preview_other(w: &World) -> ChangeLinkPreview {
         .expect("preview")
 }
 
-async fn move_to_other(w: &World) -> DomainResult<crate::openapi_change_link::ChangeLinkOutcome> {
+async fn move_to_other(w: &World) -> DomainResult<crate::change_link::ChangeLinkOutcome> {
     let preview = preview_other(w).await;
     w.svc
         .change_link_confirm(&w.name, OTHER, None, &preview.spec_sha256)
@@ -101,7 +101,7 @@ async fn confirm_with(
     svc: &OpenApiSyncService,
     w: &World,
     link: &str,
-) -> DomainResult<crate::openapi_change_link::ChangeLinkOutcome> {
+) -> DomainResult<crate::change_link::ChangeLinkOutcome> {
     let preview = svc
         .change_link_preview(&w.name, link, None)
         .await

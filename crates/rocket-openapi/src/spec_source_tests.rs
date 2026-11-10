@@ -1,7 +1,7 @@
 //! Tests for the raw spec text. They reuse the world of the apply tests.
 
 use super::*;
-use rocket_openapi::view::SpecSourceFormat;
+use crate::view::SpecSourceFormat;
 
 /// Stores `bytes` as the applied copy and points the source at them.
 fn set_applied(w: &World, bytes: &[u8]) {

@@ -1,8 +1,6 @@
 //! Tests for the due list and the supervisor, on real temporary collections.
 
 use super::*;
-use crate::openapi_sync_apply::ApplyDeps;
-use crate::openapi_sync_service::SyncTarget;
 use async_trait::async_trait;
 use rocket_collection::file_tx::{CollectionFileTx, CollectionFileTxFactory, RecoveryOutcome};
 use rocket_collection::openapi_local::{OpenApiLocalRepository, OpenApiLocalState};
@@ -13,6 +11,8 @@ use rocket_collection::{CollectionRepository, OpenApiConsentStore};
 use rocket_environment::SecretStore;
 use rocket_http::spec_fetch::{SpecFetchFailure, SpecFetchOutcome, SpecFetchRequest, SpecFetcher};
 use rocket_infra::{FsFileTxFactory, FsOpenApiLocalRepo, FsOpenApiSourceRepo};
+use rocket_openapi::apply::ApplyDeps;
+use rocket_openapi::service::SyncTarget;
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::PublishedEvent;
 use std::collections::HashSet;
@@ -246,7 +246,7 @@ impl World {
                 url: "https://example.com/spec.json".into(),
             },
             group_by: "tags".into(),
-            spec_sha256: crate::openapi_sync_service::sha256_hex(&fixture()),
+            spec_sha256: rocket_openapi::service::sha256_hex(&fixture()),
             etag: None,
             last_modified: None,
             operations: Vec::new(),
@@ -450,7 +450,8 @@ fn set_interval_turns_checks_on_and_off() {
     let svc = w.service();
     // Turning checks on needs an approval first.
     assert!(svc.set_interval(&root, SyncInterval::Hourly).is_err());
-    svc.grant_current(&root).expect("grant");
+    let shown = svc.status(&root, false).expect("status").location;
+    svc.grant_consent(&root, &shown).expect("grant");
     svc.set_interval(&root, SyncInterval::Hourly).expect("on");
     assert_eq!(w.local("mine").opt_in_root, None);
     assert_eq!(names(&svc.due_targets(t0())), vec!["mine"]);

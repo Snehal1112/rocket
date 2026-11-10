@@ -6,9 +6,9 @@ use rocket_collection::CollectionRepository;
 use rocket_import::{plan_with_links, CurrentRequest, SyncItem};
 use rocket_shared::error::{DomainError, DomainResult};
 
-use crate::openapi_change_link::UNFINISHED;
-use crate::openapi_connect::APPLY_RUNNING;
-use crate::openapi_sync_service::OpenApiSyncService;
+use crate::change_link::UNFINISHED;
+use crate::connect::APPLY_RUNNING;
+use crate::service::OpenApiSyncService;
 use rocket_collection::collection_lock::collection_lock;
 
 /// One skipped item. A key the spec no longer has shows the key as its name.

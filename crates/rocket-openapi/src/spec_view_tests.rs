@@ -1,9 +1,9 @@
 //! Tests for the read-only spec view. They reuse the world of the apply tests.
 
 use super::*;
-use rocket_openapi::view::SpecViewState;
+use crate::view::SpecViewState;
 
-fn keys(view: &rocket_openapi::view::SpecView) -> Vec<(&str, bool)> {
+fn keys(view: &crate::view::SpecView) -> Vec<(&str, bool)> {
     view.groups
         .iter()
         .flat_map(|g| g.operations.iter())
@@ -84,7 +84,7 @@ async fn an_unparsable_copy_gives_a_fixed_sentence() {
     std::fs::write(w.root.join(".rocket/openapi-applied.spec"), junk).expect("write");
     // The source says this is the applied spec, so the copy is trusted and fails to parse.
     let mut source = w.source();
-    source.spec_sha256 = crate::openapi_sync_service::sha256_hex(junk.as_bytes());
+    source.spec_sha256 = crate::service::sha256_hex(junk.as_bytes());
     rocket_infra::FsOpenApiSourceRepo
         .save(&w.root, &source)
         .expect("save source");
@@ -190,7 +190,7 @@ components:
 fn use_applied_copy(w: &World, text: &str) {
     std::fs::write(w.root.join(".rocket/openapi-applied.spec"), text).expect("write");
     let mut source = w.source();
-    source.spec_sha256 = crate::openapi_sync_service::sha256_hex(text.as_bytes());
+    source.spec_sha256 = crate::service::sha256_hex(text.as_bytes());
     rocket_infra::FsOpenApiSourceRepo
         .save(&w.root, &source)
         .expect("save source");

@@ -32,7 +32,7 @@ use rocket_shared::error::{DomainError, DomainResult};
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
-use crate::openapi_sync_apply::ApplyDeps;
+use crate::apply::ApplyDeps;
 use rocket_collection::collection_lock::{collection_lock, lock_for_key, CollectionLock};
 
 const TOKEN_KEY: &str = "token";
@@ -100,7 +100,7 @@ pub struct OpenApiSyncService {
     backups: Option<Arc<dyn rocket_collection::openapi_backup::OpenApiBackupRepository>>,
 }
 
-pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
+pub fn sha256_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
         .map(|b| format!("{b:02x}"))
@@ -398,7 +398,7 @@ impl OpenApiSyncService {
     /// The lock of one collection root. It is keyed through the apply repository, then through
     /// the lock key repository, like every other writer of the collection. A service with
     /// neither keys it by the root as given.
-    fn lock_of(&self, root: &Path) -> Arc<CollectionLock> {
+    pub fn lock_of(&self, root: &Path) -> Arc<CollectionLock> {
         if let Some(deps) = &self.apply_deps {
             return collection_lock(deps.collections.as_ref(), root);
         }
@@ -1136,28 +1136,6 @@ mod tests {
             safe_message("not_https"),
             "The link must use https. Plain http works only for localhost."
         );
-    }
-
-    #[test]
-    fn a_service_without_apply_deps_keys_its_lock_through_the_lock_key_repo() {
-        let keys = crate::test_doubles::NullCollectionRepo::new().on_lock_key(|p| {
-            if p == Path::new("/alias-sync-test/demo") {
-                std::path::PathBuf::from("/real-sync-test/demo")
-            } else {
-                p.to_path_buf()
-            }
-        });
-        let svc = OpenApiSyncService::new(
-            Arc::new(SharedFetcher(Arc::new(FakeFetcher::default()))),
-            Box::new(FsOpenApiSourceRepo),
-            Arc::new(MemSecrets::default()),
-        )
-        .with_lock_keys(Arc::new(keys));
-
-        let alias = svc.lock_of(Path::new("/alias-sync-test/demo"));
-        let real = svc.lock_of(Path::new("/real-sync-test/demo"));
-
-        assert!(Arc::ptr_eq(&alias, &real));
     }
 
     #[derive(Default)]
@@ -2609,9 +2587,9 @@ mod tests {
 }
 
 #[cfg(test)]
-#[path = "openapi_sync_consent_tests.rs"]
+#[path = "consent_tests.rs"]
 mod consent_tests;
 
 #[cfg(test)]
-#[path = "openapi_sync_disconnect_tests.rs"]
+#[path = "disconnect_tests.rs"]
 mod disconnect_tests;
