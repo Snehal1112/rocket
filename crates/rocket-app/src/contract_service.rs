@@ -6,7 +6,7 @@ use rocket_audit::{
 use rocket_collection::{
     contract::{
         attachments::AttachmentStore,
-        changelog::{ChangelogEntry, ContractChangelog},
+        changelog::{ChangeType, ChangelogEntry, ContractChangelog},
         diff::diff_signature,
         repository::{ContractError, ContractRepository, ContractResult},
         snapshot::{ContractSnapshot, RequestSignatureSnapshot},
@@ -668,17 +668,32 @@ impl ContractService {
         Ok(contract)
     }
 
-    /// Scans all active contracts in the collection, diffs each against the
-    /// current on-disk request shapes (loaded from the collection repo), updates
-    /// drift/breach counts, transitions status via the state machine, appends
-    /// changelog entries, and saves all modified contracts.
-    pub fn recompute_drift_for_collection(
+    /// Read-only. Changes of the live collection against the signed snapshot.
+    ///
+    /// The contract's status is not checked and nothing is written. A request that is in the
+    /// snapshot but no longer in the collection is one breaking `request` entry.
+    pub fn pending_changes(
         &self,
         collection_root: &Path,
-    ) -> ContractResult<Vec<ContractDriftSummary>> {
-        // Build the current snapshot set by walking the live collection on disk.
-        // This is the authoritative source of truth — the frontend cannot supply
-        // request signatures because it operates in Option B (snapshot-less) mode.
+        contract_id: Ulid,
+    ) -> ContractResult<Vec<ChangelogEntry>> {
+        let contract = self.repo.load_contract(collection_root, contract_id)?;
+        let snapshot = self.repo.load_snapshot(collection_root, contract_id)?;
+        let current = self.live_signatures(collection_root)?;
+        Ok(snapshot_changes(
+            &snapshot,
+            &current,
+            &contract.policy.breaking_change_policy,
+        ))
+    }
+
+    /// The signature of every request of the live collection, walked from the repository.
+    /// This is the source of truth: the frontend cannot supply request signatures because it
+    /// runs in Option B (snapshot-less) mode.
+    fn live_signatures(
+        &self,
+        collection_root: &Path,
+    ) -> ContractResult<Vec<RequestSignatureSnapshot>> {
         let collection_name = collection_root
             .file_name()
             .and_then(|n| n.to_str())
@@ -691,10 +706,21 @@ impl ContractService {
             .map_err(|e| ContractError::Internal(e.to_string()))?;
         let mut walked = Vec::new();
         walk_folder(&collection.root, Path::new(""), &mut walked);
-        let current_snapshots: Vec<RequestSignatureSnapshot> = walked
+        Ok(walked
             .into_iter()
             .map(|(rel_path, request)| RequestSignatureSnapshot::from_request(&rel_path, request))
-            .collect();
+            .collect())
+    }
+
+    /// Scans all active contracts in the collection, diffs each against the
+    /// current on-disk request shapes (loaded from the collection repo), updates
+    /// drift/breach counts, transitions status via the state machine, appends
+    /// changelog entries, and saves all modified contracts.
+    pub fn recompute_drift_for_collection(
+        &self,
+        collection_root: &Path,
+    ) -> ContractResult<Vec<ContractDriftSummary>> {
+        let current_snapshots = self.live_signatures(collection_root)?;
 
         let contracts = self.repo.list_contracts(collection_root)?;
         let mut summaries = Vec::new();
@@ -724,36 +750,13 @@ impl ContractService {
             let original_drift = contract.drift_count;
             let original_breach = contract.breach_count;
 
-            let mut drift_count = 0u32;
-            let mut breach_count = 0u32;
-
-            for snap_entry in &snapshot.entries {
-                let current = current_snapshots
-                    .iter()
-                    .find(|s| s.request_path == snap_entry.request_path);
-
-                match current {
-                    None => {
-                        // Request removed — always a breaking drift.
-                        drift_count += 1;
-                        breach_count += 1;
-                    }
-                    Some(current_snap) => {
-                        let changes = diff_signature(
-                            snap_entry,
-                            current_snap,
-                            &contract.policy.breaking_change_policy,
-                            None,
-                        );
-                        for entry in &changes {
-                            drift_count += 1;
-                            if entry.is_breaking {
-                                breach_count += 1;
-                            }
-                        }
-                    }
-                }
-            }
+            let changes = snapshot_changes(
+                &snapshot,
+                &current_snapshots,
+                &contract.policy.breaking_change_policy,
+            );
+            let drift_count = changes.len() as u32;
+            let breach_count = changes.iter().filter(|e| e.is_breaking).count() as u32;
 
             // Determine new status via state machine
             let event = if breach_count > 0 {
@@ -1100,7 +1103,42 @@ fn apply_transition(
 /// directory name) to match the path format the save handler emits.
 /// Requests with no `file_name` (e.g. freshly constructed in memory) are
 /// skipped because we cannot key them the same way the save path will.
-fn walk_folder<'a>(
+/// The changes of the live request signatures against a snapshot, in snapshot order.
+///
+/// A request missing from `current` is one `request` entry, `Removed` and always breaking.
+/// Requests added since the snapshot are not listed.
+fn snapshot_changes(
+    snapshot: &ContractSnapshot,
+    current: &[RequestSignatureSnapshot],
+    policy: &rocket_collection::contract::types::BreakingChangePolicy,
+) -> Vec<ChangelogEntry> {
+    let mut changes = Vec::new();
+    for snap_entry in &snapshot.entries {
+        match current
+            .iter()
+            .find(|s| s.request_path == snap_entry.request_path)
+        {
+            None => changes.push(ChangelogEntry {
+                timestamp: chrono::Utc::now(),
+                request_path: snap_entry.request_path.clone(),
+                field: "request".into(),
+                change_type: ChangeType::Removed,
+                old_value: None,
+                new_value: None,
+                is_breaking: true,
+                request_method: Some(snap_entry.method.clone()),
+                http_path: Some(snap_entry.url_pattern.clone()),
+                author: None,
+            }),
+            Some(current_snap) => {
+                changes.extend(diff_signature(snap_entry, current_snap, policy, None));
+            }
+        }
+    }
+    changes
+}
+
+pub(crate) fn walk_folder<'a>(
     folder: &'a Folder,
     prefix: &Path,
     out: &mut Vec<(PathBuf, &'a rocket_collection::Request)>,
@@ -1170,6 +1208,15 @@ mod tests {
         contracts: Mutex<HashMap<Ulid, Contract>>,
         snapshots: Mutex<HashMap<Ulid, ContractSnapshot>>,
         changelogs: Mutex<HashMap<Ulid, ContractChangelog>>,
+        /// Counts every write, so a read-only method can prove it wrote nothing.
+        writes: std::sync::atomic::AtomicUsize,
+    }
+
+    impl MockContractRepo {
+        fn count_write(&self) {
+            self.writes
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
     }
 
     impl ContractRepository for MockContractRepo {
@@ -1178,6 +1225,7 @@ mod tests {
             _collection_root: &Path,
             contract: &Contract,
         ) -> ContractResult<()> {
+            self.count_write();
             self.contracts
                 .lock()
                 .unwrap()
@@ -1199,6 +1247,7 @@ mod tests {
         }
 
         fn delete_contract(&self, _collection_root: &Path, id: Ulid) -> ContractResult<()> {
+            self.count_write();
             self.contracts.lock().unwrap().remove(&id);
             self.snapshots.lock().unwrap().remove(&id);
             self.changelogs.lock().unwrap().remove(&id);
@@ -1210,6 +1259,7 @@ mod tests {
             _collection_root: &Path,
             snapshot: &ContractSnapshot,
         ) -> ContractResult<()> {
+            self.count_write();
             self.snapshots
                 .lock()
                 .unwrap()
@@ -1236,6 +1286,7 @@ mod tests {
             _collection_root: &Path,
             incoming: &ContractChangelog,
         ) -> ContractResult<()> {
+            self.count_write();
             let mut guard = self.changelogs.lock().unwrap();
             let existing = guard
                 .entry(incoming.contract_id)
@@ -1926,6 +1977,116 @@ mod tests {
         let result = svc.recompute_drift_for_collection(root());
         assert!(result.is_ok());
         assert!(result.unwrap().is_empty());
+    }
+
+    // ─── pending_changes ──────────────────────────────────────────────
+
+    /// The live collection of the drift fixture, with an added header on `get-users.yml`.
+    fn make_collection_with_added_header() -> Collection {
+        let mut collection = make_collection_with_two_requests();
+        for item in &mut collection.root.items {
+            if let CollectionItem::Request(req) = item {
+                req.headers
+                    .push(rocket_shared::types::Header::new("X-Trace", "on"));
+            }
+        }
+        collection
+    }
+
+    /// The baseline of the drift fixture before the header was added.
+    fn baseline_without_header() -> Vec<RequestSignatureSnapshot> {
+        let original = make_collection_with_two_requests();
+        let mut walked = Vec::new();
+        walk_folder(&original.root, Path::new(""), &mut walked);
+        walked
+            .into_iter()
+            .map(|(path, req)| RequestSignatureSnapshot::from_request(&path, req))
+            .collect()
+    }
+
+    #[test]
+    fn pending_changes_is_empty_when_nothing_changed() {
+        let svc = make_service_with_collection(make_collection_with_two_requests());
+        let contract = svc
+            .attach_contract(root(), make_contract(), vec![], vec![])
+            .expect("attach");
+
+        let changes = svc.pending_changes(root(), contract.id).expect("changes");
+
+        assert!(changes.is_empty(), "{changes:?}");
+    }
+
+    #[test]
+    fn pending_changes_lists_an_added_header_and_a_removed_request() {
+        let svc = make_service_with_collection(make_collection_with_added_header());
+        let mut baseline = baseline_without_header();
+        let mut removed = make_snap("removed.yml");
+        removed.method = "DELETE".into();
+        removed.url_pattern = "/items/{id}".into();
+        baseline.push(removed);
+        let contract = svc
+            .attach_contract(root(), make_contract(), baseline, vec![])
+            .expect("attach");
+
+        let changes = svc.pending_changes(root(), contract.id).expect("changes");
+
+        assert_eq!(changes.len(), 2, "{changes:?}");
+        let header = changes
+            .iter()
+            .find(|e| e.field == "header.X-Trace")
+            .expect("added header");
+        assert_eq!(header.change_type, ChangeType::Added);
+        assert_eq!(header.request_path, PathBuf::from("get-users.yml"));
+        assert_eq!(header.request_method.as_deref(), Some("GET"));
+        let gone = changes
+            .iter()
+            .find(|e| e.request_path == Path::new("removed.yml"))
+            .expect("removed request");
+        assert_eq!(gone.change_type, ChangeType::Removed);
+        assert!(gone.is_breaking);
+        assert_eq!(gone.request_method.as_deref(), Some("DELETE"));
+        assert_eq!(gone.http_path.as_deref(), Some("/items/{id}"));
+    }
+
+    #[test]
+    fn pending_changes_writes_nothing() {
+        let repo = Arc::new(MockContractRepo::default());
+        let svc = ContractService::new(
+            repo.clone(),
+            Arc::new(MockCollectionRepo::with_collection(
+                make_collection_with_added_header(),
+            )),
+            Arc::new(FakeAttachmentStore::default()),
+        );
+        let mut contract = make_contract_with_status(ContractStatus::Active);
+        contract.id = Ulid::new();
+        repo.save_contract(root(), &contract).expect("save");
+        repo.save_snapshot(
+            root(),
+            &ContractSnapshot {
+                contract_id: contract.id,
+                entries: baseline_without_header(),
+            },
+        )
+        .expect("snapshot");
+        let writes_before = repo.writes.load(std::sync::atomic::Ordering::SeqCst);
+
+        let changes = svc.pending_changes(root(), contract.id).expect("changes");
+
+        assert!(!changes.is_empty());
+        assert_eq!(
+            repo.writes.load(std::sync::atomic::Ordering::SeqCst),
+            writes_before,
+            "pending_changes must not write"
+        );
+        let stored = repo.load_contract(root(), contract.id).expect("load");
+        assert_eq!(stored.status, ContractStatus::Active);
+        assert_eq!(stored.drift_count, 0);
+        assert!(repo
+            .load_changelog(root(), contract.id)
+            .expect("log")
+            .entries
+            .is_empty());
     }
 
     // -----------------------------------------------------------------------

@@ -2,6 +2,9 @@ mod audit_bridge;
 mod auth_browser;
 mod callback_adapter;
 mod import_wiring;
+// The contract check service wires these adapters in the next task.
+#[allow(dead_code)]
+mod network_contract_adapters;
 #[cfg(test)]
 mod ipc_acl_tests;
 // `pub` so integration tests in `src-tauri/tests/` can drive command

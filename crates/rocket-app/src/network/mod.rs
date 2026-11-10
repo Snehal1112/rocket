@@ -5,6 +5,7 @@
 
 mod connections;
 pub mod contract_check_match;
+pub mod contract_check_ports;
 mod frame_router;
 mod handler;
 mod nodes;
@@ -34,6 +35,9 @@ mod connections_tests;
 #[cfg(test)]
 #[path = "contract_check_match_tests.rs"]
 mod contract_check_match_tests;
+#[cfg(test)]
+#[path = "contract_check_ports_tests.rs"]
+mod contract_check_ports_tests;
 #[cfg(test)]
 #[path = "e2e_sync_tests.rs"]
 mod e2e_sync_tests;
@@ -82,6 +86,10 @@ mod transfer_receive_tests;
 #[path = "transfer_send_tests.rs"]
 mod transfer_send_tests;
 
+pub use contract_check_ports::{
+    local_requests_of, policy_to_wire, wire_changes, ContractChangesPort, LocalRequestsPort,
+    PendingContract,
+};
 pub use frame_router::FrameRouter;
 pub use nodes::{NodeGroup, NodeStatus, NodeView};
 pub use pairing::{PairingDecision, PairingStarted};
