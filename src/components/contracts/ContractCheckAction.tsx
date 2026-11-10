@@ -29,12 +29,18 @@ interface ContractCheckActionProps {
 }
 
 export const TOO_MANY_CHANGES_TEXT = 'Check fewer changes at a time.';
+export const NO_CHANGES_BACKEND_TEXT = 'This contract has no changes to check.';
+export const NO_CHANGES_TEXT =
+  'No changes can be checked. Changes to the method, the URL or a removed request are not covered.';
 export const START_FAILED_TEXT = 'Could not start the check.';
 
-// Only two backend texts are shown. Anything else could carry local detail.
+// Only two backend texts are mapped. Anything else could carry local detail.
 export function startErrorText(err: unknown): string {
   const raw = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
-  return raw.trim() === TOO_MANY_CHANGES_TEXT ? TOO_MANY_CHANGES_TEXT : START_FAILED_TEXT;
+  const text = raw.trim();
+  if (text === TOO_MANY_CHANGES_TEXT) return TOO_MANY_CHANGES_TEXT;
+  if (text === NO_CHANGES_BACKEND_TEXT) return NO_CHANGES_TEXT;
+  return START_FAILED_TEXT;
 }
 
 function disabledReason(hasChanges: boolean, networkOn: boolean): string | null {

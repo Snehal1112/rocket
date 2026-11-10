@@ -109,4 +109,37 @@ describe('ContractCheckAction', () => {
     expect(await screen.findByText('Could not start the check.')).toBeInTheDocument();
     expect(screen.queryByText(/secret/)).toBeNull();
   });
+
+  it('explains a contract with nothing that can be checked', async () => {
+    mocks.api.startContractCheck.mockRejectedValue('Invalid input: This contract has no changes to check.');
+    setup();
+    await userEvent.click(screen.getByRole('button', { name: 'Check with the team' }));
+    await userEvent.click(screen.getByLabelText(/Ada/));
+    await userEvent.click(screen.getByRole('button', { name: 'Send' }));
+    expect(
+      await screen.findByText(
+        'No changes can be checked. Changes to the method, the URL or a removed request are not covered.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('starts once on a double click and tracks every returned check', async () => {
+    mocks.api.startContractCheck.mockResolvedValue({
+      checks: [
+        { deviceId: 'd1', checkId: 'c1' },
+        { deviceId: 'd9', checkId: 'c9' },
+      ],
+      changes: [],
+    });
+    const track = vi.fn();
+    useNetworkStore.setState({ trackContractCheck: track });
+    setup();
+    await userEvent.click(screen.getByRole('button', { name: 'Check with the team' }));
+    await userEvent.click(screen.getByLabelText(/Ada/));
+    await userEvent.dblClick(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(track).toHaveBeenCalledTimes(2));
+    expect(mocks.api.startContractCheck).toHaveBeenCalledTimes(1);
+    expect(track).toHaveBeenCalledWith('c1', 'd1');
+    expect(track).toHaveBeenCalledWith('c9', 'd9');
+  });
 });

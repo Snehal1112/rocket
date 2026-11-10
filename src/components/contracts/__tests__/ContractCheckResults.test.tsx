@@ -89,4 +89,48 @@ describe('ContractCheckResults', () => {
     expect(screen.getByText('<img src=x onerror=alert(1)>')).toBeInTheDocument();
     expect(baseElement.querySelector('img')).toBeNull();
   });
+
+  function showOne(rows: { index: number; verdict: 'pass' | 'break' | 'not_used' }[]) {
+    useContractCheckRunsStore.getState().setRun(contractCheckRunKey('/ws', 'k1'), {
+      changes: [change('f.one'), change('f.two'), change('f.three')],
+      targets: [{ checkId: 'c1', deviceId: 'd1', name: 'Ada' }],
+    });
+    useNetworkStore.getState().setContractCheckResult('c1', 'd1', { outcome: 'answered', rows });
+    return render(<ContractCheckResults collectionId='/ws' contractId='k1' />);
+  }
+
+  it('shows Break with the fields when Break and Pass are mixed', () => {
+    showOne([
+      { index: 0, verdict: 'pass' },
+      { index: 1, verdict: 'break' },
+      { index: 2, verdict: 'break' },
+    ]);
+    expect(screen.getByText('Break')).toBeInTheDocument();
+    expect(screen.queryByText('Pass')).toBeNull();
+    expect(screen.getByText('f.two, f.three')).toBeInTheDocument();
+  });
+
+  it('shows Pass when every row passes', () => {
+    showOne([
+      { index: 0, verdict: 'pass' },
+      { index: 1, verdict: 'pass' },
+    ]);
+    expect(screen.getByText('Pass')).toBeInTheDocument();
+  });
+
+  it('shows Not used when every row is not used', () => {
+    showOne([{ index: 0, verdict: 'not_used' }]);
+    expect(screen.getByText('Not used')).toBeInTheDocument();
+  });
+
+  it('shows Not used for an answer with no rows', () => {
+    showOne([]);
+    expect(screen.getByText('Not used')).toBeInTheDocument();
+  });
+
+  it('does not crash on an out-of-range index and shows Break without a field', () => {
+    const { container } = showOne([{ index: 99, verdict: 'break' }]);
+    expect(screen.getByText('Break')).toBeInTheDocument();
+    expect(container.querySelector('p.font-mono')).toBeNull();
+  });
 });
