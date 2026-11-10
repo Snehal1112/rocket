@@ -1098,11 +1098,6 @@ fn apply_transition(
     })
 }
 
-/// Recursively collect every request in the folder tree along with its
-/// collection-relative path. Folder segments prefer `dir_name` (the on-disk
-/// directory name) to match the path format the save handler emits.
-/// Requests with no `file_name` (e.g. freshly constructed in memory) are
-/// skipped because we cannot key them the same way the save path will.
 /// The changes of the live request signatures against a snapshot, in snapshot order.
 ///
 /// A request missing from `current` is one `request` entry, `Removed` and always breaking.
@@ -1138,6 +1133,11 @@ fn snapshot_changes(
     changes
 }
 
+/// Recursively collect every request in the folder tree along with its
+/// collection-relative path. Folder segments prefer `dir_name` (the on-disk
+/// directory name) to match the path format the save handler emits.
+/// Requests with no `file_name` (e.g. freshly constructed in memory) are
+/// skipped because we cannot key them the same way the save path will.
 pub(crate) fn walk_folder<'a>(
     folder: &'a Folder,
     prefix: &Path,

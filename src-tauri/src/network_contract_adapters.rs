@@ -81,12 +81,92 @@ impl RepoLocalRequests {
 impl LocalRequestsPort for RepoLocalRequests {
     fn local_requests(&self) -> DomainResult<Vec<LocalRequest>> {
         let mut locals = Vec::new();
-        // An unreadable collection fails the read. Skipping it could turn a break into
-        // `not_used`.
-        for summary in self.collections.list()? {
-            let collection = self.collections.get(&summary.name)?;
+        // The strict reads fail on a collection that cannot load and on a request file that
+        // cannot be parsed. Skipping either could turn a break into `not_used`.
+        for summary in self.collections.list_strict()? {
+            let collection = self.collections.get_strict(&summary.name)?;
             locals.extend(local_requests_of(&collection));
         }
         Ok(locals)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rocket_infra::{FsAttachmentStore, FsContractRepo, SharedPathCollectionRepo};
+    use std::path::PathBuf;
+    use std::sync::Mutex;
+
+    fn workspace_repo(workspace: &Path) -> Arc<dyn CollectionRepository> {
+        Arc::new(SharedPathCollectionRepo::new(Arc::new(Mutex::new(
+            workspace.to_path_buf(),
+        ))))
+    }
+
+    fn contract_changes(workspace: &Path) -> ServiceContractChanges {
+        ServiceContractChanges::new(Arc::new(ContractService::new(
+            Arc::new(FsContractRepo),
+            workspace_repo(workspace),
+            Arc::new(FsAttachmentStore),
+        )))
+    }
+
+    fn collection_root(workspace: &Path) -> PathBuf {
+        workspace.join("collections").join("orders")
+    }
+
+    #[test]
+    fn local_requests_fail_on_an_unparseable_request_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = workspace_repo(dir.path());
+        repo.create("orders").expect("create collection");
+        std::fs::write(
+            collection_root(dir.path()).join("broken.yml"),
+            "info:\n  name: Broken\n  type: http\nhttp:\n  method: GET\n  url: https://example.com\n  body:\n    type: bogus\n    data: x\n",
+        )
+        .expect("write broken.yml");
+        // The lenient read skips the broken file, so a lenient adapter would return a list.
+        assert!(repo
+            .get("orders")
+            .expect("lenient get")
+            .root
+            .items
+            .is_empty());
+
+        let result = RepoLocalRequests::new(repo).local_requests();
+
+        assert!(
+            result.is_err(),
+            "expected an error, got {:?}",
+            result.map(|l| l.len())
+        );
+    }
+
+    #[test]
+    fn pending_changes_refuses_an_invalid_contract_id() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = collection_root(dir.path());
+
+        let err = contract_changes(dir.path())
+            .pending_changes(&root.to_string_lossy(), "not-a-ulid")
+            .expect_err("invalid id");
+
+        assert!(matches!(err, DomainError::InvalidInput(_)), "{err:?}");
+    }
+
+    #[test]
+    fn pending_changes_maps_a_missing_contract_to_not_found() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = collection_root(dir.path());
+
+        let err = contract_changes(dir.path())
+            .pending_changes(&root.to_string_lossy(), &Ulid::new().to_string())
+            .expect_err("missing contract");
+
+        assert!(
+            matches!(&err, DomainError::NotFound(m) if m == "The contract was not found."),
+            "{err:?}"
+        );
     }
 }
