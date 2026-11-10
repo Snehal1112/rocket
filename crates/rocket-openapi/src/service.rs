@@ -100,6 +100,7 @@ pub struct OpenApiSyncService {
     backups: Option<Arc<dyn rocket_collection::openapi_backup::OpenApiBackupRepository>>,
 }
 
+#[doc(hidden)]
 pub fn sha256_hex(bytes: &[u8]) -> String {
     Sha256::digest(bytes)
         .iter()
@@ -398,6 +399,7 @@ impl OpenApiSyncService {
     /// The lock of one collection root. It is keyed through the apply repository, then through
     /// the lock key repository, like every other writer of the collection. A service with
     /// neither keys it by the root as given.
+    #[doc(hidden)]
     pub fn lock_of(&self, root: &Path) -> Arc<CollectionLock> {
         if let Some(deps) = &self.apply_deps {
             return collection_lock(deps.collections.as_ref(), root);
