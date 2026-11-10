@@ -225,7 +225,7 @@ describe('useNetworkEventBridge', () => {
   it('ignores events after unmount and stops listening', async () => {
     const view = await mountBridge();
     view.unmount();
-    await waitFor(() => expect(mocks.unlisten).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(mocks.unlisten).toHaveBeenCalledTimes(5));
     emit('changed', { type: 'nodesChanged' });
     emit('pairing', incomingEvent());
     expect(mocks.api.listNetworkNodes).toHaveBeenCalledTimes(1);
@@ -546,7 +546,7 @@ describe('useNetworkEventBridge transfers', () => {
   it('ignores transfer events after unmount', async () => {
     const view = await mountBridge();
     view.unmount();
-    await waitFor(() => expect(mocks.unlisten).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(mocks.unlisten).toHaveBeenCalledTimes(5));
     emit('transfer', offerEvent());
     emit('transfer', finishedEvent('completed'));
     expect(store().incomingTransfers).toEqual([]);
