@@ -4,6 +4,7 @@
 //! `rocket-network`, so tests run with fakes and no sockets.
 
 mod connections;
+mod contract_check;
 pub mod contract_check_match;
 pub mod contract_check_ports;
 mod frame_router;
@@ -32,6 +33,12 @@ pub(crate) mod test_support;
 #[cfg(test)]
 #[path = "connections_tests.rs"]
 mod connections_tests;
+// The contract check tests share these fakes.
+#[cfg(test)]
+pub(crate) mod contract_check_fakes;
+#[cfg(test)]
+#[path = "contract_check_tests.rs"]
+mod contract_check_tests;
 #[cfg(test)]
 #[path = "contract_check_match_tests.rs"]
 mod contract_check_match_tests;
@@ -86,6 +93,10 @@ mod transfer_receive_tests;
 #[path = "transfer_send_tests.rs"]
 mod transfer_send_tests;
 
+pub use contract_check::{
+    ContractCheckDeps, ContractCheckReview, ContractCheckService, ContractCheckStarted, LocalMatch,
+    ReviewedChange,
+};
 pub use contract_check_ports::{
     local_requests_of, policy_to_wire, wire_changes, ContractChangesPort, LocalRequestsPort,
     PendingContract,
