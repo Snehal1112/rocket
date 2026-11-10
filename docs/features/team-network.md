@@ -159,6 +159,8 @@ A provider asks paired teammates, "does this contract change break your requests
 4. The teammate gets a toast and a review dialog. For each change the dialog shows their matching local requests (names stay on that node), the verdict and a before and after diff. They press **Send result** or **Decline**.
 5. A row reads Pass, Break with the field names, Not used, No answer yet, Declined, Busy, or "No answer, the check expired". The rows live in the stores, so they survive closing and reopening the view.
 
+Results on the provider side are kept in memory and are lost when the app restarts. Changes to the method, the URL or a removed request are not covered by a check. A contract with only such changes is refused with "No changes can be checked."
+
 **What leaves the node.**
 
 - Provider to teammate: contract name and version, policy and the change list (method, path template, field, kind, old and new value cut to 256 characters, breaking flag). Values of sensitive fields (auth fields, tokens, sensitive headers) are sent as `[hidden]`. The offer must fit 64 KiB, or the provider sees "Check fewer changes at a time." and nothing is sent.
