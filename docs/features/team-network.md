@@ -1,6 +1,6 @@
 # Team network
 
-Rocket nodes on the same network find each other, pair once with a matching 6-digit code and stay paired until one side removes the pairing. Paired nodes can send each other a collection (see Send a collection). A sent collection can be kept in sync (see Keep a collection in sync). Checking contracts between nodes is a later project. Spec: `docs/superpowers/specs/2026-11-05-team-network-discovery-pairing-design.md`. Send a collection: `docs/superpowers/specs/2026-11-06-team-network-send-collection-design.md`, plans in `docs/superpowers/plans/team-network-send/`. Keep in sync: `docs/superpowers/specs/2026-11-08-team-network-sync-collection-design.md`, plans in `docs/superpowers/plans/team-network-sync/`. Plans: `docs/superpowers/plans/team-network/`. Roadmap: R-83, project CA-5.
+Rocket nodes on the same network find each other, pair once with a matching 6-digit code and stay paired until one side removes the pairing. Paired nodes can send each other a collection (see Send a collection). A sent collection can be kept in sync (see Keep a collection in sync). A provider can ask teammates whether a contract change breaks their requests (see Contract check). Spec: `docs/superpowers/specs/2026-11-05-team-network-discovery-pairing-design.md`. Send a collection: `docs/superpowers/specs/2026-11-06-team-network-send-collection-design.md`, plans in `docs/superpowers/plans/team-network-send/`. Keep in sync: `docs/superpowers/specs/2026-11-08-team-network-sync-collection-design.md`, plans in `docs/superpowers/plans/team-network-sync/`. Contract check: `docs/superpowers/specs/2026-11-09-team-network-contract-check-design.md`. Plans: `docs/superpowers/plans/team-network/`. Roadmap: R-83, project CA-5.
 
 ## What the user sees
 
@@ -147,6 +147,47 @@ A collection that was sent can be linked, so the two copies can be merged on req
 
 **Audit** (wire fields `device_id`, `collection`, `outcome`): `network_sync_sent` and `network_sync_received`, and `network_link_removed` (`device_id`, `collection`). Never file names or contents. The outcome shows in brackets unless it is `applied`.
 
+## Contract check
+
+A provider asks paired teammates, "does this contract change break your requests?" before accepting it. The check is advisory: it changes no contract state and writes no file on either node. Nothing blocks publish.
+
+**Flow.**
+
+1. The provider opens a contract view (the diff pane) that has changes since its signed snapshot and presses **Check with the team**. The button is disabled, with a tooltip, when the contract has no changes or the team network is off.
+2. The picker lists only paired nodes that are online, with a checkbox each. With none online it shows an empty state and Send stays off.
+3. Send builds one offer per node. Each offer expires after 10 minutes. The view shows a preview of the change list in the read-only Monaco diff and one row per teammate beside it.
+4. The teammate gets a toast and a review dialog. For each change the dialog shows their matching local requests (names stay on that node), the verdict and a before and after diff. They press **Send result** or **Decline**.
+5. A row reads Pass, Break with the field names, Not used, No answer yet, Declined, Busy, or "No answer, the check expired". The rows live in the stores, so they survive closing and reopening the view.
+
+**What leaves the node.**
+
+- Provider to teammate: contract name and version, policy and the change list (method, path template, field, kind, old and new value cut to 256 characters, breaking flag). Values of sensitive fields (auth fields, tokens, sensitive headers) are sent as `[hidden]`. The offer must fit 64 KiB, or the provider sees "Check fewer changes at a time." and nothing is sent.
+- Teammate to provider: only a verdict (pass, break or not used) per change index, or declined or busy. No request name, path or collection. The provider maps the index to its own change list to show the field.
+
+**Limits.**
+
+- Request shape only. Response fields need R-80 and R-81.
+- Removed or re-routed requests are not covered, because matching is by method and path.
+- Matching is by method and path, so two unrelated APIs with the same path look alike.
+- A teammate holds at most 1 open check per sending node and 3 in all. Any further offer gets Busy.
+- An offline teammate gets no check. There is no queue. A node on an older build never answers and shows No answer yet.
+- Only the active workspace of the teammate is read.
+
+**Code.**
+
+| Layer | Place |
+|---|---|
+| Frames, ids, caps | `crates/rocket-network` (`messages.rs`, `limits.rs`) |
+| Service and router branch | `crates/rocket-app/src/network/` |
+| Commands | `src-tauri/src/commands/network_contract_check.rs`: `network_contract_check_start`, `_review`, `_reply`, `_decline` (all in `src-tauri/app-commands.txt`) |
+| API, store, event bridge | `src/lib/tauri-api.ts`, `src/stores/network-store.ts` (contract check slice), `src/lib/network-contract-check-utils.ts` |
+| Consumer UI | `src/components/network/ContractCheckReviewDialog.tsx`, `ContractCheckChangeRow.tsx`, `ContractCheckChangeDiff.tsx` |
+| Provider UI | `src/components/contracts/ContractCheckAction.tsx`, `ContractCheckResults.tsx`, mounted in `ContractDiffPane.tsx`. Rows are kept in `src/stores/contract-check-runs-store.ts`. |
+
+**Frontend rules.** Peer text (teammate and contract names) renders as plain text. Backend error text is never echoed: the provider sees the fixed "Check fewer changes at a time." or "Could not start the check.", the teammate sees "Could not send. Try again." The diff uses a fixed file name, `contract-check.txt`.
+
+**Audit** (wire kinds): `network_contract_check_sent` on the provider and `network_contract_check_received` on the teammate. Never request names or values.
+
 ## Decisions
 
 - Visible to everyone on the network by default, with a Hide my node switch (spec section 2). Hiding stops the announcement and refuses new requests. Paired nodes still connect.
@@ -159,7 +200,7 @@ A collection that was sent can be linked, so the two copies can be merged on req
 - 200 paired devices, 50 saved addresses, 256 connections (32 unpaired), 5 pairing requests a minute.
 - A pairing request expires after 2 minutes. A declined device waits 1 minute.
 - Same-network discovery only, plus Add by address. No relay, no internet pairing.
-- No sending of contracts yet. A collection can be sent as described in Send a collection. A sent collection can be kept in sync as described in Keep a collection in sync.
+- Contracts are not sent, only checked (see Contract check). A collection can be sent as described in Send a collection. A sent collection can be kept in sync as described in Keep a collection in sync.
 - A link joins two copies. A third copy links to either node separately.
 - Sync is manual and reviewed: no automatic or background sync.
 - Collections sent before this feature, and collections that exist on both sides, cannot be linked.

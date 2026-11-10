@@ -16,6 +16,8 @@ Contents
 - 9: hub with 30 teammates
 - 10: hide, block, remove
 - 11: send a collection
+- 12: keep a collection in sync
+- 13: contract check
 
 ## Setup
 
@@ -155,3 +157,21 @@ Needs two paired machines, A and B, ideally one Linux and one Mac, both Online. 
 22. Apply conflict. Sync from A. On B, with the review dialog open, edit a request that B does not send (an unrelated request, or one only A changed), press Accept on B and Apply on A. Expect B to show exactly "The collection changed or is busy, or an earlier sync is not finished. Sync again. If this keeps happening, restart Rocket.", B to be unchanged apart from your own edit, and A to show "The other node could not apply the changes." Both links read "Out of date ... Sync again.", and the next sync ends in sync.
 23. Unconfirmed finish. Quit Rocket on B right after A pressed Apply, so B applies but A gets no result. Expect A to show "Applied here, but the other node did not confirm." or the backend text about the result not being sent, and the status line "Out of date with <B>. Sync again." If the next sync ends with the base mismatch text, unlink on both sides and send again with **Keep in sync**.
 24. Workspace switch. Link `Orders` in workspace W1, then switch to workspace W2, which has no `Orders`. Expect Settings, Team network, and the Network panel to list the link with the badge "Not in this workspace", with no advice to unlink and no Sync item (the Unlink button stays), and no `Orders` row in the sidebar. Switching back to W1 restores the state ("In sync"). If W2 has its own collection named `Orders`, links are matched by name, so that collection shows the menu entries of the link and may read as broken: do not unlink it for that reason alone.
+
+## 13: contract check
+
+Needs two paired machines, A (provider) and B (teammate), both Online and both on the same build. A has a collection with a contract that has changes since its signed snapshot (for example a changed response field and a changed header). B has a collection with a request that matches one of the changed method and path pairs. Open the Audit log on both machines before you start. A third machine C helps in check 4.
+
+1. Offer and review. On A open the contract diff view and press **Check with the team**. Expect the picker to list only B. Tick it and press Send. Expect a preview of the change list in the diff with one row "<B>: No answer yet". B gets a toast "<A> wants to check a change to <contract> (N changes)". Press Review on B: each change lists B's matching requests, a verdict (Pass, Break or Not used) and a before and after diff.
+2. Reply. On B press **Send result**. Expect the toast and dialog to go away and A's row to switch to Pass, Break or Not used. For Break the row lists the field names that break, and no request name of B's appears on A. Close the diff view on A and open it again: the row is still there.
+3. Decline. Run a new check and press **Decline** on B. Expect "Declined" on A and no toast about its own choice on B.
+4. Busy. B takes one open check per sending node and 3 in all. From A send a check and leave it unanswered, then send a second one: expect "Busy" on A for the second. With 3 other nodes (C and two more) each holding an open check on B, a 4th offer from a new node also gets "Busy". The earlier checks stay pending on B.
+5. Expiry. Send a check and leave B alone for 10 minutes. Expect A's row to read "No answer, the check expired". With the dialog open on B, it switches to "This check expired." with both buttons off.
+6. Older build. Run B on a build from before the contract check. Send a check from A. Expect the row to stay "No answer yet" and no error on either side.
+7. Other workspace. On B switch to a workspace that does not hold the matching request, then review a check. Expect every change to be Not used. Switch back and check again to see Pass or Break. B never reads a workspace that is not active.
+8. Secrets hidden. Change an Authorization header or a token on A so the change touches a sensitive field. Expect the preview on A and the dialog on B to show `[hidden]` for the old and new values, and no real secret in either place.
+9. Nothing written. Compare the collection folders on A and B (and the contract file) before and after a full check, with `git status` or a folder diff. Expect no file to change. The contract stays in the same status on A.
+10. Audit rows. Expect on A one `network_contract_check_sent` row and on B one `network_contract_check_received` row per check, with no request name and no value in any row.
+11. No match. Change a request on A that B does not have. Expect B's dialog to show Not used for every change and A's row to read Not used.
+12. Removed request. Delete a request on A and send the check. Expect no entry about the removed request, because removed or re-routed requests are not covered. Expect the other changes to be reported as usual.
+13. Limits and errors. Offer a contract with so many changes that the offer passes 64 KiB: expect "Check fewer changes at a time." in the picker and nothing sent. Turn the team network off on A, or open a contract with no changes: expect the button to be disabled with a tooltip. Quit Rocket on B and open the picker on A: B is not listed.

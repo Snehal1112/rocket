@@ -100,7 +100,7 @@ R-44 (delete the stale worktree directory) needs the user's confirmation first.
 
 - R-33 dedup series (49 work packages, tiers #89 to #91): two or three packages per sprint beside other work.
 - R-35 git integration audit backlog: needed before destructive git workflows.
-- Team network: send and keep-in-sync are built (manual checks R-83 sections 11 and 12 open, nothing ships before they run). Next: contract-check spec between nodes (CA-5). Open follow-ups: unconfirmed-apply trade-off (unlink and resend), lost `Unpair` frame in `socket.rs`, stale waiting toast and Cancel after Apply, link quarantine startup warning.
+- Team network: send, keep-in-sync and contract check are built (manual checks R-83 sections 11, 12 and 13 open, nothing ships before they run). Open follow-ups: trusted-node auto-reply, offline queue, CLI check (R-79), response-field checks (R-80, R-81), unconfirmed-apply trade-off (unlink and resend), lost `Unpair` frame in `socket.rs`, stale waiting toast and Cancel after Apply, link quarantine startup warning.
 - R-80, R-81, R-82 after R-79 and the cross-repo consumers decision.
 - Flow (`flow-roadmap.md`), Rust style (`rust-style-roadmap.md`), DDD (`ddd-roadmap.md`) follow their own batches.
 
