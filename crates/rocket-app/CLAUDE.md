@@ -8,7 +8,7 @@ not touch the filesystem or any I/O directly — those concerns live in
 POST and the host environment (`HostEnv`) behind traits. One read is left: the
 `which::which` command lookup in `agent_config_service.rs` (reads `PATH` and the file
 system, no roadmap item yet). The home directory comes from `HostEnv::home_dir()` (D-53). Do not add new reads. The crate is also
-large (about 33k non-test lines); D-80 to D-82 plan its split by context.
+large (about 33k non-test lines); the split by context is done for OpenAPI sync (D-81) and the domain rules (D-82); the flow runtime (D-80) is still open.
 
 ## Public Types
 

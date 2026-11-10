@@ -30,9 +30,10 @@ cargo test -p rocket-openapi -j4
 
 ## Module Map
 
-Each module has a `*_tests.rs` file beside it (some tests files cover a topic:
-`consent_tests.rs`, `disconnect_tests.rs`, `file_source_tests.rs`,
-`plan_tests.rs`).
+Most modules have a `*_tests.rs` file beside them, mounted through the `#[path]`
+chain in `apply_tests.rs`; `service`, `events` and `view` keep their tests inline.
+Some test files cover a topic: `consent_tests.rs`, `disconnect_tests.rs`,
+`file_source_tests.rs`, `plan_tests.rs`.
 
 | Module | Responsibility |
 |---|---|

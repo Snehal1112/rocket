@@ -25,7 +25,7 @@ pub struct PlanView {
 }
 
 impl PlanView {
-    pub fn empty() -> Self {
+    pub(crate) fn empty() -> Self {
         Self {
             pending: false,
             plan: SyncPlan::default(),
