@@ -24,6 +24,7 @@ pub mod history;
 pub mod import;
 pub mod load_test;
 pub mod network;
+pub mod network_contract_check;
 pub mod network_sync;
 pub mod oauth2;
 pub mod openapi_sync;

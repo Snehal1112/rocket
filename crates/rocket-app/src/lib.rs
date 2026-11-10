@@ -163,10 +163,12 @@ pub use mcp_tool_service::{
     WORKSPACE_ASSISTANT_INSTRUCTIONS,
 };
 pub use network::{
-    paired_limit_message, CollectionImportPort, ConflictFiles, FrameRouter, ImportedCollection,
-    LinkView, NetworkDeps, NetworkHandle, NetworkService, NetworkState, NetworkStatus, NodeGroup,
-    NodeStatus, NodeView, PairingDecision, PairingStarted, PeerSender, SendStarted, SyncDeps,
-    SyncService, Timing, TransferDeps, TransferService, TransferStaging,
+    paired_limit_message, CollectionImportPort, ConflictFiles, ContractCheckDeps,
+    ContractCheckReview, ContractCheckService, ContractCheckStarted, FrameRouter,
+    ImportedCollection, LinkView, LocalMatch, NetworkDeps, NetworkHandle, NetworkService,
+    NetworkState, NetworkStatus, NodeGroup, NodeStatus, NodeView, PairingDecision, PairingStarted,
+    PeerSender, ReviewedChange, SendStarted, SyncDeps, SyncService, Timing, TransferDeps,
+    TransferService, TransferStaging,
 };
 pub use oauth2_service::OAuth2Service;
 pub use openapi_change_link::{ChangeLinkOutcome, ChangeLinkPreview};

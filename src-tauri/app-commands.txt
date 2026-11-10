@@ -175,6 +175,10 @@ move_item
 network_add_address
 network_cancel_pairing
 network_cancel_transfer
+network_contract_check_decline
+network_contract_check_reply
+network_contract_check_review
+network_contract_check_start
 network_list_addresses
 network_list_blocked
 network_list_links

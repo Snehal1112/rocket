@@ -2,11 +2,9 @@ mod audit_bridge;
 mod auth_browser;
 mod callback_adapter;
 mod import_wiring;
-// The contract check service wires these adapters in the next task.
-#[allow(dead_code)]
-mod network_contract_adapters;
 #[cfg(test)]
 mod ipc_acl_tests;
+mod network_contract_adapters;
 // `pub` so integration tests in `src-tauri/tests/` can drive command
 // orchestration directly (e.g. `commands::acp_sessions::
 // start_workspace_assistant_inner`) — mirrors why `mcp` below is already `pub`.
@@ -1072,14 +1070,47 @@ pub fn run() {
             });
             // A linked send needs the sync service to make its link.
             transfer_svc.set_sync(Arc::clone(&sync_svc));
+            // Team network contract check. It only reads: a second, stateless contract
+            // service over the same repositories (the managed one stays a value, so no
+            // contract command changes), and the requests of the active workspace through
+            // `SharedPathCollectionRepo`, whose strict reads fail closed.
+            let check_contracts = Arc::new(ContractService::new(
+                Arc::new(FsContractRepo),
+                Arc::new(SharedPathCollectionRepo::new(Arc::clone(
+                    &active_workspace_path,
+                ))),
+                Arc::new(rocket_infra::FsAttachmentStore),
+            ));
+            let contract_check_svc =
+                rocket_app::ContractCheckService::new(rocket_app::ContractCheckDeps {
+                    network: Arc::clone(&network_svc) as Arc<dyn rocket_app::PeerSender>,
+                    changes: Arc::new(network_contract_adapters::ServiceContractChanges::new(
+                        check_contracts,
+                    )),
+                    locals: Arc::new(network_contract_adapters::RepoLocalRequests::new(
+                        Arc::new(SharedPathCollectionRepo::new(Arc::clone(
+                            &active_workspace_path,
+                        ))),
+                    )),
+                    events: Arc::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
+                    audit: audit_publisher.clone(),
+                });
+            commands::network_contract_check::start_contract_check_sweeper(Arc::clone(
+                &contract_check_svc,
+            ));
             // `TransferService::new` made itself the sink. The router replaces it, so it comes
-            // last: sync frames go to the sync service, all others to the transfer service.
-            let frame_router =
-                rocket_app::FrameRouter::new(Arc::clone(&transfer_svc), Arc::clone(&sync_svc));
+            // last: contract check frames go to the contract check service, sync frames to the
+            // sync service, all others to the transfer service.
+            let frame_router = rocket_app::FrameRouter::new(
+                Arc::clone(&transfer_svc),
+                Arc::clone(&sync_svc),
+                Arc::clone(&contract_check_svc),
+            );
             network_svc.set_transfer_sink(frame_router);
             app.manage(network_svc);
             app.manage(transfer_svc);
             app.manage(sync_svc);
+            app.manage(contract_check_svc);
             app.manage(commands::network::NetworkSlot::<rocket_app::NetworkHandle>::default());
             app.manage(Mutex::new(workspace_svc));
             app.manage(active_workspace_path);
@@ -1269,6 +1300,10 @@ pub fn run() {
             commands::network_sync::network_sync_conflict_files,
             commands::network_sync::network_list_links,
             commands::network_sync::network_unlink,
+            commands::network_contract_check::network_contract_check_start,
+            commands::network_contract_check::network_contract_check_review,
+            commands::network_contract_check::network_contract_check_reply,
+            commands::network_contract_check::network_contract_check_decline,
             commands::history::search_history,
             commands::templates::list_templates,
             commands::templates::get_template,

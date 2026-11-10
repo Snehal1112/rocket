@@ -37,14 +37,17 @@ mod connections_tests;
 #[cfg(test)]
 pub(crate) mod contract_check_fakes;
 #[cfg(test)]
-#[path = "contract_check_tests.rs"]
-mod contract_check_tests;
-#[cfg(test)]
 #[path = "contract_check_match_tests.rs"]
 mod contract_check_match_tests;
 #[cfg(test)]
 #[path = "contract_check_ports_tests.rs"]
 mod contract_check_ports_tests;
+#[cfg(test)]
+#[path = "contract_check_tests.rs"]
+mod contract_check_tests;
+#[cfg(test)]
+#[path = "e2e_contract_check_tests.rs"]
+mod e2e_contract_check_tests;
 #[cfg(test)]
 #[path = "e2e_sync_tests.rs"]
 mod e2e_sync_tests;
@@ -54,6 +57,9 @@ mod e2e_tests;
 #[cfg(test)]
 #[path = "e2e_transfer_tests.rs"]
 mod e2e_transfer_tests;
+#[cfg(test)]
+#[path = "frame_router_tests.rs"]
+mod frame_router_tests;
 #[cfg(test)]
 #[path = "pairing_tests.rs"]
 mod pairing_tests;

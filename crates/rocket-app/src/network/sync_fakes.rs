@@ -21,6 +21,8 @@ use rocket_network::{
 use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::{EventPublisher, PublishedEvent};
 
+use super::contract_check::{ContractCheckDeps, ContractCheckService};
+use super::contract_check_fakes::{pending, FakeChanges, FakeLocals, RecordingCheckEvents};
 use super::frame_router::FrameRouter;
 use super::sync::{Phase, SyncDeps, SyncService};
 use super::sync_collections::plan_changes;
@@ -763,6 +765,9 @@ pub(crate) struct SyncRig {
     pub sync: Arc<SyncService>,
     pub transfer: Arc<TransferService>,
     pub router: Arc<FrameRouter>,
+    /// The third service of the router. It has no pending contract.
+    pub contract_check: Arc<ContractCheckService>,
+    pub check_events: Arc<RecordingCheckEvents>,
     pub peers: Arc<FakePeers>,
     pub events: Arc<RecordingSyncEvents>,
     pub transfer_events: Arc<RecordingTransferEvents>,
@@ -811,12 +816,22 @@ pub(crate) fn sync_rig_timed(timing: Timing) -> SyncRig {
         timing,
     );
     transfer.set_sync(sync.clone());
-    let router = FrameRouter::new(transfer.clone(), sync.clone());
+    let check_events = Arc::new(RecordingCheckEvents::default());
+    let contract_check = ContractCheckService::new(ContractCheckDeps {
+        network: peers.clone(),
+        changes: FakeChanges::new(pending(Vec::new())),
+        locals: Arc::new(FakeLocals::default()),
+        events: check_events.clone(),
+        audit: audit.clone(),
+    });
+    let router = FrameRouter::new(transfer.clone(), sync.clone(), contract_check.clone());
     peers.set_transfer_sink(router.clone());
     SyncRig {
         sync,
         transfer,
         router,
+        contract_check,
+        check_events,
         peers,
         events,
         transfer_events,

@@ -677,3 +677,85 @@ async fn stopping_the_node_closes_the_open_socket() {
         "a stopped node must not keep a socket open"
     );
 }
+
+// ----- contract check frames -----
+
+/// Records every frame the node hands to its sink.
+#[derive(Default)]
+struct RecordingSink(std::sync::Mutex<Vec<PeerMessage>>);
+
+impl RecordingSink {
+    fn frames(&self) -> Vec<PeerMessage> {
+        self.0.lock().expect("sink lock").clone()
+    }
+}
+
+impl rocket_network::TransferSink for RecordingSink {
+    fn on_frame(&self, _from: DeviceId, message: PeerMessage) {
+        self.0.lock().expect("sink lock").push(message);
+    }
+
+    fn on_peer_gone(&self, _device: DeviceId) {}
+}
+
+fn contract_frames() -> Vec<PeerMessage> {
+    vec![
+        PeerMessage::ContractCheckOffer {
+            check_id: rocket_network::ContractCheckId::random()
+                .as_str()
+                .to_string(),
+            contract: "Orders API".into(),
+            version: "1.0.0".into(),
+            policy: rocket_network::ContractPolicyWire::Strict,
+            changes: Vec::new(),
+        },
+        PeerMessage::ContractCheckResult {
+            check_id: rocket_network::ContractCheckId::random()
+                .as_str()
+                .to_string(),
+            outcome: rocket_network::ContractCheckOutcome::Declined,
+            rows: Vec::new(),
+        },
+    ]
+}
+
+#[tokio::test(start_paused = true)]
+async fn contract_check_frames_from_a_paired_device_reach_the_sink() {
+    let (a, _h) = solo(2).await;
+    let sink = std::sync::Arc::new(RecordingSink::default());
+    a.svc.set_transfer_sink(sink.clone());
+    let remote = go_online(&a, 2, a.id()).await;
+
+    let frames = contract_frames();
+    for frame in frames.clone() {
+        remote.to_service.send(frame).await.expect("send frame");
+    }
+    settle().await;
+
+    assert_eq!(sink.frames(), frames, "both frames are delivered as sent");
+}
+
+#[tokio::test(start_paused = true)]
+async fn contract_check_frames_from_a_blocked_device_are_dropped_before_the_sink() {
+    let (a, _h) = solo(2).await;
+    let sink = std::sync::Arc::new(RecordingSink::default());
+    a.svc.set_transfer_sink(sink.clone());
+    let mut remote = go_online(&a, 2, a.id()).await;
+
+    // The block lands while the socket is open.
+    a.blocked.put(identity(2).device_id, "Peer");
+    for frame in contract_frames() {
+        // The second send can fail once the node closed the socket.
+        let _ = remote.to_service.send(frame).await;
+    }
+    settle().await;
+
+    assert!(
+        sink.frames().is_empty(),
+        "no contract frame reached the sink"
+    );
+    let next = tokio::time::timeout(Duration::from_secs(1), remote.from_service.recv())
+        .await
+        .expect("the socket ends at once");
+    assert_eq!(next, None, "the service closed the socket");
+}

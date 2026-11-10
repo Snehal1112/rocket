@@ -1,5 +1,6 @@
 //! End-to-end sync tests: two real nodes over real TLS on 127.0.0.1, each with a real
-//! `TransferService`, `SyncService`, `FrameRouter`, `FsLinkRepo` and `FsTransferStaging`.
+//! `TransferService`, `SyncService`, `ContractCheckService`, `FrameRouter`, `FsLinkRepo` and
+//! `FsTransferStaging`.
 //!
 //! Test-only fakes: `MemCollections` (the collection port, over the real export and the real
 //! file merge through `plan_changes`), `SyncImport` (the import of the first send) and
@@ -32,15 +33,16 @@ use rocket_network::{
 use rocket_shared::error::{DomainError, DomainResult};
 use tempfile::TempDir;
 
+use super::contract_check_fakes::{pending, FakeChanges, FakeLocals, RecordingCheckEvents};
 use super::e2e_tests::{online_pair, wait_until, E2eNode};
 use super::e2e_transfer_tests::{count_files, file, normal};
 use super::sync_collections::plan_changes;
 use super::sync_ports::{base_from_reader, FileChange, SyncCollectionPort, SyncFile};
 use super::test_support::RecordingEvents;
 use super::{
-    CollectionImportPort, ExportBackedSyncCollections, FrameRouter, ImportedCollection,
-    NetworkHandle, NetworkService, PeerSender, SyncDeps, SyncService, TransferDeps,
-    TransferService, TransferStaging, UNSAFE_ZIP_MESSAGE,
+    CollectionImportPort, ContractCheckDeps, ContractCheckService, ExportBackedSyncCollections,
+    FrameRouter, ImportedCollection, NetworkHandle, NetworkService, PeerSender, SyncDeps,
+    SyncService, TransferDeps, TransferService, TransferStaging, UNSAFE_ZIP_MESSAGE,
 };
 use crate::collection_export_service::CollectionExportService;
 
@@ -397,10 +399,15 @@ impl PeerSender for WireTap {
 
 // ----- the harness -----
 
-/// The whole sync stack of one node on top of its real network service.
-struct Stack {
-    node: E2eNode,
+/// The whole sync stack of one node on top of its real network service. The contract check
+/// service has fake ports; the contract check end-to-end tests set them.
+pub(super) struct Stack {
+    pub(super) node: E2eNode,
     sync: Arc<SyncService>,
+    pub(super) checks: Arc<ContractCheckService>,
+    pub(super) check_changes: Arc<FakeChanges>,
+    pub(super) check_locals: Arc<FakeLocals>,
+    pub(super) check_events: Arc<RecordingCheckEvents>,
     transfer: Arc<TransferService>,
     links: Arc<FsLinkRepo>,
     wire: Arc<WireTap>,
@@ -409,7 +416,7 @@ struct Stack {
 }
 
 /// Builds the services in the order `lib.rs` uses: transfer service, sync service,
-/// `set_sync`, router, then the router becomes the sink.
+/// `set_sync`, contract check service, router, then the router becomes the sink.
 fn build_stack(
     node: E2eNode,
     export: Arc<CollectionExportService>,
@@ -441,11 +448,29 @@ fn build_stack(
         audit: node.audit.clone(),
     });
     transfer.set_sync(Arc::clone(&sync));
-    let router = FrameRouter::new(Arc::clone(&transfer), Arc::clone(&sync));
+    let check_changes = FakeChanges::new(pending(Vec::new()));
+    let check_locals = Arc::new(FakeLocals::default());
+    let check_events = Arc::new(RecordingCheckEvents::default());
+    let checks = ContractCheckService::new(ContractCheckDeps {
+        network: node.svc.clone(),
+        changes: check_changes.clone(),
+        locals: check_locals.clone(),
+        events: check_events.clone(),
+        audit: node.audit.clone(),
+    });
+    let router = FrameRouter::new(
+        Arc::clone(&transfer),
+        Arc::clone(&sync),
+        Arc::clone(&checks),
+    );
     node.svc.set_transfer_sink(router);
     Stack {
         node,
         sync,
+        checks,
+        check_changes,
+        check_locals,
+        check_events,
         transfer,
         links,
         wire,
@@ -455,7 +480,7 @@ fn build_stack(
 }
 
 impl Stack {
-    fn id(&self) -> DeviceId {
+    pub(super) fn id(&self) -> DeviceId {
         self.node.id()
     }
 
@@ -558,7 +583,7 @@ impl Stack {
 }
 
 /// A node with the sync stack over in-memory collections.
-struct Peer {
+pub(super) struct Peer {
     stack: Stack,
     cols: Arc<MemCollections>,
 }
@@ -571,7 +596,7 @@ impl Deref for Peer {
     }
 }
 
-fn attach_sync(node: E2eNode, collections: Vec<(&str, Vec<SourceFile>)>) -> Peer {
+pub(super) fn attach_sync(node: E2eNode, collections: Vec<(&str, Vec<SourceFile>)>) -> Peer {
     let cols = Arc::new(MemCollections::default());
     for (name, files) in collections {
         cols.seed(name, files);
