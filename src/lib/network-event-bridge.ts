@@ -386,7 +386,7 @@ export function handleNetworkContractCheck(event: NetworkContractCheckEvent): vo
 }
 
 /**
- * Subscribes once, for the app's lifetime, to the four network channels and loads the first
+ * Subscribes once, for the app's lifetime, to the network channels and loads the first
  * status and node list. Mount it once, next to the other event bridges.
  */
 export function useNetworkEventBridge(): void {

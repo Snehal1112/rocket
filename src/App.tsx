@@ -10,6 +10,7 @@ import { OpenApiSyncNotifier } from '@/components/layout/OpenApiSyncNotifier';
 import { StatusBar } from '@/components/layout/StatusBar';
 import { TrustMigrationNotice } from '@/components/layout/TrustMigrationNotice';
 import { WorkspaceToolbar } from '@/components/layout/WorkspaceToolbar';
+import { ContractCheckReviewDialog } from '@/components/network/ContractCheckReviewDialog';
 import { IncomingTransferDialog } from '@/components/network/IncomingTransferDialog';
 import { NetworkIntroCard } from '@/components/network/NetworkIntroCard';
 import { PairingDialog } from '@/components/network/PairingDialog';
@@ -305,6 +306,7 @@ function App() {
       <PairingDialog />
       <IncomingTransferDialog />
       <SyncReviewDialog />
+      <ContractCheckReviewDialog />
       <NetworkIntroCard />
       <UpdateDialog />
       <OpenApiSyncNotifier />
