@@ -4,6 +4,8 @@ import { format } from 'date-fns';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { ChangeChip } from '@/components/contracts/ChangeChip';
+import { ContractCheckAction } from '@/components/contracts/ContractCheckAction';
+import { ContractCheckResults } from '@/components/contracts/ContractCheckResults';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -96,7 +98,14 @@ export function ContractDiffPane({ collectionId, contractId }: ContractDiffPaneP
             <span className='ml-2 text-destructive font-medium'>· {breakingCount} breaking</span>
           )}
         </span>
+        <ContractCheckAction
+          collectionId={collectionId}
+          contractId={contractId}
+          hasChanges={!loading && entries.length > 0}
+        />
       </div>
+
+      <ContractCheckResults collectionId={collectionId} contractId={contractId} />
 
       {/* Content */}
       <ScrollArea className='flex-1 min-h-0'>

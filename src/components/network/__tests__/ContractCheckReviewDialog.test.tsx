@@ -137,4 +137,37 @@ describe('ContractCheckReviewDialog', () => {
     expect(mocks.api.declineContractCheck).not.toHaveBeenCalled();
     expect(store().contractChecksIncoming).toHaveLength(1);
   });
+
+  it('shows a fixed sentence and disables the buttons when the review is rejected', async () => {
+    mocks.api.reviewContractCheck.mockRejectedValue(new Error('secret local request'));
+    store().addIncomingContractCheck({ checkId: 'c1', deviceId: 'd1', contract: 'X', changeCount: 1 });
+    store().openContractCheckDialog('c1');
+    render(<ContractCheckReviewDialog />);
+    expect(await screen.findByText('The check could not be loaded.')).toBeInTheDocument();
+    expect(screen.queryByText(/secret local request/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Send result' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Decline' })).toBeDisabled();
+  });
+
+  it('keeps the toast and re-enables the buttons when the reply fails', async () => {
+    mocks.api.replyContractCheck.mockRejectedValue(new Error('raw backend text'));
+    openCheck();
+    await screen.findByText('response.total');
+    await userEvent.click(screen.getByRole('button', { name: 'Send result' }));
+    expect(await screen.findByText('Could not send. Try again.')).toBeInTheDocument();
+    expect(screen.queryByText(/raw backend text/)).toBeNull();
+    expect(screen.getByRole('button', { name: 'Send result' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Decline' })).toBeEnabled();
+    expect(mocks.toast.dismiss).not.toHaveBeenCalled();
+    expect(store().contractChecksIncoming).toHaveLength(1);
+  });
+
+  it('sends once on a double click', async () => {
+    openCheck();
+    await screen.findByText('response.total');
+    const button = screen.getByRole('button', { name: 'Send result' });
+    await userEvent.dblClick(button);
+    await waitFor(() => expect(store().dialogContractCheckId).toBeNull());
+    expect(mocks.api.replyContractCheck).toHaveBeenCalledTimes(1);
+  });
 });

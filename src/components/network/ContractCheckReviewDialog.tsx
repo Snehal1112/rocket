@@ -24,6 +24,8 @@ import { useNetworkStore } from '@/stores/network-store';
 const store = () => useNetworkStore.getState();
 
 export const CONTRACT_CHECK_EXPIRED_TEXT = 'This check expired.';
+// The backend text may name a local request, so a failure shows this fixed sentence.
+export const SEND_FAILED_TEXT = 'Could not send. Try again.';
 
 type LoadState =
   | { status: 'loading' }
@@ -111,7 +113,7 @@ export function ContractCheckReviewDialog() {
               {CONTRACT_CHECK_EXPIRED_TEXT}
             </p>
           )}
-          {error && <StateBlock tone='error'>{error}</StateBlock>}
+          {error && <StateBlock tone='error'>{SEND_FAILED_TEXT}</StateBlock>}
         </div>
         <DialogFooter>
           <Button

@@ -26,7 +26,8 @@ export function ContractCheckChangeDiff({
         key={`${checkId}:${change.index}`}
         hideStageToggle
         diffState={{
-          filePath: `${change.method} ${change.pathTemplate} ${change.field}`,
+          // A fixed name, so peer text never becomes a file path.
+          filePath: 'contract-check.txt',
           repositoryId: '',
           repositoryLabel: 'Contract check',
           oldContent: change.oldValue ?? '',
