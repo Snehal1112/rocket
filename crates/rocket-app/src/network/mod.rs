@@ -4,6 +4,7 @@
 //! `rocket-network`, so tests run with fakes and no sockets.
 
 mod connections;
+pub mod contract_check_match;
 mod frame_router;
 mod handler;
 mod nodes;
@@ -30,6 +31,9 @@ pub(crate) mod test_support;
 #[cfg(test)]
 #[path = "connections_tests.rs"]
 mod connections_tests;
+#[cfg(test)]
+#[path = "contract_check_match_tests.rs"]
+mod contract_check_match_tests;
 #[cfg(test)]
 #[path = "e2e_sync_tests.rs"]
 mod e2e_sync_tests;
