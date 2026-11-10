@@ -1,6 +1,6 @@
 # Phase 8 series 3: a home for OpenAPI sync (D-81)
 
-Status: approved 2026-11-09 (scope chosen by the user: new crate `rocket-openapi`). Roadmap: `docs/roadmaps/ddd-roadmap.md` Phase 8, D-81. Decisions: `docs/engineering/ddd-decisions.md` (D-02 split by context). Follows series 2 (`2026-11-09-ddd-phase8-series2-domain-rules-design.md`).
+Status: approved 2026-11-09, implemented (scope chosen by the user: new crate `rocket-openapi`). Roadmap: `docs/roadmaps/ddd-roadmap.md` Phase 8, D-81. Decisions: `docs/engineering/ddd-decisions.md` (D-02 split by context). Follows series 2 (`2026-11-09-ddd-phase8-series2-domain-rules-design.md`).
 
 ## Goal
 

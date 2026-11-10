@@ -87,7 +87,7 @@ Each item replaces a direct `std::fs` or `reqwest` call with an existing or new 
 |---|---|---|---|
 | D-40 | Contract attachments: `create_dir_all`, `metadata`, `copy`, `exists`, `read_dir`, `remove_file` (six sites). Add an attachment store port and an `rocket-infra` adapter. | `rocket-app/src/contract_service.rs:54,74,88,262,263,271` | done (2026-11-04) |
 | D-41 | Workspace directory checks and `remove_dir_all`. Move behind the existing `WorkspaceRepository` or a new method on it. | `rocket-app/src/workspace_service.rs:267,329,378-379` | done (2026-11-04) |
-| D-42 | `fs::canonicalize` for the per-collection lock key. Resolve the key in an infra helper or accept a pre-resolved path. | `rocket-app/src/collection_lock.rs:84` | done (2026-11-04) |
+| D-42 | `fs::canonicalize` for the per-collection lock key. Resolve the key in an infra helper or accept a pre-resolved path. | `rocket-collection/src/collection_lock.rs` (moved from `rocket-app` 2026-11-10, D-81) | done (2026-11-04) |
 | D-43 | `fs::metadata` of the proto file for the cache key. Move to the `ProtoLoader` port. | `rocket-app/src/grpc_service.rs:475` | done (2026-11-04) |
 | D-44 | `reqwest` client build (fallback) and token POST inside `OAuth2Service`. Require a `TokenClientProvider` and remove the fallback; move the POST behind the port. | `rocket-app/src/oauth2_service.rs:226-242,420-431` | done (2026-11-04) |
 | D-45 | Environment reads: process env snapshot, `USER`/`USERNAME`, `current_exe`. Inject an `EnvReader` (the agent config service already does). | `execution_service.rs:1413,2674`, `contract_service.rs:349-350`, `acp_session_service.rs:707` | done (2026-11-04) |
@@ -146,7 +146,7 @@ Larger moves, each with its own spec. Do not start before Phases 3, 4 and 6 are 
 | ID | Item | Where | Status |
 |---|---|---|---|
 | D-80 | Extract the flow runtime (13 `flow_*.rs` files, about 25k lines with tests) from `rocket-app` into `rocket-flow` or a runtime crate. Keep the service as thin wiring. | `rocket-app/src/flow_*.rs` | open |
-| D-81 | Give OpenAPI sync a home: about 20 `openapi_sync_*` files and the rules (apply, skip, reset, consent, scheduler) are application code today. Move the rules to `rocket-collection` or a new `rocket-openapi` crate. | `rocket-app/src/openapi_*` | open |
+| D-81 | Give OpenAPI sync a home: about 20 `openapi_sync_*` files and the rules (apply, skip, reset, consent, scheduler) are application code today. Move the rules to `rocket-collection` or a new `rocket-openapi` crate. | `rocket-app/src/openapi_*` | done (2026-11-10, sync service, apply, events and view in rocket-openapi; scheduler stays in rocket-app; collection_lock moved to rocket-collection) |
 | D-82 | Same for contract, proposal and conversation services: the types are in `rocket-collection` and `rocket-acp`, the rules in `rocket-app`. | `contract_service.rs`, `proposal_service.rs`, `conversation_service.rs` | done (2026-11-09, contract, conversation and proposal structural rules moved; fingerprints and masking stay in rocket-app) |
 | D-83 | Move `AssistantMode` out of `mcp_tool_service.rs:77`. (D-05 ruled no rename of `rocket-acp`.) | `rocket-acp`, `rocket-app/src/mcp_tool_service.rs` | done (2026-11-09) |
 | D-84 | Move the script-facing cookie types (`CookieEntry`, `CookieInput`) from `rocket-http/src/script_cookie.rs` into `rocket-scripting`, so `rocket-scripting` no longer depends on `rocket-http` for them (re-scoped, see the decisions log). | `rocket-http/src/script_cookie.rs`, `rocket-scripting/src/host.rs:9` | done (2026-11-09, re-scoped: the whole module moved; the dependency on rocket-http stays) |
@@ -171,7 +171,7 @@ Larger moves, each with its own spec. Do not start before Phases 3, 4 and 6 are 
 3. Phase 5 (domain purity), `rocket-import` first (D-51), then `rocket-http` (D-50).
 4. Phase 6 (rich model), one aggregate at a time, tests first.
 5. Phase 7 (shared kernel). D-70 and D-71 are cheap and can go early. D-74 is done.
-6. Phase 8 (contexts). Each item needs a spec. Start with D-80 or D-81.
+6. Phase 8 (contexts). Each item needs a spec. Start with D-80 (D-81 is done).
 7. Phase 9 once the first phases are done.
 
 Overlap with the style roadmap: S-100 (split `run()`), S-102 (split `tool_server.rs`), S-103 (move the OAuth callback server, same as D-30) and S-105 (split `git.rs`) are structural fixes that serve both. Do them once.
@@ -184,3 +184,4 @@ Overlap with the style roadmap: S-100 (split `run()`), S-102 (split `tool_server
 - Ruling (2026-11-09): D-84 is re-scoped. The whole `script_cookie.rs` moved into `rocket-scripting`, not only `CookieEntry` and `CookieInput`. Why: the types are the script API language, and the dependency stays one way (scripting to http). `rocket-scripting` still depends on `rocket-http` for `HttpRequest`, `HttpResponse` and the cookie jar. Design in `docs/superpowers/specs/2026-11-09-ddd-phase8-series1-small-moves-design.md`.
 - Ruling (2026-11-09): D-86 is closed for the pure parts only. `graphql_document` moved to `rocket-collection`, `assertion_evaluator` to `rocket-scripting` and `effective_capabilities` to `rocket-collection`. The graphql services and `CollectionTrustService` stay in `rocket-app` because they hold ports, events and locks.
 - Ruling (2026-11-09): D-82 adds the edge `rocket-acp` -> `rocket-collection` (and `sha2` in `rocket-acp`). Why: the proposal path and apply rules work on `Folder`, `Request` and `FolderSettings`, and the dependency stays one way (`rocket-collection` must not depend on `rocket-acp`). `folder_shape` moved too, because `Folder::dir_or_name` made it pure. `folder_fingerprint`, masking and the environment name check stay in `rocket-app`. Design in `docs/superpowers/specs/2026-11-09-ddd-phase8-series2-domain-rules-design.md`.
+- Ruling (2026-11-10): D-81 gives OpenAPI sync its own crate `rocket-openapi` (not `rocket-collection`). Why: the service needs `rocket-import`, `rocket-http` and `rocket-environment`, which `rocket-collection` must not depend on. `collection_lock` moved to `rocket-collection` so both `rocket-app` and `rocket-openapi` share it. `OpenApiSyncScheduler` stays in `rocket-app` because it is a tokio supervisor. Design in `docs/superpowers/specs/2026-11-09-ddd-phase8-series3-openapi-sync-home-design.md`.

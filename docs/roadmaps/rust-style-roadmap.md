@@ -160,7 +160,7 @@ Do these where the call site is unclear. Skip deno-op ABI parameters (`rocket-in
 | S-60 | `rocket-export`: `bruno.rs:153` `include_environments`; `scripts.rs:208` `markers` (low) | open |
 | S-61 | `rocket-import/src/openapi`: `bundle.rs:463` (two bools), `entry.rs:36`, `source_url.rs:271` (pub), `merge.rs:354,363` `case_insensitive`, `reader.rs:172,603` `is_v2` (use a `SpecVersion` enum) | open |
 | S-62 | `rocket-infra`: `fs_collection/tree.rs:15,235`, `reqwest_executor.rs:218`, `acp_agent_client.rs:1172` | open |
-| S-63 | `rocket-app`: `git_service.rs:150,196` `force`, `openapi_sync_apply.rs:491` `include_token`, `oauth2_service.rs:226`, `execution_service.rs:272,599,608` (the `sent` pair is the least clear), `script_chain.rs:167`, `mcp_read_views.rs:206,491`, `proposal_service.rs:920,940,993`, `flow_poll.rs:64`, `flow_routing.rs:22,46,63`, `flow_run_cache.rs:1180`, `flow_execution_service.rs:2279,2396` | open |
+| S-63 | `rocket-app`: `git_service.rs:150,196` `force`, `rocket-openapi` `apply.rs` (was `openapi_sync_apply.rs:491`) `include_token`, `oauth2_service.rs:226`, `execution_service.rs:272,599,608` (the `sent` pair is the least clear), `script_chain.rs:167`, `mcp_read_views.rs:206,491`, `proposal_service.rs:920,940,993`, `flow_poll.rs:64`, `flow_routing.rs:22,46,63`, `flow_run_cache.rs:1180`, `flow_execution_service.rs:2279,2396` | open |
 | S-64 | `src-tauri/src/tauri_tracing_layer.rs:~47` `always_send` | open |
 
 ### 3c. Tuples, error types, std traits
@@ -197,7 +197,7 @@ Only the avoidable ones. Most clones in the audit are required.
 | S-87 | Scope maps and each secret value cloned twice | `rocket-infra/src/scripting/ops/host.rs:243-249,172,223,178-181` | open |
 | S-88 | `acp_agent_client.rs:347,352,364`; small ones in `conversions/request.rs:46,63,116-117`, `grpc.rs:44` | `rocket-infra` | open |
 | S-89 | `chain.rs:7` clones the whole event to blank the hash; `chain.rs:44` `prev` can be `&str` | `rocket-audit/src/chain.rs:7,44` | open |
-| S-90 | Avoidable clones in proposal and ACP services | `rocket-app`: `proposal_service.rs:847,1053-1078,1310-1326`, `acp_session_service.rs:272,339`, `workspace_service.rs:111-112,300,305`, `openapi_connect.rs:327-328`, `execution_service.rs:2941,3629,3992`, `flow_execution_service.rs:1381-1385,2581,1806,1892` | open |
+| S-90 | Avoidable clones in proposal and ACP services | `rocket-app`: `proposal_service.rs:847,1053-1078,1310-1326`, `acp_session_service.rs:272,339`, `workspace_service.rs:111-112,300,305`, `rocket-openapi` `connect.rs` (was `openapi_connect.rs:327-328`), `execution_service.rs:2941,3629,3992`, `flow_execution_service.rs:1381-1385,2581,1806,1892` | open |
 | S-91 | `openapi_sync.rs:204-212,272-329`, `environments.rs:298-336`, `import.rs:50,70,87,107,124,334,417`, `workspaces.rs:142` (`.cloned()`) | `src-tauri/src/commands` | open |
 | S-92 | `lib.rs:348` and `:295` | `src-tauri/src/lib.rs` | open |
 | S-93 | `push_str(&format!(..))` becomes `write!` | `rocket-flow/src/lint.rs:368`; `rocket-export/src/scripts.rs:355,360`; `rocket-import`: `openapi/source_url.rs:364`, `openapi/sync/merge.rs:260,625`, `converter/wsdl.rs:21,67`; `rocket-app`: `mcp_read_views.rs:965,979,985,995,999`, `flow_service.rs:292,312`, `export_service.rs:78`; `src-tauri/commands/oauth2.rs:249,475,481` | open |

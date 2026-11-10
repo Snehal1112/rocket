@@ -17,7 +17,7 @@ Pointers to the feature and engineering docs. Open the one that matches the area
 - `docs/features/example-masking.md` for how saved request examples get their secrets masked in a git commit.
 - `docs/features/bruno-import-strictness.md` for Bruno 3 imports (files are copied as they are), what Rocket's readers now tolerate, and the known gaps.
 - `docs/features/response-examples.md` for saved response examples (save, view, limits, the Try temporary tab and its save guards, manual checks).
-- `docs/features/openapi-sync-ux.md` for the OpenAPI sync tab (spec updates bulk rules, View spec, Reset and Restore, Connect, local files, known limits, manual checks).
+- `docs/features/openapi-sync-ux.md` for the OpenAPI sync tab (the service lives in `crates/rocket-openapi`; spec updates bulk rules, View spec, Reset and Restore, Connect, local files, known limits, manual checks).
 - `docs/features/ipc-command-acl.md` for the app command ACL (app-commands.txt, main-window-only access).
 - `docs/features/settings-page.md` for the global Settings page (sections, lock, shortcuts, how to add a section).
 - `docs/features/elevation.md` for the four elevation levels (VS Code colours, shadows, which surface uses which, borders).

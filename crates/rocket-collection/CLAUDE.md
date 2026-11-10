@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-`rocket-collection` is a domain crate with no I/O. `openapi_consent.rs` takes the collection root as given; `FsOpenApiConsentRepo` canonicalizes it first (D-52 in `docs/roadmaps/ddd-roadmap.md`). It defines the Collection aggregate and its repository trait. The filesystem implementation lives in `rocket-infra`.
+`rocket-collection` is a domain crate with no I/O. `openapi_consent.rs` takes the collection root as given; `FsOpenApiConsentRepo` canonicalizes it first (D-52 in `docs/roadmaps/ddd-roadmap.md`). It defines the Collection aggregate and its repository trait. The filesystem implementation lives in `rocket-infra`. `collection_lock.rs` holds the process-wide per-collection lock (a fair FIFO ticket lock, not reentrant), shared by `CollectionService` in `rocket-app` and the sync service in `rocket-openapi`. Lock order: the collection lock first, then the file transaction's own guard.
 
 ## Commands
 
