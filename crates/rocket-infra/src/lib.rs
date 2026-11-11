@@ -65,6 +65,7 @@ pub mod shared_path_environment_repo;
 pub mod shared_path_flow_repo;
 pub mod shared_path_history_repo;
 pub mod shared_path_template_repo;
+mod tolerant_list;
 mod trust_discovery;
 mod websocket_client;
 mod yaml_io;

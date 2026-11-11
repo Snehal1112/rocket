@@ -11,6 +11,7 @@ use rocket_acp::{AgentConfig, AgentConfigRepository};
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
+use crate::tolerant_list::TolerantList;
 
 pub struct FsAgentConfigRepo {
     path: PathBuf,
@@ -23,24 +24,24 @@ impl FsAgentConfigRepo {
         Self { path }
     }
 
-    fn read_all(&self) -> DomainResult<Vec<AgentConfig>> {
+    fn read_all(&self) -> DomainResult<TolerantList<AgentConfig>> {
         if !self.path.exists() {
-            return Ok(Vec::new());
+            return Ok(TolerantList::empty());
         }
         let content = fs::read_to_string(&self.path)
             .map_err(|e| DomainError::Io(format!("Failed to read agent_configs.yml: {e}")))?;
         if content.trim().is_empty() {
             // A zero-byte file (e.g. left behind by an interrupted first
             // write) is not an error. Treat it the same as a missing file.
-            return Ok(Vec::new());
+            return Ok(TolerantList::empty());
         }
-        serde_yaml::from_str(&content).map_err(|e| {
+        TolerantList::parse(&content, "agent_configs.yml").map_err(|e| {
             DomainError::InvalidInput(format!("Failed to parse agent_configs.yml: {e}"))
         })
     }
 
-    fn write_all(&self, configs: &[AgentConfig]) -> DomainResult<()> {
-        let yaml = serde_yaml::to_string(configs).map_err(|e| {
+    fn write_all(&self, list: &TolerantList<AgentConfig>) -> DomainResult<()> {
+        let yaml = list.render().map_err(|e| {
             DomainError::InvalidInput(format!("Failed to serialize agent_configs.yml: {e}"))
         })?;
         atomic_write(&self.path, yaml.as_bytes())
@@ -50,24 +51,24 @@ impl FsAgentConfigRepo {
 
 impl AgentConfigRepository for FsAgentConfigRepo {
     fn list(&self) -> DomainResult<Vec<AgentConfig>> {
-        self.read_all()
+        Ok(self.read_all()?.items)
     }
 
     fn get(&self, id: &str) -> DomainResult<Option<AgentConfig>> {
-        Ok(self.read_all()?.into_iter().find(|c| c.id == id))
+        Ok(self.read_all()?.items.into_iter().find(|c| c.id == id))
     }
 
     fn save(&self, config: &AgentConfig) -> DomainResult<()> {
-        let mut configs = self.read_all()?;
-        configs.retain(|c| c.id != config.id);
-        configs.push(config.clone());
-        self.write_all(&configs)
+        let mut list = self.read_all()?;
+        list.items.retain(|c| c.id != config.id);
+        list.items.push(config.clone());
+        self.write_all(&list)
     }
 
     fn delete(&self, id: &str) -> DomainResult<()> {
-        let mut configs = self.read_all()?;
-        configs.retain(|c| c.id != id);
-        self.write_all(&configs)
+        let mut list = self.read_all()?;
+        list.items.retain(|c| c.id != id);
+        self.write_all(&list)
     }
 }
 
@@ -210,6 +211,26 @@ mod tests {
         repo.save(&sample("agent-1")).expect("save");
         repo.delete("no-such-id")
             .expect("delete of missing id must not error");
+        assert_eq!(repo.list().expect("list").len(), 1);
+    }
+
+    #[test]
+    fn an_entry_from_a_newer_build_is_hidden_but_kept_on_save() {
+        let (dir, repo) = setup();
+        let path = dir.path().join("agent_configs.yml");
+        fs::write(&path, "- id: future\n  label: F\n  kind: from_the_future\n").expect("write");
+
+        assert!(repo
+            .list()
+            .expect("an unknown kind must not fail")
+            .is_empty());
+
+        repo.save(&sample("agent-1")).expect("save");
+        let raw = fs::read_to_string(&path).expect("read");
+        assert!(
+            raw.contains("from_the_future"),
+            "the newer entry was lost: {raw}"
+        );
         assert_eq!(repo.list().expect("list").len(), 1);
     }
 

@@ -12,6 +12,7 @@ use rocket_environment::secret_manager::{SecretManagerConnection, SecretManagerR
 use rocket_shared::error::{DomainError, DomainResult};
 
 use crate::atomic_write;
+use crate::tolerant_list::TolerantList;
 
 pub struct FsSecretManagerRepo {
     path: PathBuf,
@@ -26,26 +27,26 @@ impl FsSecretManagerRepo {
         Self { path }
     }
 
-    fn read_all(&self) -> DomainResult<Vec<SecretManagerConnection>> {
+    fn read_all(&self) -> DomainResult<TolerantList<SecretManagerConnection>> {
         if !self.path.exists() {
-            return Ok(Vec::new());
+            return Ok(TolerantList::empty());
         }
         let content = fs::read_to_string(&self.path)
             .map_err(|e| DomainError::Io(format!("Failed to read secret_managers.yml: {e}")))?;
         if content.trim().is_empty() {
             // A zero-byte file (e.g. left behind by an interrupted first
             // write) is not an error — treat it the same as "missing".
-            return Ok(Vec::new());
+            return Ok(TolerantList::empty());
         }
-        serde_yaml::from_str(&content).map_err(|e| {
+        TolerantList::parse(&content, "secret_managers.yml").map_err(|e| {
             DomainError::InvalidInput(format!(
                 "Failed to parse secret_managers.yml: {e}. The file may have been written by a newer version of Rocket."
             ))
         })
     }
 
-    fn write_all(&self, connections: &[SecretManagerConnection]) -> DomainResult<()> {
-        let yaml = serde_yaml::to_string(connections).map_err(|e| {
+    fn write_all(&self, list: &TolerantList<SecretManagerConnection>) -> DomainResult<()> {
+        let yaml = list.render().map_err(|e| {
             DomainError::InvalidInput(format!("Failed to serialize secret_managers.yml: {e}"))
         })?;
         atomic_write(&self.path, yaml.as_bytes())
@@ -55,24 +56,24 @@ impl FsSecretManagerRepo {
 
 impl SecretManagerRepository for FsSecretManagerRepo {
     fn list(&self) -> DomainResult<Vec<SecretManagerConnection>> {
-        self.read_all()
+        Ok(self.read_all()?.items)
     }
 
     fn get(&self, id: &str) -> DomainResult<Option<SecretManagerConnection>> {
-        Ok(self.read_all()?.into_iter().find(|c| c.id == id))
+        Ok(self.read_all()?.items.into_iter().find(|c| c.id == id))
     }
 
     fn save(&self, connection: &SecretManagerConnection) -> DomainResult<()> {
-        let mut connections = self.read_all()?;
-        connections.retain(|c| c.id != connection.id);
-        connections.push(connection.clone());
-        self.write_all(&connections)
+        let mut list = self.read_all()?;
+        list.items.retain(|c| c.id != connection.id);
+        list.items.push(connection.clone());
+        self.write_all(&list)
     }
 
     fn delete(&self, id: &str) -> DomainResult<()> {
-        let mut connections = self.read_all()?;
-        connections.retain(|c| c.id != id);
-        self.write_all(&connections)
+        let mut list = self.read_all()?;
+        list.items.retain(|c| c.id != id);
+        self.write_all(&list)
     }
 }
 
@@ -193,19 +194,20 @@ mod tests {
     }
 
     #[test]
-    fn a_row_with_an_unknown_provider_fails_loudly_and_names_it() {
+    fn a_row_with_an_unknown_provider_is_hidden_not_turned_into_rocketvault() {
         let (dir, repo) = setup();
-        std::fs::write(
-            dir.path().join("secret_managers.yml"),
-            "- id: x\n  label: X\n  provider: bogus\n",
-        )
-        .expect("write");
+        let path = dir.path().join("secret_managers.yml");
+        std::fs::write(&path, "- id: x\n  label: X\n  provider: bogus\n").expect("write");
 
-        let err = repo
-            .list()
-            .expect_err("must not silently become RocketVault");
+        assert_eq!(repo.list().expect("list"), Vec::new());
+        assert_eq!(repo.get("x").expect("get"), None);
 
-        assert!(err.to_string().contains("bogus"), "got: {err}");
+        repo.save(&sample("conn-1")).expect("save");
+        let raw = std::fs::read_to_string(&path).expect("read");
+        assert!(
+            raw.contains("bogus"),
+            "the entry must stay as written: {raw}"
+        );
     }
 
     #[test]
@@ -230,20 +232,44 @@ mod tests {
     }
 
     #[test]
-    fn an_unreadable_file_points_at_a_newer_build() {
+    fn an_entry_from_a_newer_build_is_hidden_but_kept_on_save() {
         let (dir, repo) = setup();
+        let path = dir.path().join("secret_managers.yml");
         std::fs::write(
-            dir.path().join("secret_managers.yml"),
+            &path,
             "- id: x\n  label: X\n  base_url: https://v\n  client_id: a\n  provider: azure\n  config: !FutureProvider {region: eu}\n",
         )
         .expect("write");
 
-        let err = repo
-            .list()
-            .expect_err("an unknown config tag must not load");
+        assert_eq!(
+            repo.list().expect("an unknown config tag must not fail"),
+            Vec::new()
+        );
 
-        let msg = err.to_string();
-        assert!(msg.contains("newer version of Rocket"), "got: {msg}");
-        assert!(msg.contains("secret_managers.yml"), "got: {msg}");
+        repo.save(&sample("conn-1")).expect("save");
+        let raw = std::fs::read_to_string(&path).expect("read");
+        assert!(
+            raw.contains("FutureProvider"),
+            "the newer entry was lost: {raw}"
+        );
+        assert_eq!(repo.list().expect("list").len(), 1);
+
+        repo.delete("conn-1").expect("delete");
+        let raw = std::fs::read_to_string(&path).expect("read");
+        assert!(
+            raw.contains("FutureProvider"),
+            "the newer entry was lost: {raw}"
+        );
+    }
+
+    #[test]
+    fn text_that_is_not_a_list_is_still_an_error() {
+        let (dir, repo) = setup();
+        std::fs::write(dir.path().join("secret_managers.yml"), "id: x\n").expect("write");
+        let err = repo.list().expect_err("a map is not a list");
+        assert!(
+            err.to_string().contains("secret_managers.yml"),
+            "got: {err}"
+        );
     }
 }
