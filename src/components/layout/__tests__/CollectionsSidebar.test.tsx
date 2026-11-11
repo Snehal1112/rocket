@@ -14,6 +14,9 @@ import { usePaneStore } from '@/stores/pane-store';
 import { type FlowTab, isExampleTab, isFlowTab } from '@/types/pane-types';
 import { useWorkspaceStore } from '@/stores/workspace-store';
 
+// The move menu is hidden behind a flag, so turn it on for these tests.
+vi.mock('@/lib/feature-flags', () => ({ FEATURE_FLAGS: { moveRequestToCollection: true } }));
+
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn().mockResolvedValue(() => undefined),
 }));

@@ -34,6 +34,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Tree, TreeItem, TreeItemContent } from '@/components/ui/tree';
 import { METHOD_TEXT_COLOR } from '@/lib/colors';
+import { FEATURE_FLAGS } from '@/lib/feature-flags';
 import {
   encodeFlowRequestDragPayload,
   FLOW_REQUEST_DRAG_MIME,
@@ -381,25 +382,27 @@ export function RequestNode({
               >
                 <Pencil aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Rename
               </DropdownMenuItem>
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger>
-                  <FolderInput aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Move to...
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className='w-48'>
-                  {summaries.map((s) => (
-                    <DropdownMenuItem
-                      key={s.name}
-                      onClick={() => void onMove(collectionName, path, s.name, '')}
-                      disabled={s.name === collectionName}
-                    >
-                      {s.name}
-                    </DropdownMenuItem>
-                  ))}
-                  {summaries.length === 0 && (
-                    <DropdownMenuItem disabled>No collections</DropdownMenuItem>
-                  )}
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
+              {FEATURE_FLAGS.moveRequestToCollection && (
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>
+                    <FolderInput aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Move to...
+                  </DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent className='w-48'>
+                    {summaries.map((s) => (
+                      <DropdownMenuItem
+                        key={s.name}
+                        onClick={() => void onMove(collectionName, path, s.name, '')}
+                        disabled={s.name === collectionName}
+                      >
+                        {s.name}
+                      </DropdownMenuItem>
+                    ))}
+                    {summaries.length === 0 && (
+                      <DropdownMenuItem disabled>No collections</DropdownMenuItem>
+                    )}
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              )}
               <DropdownMenuSeparator />
               {/* Pane-targeting actions. */}
               {otherGroupIds.length === 1 && (
@@ -458,23 +461,25 @@ export function RequestNode({
         >
           <Pencil aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Rename
         </ContextMenuItem>
-        <ContextMenuSub>
-          <ContextMenuSubTrigger>
-            <FolderInput aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Move to...
-          </ContextMenuSubTrigger>
-          <ContextMenuSubContent className='w-48'>
-            {summaries.map((s) => (
-              <ContextMenuItem
-                key={s.name}
-                onClick={() => void onMove(collectionName, path, s.name, '')}
-                disabled={s.name === collectionName}
-              >
-                {s.name}
-              </ContextMenuItem>
-            ))}
-            {summaries.length === 0 && <ContextMenuItem disabled>No collections</ContextMenuItem>}
-          </ContextMenuSubContent>
-        </ContextMenuSub>
+        {FEATURE_FLAGS.moveRequestToCollection && (
+          <ContextMenuSub>
+            <ContextMenuSubTrigger>
+              <FolderInput aria-hidden='true' className='h-3.5 w-3.5 mr-2' /> Move to...
+            </ContextMenuSubTrigger>
+            <ContextMenuSubContent className='w-48'>
+              {summaries.map((s) => (
+                <ContextMenuItem
+                  key={s.name}
+                  onClick={() => void onMove(collectionName, path, s.name, '')}
+                  disabled={s.name === collectionName}
+                >
+                  {s.name}
+                </ContextMenuItem>
+              ))}
+              {summaries.length === 0 && <ContextMenuItem disabled>No collections</ContextMenuItem>}
+            </ContextMenuSubContent>
+          </ContextMenuSub>
+        )}
         <ContextMenuSeparator />
         {/* Pane-targeting actions. */}
         {otherGroupIds.length === 1 && (
