@@ -23,6 +23,7 @@ pub enum ChainVerification {
 }
 
 /// Walks events in order, recomputing each hash and confirming prev_hash linkage.
+/// An event of an unknown kind keeps its stored hash, since this build cannot recompute it.
 pub fn verify_chain(events: &[SecurityAuditEvent]) -> ChainVerification {
     let mut prev = String::new();
     for (i, ev) in events.iter().enumerate() {
@@ -33,7 +34,13 @@ pub fn verify_chain(events: &[SecurityAuditEvent]) -> ChainVerification {
                 actual: ev.prev_hash.clone(),
             };
         }
-        let expected = hash_event(ev);
+        // The hash of an event kind this build does not know cannot be recomputed.
+        // Its link to the next event is still checked, through `prev_hash`.
+        let expected = if ev.event.is_unknown() {
+            ev.hash.clone()
+        } else {
+            hash_event(ev)
+        };
         if expected != ev.hash {
             return ChainVerification::Broken {
                 index: i,
@@ -99,5 +106,40 @@ mod tests {
             ChainVerification::Broken { index, .. } => assert_eq!(index, 1),
             _ => panic!("expected broken chain at index 1"),
         }
+    }
+
+    fn unknown_event(prev: &str, hash: &str) -> SecurityAuditEvent {
+        let line = format!(
+            r#"{{"id":"01M74GZKNT1Y8Q3FH01WDMAFFC","occurredAt":"2026-11-11T05:23:38Z","actor":"user","workspaceId":null,"event":{{"kind":"from_the_future","x":1}},"controls":[{{"framework":"hipaa","code":"164","title":"t"}}],"prevHash":"{prev}","hash":"{hash}"}}"#
+        );
+        serde_json::from_str(&line).expect("unknown kinds and frameworks must still parse")
+    }
+
+    #[test]
+    fn verify_accepts_an_unknown_event_in_the_middle() {
+        let a = mk("");
+        let u = unknown_event(&a.hash, "abc123");
+        let c = mk("abc123");
+        assert!(u.event.is_unknown());
+        assert_eq!(verify_chain(&[a, u, c]), ChainVerification::Ok);
+    }
+
+    #[test]
+    fn verify_still_catches_a_broken_link_after_an_unknown_event() {
+        let a = mk("");
+        let u = unknown_event(&a.hash, "abc123");
+        let c = mk("not-the-hash");
+        match verify_chain(&[a, u, c]) {
+            ChainVerification::Broken { index, .. } => assert_eq!(index, 2),
+            _ => panic!("expected broken chain at index 2"),
+        }
+    }
+
+    #[test]
+    fn an_unknown_event_is_written_back_as_it_was_read() {
+        let u = unknown_event("", "abc123");
+        let json = serde_json::to_value(&u).unwrap();
+        assert_eq!(json["event"]["kind"], "from_the_future");
+        assert_eq!(json["event"]["x"], 1);
     }
 }

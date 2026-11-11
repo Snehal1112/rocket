@@ -7,6 +7,9 @@ pub enum Framework {
     Iso27001,
     Iso42001,
     CsaStar,
+    /// A framework a newer build wrote. It keeps old builds able to read the log.
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

@@ -71,6 +71,13 @@ function summarize(event: SecurityAuditEvent): string {
       return `Contract ${k.contract} checked for device ${shortDeviceId(k.device_id)}${outcomeSuffix(k.outcome)}`;
     case 'network_link_removed':
       return `Unlinked collection ${k.collection} from device ${shortDeviceId(k.device_id)}`;
+    default: {
+      // A kind from a newer version of Rocket: show its name instead of failing.
+      const name = (k as { kind?: unknown }).kind;
+      return typeof name === 'string' && name
+        ? `Event from a newer version (${name})`
+        : 'Event from a newer version';
+    }
   }
 }
 

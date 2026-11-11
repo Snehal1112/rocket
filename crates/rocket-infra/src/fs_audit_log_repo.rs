@@ -300,7 +300,7 @@ mod tests {
     }
 
     #[test]
-    fn load_all_skips_an_unknown_last_event_without_failing() {
+    fn load_all_keeps_an_unknown_last_event_without_failing() {
         let dir = TempDir::new().expect("temp dir");
         let path = dir.path().join("audit.jsonl");
         let repo = FsAuditLogRepo::new(path.clone()).expect("repo");
@@ -309,7 +309,30 @@ mod tests {
         let unknown = unknown_kind_line(&a.hash, "future-hash");
         std::fs::write(&path, format!("{known}\n{unknown}\n")).expect("write log");
 
-        assert_eq!(repo.load_all().expect("load").len(), 1);
+        let events = repo.load_all().expect("load");
+        assert_eq!(events.len(), 2);
+        assert!(events[1].event.is_unknown());
+    }
+
+    #[test]
+    fn an_unknown_event_in_the_middle_keeps_the_chain_intact() {
+        let dir = TempDir::new().expect("temp dir");
+        let path = dir.path().join("audit.jsonl");
+        let repo = FsAuditLogRepo::new(path.clone()).expect("repo");
+        let a = mk_event("");
+        let unknown = unknown_kind_line(&a.hash, "future-hash");
+        let mut c = mk_event("future-hash");
+        c.hash = rocket_audit::chain::hash_event(&c);
+        let first = serde_json::to_string(&a).expect("serialize");
+        let last = serde_json::to_string(&c).expect("serialize");
+        std::fs::write(&path, format!("{first}\n{unknown}\n{last}\n")).expect("write log");
+
+        let events = repo.load_all().expect("load");
+        assert_eq!(events.len(), 3);
+        assert_eq!(
+            rocket_audit::chain::verify_chain(&events),
+            rocket_audit::chain::ChainVerification::Ok
+        );
     }
 
     #[test]

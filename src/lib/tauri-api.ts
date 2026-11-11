@@ -2821,7 +2821,8 @@ export async function exportContractOpenapi(
 // Security audit / compliance
 // ============================================================
 
-export type Framework = 'soc2' | 'iso27001' | 'iso42001' | 'csa_star';
+// 'unknown' is a framework that a newer build wrote.
+export type Framework = 'soc2' | 'iso27001' | 'iso42001' | 'csa_star' | 'unknown';
 export type EnforcementLevel = 'record' | 'warn' | 'block';
 
 export interface ControlId {
@@ -2862,6 +2863,9 @@ export type AuditEventKind =
       outcome: string;
     }
   | { kind: 'network_link_removed'; device_id: string; collection: string };
+
+// The kinds above are the ones this build knows. A newer build can write others, and the
+// backend then sends them as they were stored, so the row has a fallback text.
 
 export interface SecurityAuditEvent {
   id: string;

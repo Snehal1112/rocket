@@ -150,3 +150,10 @@ describe('AuditEventRow network kinds', () => {
     expect(screen.queryByText(new RegExp(FULL_ID))).toBeNull();
   });
 });
+
+describe('AuditEventRow unknown kinds', () => {
+  it('names an event kind from a newer version', () => {
+    show({ kind: 'from_the_future' } as unknown as AuditEventKind);
+    expect(screen.getByText('Event from a newer version (from_the_future)')).toBeInTheDocument();
+  });
+});

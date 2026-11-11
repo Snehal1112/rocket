@@ -8,8 +8,10 @@ use ulid::Ulid;
 #[serde(transparent)]
 pub struct AuditEventId(pub Ulid);
 
+/// One audit event kind. The derive below is `remote = "Self"` so the manual
+/// `Serialize` and `Deserialize` impls can add the `Unknown` fallback.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(remote = "Self", tag = "kind", rename_all = "snake_case")]
 pub enum AuditEventKind {
     ContractAttached {
         contract_id: String,
@@ -117,6 +119,46 @@ pub enum AuditEventKind {
         device_id: String,
         collection: String,
     },
+    /// An event kind that a newer build wrote and this build does not know.
+    /// It keeps the stored JSON as it was, so the log stays readable and the
+    /// chain stays linked. It is never created by this build.
+    #[serde(skip)]
+    Unknown(UnknownEvent),
+}
+
+/// The stored JSON of an event kind this build does not know.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnknownEvent {
+    /// The `kind` tag as written, or empty when the event had none.
+    pub kind: String,
+    /// The whole stored `event` object, including the `kind` tag.
+    pub raw: serde_json::Value,
+}
+
+impl Serialize for AuditEventKind {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Unknown(unknown) => unknown.raw.serialize(serializer),
+            _ => Self::serialize(self, serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for AuditEventKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = serde_json::Value::deserialize(deserializer)?;
+        match Self::deserialize(raw.clone()) {
+            Ok(known) => Ok(known),
+            Err(_) => {
+                let kind = raw
+                    .get("kind")
+                    .and_then(|k| k.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                Ok(Self::Unknown(UnknownEvent { kind, raw }))
+            }
+        }
+    }
 }
 
 impl AuditEventKind {
@@ -141,7 +183,13 @@ impl AuditEventKind {
             Self::NetworkContractCheckSent { .. } => "network_contract_check_sent",
             Self::NetworkContractCheckReceived { .. } => "network_contract_check_received",
             Self::NetworkLinkRemoved { .. } => "network_link_removed",
+            Self::Unknown(_) => "unknown",
         }
+    }
+
+    /// True for an event kind this build does not know.
+    pub fn is_unknown(&self) -> bool {
+        matches!(self, Self::Unknown(_))
     }
 }
 
