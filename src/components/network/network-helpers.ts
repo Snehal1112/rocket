@@ -1,4 +1,4 @@
-import type { NetworkNode, NetworkNodeStatus } from '@/lib/tauri-api';
+import type { LinkState, NetworkNode, NetworkNodeStatus } from '@/lib/tauri-api';
 
 export const DEFAULT_NETWORK_PORT = '47821';
 
@@ -82,4 +82,19 @@ export function validateDisplayName(input: string): NameCheck {
     return { ok: false, error: 'The name cannot contain control characters.' };
   }
   return { ok: true, name };
+}
+
+/** Dot colour per link state. A state added later gets the neutral dot. */
+export function linkDotClass(state: LinkState): string {
+  switch (state) {
+    case 'in_sync':
+      return 'bg-green-500';
+    case 'changes_waiting':
+    case 'out_of_date':
+      return 'bg-amber-500';
+    case 'broken':
+      return 'bg-destructive';
+    default:
+      return 'bg-muted-foreground';
+  }
 }
