@@ -39,7 +39,7 @@ export function NetworkStatusItem() {
     <>
       <Popover open={open} onOpenChange={handleOpenChange}>
         <PopoverTrigger asChild>
-          <StatusBarItem title='Team network' aria-label={label}>
+          <StatusBarItem title='Team network' aria-label={label} frameBorder='border-r'>
             <Radar className={cn('w-2.75 h-2.75', off && 'opacity-50')} aria-hidden='true' />
             {online > 0 && <StatusBarCount>{online}</StatusBarCount>}
           </StatusBarItem>

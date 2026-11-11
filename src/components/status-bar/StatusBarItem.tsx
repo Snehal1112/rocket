@@ -2,12 +2,21 @@ import type { ComponentProps } from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
-type StatusBarItemProps = Omit<ComponentProps<typeof Button>, 'variant' | 'size' | 'asChild'>;
+type StatusBarItemProps = Omit<ComponentProps<typeof Button>, 'variant' | 'size' | 'asChild'> & {
+  /** Border sides of the frame. Use `border-r` when a neighbour already draws the left line. */
+  frameBorder?: 'border-x' | 'border-r';
+};
 
 /** A status bar cell: a bordered frame around a small ghost button. */
-export function StatusBarItem({ className, ...props }: StatusBarItemProps) {
+export function StatusBarItem({
+  className,
+  frameBorder = 'border-x',
+  ...props
+}: StatusBarItemProps) {
   return (
-    <div className='flex h-5 items-center border-x border-statusbar-border px-1'>
+    <div
+      className={cn('flex h-5 items-center border-statusbar-border px-1 [&+&]:-ml-px', frameBorder)}
+    >
       <Button
         variant='ghost'
         size='sm'
