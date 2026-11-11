@@ -570,6 +570,8 @@ async fn keep_in_sync_without_a_sync_service_is_refused() {
 async fn receive_linked(rig: &SyncRig, link: Option<&LinkId>) {
     rig.peers.add(dev(ANA), "Ana");
     rig.colls.add(ORDERS, base());
+    // The receiver names the copy after the sender.
+    rig.colls.add(RECEIVED, base());
     let zip = rooted_zip(ORDERS, &base());
     rig.push(ANA, collection_offer(&ptid(1), &zip, link));
     wait_for("the incoming offer", || {
@@ -598,8 +600,8 @@ async fn a_keep_in_sync_receive_creates_the_receiver_link_after_import() {
         "the root folder is stripped"
     );
     assert_eq!(link.peer_device_id, dev(ANA));
-    assert_eq!(link.collection_name, ORDERS, "the imported name");
-    assert_eq!(link.collection_root, ROOT);
+    assert_eq!(link.collection_name, RECEIVED, "the imported name");
+    assert_eq!(link.collection_root, format!("{ROOT} (from Ana)"));
     assert_eq!(link.state, LinkState::InSync);
     assert_eq!(
         rig.links.base_files(&lid(4)),
@@ -679,6 +681,7 @@ async fn both_ends_of_a_linked_send_store_the_same_base_hash() {
     let mut pair = SyncPair::new();
     pair.a.colls.add(ORDERS, base());
     pair.b.colls.add(ORDERS, base());
+    pair.b.colls.add(RECEIVED_FROM_BO, base());
     let started = pair
         .a
         .transfer

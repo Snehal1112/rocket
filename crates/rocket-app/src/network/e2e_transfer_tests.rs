@@ -405,7 +405,7 @@ async fn a_pushed_collection_is_imported_once_and_both_sides_see_it_finish() {
     let calls = b.import.calls();
     assert_eq!(calls.len(), 1, "imported exactly once");
     let (display, bytes) = &calls[0];
-    assert_eq!(display, "Orders");
+    assert_eq!(display, &format!("Orders (from {})", a.node.name));
     let names: Vec<String> = zip_entries(bytes).into_iter().map(|(n, _)| n).collect();
     assert!(names.contains(&"Orders/opencollection.yml".to_string()));
     assert!(names.contains(&"Orders/users/get.yml".to_string()));
@@ -470,7 +470,7 @@ async fn a_pushed_collection_is_imported_once_and_both_sides_see_it_finish() {
         .audited()
         .contains(&AuditEventKind::NetworkCollectionReceived {
             device_id: a.id().short(),
-            collection: "Orders".to_string(),
+            collection: format!("Orders (from {})", a.node.name),
             outcome: "completed".to_string(),
         }));
 
@@ -781,7 +781,8 @@ async fn a_name_with_spaces_and_unicode_survives_the_trip() {
     let calls = b.import.calls();
     assert_eq!(calls.len(), 1);
     assert_eq!(
-        calls[0].0, name,
+        calls[0].0,
+        format!("{name} (from {})", a.node.name),
         "the display name keeps spaces and unicode"
     );
     let root = format!("{name}/opencollection.yml");
@@ -844,8 +845,8 @@ async fn two_nodes_pushing_to_each_other_at_once_both_complete() {
     .await;
     assert_eq!(b.import.calls().len(), 1);
     assert_eq!(a.import.calls().len(), 1);
-    assert_eq!(b.import.calls()[0].0, "FromAnn");
-    assert_eq!(a.import.calls()[0].0, "FromBen");
+    assert_eq!(b.import.calls()[0].0, "FromAnn (from ann)");
+    assert_eq!(a.import.calls()[0].0, "FromBen (from ben)");
     wait_until("both staging folders are empty", || {
         a.staged_files() == 0 && b.staged_files() == 0
     })

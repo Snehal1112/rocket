@@ -24,6 +24,20 @@ pub trait CollectionImportPort: Send + Sync {
     /// Names of the collections of the active workspace.
     fn existing_names(&self) -> DomainResult<Vec<String>>;
     fn import_zip(&self, zip_path: &Path, display_name: &str) -> DomainResult<ImportedCollection>;
+    /// Remembers who sent the collection that was just imported under `imported_name`. The
+    /// default does nothing. A failure never changes the outcome of the receive, so the
+    /// caller only logs it.
+    fn record_origin(&self, _imported_name: &str, _origin: &CollectionOrigin) -> DomainResult<()> {
+        Ok(())
+    }
+}
+
+/// The sender of a received collection, as the receiver knew it at that time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CollectionOrigin {
+    pub sender_name: String,
+    /// The short device id of the sender, for example `50L2-DPML`.
+    pub sender_short_id: String,
 }
 
 /// The text `import_zip` returns (as `DomainError::InvalidInput`) for a ZIP that failed the
@@ -87,18 +101,13 @@ fn unreserve(name: String) -> String {
         .to_string()
 }
 
-/// The name the receiver gives the new collection: the offered name when it is free,
-/// otherwise `<offered> (from <sender>)`. The importer still adds `-1`, `-2` when that name
-/// is taken too. The clash check ignores letter case, because a Mac or Windows disk does.
-/// The result is at most `MAX_NAME_BYTES` bytes in both cases.
-pub fn receiver_display_name(offered: &str, sender: &str, existing: &[String]) -> String {
+/// The name the receiver gives the new collection: always `<offered> (from <sender>)`, so the
+/// source shows in every received collection. The importer still adds `-1`, `-2` when that
+/// name is taken. The result is at most `MAX_NAME_BYTES` bytes.
+pub fn receiver_display_name(offered: &str, sender: &str) -> String {
     let mut base = clean_part(offered, MAX_NAME_BYTES);
     if base.is_empty() {
         base = FALLBACK_NAME.to_string();
-    }
-    let wanted = base.to_lowercase();
-    if !existing.iter().any(|name| name.to_lowercase() == wanted) {
-        return unreserve(base);
     }
     let mut who = clean_part(sender, MAX_SENDER_BYTES);
     if who.is_empty() {
@@ -116,115 +125,102 @@ pub fn receiver_display_name(offered: &str, sender: &str, existing: &[String]) -
 mod tests {
     use super::*;
 
-    fn names(list: &[&str]) -> Vec<String> {
-        list.iter().map(|s| s.to_string()).collect()
+    #[test]
+    fn every_name_gets_the_sender() {
+        assert_eq!(receiver_display_name("Orders", "Ana"), "Orders (from Ana)");
     }
 
     #[test]
-    fn a_free_name_is_kept() {
-        let got = receiver_display_name("Orders", "Ana", &names(&["Billing"]));
-        assert_eq!(got, "Orders");
-    }
-
-    #[test]
-    fn a_clash_adds_the_sender() {
-        let got = receiver_display_name("Orders", "Ana", &names(&["Orders"]));
-        assert_eq!(got, "Orders (from Ana)");
-    }
-
-    #[test]
-    fn a_clash_on_the_suffixed_name_keeps_it_as_is() {
-        // The importer adds -1, -2 on its own.
-        let got = receiver_display_name("Orders", "Ana", &names(&["Orders", "Orders (from Ana)"]));
-        assert_eq!(got, "Orders (from Ana)");
-    }
-
-    #[test]
-    fn the_clash_check_ignores_letter_case() {
-        let got = receiver_display_name("orders", "Ana", &names(&["Orders"]));
-        assert_eq!(got, "orders (from Ana)");
+    fn a_taken_name_is_left_to_the_importer() {
+        // The importer adds -1, -2 on its own, so the name does not depend on what exists.
+        assert_eq!(receiver_display_name("Orders", "Ana"), "Orders (from Ana)");
+        assert_eq!(receiver_display_name("orders", "Ana"), "orders (from Ana)");
     }
 
     #[test]
     fn the_sender_name_is_trimmed() {
-        let got = receiver_display_name("Orders", "  Ana  ", &names(&["Orders"]));
-        assert_eq!(got, "Orders (from Ana)");
+        assert_eq!(
+            receiver_display_name("Orders", "  Ana  "),
+            "Orders (from Ana)"
+        );
     }
 
     #[test]
     fn an_empty_sender_falls_back_to_a_teammate() {
         for blank in ["", "   ", "\t"] {
-            let got = receiver_display_name("Orders", blank, &names(&["Orders"]));
+            let got = receiver_display_name("Orders", blank);
             assert_eq!(got, "Orders (from a teammate)", "sender was {blank:?}");
         }
     }
 
     #[test]
     fn receiver_display_name_replaces_characters_unsafe_in_a_folder_name() {
-        let got = receiver_display_name("../../etc/passwd", "Ana", &[]);
-        assert_eq!(got, "_.._etc_passwd");
+        let got = receiver_display_name("../../etc/passwd", "Ana");
+        assert_eq!(got, "_.._etc_passwd (from Ana)");
         assert!(!got.contains('/') && !got.contains('\\'));
 
-        let got = receiver_display_name("a:b*c?d\"e<f>g|h", "Ana", &[]);
-        assert_eq!(got, "a_b_c_d_e_f_g_h");
+        let got = receiver_display_name("a:b*c?d\"e<f>g|h", "Ana");
+        assert_eq!(got, "a_b_c_d_e_f_g_h (from Ana)");
 
-        let got = receiver_display_name("tab\there\nnewline\0nul", "Ana", &[]);
-        assert_eq!(got, "tab_here_newline_nul");
+        let got = receiver_display_name("tab\there\nnewline\0nul", "Ana");
+        assert_eq!(got, "tab_here_newline_nul (from Ana)");
     }
 
     #[test]
     fn receiver_display_name_replaces_hidden_format_characters() {
         // A right-to-left override or a zero-width space could spoof the name in the sidebar.
-        let got = receiver_display_name("a\u{202E}b\u{200B}c\u{FEFF}", "Ana", &[]);
-        assert_eq!(got, "a_b_c_");
+        let got = receiver_display_name("a\u{202E}b\u{200B}c\u{FEFF}", "Ana");
+        assert_eq!(got, "a_b_c_ (from Ana)");
     }
 
     #[test]
     fn receiver_display_name_maps_windows_reserved_names() {
-        assert_eq!(receiver_display_name("CON", "Ana", &[]), "CON_");
-        assert_eq!(receiver_display_name("nul.v2", "Ana", &[]), "nul_.v2");
-        assert_eq!(receiver_display_name("com1", "Ana", &[]), "com1_");
-        assert_eq!(receiver_display_name("CONSOLE", "Ana", &[]), "CONSOLE");
-        // With the suffix and no dot the name is no longer reserved.
-        assert_eq!(
-            receiver_display_name("Aux", "Ana", &names(&["aux"])),
-            "Aux (from Ana)"
-        );
-        // Windows also reserves `CON.<anything>`, so a dotted clash is mapped too.
-        assert_eq!(
-            receiver_display_name("con.v2", "Ana", &names(&["con_.v2", "con.v2"])),
-            "con_.v2 (from Ana)"
-        );
+        // The suffix makes a bare reserved name safe.
+        assert_eq!(receiver_display_name("CON", "Ana"), "CON (from Ana)");
+        // Windows also reserves `CON.<anything>`, so a dotted name is mapped.
+        assert_eq!(receiver_display_name("nul.v2", "Ana"), "nul_.v2 (from Ana)");
+        assert_eq!(receiver_display_name("con.v2", "Ana"), "con_.v2 (from Ana)");
     }
 
     #[test]
     fn the_sender_name_is_cleaned_the_same_way() {
-        let got = receiver_display_name("Orders", "../Ana/", &names(&["Orders"]));
-        assert_eq!(got, "Orders (from _Ana_)");
+        assert_eq!(
+            receiver_display_name("Orders", "../Ana/"),
+            "Orders (from _Ana_)"
+        );
     }
 
     #[test]
     fn receiver_display_name_trims_spaces_and_dots_at_both_ends() {
-        assert_eq!(receiver_display_name("Orders.", "Ana", &[]), "Orders");
-        assert_eq!(receiver_display_name("Orders ", "Ana", &[]), "Orders");
-        assert_eq!(receiver_display_name(" . Orders . ", "Ana", &[]), "Orders");
-        assert_eq!(receiver_display_name(".hidden", "Ana", &[]), "hidden");
-        assert_eq!(receiver_display_name("v1.2 API", "Ana", &[]), "v1.2 API");
+        assert_eq!(receiver_display_name("Orders.", "Ana"), "Orders (from Ana)");
+        assert_eq!(receiver_display_name("Orders ", "Ana"), "Orders (from Ana)");
+        assert_eq!(
+            receiver_display_name(" . Orders . ", "Ana"),
+            "Orders (from Ana)"
+        );
+        assert_eq!(receiver_display_name(".hidden", "Ana"), "hidden (from Ana)");
+        assert_eq!(
+            receiver_display_name("v1.2 API", "Ana"),
+            "v1.2 API (from Ana)"
+        );
     }
 
     #[test]
     fn receiver_display_name_never_returns_an_empty_name() {
         for odd in ["", "   ", "...", " . ", "\0"] {
-            let got = receiver_display_name(odd, "Ana", &[]);
-            assert!(!got.is_empty(), "offered was {odd:?}");
-            assert!(!got.starts_with('.') && !got.ends_with('.') && !got.ends_with(' '));
+            let got = receiver_display_name(odd, "Ana");
+            assert!(got.ends_with(" (from Ana)"), "offered was {odd:?}");
+            assert!(!got.starts_with('.') && !got.starts_with(' '));
         }
-        assert_eq!(receiver_display_name("", "Ana", &[]), "Received collection");
+        assert_eq!(
+            receiver_display_name("", "Ana"),
+            "Received collection (from Ana)"
+        );
     }
 
     #[test]
     fn receiver_display_name_keeps_non_ascii_letters() {
-        let got = receiver_display_name("Café – Ünï 日本語", "Zoë", &names(&["Café – Ünï 日本語"]));
+        let got = receiver_display_name("Café – Ünï 日本語", "Zoë");
         assert_eq!(got, "Café – Ünï 日本語 (from Zoë)");
     }
 
@@ -232,28 +228,26 @@ mod tests {
     fn receiver_display_name_cuts_on_a_character_boundary() {
         // 150 two-byte characters = 300 bytes. A byte cut would panic or split a character.
         let long = "é".repeat(150);
-        let got = receiver_display_name(&long, "Ana", &[]);
-        assert_eq!(got.len(), 120);
-        assert_eq!(got.chars().count(), 60);
-        assert!(got.chars().all(|c| c == 'é'));
+        let got = receiver_display_name(&long, "Ana");
+        assert!(got.len() <= 120);
+        assert!(got.ends_with(" (from Ana)"));
+        assert!(got
+            .trim_end_matches(" (from Ana)")
+            .chars()
+            .all(|c| c == 'é'));
 
         // A three-byte character that does not divide 120 evenly after the suffix.
         let long_sender = "ü".repeat(80);
-        let got = receiver_display_name("Orders", &long_sender, &names(&["Orders"]));
+        let got = receiver_display_name("Orders", &long_sender);
         assert_eq!(got, format!("Orders (from {})", "ü".repeat(20)));
     }
 
     #[test]
     fn receiver_display_name_caps_cjk_names_by_bytes() {
-        // 100 CJK characters are 300 bytes. Counting characters would let all of them through.
+        // 100 CJK characters are 300 bytes. With the suffix " (from Ana)" (11 bytes) the
+        // offered part gets 109 bytes: 36 characters.
         let cjk = "日".repeat(100);
-        let got = receiver_display_name(&cjk, "Ana", &[]);
-        assert_eq!(got, "日".repeat(40));
-        assert_eq!(got.len(), 120);
-
-        // With the suffix " (from Ana)" (11 bytes) the offered part gets 109 bytes: 36 characters.
-        let taken = "日".repeat(40);
-        let got = receiver_display_name(&cjk, "Ana", &names(&[taken.as_str()]));
+        let got = receiver_display_name(&cjk, "Ana");
         assert_eq!(got, format!("{} (from Ana)", "日".repeat(36)));
         assert_eq!(got.len(), 119);
     }
@@ -269,22 +263,20 @@ mod tests {
             ("a".repeat(300), cjk_sender.clone()),
             ("é".repeat(200), "ü".repeat(200)),
         ] {
-            // Make the offered name clash so that the suffix is added.
-            let clash = receiver_display_name(&offered, &sender, &[]);
-            let got = receiver_display_name(&offered, &sender, &[clash]);
+            let got = receiver_display_name(&offered, &sender);
             assert!(got.len() <= 120, "{} bytes for {offered:.10}", got.len());
             assert!(!got.is_empty() && !got.ends_with(' ') && !got.ends_with('.'));
         }
         // The sender part alone is cut to 40 bytes: 13 characters of 3 bytes.
-        let got = receiver_display_name("Orders", &cjk_sender, &names(&["Orders"]));
+        let got = receiver_display_name("Orders", &cjk_sender);
         assert_eq!(got, format!("Orders (from {})", "本".repeat(13)));
     }
 
     #[test]
     fn a_cut_that_ends_in_a_space_is_trimmed() {
-        let offered = format!("{} tail", "a".repeat(119));
-        let got = receiver_display_name(&offered, "Ana", &[]);
-        assert_eq!(got, "a".repeat(119));
+        let offered = format!("{} tail", "a".repeat(108));
+        let got = receiver_display_name(&offered, "Ana");
+        assert_eq!(got, format!("{} (from Ana)", "a".repeat(108)));
     }
 
     #[test]

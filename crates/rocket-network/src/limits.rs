@@ -12,6 +12,8 @@ pub const DEFAULT_PORT: u16 = 47821;
 pub const PORT_RANGE_END: u16 = 47830;
 /// The most paired devices one node keeps.
 pub const MAX_PAIRED_DEVICES: usize = 200;
+/// The most received-collection origins one node keeps.
+pub const MAX_RECEIVED_COLLECTIONS: usize = 2000;
 /// The most manual addresses one node keeps.
 pub const MAX_MANUAL_ADDRESSES: usize = 50;
 /// The most concurrent connections the peer server accepts.

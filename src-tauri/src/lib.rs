@@ -1037,11 +1037,19 @@ pub fn run() {
             ));
             // The adapter copies a received ZIP into its own private temp dir while it imports.
             // A crash can leave a dir behind, so stale ones go at start with the staging folder.
-            let importer = Arc::new(import_wiring::ImporterAdapter::new(
-                Arc::clone(&active_workspace_path),
-                network_dir.join("import-tmp"),
-                Arc::clone(&trust_store),
+            // Where each received collection came from. It stays in the network folder.
+            let received_origins = Arc::new(rocket_infra::network::FsReceivedCollectionRepo::new(
+                network_dir.join("received.yml"),
             ));
+            let importer = Arc::new(
+                import_wiring::ImporterAdapter::new(
+                    Arc::clone(&active_workspace_path),
+                    network_dir.join("import-tmp"),
+                    Arc::clone(&trust_store),
+                )
+                .with_origins(received_origins.clone()),
+            );
+            app.manage(received_origins as Arc<dyn rocket_network::ReceivedCollectionRepository>);
             import_wiring::purge_transfer_temp(transfer_staging.as_ref(), importer.as_ref());
             let transfer_svc = rocket_app::TransferService::new(rocket_app::TransferDeps {
                 network: Arc::clone(&network_svc) as Arc<dyn rocket_app::PeerSender>,
@@ -1278,6 +1286,7 @@ pub fn run() {
             commands::history::clear_history,
             commands::network::network_status,
             commands::network::network_list_nodes,
+            commands::network::network_list_received,
             commands::network::network_set_visibility,
             commands::network::network_set_profile,
             commands::network::network_mark_intro_seen,

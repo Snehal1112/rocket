@@ -7,7 +7,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
-use rocket_app::network::{CollectionImportPort, ImportedCollection, UNSAFE_ZIP_MESSAGE};
+use rocket_app::network::{
+    CollectionImportPort, CollectionOrigin, ImportedCollection, UNSAFE_ZIP_MESSAGE,
+};
 use rocket_collection::{
     Collection, CollectionIdentity, CollectionRepository, CollectionTrustStore,
 };
@@ -16,6 +18,7 @@ use rocket_environment::EnvironmentRepositoryFactory;
 use rocket_import::transfer_zip::{self, is_hidden_format_char, is_reserved_device_name};
 use rocket_import::{ImportError, ImportService};
 use rocket_infra::{FsCollectionRepo, FsEnvironmentRepo, FsImportFiles};
+use rocket_network::{ReceivedCollection, ReceivedCollectionRepository};
 use rocket_shared::error::{DomainError, DomainResult};
 
 /// Makes the environment repository of one collection under a workspace.
@@ -91,6 +94,8 @@ pub struct ImporterAdapter {
     process_dir: Mutex<Option<ProcessDir>>,
     started: SystemTime,
     trust: Arc<dyn CollectionTrustStore>,
+    /// Where each received collection came from. Without it nothing is remembered.
+    origins: Option<Arc<dyn ReceivedCollectionRepository>>,
 }
 
 impl ImporterAdapter {
@@ -108,7 +113,14 @@ impl ImporterAdapter {
             process_dir: Mutex::new(None),
             started: SystemTime::now(),
             trust,
+            origins: None,
         }
+    }
+
+    /// Keeps the sender of every received collection in `origins`.
+    pub fn with_origins(mut self, origins: Arc<dyn ReceivedCollectionRepository>) -> Self {
+        self.origins = Some(origins);
+        self
     }
 
     /// Test seam: pretends the adapter started at `started`.
@@ -366,6 +378,27 @@ impl ImporterAdapter {
 }
 
 impl CollectionImportPort for ImporterAdapter {
+    fn record_origin(&self, imported_name: &str, origin: &CollectionOrigin) -> DomainResult<()> {
+        let Some(origins) = &self.origins else {
+            return Ok(());
+        };
+        // The entry is keyed by the uid of the collection file, so a rename keeps it.
+        let uid = self
+            .repo()?
+            .list()?
+            .into_iter()
+            .find(|summary| summary.name == imported_name)
+            .map(|summary| summary.uid)
+            .filter(|uid| !uid.is_empty())
+            .ok_or_else(|| DomainError::NotFound("The received collection has no uid.".into()))?;
+        origins.record(ReceivedCollection {
+            collection_uid: uid,
+            sender_name: origin.sender_name.clone(),
+            sender_short_id: origin.sender_short_id.clone(),
+            received_at: chrono::Utc::now(),
+        })
+    }
+
     fn existing_names(&self) -> DomainResult<Vec<String>> {
         Ok(self.repo()?.list()?.into_iter().map(|s| s.name).collect())
     }
@@ -508,6 +541,50 @@ mod tests {
         let repo = factory.for_collection("My API");
         // A new, empty collection has no environments yet.
         assert!(repo.list().expect("list").is_empty());
+    }
+
+    // ---- record_origin ----
+
+    #[test]
+    fn record_origin_keeps_the_sender_by_collection_uid() {
+        let (ws, adapter) = adapter();
+        let origins = Arc::new(rocket_infra::network::FsReceivedCollectionRepo::new(
+            ws.path().join("received.yml"),
+        ));
+        let adapter = adapter.with_origins(origins.clone());
+        FsCollectionRepo::new_standalone(ws.path().join("collections"))
+            .create("Orders (from Ana)")
+            .expect("create");
+        let origin = CollectionOrigin {
+            sender_name: "Ana".into(),
+            sender_short_id: "50L2-DPML".into(),
+        };
+
+        adapter
+            .record_origin("Orders (from Ana)", &origin)
+            .expect("recorded");
+
+        let saved = origins.list().expect("list");
+        assert_eq!(saved.len(), 1);
+        assert!(!saved[0].collection_uid.is_empty());
+        assert_eq!(saved[0].sender_name, "Ana");
+        assert_eq!(saved[0].sender_short_id, "50L2-DPML");
+    }
+
+    #[test]
+    fn record_origin_of_a_missing_collection_is_an_error_and_writes_nothing() {
+        let (ws, adapter) = adapter();
+        let origins = Arc::new(rocket_infra::network::FsReceivedCollectionRepo::new(
+            ws.path().join("received.yml"),
+        ));
+        let adapter = adapter.with_origins(origins.clone());
+        let origin = CollectionOrigin {
+            sender_name: "Ana".into(),
+            sender_short_id: "50L2-DPML".into(),
+        };
+
+        assert!(adapter.record_origin("Nope", &origin).is_err());
+        assert!(origins.list().expect("list").is_empty());
     }
 
     // ---- ImporterAdapter ----

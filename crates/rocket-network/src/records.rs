@@ -24,6 +24,18 @@ pub struct BlockedDevice {
     pub blocked_at: DateTime<Utc>,
 }
 
+/// Where a received collection came from. Kept on this machine only, keyed by the uid of the
+/// collection file, so a rename of the folder does not lose it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReceivedCollection {
+    pub collection_uid: String,
+    /// The sender's display name when the collection arrived.
+    pub sender_name: String,
+    /// The short device id of the sender, for example `50L2-DPML`.
+    pub sender_short_id: String,
+    pub received_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ManualAddress {
     pub host: String,

@@ -20,7 +20,9 @@ use tokio::sync::mpsc;
 
 use super::sync::LinkEnd;
 use super::transfer::{outcome_name, Inner, TransferService};
-use super::transfer_ports::{receiver_display_name, StagedFile, StagedZip, UNSAFE_ZIP_MESSAGE};
+use super::transfer_ports::{
+    receiver_display_name, CollectionOrigin, StagedFile, StagedZip, UNSAFE_ZIP_MESSAGE,
+};
 
 /// The text of a pending offer whose sender went away before the user answered.
 const WENT_OFFLINE: &str = "The other node went offline.";
@@ -535,6 +537,8 @@ impl TransferService {
         self.release_staged(&file);
         match result {
             Ok(imported) => {
+                self.record_origin(&imported, &view.from_name, view.device)
+                    .await;
                 // The link is made only after a successful import, under the imported name.
                 if let Some((link, bytes)) = view.keep {
                     self.spawn_link(
@@ -548,6 +552,25 @@ impl TransferService {
                 self.conclude(id, Outcome::Completed, None, Some(imported), true)
             }
             Err((outcome, message)) => self.conclude(id, outcome, message, None, true),
+        }
+    }
+
+    /// Remembers who sent the collection. It only matters for display, so a failure is logged
+    /// and never changes the outcome of the receive.
+    async fn record_origin(&self, imported: &str, from_name: &str, device: DeviceId) {
+        let importer = Arc::clone(&self.deps.importer);
+        let imported = imported.to_string();
+        let origin = CollectionOrigin {
+            sender_name: from_name.to_string(),
+            sender_short_id: device.short(),
+        };
+        let done =
+            tokio::task::spawn_blocking(move || importer.record_origin(&imported, &origin)).await;
+        if !matches!(done, Ok(Ok(()))) {
+            tracing::warn!(
+                code = "network_origin_not_saved",
+                "could not save the sender"
+            );
         }
     }
 
@@ -580,8 +603,7 @@ impl TransferService {
         let collection = collection.to_string();
         let from_name = from_name.to_string();
         let imported = tokio::task::spawn_blocking(move || {
-            let existing = importer.existing_names()?;
-            let display = receiver_display_name(&collection, &from_name, &existing);
+            let display = receiver_display_name(&collection, &from_name);
             importer.import_zip(&path, &display)
         })
         .await;

@@ -14,12 +14,14 @@ use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
 use rocket_network::device::DeviceId;
-use rocket_network::limits::{MAX_MANUAL_ADDRESSES, MAX_PAIRED_DEVICES};
+use rocket_network::limits::{MAX_MANUAL_ADDRESSES, MAX_PAIRED_DEVICES, MAX_RECEIVED_COLLECTIONS};
 use rocket_network::ports::{
     BlockedDeviceRepository, ManualAddressRepository, NetworkSettingsRepository,
-    PairedDeviceRepository, QuarantineReport,
+    PairedDeviceRepository, QuarantineReport, ReceivedCollectionRepository,
 };
-use rocket_network::records::{BlockedDevice, ManualAddress, NetworkSettings, PairedDevice};
+use rocket_network::records::{
+    BlockedDevice, ManualAddress, NetworkSettings, PairedDevice, ReceivedCollection,
+};
 use rocket_shared::error::{DomainError, DomainResult};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -399,6 +401,60 @@ impl BlockedDeviceRepository for FsBlockedDeviceRepo {
     }
 }
 
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct ReceivedFile {
+    #[serde(default)]
+    collections: Vec<ReceivedCollection>,
+}
+
+impl Keyed for ReceivedCollection {
+    type Key = String;
+
+    fn key(&self) -> String {
+        self.collection_uid.clone()
+    }
+}
+
+impl ListFile for ReceivedFile {
+    type Item = ReceivedCollection;
+
+    fn into_items(self) -> Vec<ReceivedCollection> {
+        self.collections
+    }
+
+    fn items_mut(&mut self) -> &mut Vec<ReceivedCollection> {
+        &mut self.collections
+    }
+}
+
+/// `received.yml`: where each received collection came from. It stays in the network folder,
+/// so it never reaches an export, a git repo or a sync.
+pub struct FsReceivedCollectionRepo {
+    inner: YamlListRepo<ReceivedFile>,
+}
+
+impl FsReceivedCollectionRepo {
+    /// `path` is the YAML file itself, for example `<data dir>/network/received.yml`.
+    pub fn new(path: PathBuf) -> Self {
+        Self {
+            inner: YamlListRepo::new(path),
+        }
+    }
+}
+
+impl ReceivedCollectionRepository for FsReceivedCollectionRepo {
+    fn list(&self) -> DomainResult<Vec<ReceivedCollection>> {
+        self.inner.list()
+    }
+
+    fn record(&self, entry: ReceivedCollection) -> DomainResult<()> {
+        let full =
+            format!("You've reached the limit of {MAX_RECEIVED_COLLECTIONS} received collections.");
+        self.inner
+            .upsert_with_limit(entry, MAX_RECEIVED_COLLECTIONS, &full)
+    }
+}
+
 /// `addresses.yml`: addresses the user added by hand ("Add by address").
 pub struct FsManualAddressRepo {
     inner: YamlListRepo<AddressFile>,
@@ -475,6 +531,7 @@ quarantine_report!(
     FsBlockedDeviceRepo,
     FsManualAddressRepo,
     FsNetworkSettingsRepo,
+    FsReceivedCollectionRepo,
 );
 
 #[cfg(test)]
@@ -816,6 +873,31 @@ mod tests {
     }
 
     // ---- blocked ----
+
+    #[test]
+    fn received_collections_are_recorded_by_uid_and_persist() {
+        let dir = TempDir::new().expect("tempdir");
+        let path = dir.path().join("received.yml");
+        let repo = FsReceivedCollectionRepo::new(path.clone());
+        let entry = |uid: &str, who: &str| ReceivedCollection {
+            collection_uid: uid.to_string(),
+            sender_name: who.to_string(),
+            sender_short_id: "50L2-DPML".to_string(),
+            received_at: Utc
+                .with_ymd_and_hms(2026, 11, 11, 9, 0, 0)
+                .single()
+                .expect("date"),
+        };
+        assert!(repo.list().expect("empty list").is_empty());
+        repo.record(entry("u1", "Ana")).expect("record");
+        repo.record(entry("u2", "Ben")).expect("record 2");
+        repo.record(entry("u1", "Ana B")).expect("record again");
+        let again = FsReceivedCollectionRepo::new(path);
+        assert_eq!(
+            again.list().expect("list"),
+            vec![entry("u1", "Ana B"), entry("u2", "Ben")]
+        );
+    }
 
     #[test]
     fn blocked_devices_add_contain_remove_and_persist() {

@@ -291,6 +291,10 @@ pub(crate) const ANA: u8 = 2;
 /// A second peer.
 pub(crate) const BEN: u8 = 3;
 pub(crate) const ORDERS: &str = "orders";
+/// What a receiver calls `ORDERS` when `ANA` sent it.
+pub(crate) const RECEIVED: &str = "orders (from Ana)";
+/// What a receiver calls `ORDERS` when `BO` sent it.
+pub(crate) const RECEIVED_FROM_BO: &str = "orders (from Bo)";
 pub(crate) const ROOT: &str = "/ws/collections/orders";
 pub(crate) const UID: &str = "uid-orders";
 

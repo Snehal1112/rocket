@@ -4636,6 +4636,18 @@ export const cancelNetworkSync = (syncId: string): Promise<void> =>
 export const listNetworkLinks = (): Promise<NetworkLink[]> =>
   invoke<NetworkLink[]>('network_list_links');
 
+/** Where a received collection came from (`ReceivedCollectionDto`), keyed by collection uid. */
+export interface ReceivedCollection {
+  collectionUid: string;
+  senderName: string;
+  senderShortId: string;
+  /** RFC 3339, UTC. */
+  receivedAt: string;
+}
+
+export const listReceivedCollections = (): Promise<ReceivedCollection[]> =>
+  invoke<ReceivedCollection[]>('network_list_received');
+
 export const unlinkNetworkLink = (linkId: string): Promise<void> =>
   invoke<void>('network_unlink', { linkId });
 

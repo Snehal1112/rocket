@@ -26,6 +26,7 @@ import { FlowListItem } from '@/components/collections/FlowListItem';
 import { NewScriptDialog } from '@/components/collections/NewScriptDialog';
 import { ConnectOpenApiDialog } from '@/components/collections/openapi-sync/ConnectOpenApiDialog';
 import { offersConnect } from '@/components/collections/openapi-sync/openApiSyncView';
+import { ReceivedFromName } from '@/components/collections/ReceivedFrom';
 import { ScriptNode } from '@/components/collections/ScriptNode';
 import { ContractBadge } from '@/components/contract/ContractBadge';
 import { ExportCollectionDialog } from '@/components/export/ExportCollectionDialog';
@@ -63,6 +64,7 @@ import { startCollectionSync } from '@/lib/network-sync-actions';
 import { createDefaultRequest } from '@/lib/pane-utils';
 import { useFlows } from '@/lib/queries/flow-queries';
 import { useOpenApiSyncBadges, useOpenApiSyncStatus } from '@/lib/queries/openapi-sync-queries';
+import { useReceivedOrigin } from '@/lib/queries/received-queries';
 import { useWorkspaces } from '@/lib/queries/workspace-queries';
 import type {
   Collection,
@@ -145,6 +147,7 @@ export function CollectionNode({
   // A boolean selector: the row re-renders only when the answer flips.
   const canSend = useNetworkStore((s) => selectOnlinePairedCount(s) > 0);
   const syncEntries = useCollectionSyncLinks(summary.name);
+  const origin = useReceivedOrigin(summary.uid);
   const [unlinkTarget, setUnlinkTarget] = useState<NetworkLink | null>(null);
   const syncWith = (link: NetworkLink) => void startCollectionSync(link).catch(toastError);
   const [connectOpen, setConnectOpen] = useState(false);
@@ -452,7 +455,7 @@ export function CollectionNode({
                 />
               ) : (
                 <>
-                  <span className='truncate text-foreground'>{summary.name}</span>
+                  <ReceivedFromName name={summary.name} origin={origin} />
                   {waitingUpdates > 0 && (
                     <TooltipProvider delayDuration={200}>
                       <Tooltip>

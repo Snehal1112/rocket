@@ -25,8 +25,8 @@ use tokio::sync::Notify;
 
 use super::transfer::{PeerSender, Timing, TransferDeps, TransferService};
 use super::transfer_ports::{
-    CollectionImportPort, ImportedCollection, StagedFile, StagedZip, TransferStaging,
-    UNSAFE_ZIP_MESSAGE,
+    CollectionImportPort, CollectionOrigin, ImportedCollection, StagedFile, StagedZip,
+    TransferStaging, UNSAFE_ZIP_MESSAGE,
 };
 use crate::collection_export_service::CollectionExportService;
 
@@ -511,6 +511,9 @@ pub(crate) struct FakeImporter {
     pub existing: Mutex<Vec<String>>,
     pub mode: Mutex<ImportMode>,
     calls: Mutex<Vec<(PathBuf, String)>>,
+    origins: Mutex<Vec<(String, CollectionOrigin)>>,
+    /// When true `record_origin` fails, to show that a receive still completes.
+    pub fail_origin: std::sync::atomic::AtomicBool,
     gate: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
 }
 
@@ -529,9 +532,25 @@ impl FakeImporter {
     pub fn calls(&self) -> Vec<(PathBuf, String)> {
         self.calls.lock().expect("calls lock").clone()
     }
+
+    /// The names and senders passed to `record_origin`.
+    pub fn origins(&self) -> Vec<(String, CollectionOrigin)> {
+        self.origins.lock().expect("origins lock").clone()
+    }
 }
 
 impl CollectionImportPort for FakeImporter {
+    fn record_origin(&self, imported_name: &str, origin: &CollectionOrigin) -> DomainResult<()> {
+        if self.fail_origin.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(DomainError::Internal("no origin file".into()));
+        }
+        self.origins
+            .lock()
+            .expect("origins lock")
+            .push((imported_name.to_string(), origin.clone()));
+        Ok(())
+    }
+
     fn existing_names(&self) -> DomainResult<Vec<String>> {
         Ok(self.existing.lock().expect("existing lock").clone())
     }

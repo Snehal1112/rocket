@@ -47,12 +47,14 @@ pub use ports::{
     DiscoverySink, LinkRepository, ManualAddressRepository, NetworkSettingsRepository,
     PairedDeviceRepository, PeerCallError, PeerConnector, PeerError, PeerHandler,
     PeerServerControl, PeerSocket, PeerTransport, PeerTransportFactory, QuarantineReport,
+    ReceivedCollectionRepository,
 };
 pub use presence::{backoff, Presence, PresenceTracker};
 pub use profile::{default_display_name, initials_for, NodeProfile};
 pub use rate::SlidingWindow;
 pub use records::{
     BlockedDevice, DiscoveredNode, DiscoverySource, ManualAddress, NetworkSettings, PairedDevice,
+    ReceivedCollection,
 };
 pub use staging::{StagedFile, StagedZip, TransferStaging};
 pub use transfer::{

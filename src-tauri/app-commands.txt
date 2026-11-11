@@ -183,6 +183,7 @@ network_list_addresses
 network_list_blocked
 network_list_links
 network_list_nodes
+network_list_received
 network_mark_intro_seen
 network_remove_address
 network_remove_paired

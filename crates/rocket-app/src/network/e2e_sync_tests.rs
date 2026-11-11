@@ -610,13 +610,28 @@ pub(super) fn attach_sync(node: E2eNode, collections: Vec<(&str, Vec<SourceFile>
 }
 
 impl Peer {
+    /// The name this node knows `name` by: its own, or the copy named after the sender.
+    fn local_name(&self, name: &str) -> String {
+        let names = self.cols.names();
+        if names.iter().any(|n| n == name) {
+            return name.to_string();
+        }
+        let prefix = format!("{name} (from ");
+        names
+            .into_iter()
+            .find(|n| n.starts_with(&prefix))
+            .unwrap_or_else(|| name.to_string())
+    }
+
     fn manifest(&self, name: &str) -> Manifest {
-        self.cols.manifest(name).expect("a manifest")
+        self.cols
+            .manifest(&self.local_name(name))
+            .expect("a manifest")
     }
 
     fn text(&self, path: &str) -> String {
         self.cols
-            .text(O, path)
+            .text(&self.local_name(O), path)
             .unwrap_or_else(|| panic!("{path} is missing"))
     }
 }
@@ -848,7 +863,7 @@ async fn the_first_send_with_keep_in_sync_creates_equal_links_on_both_sides() {
     assert_eq!(on_a.peer_device_id, b.id());
     assert_eq!(on_b.peer_device_id, a.id());
     assert_eq!(on_a.collection_name, O);
-    assert_eq!(on_b.collection_name, O);
+    assert_eq!(on_b.collection_name, format!("{O} (from {})", a.node.name));
     assert_eq!(on_a.state, LinkState::InSync);
     assert_eq!(on_b.state, LinkState::InSync);
     assert_eq!(
@@ -884,7 +899,9 @@ async fn a_send_without_keep_in_sync_creates_no_link() {
     assert_eq!(a.link_count(), 0, "no link on the sender");
     assert_eq!(b.link_count(), 0, "no link on the receiver");
     assert!(
-        b.cols.names().contains(&O.to_string()),
+        b.cols
+            .names()
+            .contains(&format!("{O} (from {})", a.node.name)),
         "the collection did arrive"
     );
 }
@@ -1434,7 +1451,11 @@ async fn a_send_and_a_sync_can_run_at_the_same_time() {
     // The sync is waiting for the planner's user when the send starts.
     let ran = start_and_wait_review(&rig.a, &rig.b, &rig.link).await;
     send_and_accept(&rig.a, &rig.b, "Extras", false).await;
-    assert!(rig.b.cols.names().contains(&"Extras".to_string()));
+    assert!(rig
+        .b
+        .cols
+        .names()
+        .contains(&format!("Extras (from {})", rig.a.node.name)));
 
     // The sync is still open and finishes normally.
     assert!(rig.a.finish(&ran.sid).is_none());
@@ -1599,11 +1620,8 @@ async fn first_send_on_disk(clash: bool) {
     if clash {
         b.repo().create(O).expect("the receiver's own collection");
     }
-    let expected = if clash {
-        format!("{O} (from {})", a.node.name)
-    } else {
-        O.to_string()
-    };
+    // The receiver always names the copy after the sender.
+    let expected = format!("{O} (from {})", a.node.name);
     let a_root = a.read(O, "opencollection.yml");
 
     send_and_accept(&a, &b, O, true).await;

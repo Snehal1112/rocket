@@ -201,7 +201,7 @@ async fn accept_stages_imports_with_the_display_name_and_cleans_up() {
 }
 
 #[tokio::test]
-async fn a_free_name_is_imported_as_offered() {
+async fn a_received_collection_remembers_its_sender() {
     let rig = rig_peers();
     let payload = Payload::new(40 * 1024);
     let id = tid(1);
@@ -211,7 +211,43 @@ async fn a_free_name_is_imported_as_offered() {
     feed(&rig, ANA, &id, &payload);
     wait_for_finish(&rig).await;
 
-    assert_eq!(rig.importer.calls()[0].1, "orders");
+    let origins = rig.importer.origins();
+    assert_eq!(origins.len(), 1);
+    assert_eq!(origins[0].0, "orders (from Ana)");
+    assert_eq!(origins[0].1.sender_name, "Ana");
+    assert_eq!(origins[0].1.sender_short_id, dev(ANA).short());
+}
+
+#[tokio::test]
+async fn a_failed_origin_write_does_not_fail_the_receive() {
+    let rig = rig_peers();
+    rig.importer
+        .fail_origin
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let payload = Payload::new(40 * 1024);
+    let id = tid(1);
+    offer(&rig, ANA, &id, &payload).await;
+
+    rig.svc.respond(&id, true).await.expect("accepts");
+    feed(&rig, ANA, &id, &payload);
+    wait_for_finish(&rig).await;
+
+    assert_eq!(rig.importer.calls().len(), 1, "the import ran");
+    assert!(rig.importer.origins().is_empty());
+}
+
+#[tokio::test]
+async fn a_free_name_is_imported_with_the_sender() {
+    let rig = rig_peers();
+    let payload = Payload::new(40 * 1024);
+    let id = tid(1);
+    offer(&rig, ANA, &id, &payload).await;
+
+    rig.svc.respond(&id, true).await.expect("accepts");
+    feed(&rig, ANA, &id, &payload);
+    wait_for_finish(&rig).await;
+
+    assert_eq!(rig.importer.calls()[0].1, "orders (from Ana)");
 }
 
 #[tokio::test(start_paused = true)]

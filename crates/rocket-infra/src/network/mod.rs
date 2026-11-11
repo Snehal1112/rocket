@@ -23,6 +23,7 @@ pub use links::FsLinkRepo;
 pub use mdns::MdnsDiscovery;
 pub use repos::{
     FsBlockedDeviceRepo, FsManualAddressRepo, FsNetworkSettingsRepo, FsPairedDeviceRepo,
+    FsReceivedCollectionRepo,
 };
 pub use server::RustlsPeerServer;
 pub use staging::FsTransferStaging;

@@ -9,6 +9,8 @@ import {
   transferResultToastId,
   transferWaitingToastId,
 } from '@/lib/network-utils';
+import { receivedKeys } from '@/lib/queries/received-queries';
+import { getQueryClient } from '@/lib/query-client';
 import {
   type NetworkChangedEvent,
   type NetworkContractCheckEvent,
@@ -200,6 +202,14 @@ export function handleNetworkTransfer(event: NetworkTransferEvent): void {
       const wasPending = store.incomingTransfers.some((t) => t.transferId === id && !t.accepted);
       // A repeated finish event changes nothing and shows nothing.
       if (!store.finishTransfer(id)) return;
+      // A received collection has a new sender entry.
+      if (event.direction === 'receive' && event.outcome === 'completed') {
+        try {
+          void getQueryClient().invalidateQueries({ queryKey: receivedKeys.all });
+        } catch {
+          // No query client yet: the list loads when the first view asks for it.
+        }
+      }
       const message = describeTransferOutcome(event, cancelledHere);
       // An offer that ended before it was answered keeps its dialog, so the dialog can say why:
       // it expired, or the sender went offline (a `failed` with a message).

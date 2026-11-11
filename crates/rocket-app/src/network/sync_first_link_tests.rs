@@ -108,17 +108,10 @@ impl Node {
         views[0].state
     }
 
-    /// Imports the ZIP like the transfer import adapter: a display name picked against the
-    /// local names, a ZIP named after it, the real Bruno import.
+    /// Imports the ZIP like the transfer import adapter: a display name with the sender,
+    /// a ZIP named after it, the real Bruno import.
     fn import(&self, zip: &[u8]) -> String {
-        let existing: Vec<String> = self
-            .repo()
-            .list()
-            .expect("list")
-            .into_iter()
-            .map(|c| c.name)
-            .collect();
-        let display = receiver_display_name(NAME, "Ana", &existing);
+        let display = receiver_display_name(NAME, "Ana");
         let zips = TempDir::new().expect("tempdir");
         let path = zips.path().join(format!("{display}.zip"));
         std::fs::write(&path, zip).expect("write zip");
@@ -251,5 +244,7 @@ fn renaming_the_collection_on_one_end_is_not_a_change_to_sync() {
     std::fs::write(oc, text).expect("renamed");
     assert_eq!(ana.link_state(), LinkState::InSync, "sender");
     assert_eq!(bo.link_state(), LinkState::InSync, "receiver");
-    assert!(bo.root_text(&received).contains("name: Orders\n"));
+    assert!(bo
+        .root_text(&received)
+        .contains(&format!("name: {received}\n")));
 }

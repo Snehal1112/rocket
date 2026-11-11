@@ -7,7 +7,10 @@ use rocket_app::{
     NetworkHandle, NetworkService, NetworkState, NetworkStatus, NodeGroup, NodeStatus, NodeView,
     PairingDecision, PairingStarted, SendStarted, TransferService,
 };
-use rocket_network::{BlockedDevice, DeviceId, DiscoverySource, ManualAddress, PairingId};
+use rocket_network::{
+    BlockedDevice, DeviceId, DiscoverySource, ManualAddress, PairingId, ReceivedCollection,
+    ReceivedCollectionRepository,
+};
 use rocket_shared::error::DomainError;
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
@@ -181,6 +184,41 @@ pub fn network_status(svc: State<'_, Arc<NetworkService>>) -> NetworkStatusDto {
 #[tauri::command]
 pub fn network_list_nodes(svc: State<'_, Arc<NetworkService>>) -> Vec<NodeViewDto> {
     svc.list_nodes().into_iter().map(Into::into).collect()
+}
+
+/// Where a received collection came from, keyed by the uid of the collection file.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReceivedCollectionDto {
+    pub collection_uid: String,
+    pub sender_name: String,
+    pub sender_short_id: String,
+    /// RFC 3339, UTC.
+    pub received_at: String,
+}
+
+impl From<ReceivedCollection> for ReceivedCollectionDto {
+    fn from(entry: ReceivedCollection) -> Self {
+        Self {
+            collection_uid: entry.collection_uid,
+            sender_name: entry.sender_name,
+            sender_short_id: entry.sender_short_id,
+            received_at: entry.received_at.to_rfc3339(),
+        }
+    }
+}
+
+/// The sender of every collection this node received. A collection that was not received
+/// over the network has no entry.
+#[tauri::command]
+pub async fn network_list_received(
+    repo: State<'_, Arc<dyn ReceivedCollectionRepository>>,
+) -> Result<Vec<ReceivedCollectionDto>, DomainError> {
+    let repo = Arc::clone(&*repo);
+    let entries = tauri::async_runtime::spawn_blocking(move || repo.list())
+        .await
+        .map_err(|_| DomainError::Internal("The received list could not be read.".to_string()))??;
+    Ok(entries.into_iter().map(Into::into).collect())
 }
 
 #[tauri::command]

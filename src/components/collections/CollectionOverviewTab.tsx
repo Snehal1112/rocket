@@ -4,6 +4,7 @@ import { CollectionOverviewSkeleton } from '@/components/collections/CollectionO
 import { CollectionTrustBanner } from '@/components/collections/CollectionTrustBanner';
 import { CollectionTrustSection } from '@/components/collections/CollectionTrustSection';
 import { MarkdownEditor } from '@/components/collections/MarkdownEditor';
+import { ReceivedFromLine } from '@/components/collections/ReceivedFrom';
 import { TagsList } from '@/components/collections/TagsList';
 import { AuthEditor } from '@/components/request/AuthEditor';
 import { HeadersEditor } from '@/components/request/HeadersEditor';
@@ -23,12 +24,14 @@ import { NTLM_OPTION, OAUTH1_OPTION, withCurrentAuthType } from '@/lib/auth-type
 import { buildSettingsForSave } from '@/lib/collection-settings-save';
 import { fromPersistedAuth, toPersistedAuth } from '@/lib/persisted-auth';
 import { toPersistedHeaders } from '@/lib/persisted-headers';
+import { useCollections } from '@/lib/queries/collection-queries';
 import {
   useEnvironments,
   useGlobalEnvironment,
   useGlobalEnvironmentName,
   useProcessEnvVars,
 } from '@/lib/queries/environment-queries';
+import { useReceivedOrigin } from '@/lib/queries/received-queries';
 import {
   type Collection,
   type CollectionItem,
@@ -123,6 +126,9 @@ const TABS: { label: string; value: CollectionSection }[] = [
 
 export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   const collectionName = tab.collectionName;
+  // The sender is keyed by the collection uid, so a rename keeps it.
+  const summaryUid = useCollections().data?.find((c) => c.name === collectionName)?.uid;
+  const origin = useReceivedOrigin(summaryUid);
   const updateCollectionSection = usePaneStore((s) => s.updateCollectionSection);
   const setCollectionAuth = useCollectionAuthStore((s) => s.setCollectionAuth);
 
@@ -336,7 +342,10 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
           <BoxIcon className='h-5 w-5 text-muted-foreground shrink-0' />
           <h1 className='text-xl font-semibold leading-tight truncate'>{collection.name}</h1>
         </div>
-        <p className='text-sm text-muted-foreground pl-8 mb-4'>{statsLine}</p>
+        <p className={cn('text-sm text-muted-foreground pl-8', origin ? 'mb-1' : 'mb-4')}>
+          {statsLine}
+        </p>
+        {origin && <ReceivedFromLine origin={origin} />}
 
         {/* Tab bar. */}
         <div className='flex items-center gap-0'>

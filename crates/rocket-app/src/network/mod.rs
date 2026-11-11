@@ -120,7 +120,7 @@ pub use sync_ports::{
 };
 pub use transfer::{PeerSender, Timing, TransferDeps, TransferService};
 pub use transfer_ports::{
-    receiver_display_name, CollectionImportPort, ImportedCollection, StagedFile, StagedZip,
-    TransferStaging, UNSAFE_ZIP_MESSAGE,
+    receiver_display_name, CollectionImportPort, CollectionOrigin, ImportedCollection, StagedFile,
+    StagedZip, TransferStaging, UNSAFE_ZIP_MESSAGE,
 };
 pub use transfer_send::SendStarted;

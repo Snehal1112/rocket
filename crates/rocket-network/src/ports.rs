@@ -13,7 +13,9 @@ use crate::link::{LinkId, LinkRecord};
 use crate::messages::PeerMessage;
 use crate::pairing::PairingId;
 use crate::profile::NodeProfile;
-use crate::records::{BlockedDevice, ManualAddress, NetworkSettings, PairedDevice};
+use crate::records::{
+    BlockedDevice, ManualAddress, NetworkSettings, PairedDevice, ReceivedCollection,
+};
 use crate::wire::{
     DecisionRequest, HelloResponse, NonceMessage, PairRequest, PairRequestResponse,
     PairStatusResponse,
@@ -38,6 +40,15 @@ pub trait BlockedDeviceRepository: Send + Sync {
     fn contains(&self, id: &DeviceId) -> DomainResult<bool>;
     fn add(&self, device: BlockedDevice) -> DomainResult<()>;
     fn remove(&self, id: &DeviceId) -> DomainResult<bool>;
+}
+
+/// Where each received collection came from. Implemented by `rocket-infra`
+/// (`FsReceivedCollectionRepo`).
+pub trait ReceivedCollectionRepository: Send + Sync {
+    fn list(&self) -> DomainResult<Vec<ReceivedCollection>>;
+    /// Replaces the entry with the same uid, or adds one. `InvalidInput` over
+    /// `MAX_RECEIVED_COLLECTIONS` new entries.
+    fn record(&self, entry: ReceivedCollection) -> DomainResult<()>;
 }
 
 pub trait ManualAddressRepository: Send + Sync {
