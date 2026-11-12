@@ -472,6 +472,41 @@ function skipPendingRunnerEntry(entry: RunnerRequestEntry): RunnerRequestEntry {
   return entry.status === 'pending' ? { ...entry, status: 'skipped' } : entry;
 }
 
+/** How many of the latest closed passes keep their full responses. */
+export const FULL_RESULT_PASSES = 3;
+
+// Keeps what the Runner list and summary read: status, timing and test results.
+// Bodies, headers, console and the sent request are dropped to bound memory.
+export function slimRunnerEntry(entry: RunnerRequestEntry): RunnerRequestEntry {
+  const r = entry.result;
+  if (!r) return entry;
+  return {
+    ...entry,
+    result: {
+      status: r.status,
+      statusText: r.statusText,
+      headers: [],
+      body: '',
+      durationMs: r.durationMs,
+      ttfbMs: r.ttfbMs,
+      sizeBytes: r.sizeBytes,
+      testResults: r.testResults,
+      consoleEntries: [],
+      scriptError: r.scriptError,
+    },
+  };
+}
+
+// Slims the one closed pass that just fell out of the full-result window.
+// Older passes were slimmed earlier and keep their identity.
+export function slimOldPasses<T extends { requests: RunnerRequestEntry[] }>(passes: T[]): T[] {
+  const index = passes.length - 1 - FULL_RESULT_PASSES;
+  if (index < 0) return passes;
+  const next = passes.slice();
+  next[index] = { ...passes[index], requests: passes[index].requests.map(slimRunnerEntry) };
+  return next;
+}
+
 // Puts a runner entry back to pending, without a result or error.
 function resetRunnerEntry(entry: RunnerRequestEntry): RunnerRequestEntry {
   return { ...entry, status: 'pending', result: undefined, error: undefined };
@@ -1117,11 +1152,11 @@ export const usePaneStore = create<PaneState>((set, get) => ({
           if (!isRunnerTab(tab) || tab.runId !== myRunId) return tab;
           return {
             ...tab,
-            completedPasses: [
+            completedPasses: slimOldPasses([
               ...(tab.completedPasses ?? []),
               // A closed pass is never recreated, so views can skip it.
               { iteration: pass, requests: tab.requests.map(skipPendingRunnerEntry) },
-            ],
+            ]),
             ...(hasNext
               ? { iterationIndex: pass + 1, requests: tab.requests.map(resetRunnerEntry) }
               : {}),

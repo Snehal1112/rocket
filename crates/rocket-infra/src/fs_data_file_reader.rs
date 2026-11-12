@@ -1,10 +1,11 @@
 //! Reads the runner's iteration data file from disk.
 
+use std::io::Read;
 use std::path::Path;
 
 use rocket_collection::{
-    validate_data_file_path, CollectionRepository, DataFileReader, DataFileSource, DataFileText,
-    MAX_DATA_FILE_BYTES,
+    format_for_path, validate_data_file_path, CollectionRepository, DataFileReader, DataFileSource,
+    DataFileText, MAX_DATA_FILE_BYTES,
 };
 use rocket_shared::error::{DomainError, DomainResult};
 
@@ -71,20 +72,28 @@ fn missing_or_io(shown: &str, err: std::io::Error) -> DomainError {
     }
 }
 
-/// Checks the size first, so a huge file is never read into memory.
+/// Rejects a wrong extension before any read, then reads at most the limit plus one byte.
+///
+/// The bounded read also covers a file that reports length 0 (such as a `/proc` entry) or
+/// grows after the metadata check.
 fn read_limited(path: &Path, shown: &str) -> DomainResult<String> {
+    format_for_path(shown)?;
     let meta = std::fs::metadata(path).map_err(|e| missing_or_io(shown, e))?;
     if !meta.is_file() {
         return Err(DomainError::InvalidInput(format!(
             "The data file '{shown}' is not a file."
         )));
     }
-    if meta.len() > MAX_DATA_FILE_BYTES as u64 {
+    let file = std::fs::File::open(path).map_err(|e| missing_or_io(shown, e))?;
+    let mut bytes = Vec::new();
+    file.take(MAX_DATA_FILE_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| missing_or_io(shown, e))?;
+    if bytes.len() > MAX_DATA_FILE_BYTES {
         return Err(DomainError::InvalidInput(format!(
             "The data file '{shown}' is too large."
         )));
     }
-    let bytes = std::fs::read(path).map_err(|e| missing_or_io(shown, e))?;
     String::from_utf8(bytes).map_err(|_| {
         DomainError::InvalidInput(format!("The data file '{shown}' is not valid UTF-8 text."))
     })
@@ -213,6 +222,26 @@ mod tests {
             DomainError::InvalidInput(m) => assert!(m.contains("too large"), "{m}"),
             other => panic!("unexpected {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_file_with_a_wrong_extension_is_rejected_without_reading() {
+        let (dir, reader) = setup(None);
+        // The file does not exist, so a read would report not found instead.
+        let missing = dir.path().join("nope.txt");
+        let err = reader.read("api", missing.to_str()).expect_err("must fail");
+        assert!(matches!(err, DomainError::InvalidInput(_)), "{err:?}");
+    }
+
+    #[test]
+    fn a_file_over_the_limit_is_rejected_by_the_bounded_read() {
+        let dir = TempDir::new().expect("tempdir");
+        let path = dir.path().join("big.csv");
+        fs::write(&path, vec![b'a'; MAX_DATA_FILE_BYTES + 1]).expect("write");
+        let err = read_limited(&path, "big.csv").expect_err("must fail");
+        assert!(err.to_string().contains("too large"), "{err}");
+        fs::write(&path, vec![b'a'; MAX_DATA_FILE_BYTES]).expect("write");
+        assert!(read_limited(&path, "big.csv").is_ok());
     }
 
     #[test]

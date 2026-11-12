@@ -58,11 +58,16 @@ import { CollectionVariablesEditor } from './CollectionVariablesEditor';
 import { MethodBreakdown } from './MethodBreakdown';
 import { RequestList } from './RequestList';
 
-/** True for a leading slash, a `..` segment, a backslash or a colon. A hint only. */
+/**
+ * Mirrors `validate_data_file_path` in rocket-collection. True for a leading slash, a
+ * backslash, a colon, a NUL, or an empty, `.` or `..` segment (a trailing slash too).
+ * A hint only.
+ */
 function looksNotRelative(path: string): boolean {
   const p = path.trim();
   if (!p) return false;
-  return p.startsWith('/') || p.includes('\\') || p.includes(':') || p.split('/').includes('..');
+  if (p.startsWith('/') || p.includes('\\') || p.includes(':') || p.includes('\0')) return true;
+  return p.split('/').some((part) => part === '' || part === '.' || part === '..');
 }
 
 interface CollectionOverviewTabProps {

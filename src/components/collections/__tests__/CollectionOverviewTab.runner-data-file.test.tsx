@@ -119,6 +119,11 @@ describe('Runner data file field', () => {
     '../up/users.csv',
     'a\\b.csv',
     'C:users.csv',
+    './users.csv',
+    'data/./users.csv',
+    'data//users.csv',
+    'data/',
+    'data/..',
   ])('the_field_never_blocks_saving_when_the_path_looks_invalid (%s)', async (bad) => {
     setup();
     fireEvent.change(await field(), { target: { value: bad } });
@@ -127,6 +132,15 @@ describe('Runner data file field', () => {
     await waitFor(() => expect(tauriApi.saveCollectionSettings).toHaveBeenCalled());
     expect(lastSaved().runnerDataFile).toBe(bad);
   });
+
+  it.each(['users.csv', 'data/users.csv', 'a.b/users.v2.csv'])(
+    'a_valid_relative_path_shows_no_warning (%s)',
+    async (good) => {
+      setup();
+      fireEvent.change(await field(), { target: { value: good } });
+      expect(screen.queryByText(/does not look like a relative path/i)).not.toBeInTheDocument();
+    },
+  );
 
   it('the_hint_explains_the_path_is_relative_to_the_collection', async () => {
     setup();

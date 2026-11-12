@@ -21,8 +21,9 @@ use crate::execution_service::{ExecuteRequestInput, RequestExecutionService};
 use crate::iteration_data_service::{iteration_info, IterationDataService};
 use crate::runner_sequence::{build_step_input, flatten_run_set, RunItem};
 
-/// Hard cap on executed steps in one run. `setNextRequest` can form a cycle
-/// (A → B → A); without a cap the run would never end.
+/// Hard cap on executed steps in one run, counted across all data rows.
+/// `setNextRequest` can form a cycle (A → B → A); without a cap the run would
+/// never end. A long data run can also reach it without any cycle.
 const MAX_RUN_STEPS: usize = 1_000;
 
 /// Input for one run. IPC DTO.
@@ -138,8 +139,8 @@ pub enum StoppedReason {
     },
     /// `stop_collection_run` was called for this run.
     Cancelled,
-    /// `MAX_RUN_STEPS` executed steps were reached — almost certainly a
-    /// `setNextRequest` cycle.
+    /// `MAX_RUN_STEPS` executed steps were reached. The cap counts steps across
+    /// all data rows, so it is a `setNextRequest` cycle or a run with many rows.
     #[serde(rename_all = "camelCase")]
     StepLimitReached { limit: usize },
 }
