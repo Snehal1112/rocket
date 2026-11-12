@@ -526,6 +526,69 @@ interface RokResponse {
   /** Time taken in milliseconds. */
   responseTime: number;
 }
+interface GrpcScriptResult {
+  /** The gRPC status. Code 0 and name OK on success. A non-OK status still resolves. */
+  status: { code: number; name: string; message: string };
+  /** The first response message, or undefined when none arrived. */
+  message?: unknown;
+  /** Every response message, in arrival order. At most 1000 messages and 10 MiB in total. */
+  messages: unknown[];
+  /** Response headers. Names are lowercased. */
+  headers: Record<string, string>;
+  /** Response trailers. Names are lowercased. */
+  trailers: Record<string, string>;
+  /** True when a cap ended the call early. The status is then RESOURCE_EXHAUSTED. */
+  truncated: boolean;
+}
+/** Give message (one object) or messages (an array), never both. Giving both is a type error. */
+type GrpcInput =
+  | { message?: Record<string, unknown>; messages?: never }
+  | { message?: never; messages?: Record<string, unknown>[] };
+type GrpcCommonOptions = GrpcInput & {
+  /** Metadata to send. Keys are lowercased and values must be strings. */
+  metadata?: Record<string, string>;
+  /** Time limit in milliseconds. Defaults to 30000 (30 s). The ceiling is 300000 (5 min). On expiry the call resolves with DEADLINE_EXCEEDED. */
+  timeoutMs?: number;
+};
+/** Options for rok.grpc.run. With no message, the saved request's selected message is sent. Metadata is added to the saved metadata. */
+type GrpcScriptOptions = GrpcCommonOptions;
+/** Options for rok.grpc.call. */
+type GrpcAdHocOptions = GrpcCommonOptions & {
+  /** Server address, for example grpc://localhost:50051. */
+  url: string;
+  /** Full service name, for example orders.Orders. */
+  service: string;
+  /** Method name, for example GetOrder. */
+  method: string;
+  /** Proto file as a relative path inside the collection. A path outside the collection rejects the call. */
+  protoFile: string;
+  /** True to use TLS (grpcs). Defaults to false. */
+  tls?: boolean;
+};
+interface RokGrpc {
+  /**
+   * Run a saved gRPC request. The path is relative to the collection root and includes the extension, e.g. "orders/get-order.yml". Proto, server, auth and variables come from the collection.
+   * Developer mode only. Safe mode rejects the call.
+   * The exchange is non-interactive: all input messages are sent, then the stream is half-closed, then the replies are collected. Unary and server streaming take one input message. Client streaming and bidirectional take one or more (at most 1000).
+   * Limits: 1000 response messages and 10 MiB in total (then truncated is true), 30 s default timeoutMs with a 5 min ceiling.
+   * A non-OK gRPC status resolves with status set. The Promise rejects only for setup problems: a bad path, an item that is not a gRPC request, an unknown method, a message that does not fit the proto, a blocked host, a wrong argument type.
+   */
+  run(path: string, options?: GrpcScriptOptions): Promise<GrpcScriptResult>;
+  /** Callback form: the callback gets (null, result) or (error, null), and the promise resolves to what it returns. */
+  run(path: string, callback: (err: Error | null, result: GrpcScriptResult | null) => unknown): Promise<unknown>;
+  run(path: string, options: GrpcScriptOptions, callback: (err: Error | null, result: GrpcScriptResult | null) => unknown): Promise<unknown>;
+  /**
+   * Call a gRPC method without a saved request.
+   * Developer mode only. Safe mode rejects the call.
+   * An ad hoc call sends no collection auth and no default headers. Put what the server needs in metadata.
+   * The exchange is non-interactive: all input messages are sent, then the stream is half-closed, then the replies are collected. Unary and server streaming take exactly one input message. Client streaming and bidirectional take one or more (at most 1000).
+   * Limits: 1000 response messages and 10 MiB in total (then truncated is true), 30 s default timeoutMs with a 5 min ceiling.
+   * A non-OK gRPC status resolves with status set. A failed connect resolves as UNAVAILABLE. The Promise rejects only for setup problems.
+   */
+  call(options: GrpcAdHocOptions): Promise<GrpcScriptResult>;
+  /** Callback form: the callback gets (null, result) or (error, null), and the promise resolves to what it returns. */
+  call(options: GrpcAdHocOptions, callback: (err: Error | null, result: GrpcScriptResult | null) => unknown): Promise<unknown>;
+}
 interface CookieEntry {
   /** domain|path|name. */
   id: string;
@@ -689,6 +752,8 @@ declare const rok: {
   sendRequest(options: RokSendRequestOptions): Promise<RokResponse>;
   /** Callback form: the callback gets (null, response) or (error, null), and the promise resolves to what it returns. */
   sendRequest(options: RokSendRequestOptions, callback: (err: Error | null, res: RokResponse | null) => unknown): Promise<unknown>;
+  /** Call gRPC methods from a script. Developer mode only. */
+  readonly grpc: RokGrpc;
   /** Wait ms milliseconds, clamped to 0..60000. Use with await. */
   sleep(ms: number): Promise<void>;
   /** Run a saved request with its scripts, auth and variables. The path is relative to the collection root, without extension, e.g. "auth/login". Other protocols resolve to { status: "skipped" }. */

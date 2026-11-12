@@ -156,7 +156,7 @@ describe('rok typings stay in sync with the runtime', () => {
     const block = bootstrap.slice(start, end);
     const names = [...block.matchAll(/^ {4}(\w+):/gm)]
       .map((m) => m[1])
-      .filter((n) => n !== 'runner' && n !== 'cookies');
+      .filter((n) => n !== 'runner' && n !== 'cookies' && n !== 'grpc');
     const defs = ROK_TYPE_DEFS_FOR_PHASE('tests');
     // Only 2-space indented lines are top-level members, so runner.* cannot satisfy this.
     const missing = names.filter((n) => !new RegExp(`^ {2}${n}\\(`, 'm').test(defs));
@@ -261,5 +261,32 @@ describe('withScriptTopLevelAllowed', () => {
     expect(twice.diagnosticCodesToIgnore).toContain(2304);
     expect(twice.diagnosticCodesToIgnore?.filter((c) => c === 1108)).toHaveLength(1);
     expect(twice.diagnosticCodesToIgnore).toHaveLength(once.diagnosticCodesToIgnore?.length ?? 0);
+  });
+});
+
+describe('rok.grpc typings', () => {
+  it.each(['pre-request', 'post-response', 'tests'] as const)('declares rok.grpc in %s', (phase) => {
+    const defs = ROK_TYPE_DEFS_FOR_PHASE(phase);
+    expect(defs).toContain('grpc:');
+    expect(defs).toMatch(/run\(path: string/);
+    expect(defs).toMatch(/call\(options: GrpcAdHocOptions/);
+    expect(defs).toContain('interface GrpcScriptResult');
+    for (const member of ['status:', 'message?:', 'messages:', 'headers:', 'trailers:', 'truncated:']) {
+      expect(defs).toContain(member);
+    }
+    expect(defs).toContain('callback: (err: Error | null, result: GrpcScriptResult | null)');
+  });
+
+  it('rejects message and messages together through never', () => {
+    const defs = ROK_TYPE_DEFS_FOR_PHASE('pre-request');
+    expect(defs).toMatch(/message\?: never/);
+    expect(defs).toMatch(/messages\?: never/);
+  });
+
+  it('documents the limits and the model', () => {
+    const defs = ROK_TYPE_DEFS_FOR_PHASE('pre-request');
+    for (const text of ['Developer mode', '1000', '10 MiB', '30 s', '5 min', 'half-close', 'resolves', 'collection auth']) {
+      expect(defs).toContain(text);
+    }
   });
 });
