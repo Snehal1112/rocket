@@ -32,6 +32,7 @@ Never imports `rocket-infra`, `rocket-app`, or `src-tauri`.
 | `ConsoleEntry` | `result.rs` | Captured `console.log/warn/error` output |
 | `UrlScope`, `CookieEntry`, `CookieInput` | `script_cookie.rs` | Types of the `rok.cookies` API. Also `build_cookie` (token name, no control character or `;` in a value, name plus value at most 4096 bytes, value-free errors), `to_entry`, `cookie_id` and `matching_cookies`: the mapping between a jar `Cookie` and a script cookie. Moved here from `rocket-http`. `CookieEntry` and `CookieInput` keep a camelCase serde shape. |
 | `evaluate_assertions`, `assertion_outcomes` | `assertion_evaluator.rs` | Pure evaluation of declarative assertions against an `HttpResponse` (one `TestResult` per enabled assertion, or the `AssertionOutcome` shape scripts read). Moved here from `rocket-app` (D-86). |
+| `IterationInfo` | `context.rs` | The data row of a runner pass: `index`, `total` and `data` (column to text). `ScriptContext.iteration` (`with_iteration`) is `None` outside a data-driven run; scripts read it as `rok.runner.iterationData`, `iterationIndex` and `totalIterations`. |
 | `ScriptFileScope` | `context.rs` | Collection root and extra roots for local-file `require()`; plain data, `rocket-infra` does the I/O |
 
 ## Execution model

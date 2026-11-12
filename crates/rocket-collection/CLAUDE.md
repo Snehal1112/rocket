@@ -90,6 +90,11 @@ All structs use `#[serde(rename_all = "camelCase")]` for JSON serialization. Opt
 - **`headers: Vec<Header>`** — default headers prepended to every request.
 - **`docs: Option<String>`** — optional markdown documentation for the collection (maps to `docs:` in opencollection.yml).
 - **`script_flow: ScriptFlow`** — `Sandwich` (default) or `Sequential`, serde lowercase. Stored at `extensions.bruno.scripts.flow` in opencollection.yml, not in a Rocket-only field.
+- **`runner_data_file: Option<String>`** — the saved default data file of the runner. Stored at `extensions.rocketapi.runner.dataFile`, not in a Rocket-only field. The path rule is `validate_data_file_path` (relative, `/` separators, no `..`).
+
+## Iteration data (`iteration_data.rs`)
+
+Pure text rules for the runner's data files. `format_for_path` picks CSV or JSON by extension. `parse_iteration_data` returns an `IterationData` (columns plus rows of text values) and enforces `MAX_DATA_FILE_BYTES` (10 MB) and `MAX_DATA_ROWS` (1000). `DataFileReader` is the port that `FsDataFileReader` in `rocket-infra` implements; it reads the per-run file or the saved default and does no parsing. Feature doc: `docs/features/runner-iteration-data.md`.
 
 ## FolderSettings
 

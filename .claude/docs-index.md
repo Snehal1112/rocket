@@ -22,6 +22,7 @@ Pointers to the feature and engineering docs. Open the one that matches the area
 - `docs/features/settings-page.md` for the global Settings page (sections, lock, shortcuts, how to add a section).
 - `docs/features/elevation.md` for the four elevation levels (VS Code colours, shadows, which surface uses which, borders).
 - `docs/features/update-notification.md` for the update notice (schedule, install kinds, settings, manual checks).
+- `docs/features/runner-iteration-data.md` for running a collection once per CSV or JSON row (formats and limits, the saved default key, `rok.runner.iterationData`, Runner tab versus backend runner, known limits). Manual checks: `docs/manual-tests/runner-iteration-data.md`.
 - `docs/features/team-network.md` for the team network (discovery, pairing, presence, Network panel, Settings section, send a collection, keep in sync, contract check, limits, manual checks).
 
 ## Engineering
