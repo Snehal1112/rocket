@@ -17,7 +17,7 @@ Run a collection or folder once per row of a CSV or JSON data file. Scripts read
 | CSV | The first line is the header row. A UTF-8 BOM is skipped. Duplicate headers are an error. A row with fewer cells than the header gets empty values. A row with more cells is an error. |
 | JSON | An array of objects. Any other shape is an error. Columns are the keys, in the order first seen. |
 | Values | Always strings. In JSON a number or boolean becomes its JSON text, `null` becomes an empty string, and an object or array becomes its JSON text. |
-| Size | At most 10 MB, and the file must be valid UTF-8. The size is checked before the file is read. |
+| Size | At most 10 MiB, and the file must be valid UTF-8. The size is checked before the file is read. |
 | Rows | At least 1 and at most 1000. A file with only a header has no rows and is an error. |
 
 Every error is found before the run starts: no event is published and nothing is sent. Parse errors start with the file name.

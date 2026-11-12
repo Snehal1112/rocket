@@ -6,13 +6,13 @@ Setup: a collection `api` with two requests, `A` and `B`, to `https://httpbin.or
 
 1. **CSV, three rows.** Save `users.csv` with the lines `name,age`, `ann,30`, `bob,41`, `cy,52`. Open the Runner tab of `api`, click "Choose data file" and pick it. The row says `3 rows (name, age)`. Click Run. Three sections appear, one per row, each with `A` and `B`. Nothing is sent after row three.
 2. **JSON.** Save `users.json` with `[{"name":"ann","age":30},{"name":"bob","active":true,"note":null}]`. Pick it and run. Two passes run. A script sees `rok.runner.iterationData.get('age')` as `"30"` (a string) in row one, and `get('active')` as `"true"` and `get('note')` as an empty string in row two. `has('age')` is false in row two.
-3. **Wrong extension.** Pick a `.txt` file. The row shows an error that the file must end in `.csv` or `.json`. A run does not start and nothing is sent.
+3. **Wrong extension.** Pick a `.txt` file (switch the dialog to all files, or rename a text file to end in `.txt` and drop it in a place the dialog can open). The row shows an error that the file must end in `.csv` or `.json`. A run does not start and nothing is sent.
 4. **Empty file.** Pick an empty `.csv`. The row shows an error (no rows, or the header cannot be read). No request is sent.
 5. **Header only.** A `.csv` with only `name,age`. The error says the file has no rows.
 6. **1001 rows.** Make a `.csv` with a header and 1001 rows. The error says it has more than 1000 rows. With exactly 1000 rows it loads.
 7. **Duplicate header.** A `.csv` with the header `name,name`. The error names the duplicate header.
 8. **Long CSV row.** A `.csv` with the header `a,b` and a row `1,2,3`. The error says CSV row 1 has more cells than the header. A row `1` (fewer cells) loads and `b` is an empty string.
-9. **Big file.** A `.csv` over 10 MB. The error says the file is too large.
+9. **Big file.** A `.csv` over 10 MiB. The error says the file is too large.
 10. **Saved default.** In the Overview tab of `api`, type `data/users.csv` in "Runner data file" and click Save in the Runner card. Put the file at `<collection>/data/users.csv`. The Runner tab shows `Using saved default: data/users.csv`. Run: one pass per row.
 11. **Per-run file wins, then back.** In the same tab pick another file. The row shows that file. Click the X ("Use saved default"). The saved default shows again.
 12. **Second machine.** Commit the collection and pull it on a second machine, or edit `opencollection.yml` by hand to add `runner: { dataFile: data/users.csv }` under `extensions.rocketapi`. Open the collection. The Overview field and the Runner tab show the default. Other keys under `extensions` (for example `bruno.scripts.flow`) are still in the file after a save.

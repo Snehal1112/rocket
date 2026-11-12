@@ -94,7 +94,7 @@ All structs use `#[serde(rename_all = "camelCase")]` for JSON serialization. Opt
 
 ## Iteration data (`iteration_data.rs`)
 
-Pure text rules for the runner's data files. `format_for_path` picks CSV or JSON by extension. `parse_iteration_data` returns an `IterationData` (columns plus rows of text values) and enforces `MAX_DATA_FILE_BYTES` (10 MB) and `MAX_DATA_ROWS` (1000). `DataFileReader` is the port that `FsDataFileReader` in `rocket-infra` implements; it reads the per-run file or the saved default and does no parsing. Feature doc: `docs/features/runner-iteration-data.md`.
+Pure text rules for the runner's data files. `format_for_path` picks CSV or JSON by extension. `parse_iteration_data` returns an `IterationData` (columns plus rows of text values) and enforces `MAX_DATA_FILE_BYTES` (10 MiB) and `MAX_DATA_ROWS` (1000). `DataFileReader` is the port that `FsDataFileReader` in `rocket-infra` implements; it reads the per-run file or the saved default and does no parsing. Feature doc: `docs/features/runner-iteration-data.md`.
 
 ## FolderSettings
 
