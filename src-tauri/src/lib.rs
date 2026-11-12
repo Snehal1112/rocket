@@ -809,6 +809,15 @@ pub fn run() {
                 Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
             );
 
+            // Iteration data — reads the runner's data file through a
+            // workspace-following SharedPathCollectionRepo, like runner_svc, so a
+            // switch cannot make a run read another workspace's file.
+            let iteration_data_svc = rocket_app::IterationDataService::new(Box::new(
+                rocket_infra::FsDataFileReader::new(Box::new(SharedPathCollectionRepo::new(
+                    Arc::clone(&active_workspace_path),
+                ))),
+            ));
+
             // Flow execution — both repos are workspace-following (SharedPathFlowRepo,
             // SharedPathCollectionRepo), matching runner_svc's own collection_repo
             // exactly and for the same reason: a run must follow workspace switches,
@@ -983,6 +992,7 @@ pub fn run() {
             app.manage(websocket_svc);
             app.manage(graphql_subscription_svc);
             app.manage(runner_svc);
+            app.manage(iteration_data_svc);
             app.manage(flow_exec_svc);
             app.manage(executor);
             app.manage(oauth2_svc);
@@ -1266,6 +1276,7 @@ pub fn run() {
             commands::execution::evaluate_var_expression,
             commands::runner::run_collection,
             commands::runner::stop_collection_run,
+            commands::runner::load_iteration_data,
             commands::flow::list_flows,
             commands::flow::get_flow,
             commands::flow::delete_flow,

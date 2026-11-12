@@ -258,6 +258,69 @@ pub(super) fn collection_identity(
     })
 }
 
+/// Reads the runner's saved data file from `extensions.rocketapi.runner.dataFile`. A missing
+/// key or a value that is not a string both mean no saved default.
+fn runner_data_file_from_extensions(extensions: &Option<serde_yaml::Value>) -> Option<String> {
+    extensions
+        .as_ref()
+        .and_then(|v| v.get("rocketapi"))
+        .and_then(|v| v.get("runner"))
+        .and_then(|v| v.get("dataFile"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+}
+
+/// Writes the saved data file to `extensions.rocketapi.runner.dataFile`, keeping every other
+/// key. A value that already reads as `file` is left as it is, so a save never rewrites it
+/// (this keeps a non-string value that reads as none). `None` removes the key and prunes the
+/// `runner` and `rocketapi` mappings that this leaves empty.
+fn set_runner_data_file_in_extensions(
+    extensions: Option<serde_yaml::Value>,
+    file: &Option<String>,
+) -> Option<serde_yaml::Value> {
+    if runner_data_file_from_extensions(&extensions) == *file {
+        return extensions;
+    }
+    let mut root = match extensions {
+        Some(serde_yaml::Value::Mapping(map)) => map,
+        _ => serde_yaml::Mapping::new(),
+    };
+    let rocketapi_key = serde_yaml::Value::String("rocketapi".into());
+    let runner_key = serde_yaml::Value::String("runner".into());
+    let file_key = serde_yaml::Value::String("dataFile".into());
+    let mut rocketapi = match root.get(&rocketapi_key) {
+        Some(serde_yaml::Value::Mapping(map)) => map.clone(),
+        _ => serde_yaml::Mapping::new(),
+    };
+    let mut runner = match rocketapi.get(&runner_key) {
+        Some(serde_yaml::Value::Mapping(map)) => map.clone(),
+        _ => serde_yaml::Mapping::new(),
+    };
+    match file {
+        Some(path) => {
+            runner.insert(file_key, serde_yaml::Value::String(path.clone()));
+        }
+        None => {
+            runner.remove(&file_key);
+        }
+    }
+    if runner.is_empty() {
+        rocketapi.remove(&runner_key);
+    } else {
+        rocketapi.insert(runner_key, serde_yaml::Value::Mapping(runner));
+    }
+    if rocketapi.is_empty() {
+        root.remove(&rocketapi_key);
+    } else {
+        root.insert(rocketapi_key, serde_yaml::Value::Mapping(rocketapi));
+    }
+    if root.is_empty() {
+        None
+    } else {
+        Some(serde_yaml::Value::Mapping(root))
+    }
+}
+
 pub(super) fn get_settings(
     repo: &FsCollectionRepo,
     name: &str,
@@ -274,6 +337,7 @@ pub(super) fn get_settings(
     let sandbox_mode = sandbox_mode_from_extensions(&oc.extensions);
     let script_context_roots = script_roots_from_extensions(&oc.extensions);
     let script_flow = script_flow_from_extensions(&oc.extensions);
+    let runner_data_file = runner_data_file_from_extensions(&oc.extensions);
     let agent_autonomy_enabled = agent_autonomy_enabled_from_extensions(&oc.extensions);
 
     if let Some(defaults) = oc.request {
@@ -295,6 +359,7 @@ pub(super) fn get_settings(
             sandbox_mode,
             script_context_roots,
             script_flow,
+            runner_data_file,
             agent_autonomy_enabled,
         })
     } else {
@@ -303,6 +368,7 @@ pub(super) fn get_settings(
             sandbox_mode,
             script_context_roots,
             script_flow,
+            runner_data_file,
             agent_autonomy_enabled,
             ..CollectionSettings::default()
         })
@@ -387,6 +453,8 @@ pub(super) fn save_settings(
     oc.extensions =
         set_script_roots_in_extensions(oc.extensions.take(), &settings.script_context_roots);
     oc.extensions = set_script_flow_in_extensions(oc.extensions.take(), &settings.script_flow);
+    oc.extensions =
+        set_runner_data_file_in_extensions(oc.extensions.take(), &settings.runner_data_file);
 
     let yaml = serde_yaml::to_string(&oc).map_err(|e| {
         DomainError::Internal(format!("Failed to serialize opencollection.yml: {e}"))
@@ -573,6 +641,74 @@ mod tests {
         assert_eq!(
             set_script_flow_in_extensions(sequential.clone(), &ScriptFlow::Sequential),
             sequential
+        );
+    }
+
+    #[test]
+    fn runner_data_file_reads_a_string_at_extensions_rocketapi_runner_datafile() {
+        assert_eq!(
+            runner_data_file_from_extensions(&ext(
+                "rocketapi:\n  runner:\n    dataFile: data/users.csv\n"
+            )),
+            Some("data/users.csv".to_string())
+        );
+    }
+
+    #[test]
+    fn runner_data_file_is_none_for_absent_or_non_string_values() {
+        assert_eq!(runner_data_file_from_extensions(&None), None);
+        for yaml in [
+            "rocketapi:\n  sandboxMode: safe\n",
+            "rocketapi:\n  runner: 3\n",
+            "rocketapi:\n  runner:\n    dataFile: 7\n",
+            "rocketapi:\n  runner:\n    dataFile: [a]\n",
+        ] {
+            assert_eq!(runner_data_file_from_extensions(&ext(yaml)), None, "{yaml}");
+        }
+    }
+
+    #[test]
+    fn set_runner_data_file_keeps_sibling_extension_keys() {
+        let input =
+            ext("rocketapi:\n  sandboxMode: safe\n  runner:\n    other: 1\nbruno:\n  x: 2\n");
+        let out = set_runner_data_file_in_extensions(input, &Some("d.json".to_string()))
+            .expect("extensions value");
+        let expected: serde_yaml::Value = serde_yaml::from_str(
+            "rocketapi:\n  sandboxMode: safe\n  runner:\n    other: 1\n    dataFile: d.json\nbruno:\n  x: 2\n",
+        )
+        .expect("parse expected yaml");
+        assert_eq!(out, expected);
+        assert_eq!(
+            runner_data_file_from_extensions(&Some(out)),
+            Some("d.json".to_string())
+        );
+    }
+
+    #[test]
+    fn set_runner_data_file_none_removes_the_key_and_prunes_empty_mappings() {
+        assert_eq!(
+            set_runner_data_file_in_extensions(
+                ext("rocketapi:\n  runner:\n    dataFile: d.csv\n"),
+                &None
+            ),
+            None
+        );
+        let out = set_runner_data_file_in_extensions(
+            ext("rocketapi:\n  sandboxMode: safe\n  runner:\n    dataFile: d.csv\n"),
+            &None,
+        )
+        .expect("extensions value");
+        let expected: serde_yaml::Value =
+            serde_yaml::from_str("rocketapi:\n  sandboxMode: safe\n").expect("parse expected yaml");
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn a_non_string_saved_value_is_left_unchanged_when_settings_hold_none() {
+        let input = ext("rocketapi:\n  runner:\n    dataFile: 7\n");
+        assert_eq!(
+            set_runner_data_file_in_extensions(input.clone(), &None),
+            input
         );
     }
 

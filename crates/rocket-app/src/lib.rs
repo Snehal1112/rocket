@@ -53,6 +53,7 @@ pub mod graphql_schema;
 pub mod graphql_subscription;
 pub mod grpc_service;
 pub mod history_service;
+pub mod iteration_data_service;
 pub mod load_test_service;
 pub mod mcp_read_views;
 pub mod mcp_tool_service;
@@ -134,6 +135,7 @@ pub use graphql_subscription::{
 };
 pub use grpc_service::{GrpcExecuteInput, GrpcService};
 pub use history_service::HistoryService;
+pub use iteration_data_service::{iteration_info, IterationDataService, LoadedIterationData};
 pub use load_test_service::LoadTestService;
 pub use mcp_read_views::{
     CollectionBrief, FolderChildView, FolderView, HistoryBrief, MaskedBody, MaskedEnvironment,

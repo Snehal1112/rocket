@@ -161,6 +161,34 @@ pub fn validate_data_file_path(path: &str) -> DomainResult<()> {
     Ok(())
 }
 
+/// Where a data file came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DataFileSource {
+    /// A path the user gave for this run.
+    PerRun,
+    /// The path saved in the collection settings.
+    SavedDefault,
+}
+
+/// The text of a data file, before parsing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DataFileText {
+    /// The path the file was read from, as given or saved.
+    pub file_name: String,
+    pub text: String,
+    pub source: DataFileSource,
+}
+
+/// Reads the data file for a run. The per-run path wins, otherwise the saved default is used.
+pub trait DataFileReader: Send + Sync {
+    /// Returns `None` when neither a per-run path nor a saved default is set.
+    fn read(
+        &self,
+        collection: &str,
+        per_run_path: Option<&str>,
+    ) -> DomainResult<Option<DataFileText>>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

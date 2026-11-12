@@ -67,6 +67,11 @@ pub struct CollectionSettings {
     #[serde(default)]
     pub script_flow: ScriptFlow,
 
+    /// Saved default data file for the runner, relative to the collection directory.
+    /// Persisted at `extensions.rocketapi.runner.dataFile` with `/` separators.
+    #[serde(default)]
+    pub runner_data_file: Option<String>,
+
     /// Whether the ACP AI-assist agent may run requests, edit scripts, and
     /// write non-secret env vars against this collection without further
     /// per-action confirmation. Defaults to `false`. This field is

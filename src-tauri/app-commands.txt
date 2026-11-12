@@ -169,6 +169,7 @@ list_templates
 list_vault_certificates
 list_workspaces
 load_git_credentials_v2
+load_iteration_data
 load_ui_state
 mask_assistant_response
 move_item
