@@ -2330,6 +2330,145 @@ mod tests {
         assert_eq!(event_passes, passes);
     }
 
+    /// A runner over `collection` and a service with the REAL script engine.
+    /// The runner reads `csv` as its data file.
+    fn real_engine_run(
+        collection: Collection,
+        csv: &str,
+    ) -> (
+        CollectionRunnerService,
+        RequestExecutionService,
+        Arc<RecordingExecutor>,
+    ) {
+        let repo = InMemoryCollectionRepo::new(collection);
+        let executor = RecordingExecutor::new();
+        let exec = RequestExecutionService::new(
+            Box::new(NullEnvRepo),
+            Arc::new(SharedExecutor(Arc::clone(&executor))),
+            Box::new(SharedHistoryRepo(InMemoryHistoryRepo::new())),
+            Box::new(SharedCollectionRepo(Arc::clone(&repo))),
+            Box::new(NullCookieRepo),
+            Box::new(rocket_shared::events::NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        )
+        .with_script_engine(Box::new(rocket_infra::scripting::DenoScriptEngine::new()));
+        let runner = CollectionRunnerService::new(
+            Box::new(SharedCollectionRepo(repo)),
+            Box::new(rocket_shared::events::NullEventPublisher),
+        )
+        .with_iteration_data(IterationDataService::new(Box::new(FakeDataReader(Some(
+            data_file(csv),
+        )))));
+        (runner, exec, executor)
+    }
+
+    /// The value of header `name` on every send, in order.
+    fn sent_header_values(executor: &RecordingExecutor, name: &str) -> Vec<Option<String>> {
+        executor
+            .sent_headers()
+            .iter()
+            .map(|headers| {
+                headers
+                    .iter()
+                    .find(|h| h.key.eq_ignore_ascii_case(name))
+                    .map(|h| h.value.clone())
+            })
+            .collect()
+    }
+
+    const NAMES_CSV: &str = "name,role\nada,admin\nbob,dev\ncy,ops\n";
+
+    #[tokio::test]
+    async fn a_pre_request_script_reads_its_row_in_every_pass() {
+        let mut collection = Collection::new("my-api");
+        let mut row = Request::new("Row", HttpMethod::Get, "https://api.test/row.yml");
+        row.file_name = Some("row.yml".into());
+        row.pre_request_script = Some(
+            "req.setHeader('x-row', [rok.runner.iterationData.get('name'), \
+             rok.runner.iterationIndex, rok.runner.totalIterations].join('|'));"
+                .into(),
+        );
+        collection.root.add_request(row);
+
+        let (runner, exec, executor) = real_engine_run(collection, NAMES_CSV);
+        let summary = runner.run(&exec, sample_run_input()).await.expect("run");
+
+        assert_eq!(summary.steps.len(), 3);
+        assert!(
+            summary
+                .steps
+                .iter()
+                .all(|s| s.status == RunStepStatus::Completed),
+            "{:?}",
+            summary.steps
+        );
+        assert_eq!(
+            sent_header_values(&executor, "x-row"),
+            vec![
+                Some("ada|0|3".to_string()),
+                Some("bob|1|3".to_string()),
+                Some("cy|2|3".to_string()),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_nested_run_request_sees_the_callers_row() {
+        let mut collection = Collection::new("my-api");
+        let mut main = Request::new("Main", HttpMethod::Get, "https://api.test/main.yml");
+        main.file_name = Some("main.yml".into());
+        main.pre_request_script = Some(
+            "req.setHeader('x-row', rok.runner.iterationData.get('name') + '|' + \
+             rok.runner.iterationIndex); await rok.runRequest('auth/login');"
+                .into(),
+        );
+        let mut login = Request::new("Login", HttpMethod::Get, "https://api.test/login.yml");
+        login.file_name = Some("login.yml".into());
+        login.pre_request_script = Some(
+            "req.setHeader('x-row', rok.runner.iterationData.get('name') + '|' + \
+             rok.runner.iterationIndex + '|' + rok.runner.totalIterations);"
+                .into(),
+        );
+        let mut auth = rocket_collection::Folder::new("auth");
+        auth.add_request(login);
+        collection.root.add_request(main);
+        collection.root.add_subfolder(auth);
+
+        let (runner, exec, executor) = real_engine_run(collection, NAMES_CSV);
+        let summary = runner.run(&exec, sample_run_input()).await.expect("run");
+        assert!(
+            summary
+                .steps
+                .iter()
+                .all(|s| s.status == RunStepStatus::Completed),
+            "{:?}",
+            summary.steps
+        );
+
+        // Per pass the sends are: the nested login, Main, then the runner's own login.
+        let urls = executor.sent_urls();
+        let headers = sent_header_values(&executor, "x-row");
+        assert_eq!(urls.len(), 9, "{urls:?}");
+        let rows = [("ada", 0), ("bob", 1), ("cy", 2)];
+        for (pass, (name, index)) in rows.iter().enumerate() {
+            let at = pass * 3;
+            assert!(urls[at].ends_with("login.yml"), "{urls:?}");
+            assert!(urls[at + 1].ends_with("main.yml"), "{urls:?}");
+            assert_eq!(
+                headers[at + 1].as_deref(),
+                Some(format!("{name}|{index}").as_str()),
+                "the caller's row in pass {pass}"
+            );
+            assert_eq!(
+                headers[at].as_deref(),
+                Some(format!("{name}|{index}|3").as_str()),
+                "the nested run's row in pass {pass}"
+            );
+        }
+    }
+
     #[tokio::test]
     async fn set_next_request_jumps_stay_inside_a_pass() {
         let engine = ProgrammableEngine::new();
