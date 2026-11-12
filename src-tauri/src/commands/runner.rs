@@ -36,8 +36,8 @@ impl From<LoadedIterationData> for IterationDataDto {
 
 /// Reads and parses the data file for a run: the per-run path, else the saved default.
 /// Returns `None` when neither is set.
-#[tauri::command]
-pub async fn load_iteration_data(
+#[tauri::command(async)]
+pub fn load_iteration_data(
     collection: String,
     per_run_path: Option<String>,
     service: State<'_, IterationDataService>,

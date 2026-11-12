@@ -11,13 +11,14 @@ use std::sync::{Arc, Mutex};
 
 use crate::execution_events::ExecutionEvent;
 use rocket_collection::CollectionRepository;
-use rocket_scripting::{ExecutionMode, NextRequest};
+use rocket_scripting::{ExecutionMode, IterationInfo, NextRequest};
 use rocket_shared::error::DomainResult;
 use rocket_shared::events::EventPublisher;
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
 
 use crate::execution_service::{ExecuteRequestInput, RequestExecutionService};
+use crate::iteration_data_service::{iteration_info, IterationDataService};
 use crate::runner_sequence::{build_step_input, flatten_run_set, RunItem};
 
 /// Hard cap on executed steps in one run. `setNextRequest` can form a cycle
@@ -47,6 +48,9 @@ pub struct RunCollectionInput {
     /// same as `ExecuteRequestInput::request_guard_policy`.
     #[serde(default)]
     pub request_guard_policy: rocket_workspace::RequestGuardPolicy,
+    /// Data file for this run only. It wins over the saved default of the collection.
+    #[serde(default)]
+    pub data_file: Option<String>,
 }
 
 /// Outcome of a single step.
@@ -78,6 +82,8 @@ impl RunStepStatus {
 pub struct RunStepResult {
     /// Position in the executed-step stream, starting at 0.
     pub index: usize,
+    /// Zero-based pass over the run set (0 without a data file).
+    pub iteration: usize,
     pub item_name: String,
     pub request_path: String,
     pub status: RunStepStatus,
@@ -186,6 +192,11 @@ pub struct CollectionRunnerService {
     /// or already-finished run id does not leak an entry into `cancelled`
     /// forever — a run only ever removes its own id, never anyone else's.
     in_flight: Arc<Mutex<HashSet<String>>>,
+    /// Loads the data file of a run. Without it a run is always one pass.
+    iteration_data: Option<IterationDataService>,
+    /// Every iteration a step was sent with, in order. Test seam.
+    #[cfg(test)]
+    seen_iterations: Arc<Mutex<Vec<Option<IterationInfo>>>>,
 }
 
 impl CollectionRunnerService {
@@ -198,7 +209,16 @@ impl CollectionRunnerService {
             events,
             cancelled: Arc::new(Mutex::new(HashSet::new())),
             in_flight: Arc::new(Mutex::new(HashSet::new())),
+            iteration_data: None,
+            #[cfg(test)]
+            seen_iterations: Arc::new(Mutex::new(Vec::new())),
         }
+    }
+
+    /// Lets a run read a data file and run the set once per row.
+    pub fn with_iteration_data(mut self, service: IterationDataService) -> Self {
+        self.iteration_data = Some(service);
+        self
     }
 
     /// Replaces the cancellation registry. Test seam — it lets a test hold the
@@ -243,6 +263,14 @@ impl CollectionRunnerService {
             .resolve_external_secrets(Some(&input.collection), input.environment_name.as_deref())
             .await?;
 
+        // Load the data file before RunnerStarted, so a bad file fails the run with
+        // no event and no send. Without a file the run is one pass with no iteration.
+        let loaded = match &self.iteration_data {
+            Some(service) => service.load(&input.collection, input.data_file.as_deref())?,
+            None => None,
+        };
+        let total_passes = loaded.as_ref().map_or(1, |l| l.data.rows.len().max(1));
+
         let run_id = Ulid::new().to_string();
         if let Ok(mut set) = self.in_flight.lock() {
             set.insert(run_id.clone());
@@ -253,82 +281,92 @@ impl CollectionRunnerService {
             collection: input.collection.clone(),
             folder_path: input.folder_path.clone(),
             total_steps: items.len(),
+            total_iterations: total_passes,
         });
 
         let mut steps: Vec<RunStepResult> = Vec::new();
+        // Runtime variables live for the whole run, across every pass.
         let mut carried_runtime: HashMap<String, String> = HashMap::new();
-        let mut cursor = 0usize;
         let mut stopped_reason = StoppedReason::Completed;
 
-        while cursor < items.len() {
-            if self.is_cancelled(&run_id) {
-                stopped_reason = StoppedReason::Cancelled;
-                break;
-            }
-            if steps.len() >= MAX_RUN_STEPS {
-                stopped_reason = StoppedReason::StepLimitReached {
-                    limit: MAX_RUN_STEPS,
-                };
-                break;
-            }
+        'passes: for iteration in 0..total_passes {
+            let info = loaded.as_ref().map(|l| iteration_info(&l.data, iteration));
+            // Every pass starts at the first item.
+            let mut cursor = 0usize;
 
-            let item = &items[cursor];
-            let outcome = self
-                .run_step(
-                    exec,
-                    &input,
-                    item,
-                    steps.len(),
-                    &mut carried_runtime,
-                    &external_secrets,
-                )
-                .await;
-            let mut result = outcome.result;
-
-            // Resolve the jump before publishing so an unknown target is part
-            // of the step the frontend sees (spec §4).
-            let mut jump_to: Option<usize> = None;
-            let mut stop_after = false;
-            match outcome.next_request {
-                Some(NextRequest::Stop) => {
-                    stopped_reason = StoppedReason::StoppedByScript;
-                    stop_after = true;
+            while cursor < items.len() {
+                if self.is_cancelled(&run_id) {
+                    stopped_reason = StoppedReason::Cancelled;
+                    break 'passes;
                 }
-                Some(NextRequest::Name(ref name)) => {
-                    match items.iter().position(|i| &i.name == name) {
-                        Some(idx) => jump_to = Some(idx),
-                        None => {
-                            result.status = RunStepStatus::Error;
-                            result.error = Some(format!(
-                                "rok.runner.setNextRequest('{name}') — no request named '{name}' in this run"
-                            ));
-                            stopped_reason = StoppedReason::UnknownNextRequest {
-                                item_name: result.item_name.clone(),
-                                next_request: name.clone(),
-                            };
-                            stop_after = true;
+                if steps.len() >= MAX_RUN_STEPS {
+                    stopped_reason = StoppedReason::StepLimitReached {
+                        limit: MAX_RUN_STEPS,
+                    };
+                    break 'passes;
+                }
+
+                let item = &items[cursor];
+                let outcome = self
+                    .run_step(
+                        exec,
+                        &input,
+                        item,
+                        steps.len(),
+                        iteration,
+                        info.clone(),
+                        &mut carried_runtime,
+                        &external_secrets,
+                    )
+                    .await;
+                let mut result = outcome.result;
+
+                // Resolve the jump before publishing so an unknown target is part
+                // of the step the frontend sees (spec §4).
+                let mut jump_to: Option<usize> = None;
+                let mut stop_after = false;
+                match outcome.next_request {
+                    Some(NextRequest::Stop) => {
+                        stopped_reason = StoppedReason::StoppedByScript;
+                        stop_after = true;
+                    }
+                    Some(NextRequest::Name(ref name)) => {
+                        match items.iter().position(|i| &i.name == name) {
+                            Some(idx) => jump_to = Some(idx),
+                            None => {
+                                result.status = RunStepStatus::Error;
+                                result.error = Some(format!(
+                                    "rok.runner.setNextRequest('{name}') — no request named '{name}' in this run"
+                                ));
+                                stopped_reason = StoppedReason::UnknownNextRequest {
+                                    item_name: result.item_name.clone(),
+                                    next_request: name.clone(),
+                                };
+                                stop_after = true;
+                            }
                         }
                     }
+                    None => {}
                 }
-                None => {}
-            }
 
-            let failed = result.is_failure();
-            self.publish_step(&run_id, &result);
-            let item_name = result.item_name.clone();
-            steps.push(result);
+                let failed = result.is_failure();
+                self.publish_step(&run_id, &result);
+                let item_name = result.item_name.clone();
+                steps.push(result);
 
-            if stop_after {
-                break;
+                // A stop ends the whole run, not only this pass.
+                if stop_after {
+                    break 'passes;
+                }
+                if failed && input.stop_on_failure {
+                    stopped_reason = StoppedReason::StoppedOnFailure { item_name };
+                    break 'passes;
+                }
+                cursor = match jump_to {
+                    Some(idx) => idx,
+                    None => cursor + 1,
+                };
             }
-            if failed && input.stop_on_failure {
-                stopped_reason = StoppedReason::StoppedOnFailure { item_name };
-                break;
-            }
-            cursor = match jump_to {
-                Some(idx) => idx,
-                None => cursor + 1,
-            };
         }
 
         self.clear_cancellation(&run_id);
@@ -380,18 +418,20 @@ impl CollectionRunnerService {
         input: &RunCollectionInput,
         item: &RunItem,
         index: usize,
+        iteration: usize,
+        info: Option<IterationInfo>,
         carried_runtime: &mut HashMap<String, String>,
         external_secrets: &HashMap<String, String>,
     ) -> StepOutcome {
         // A GraphQL item that could not be built is an errored step, never a silent skip.
         if let Some(message) = &item.prepare_error {
             return StepOutcome {
-                result: error_step(index, item, message.clone()),
+                result: error_step(index, iteration, item, message.clone()),
                 next_request: None,
             };
         }
 
-        let step_input: ExecuteRequestInput = build_step_input(
+        let mut step_input: ExecuteRequestInput = build_step_input(
             item,
             &input.collection,
             input.environment_name.as_deref(),
@@ -399,12 +439,17 @@ impl CollectionRunnerService {
             input.request_guard_policy.clone(),
             rocket_shared::RunSource::Runner,
         );
+        #[cfg(test)]
+        if let Ok(mut seen) = self.seen_iterations.lock() {
+            seen.push(info.clone());
+        }
+        step_input.iteration = info;
 
         let mut state = match exec.begin_phases(&step_input, external_secrets) {
             Ok(state) => state,
             Err(e) => {
                 return StepOutcome {
-                    result: error_step(index, item, e.to_string()),
+                    result: error_step(index, iteration, item, e.to_string()),
                     next_request: None,
                 }
             }
@@ -421,7 +466,7 @@ impl CollectionRunnerService {
             .await
         {
             *carried_runtime = state.var_ctx.runtime.clone();
-            let mut result = error_step(index, item, e.to_string());
+            let mut result = error_step(index, iteration, item, e.to_string());
             result.script_error = state.script_error.clone();
             return StepOutcome {
                 next_request: state.next_request.clone(),
@@ -442,6 +487,7 @@ impl CollectionRunnerService {
                 next_request: state.next_request.clone(),
                 result: RunStepResult {
                     index,
+                    iteration,
                     item_name: item.name.clone(),
                     request_path: item.request_path.clone(),
                     status: RunStepStatus::Skipped,
@@ -462,7 +508,7 @@ impl CollectionRunnerService {
             Ok(response) => response,
             Err(e) => {
                 *carried_runtime = state.var_ctx.runtime.clone();
-                let mut result = error_step(index, item, e.to_string());
+                let mut result = error_step(index, iteration, item, e.to_string());
                 result.script_error = state.script_error.clone();
                 return StepOutcome {
                     next_request: state.next_request.clone(),
@@ -500,6 +546,7 @@ impl CollectionRunnerService {
             next_request: state.next_request.clone(),
             result: RunStepResult {
                 index,
+                iteration,
                 item_name: item.name.clone(),
                 request_path: item.request_path.clone(),
                 status: RunStepStatus::Completed,
@@ -517,6 +564,7 @@ impl CollectionRunnerService {
         self.events.publish(&ExecutionEvent::RunnerStepCompleted {
             run_id: run_id.to_string(),
             index: result.index,
+            iteration: result.iteration,
             item_name: result.item_name.clone(),
             request_path: result.request_path.clone(),
             status: result.status.as_str().to_string(),
@@ -544,9 +592,10 @@ impl CollectionRunnerService {
 }
 
 /// An errored step with no response and no tests.
-fn error_step(index: usize, item: &RunItem, message: String) -> RunStepResult {
+fn error_step(index: usize, iteration: usize, item: &RunItem, message: String) -> RunStepResult {
     RunStepResult {
         index,
+        iteration,
         item_name: item.name.clone(),
         request_path: item.request_path.clone(),
         status: RunStepStatus::Error,
@@ -961,6 +1010,7 @@ mod tests {
             global_env_name: None,
             stop_on_failure: false,
             request_guard_policy: rocket_workspace::RequestGuardPolicy::default(),
+            data_file: None,
         }
     }
 
@@ -2117,5 +2167,343 @@ mod tests {
                 _ => 0,
             })
             .sum()
+    }
+
+    // ---- Iteration data (row loop) ----
+
+    struct FakeDataReader(Option<rocket_collection::DataFileText>);
+
+    impl rocket_collection::DataFileReader for FakeDataReader {
+        fn read(
+            &self,
+            _collection: &str,
+            _per_run_path: Option<&str>,
+        ) -> DomainResult<Option<rocket_collection::DataFileText>> {
+            Ok(self.0.clone())
+        }
+    }
+
+    fn data_file(csv: &str) -> rocket_collection::DataFileText {
+        rocket_collection::DataFileText {
+            file_name: "rows.csv".into(),
+            text: csv.into(),
+            source: rocket_collection::DataFileSource::PerRun,
+        }
+    }
+
+    /// A harness whose runner reads `csv` as its data file.
+    fn data_harness(
+        csv: &str,
+        engine: Arc<ProgrammableEngine>,
+        executor: Arc<RecordingExecutor>,
+    ) -> Harness {
+        let mut h = harness(three_step_collection(), engine, executor);
+        h.runner = h
+            .runner
+            .with_iteration_data(IterationDataService::new(Box::new(FakeDataReader(Some(
+                data_file(csv),
+            )))));
+        h
+    }
+
+    fn csv_rows(count: usize) -> String {
+        let mut csv = String::from("user\n");
+        for i in 0..count {
+            csv.push_str(&format!("u{i}\n"));
+        }
+        csv
+    }
+
+    fn seen(h: &Harness) -> Vec<Option<IterationInfo>> {
+        h.runner.seen_iterations.lock().expect("lock").clone()
+    }
+
+    fn step_names(summary: &RunSummary) -> Vec<&str> {
+        summary.steps.iter().map(|s| s.item_name.as_str()).collect()
+    }
+
+    #[tokio::test]
+    async fn no_data_file_runs_one_pass_with_no_iteration_on_the_sends() {
+        let h = harness(
+            three_step_collection(),
+            ProgrammableEngine::new(),
+            RecordingExecutor::new(),
+        );
+        let summary = h
+            .runner
+            .run(&h.exec, sample_run_input())
+            .await
+            .expect("run");
+
+        assert_eq!(summary.steps.len(), 3);
+        assert_eq!(seen(&h), vec![None, None, None]);
+        assert!(summary.steps.iter().all(|s| s.iteration == 0));
+        assert!(matches!(
+            h.publisher.execution_events().first(),
+            Some(ExecutionEvent::RunnerStarted {
+                total_iterations: 1,
+                ..
+            })
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_one_row_file_runs_one_pass_with_iteration_total_1() {
+        let h = data_harness(
+            &csv_rows(1),
+            ProgrammableEngine::new(),
+            RecordingExecutor::new(),
+        );
+        let summary = h
+            .runner
+            .run(&h.exec, sample_run_input())
+            .await
+            .expect("run");
+
+        assert_eq!(summary.steps.len(), 3);
+        let seen = seen(&h);
+        assert_eq!(seen.len(), 3);
+        for info in seen {
+            let info = info.expect("iteration is set for a one-row file");
+            assert_eq!((info.index, info.total), (0, 1));
+            assert_eq!(info.data.get("user").map(String::as_str), Some("u0"));
+        }
+    }
+
+    #[tokio::test]
+    async fn three_rows_run_the_whole_set_three_times_in_order_with_the_right_iteration() {
+        let h = data_harness(
+            &csv_rows(3),
+            ProgrammableEngine::new(),
+            RecordingExecutor::new(),
+        );
+        let summary = h
+            .runner
+            .run(&h.exec, sample_run_input())
+            .await
+            .expect("run");
+
+        assert_eq!(summary.steps.len(), 9);
+        assert_eq!(summary.stopped_reason, StoppedReason::Completed);
+        assert_eq!(
+            step_names(&summary),
+            ["First", "Second", "Third"].repeat(3),
+            "each pass starts at the first item"
+        );
+        let indexes: Vec<usize> = summary.steps.iter().map(|s| s.index).collect();
+        assert_eq!(indexes, (0..9).collect::<Vec<_>>());
+        let passes: Vec<usize> = summary.steps.iter().map(|s| s.iteration).collect();
+        assert_eq!(passes, vec![0, 0, 0, 1, 1, 1, 2, 2, 2]);
+
+        for (n, info) in seen(&h).iter().enumerate() {
+            let info = info.as_ref().expect("iteration is set");
+            assert_eq!(info.index, n / 3);
+            assert_eq!(info.total, 3);
+            assert_eq!(
+                info.data.get("user").map(String::as_str),
+                Some(format!("u{}", n / 3).as_str())
+            );
+        }
+
+        let events = h.publisher.execution_events();
+        assert!(matches!(
+            events.first(),
+            Some(ExecutionEvent::RunnerStarted {
+                total_steps: 3,
+                total_iterations: 3,
+                ..
+            })
+        ));
+        let event_passes: Vec<usize> = events
+            .iter()
+            .filter_map(|e| match e {
+                ExecutionEvent::RunnerStepCompleted { iteration, .. } => Some(*iteration),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(event_passes, passes);
+    }
+
+    #[tokio::test]
+    async fn set_next_request_jumps_stay_inside_a_pass() {
+        let engine = ProgrammableEngine::new();
+        engine.on(
+            "First",
+            "tests",
+            ScriptResult {
+                next_request: Some(NextRequest::Name("Third".into())),
+                ..Default::default()
+            },
+        );
+        let h = data_harness(&csv_rows(2), engine, RecordingExecutor::new());
+        let summary = h
+            .runner
+            .run(&h.exec, sample_run_input())
+            .await
+            .expect("run");
+
+        assert_eq!(step_names(&summary), ["First", "Third", "First", "Third"]);
+        let passes: Vec<usize> = summary.steps.iter().map(|s| s.iteration).collect();
+        assert_eq!(passes, vec![0, 0, 1, 1]);
+        assert_eq!(summary.stopped_reason, StoppedReason::Completed);
+    }
+
+    #[tokio::test]
+    async fn stop_execution_ends_all_passes() {
+        let engine = ProgrammableEngine::new();
+        engine.on(
+            "Second",
+            "tests",
+            ScriptResult {
+                next_request: Some(NextRequest::Stop),
+                ..Default::default()
+            },
+        );
+        let h = data_harness(&csv_rows(3), engine, RecordingExecutor::new());
+        let summary = h
+            .runner
+            .run(&h.exec, sample_run_input())
+            .await
+            .expect("run");
+
+        assert_eq!(step_names(&summary), ["First", "Second"]);
+        assert_eq!(summary.stopped_reason, StoppedReason::StoppedByScript);
+    }
+
+    #[tokio::test]
+    async fn stop_on_failure_ends_all_passes() {
+        let executor = RecordingExecutor::new();
+        executor.set_status("second.yml", 500);
+        let h = data_harness(&csv_rows(3), ProgrammableEngine::new(), executor);
+        let mut input = sample_run_input();
+        input.stop_on_failure = true;
+        let summary = h.runner.run(&h.exec, input).await.expect("run");
+
+        assert_eq!(step_names(&summary), ["First", "Second"]);
+        assert_eq!(
+            summary.stopped_reason,
+            StoppedReason::StoppedOnFailure {
+                item_name: "Second".into()
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn runtime_variables_carry_across_passes() {
+        let engine = ProgrammableEngine::new();
+        engine.on(
+            "Third",
+            "after-response",
+            ScriptResult {
+                runtime_vars: std::collections::HashMap::from([(
+                    "TOKEN".to_string(),
+                    serde_json::json!("abc123"),
+                )]),
+                ..Default::default()
+            },
+        );
+        let h = data_harness(&csv_rows(2), engine, RecordingExecutor::new());
+        h.runner
+            .run(&h.exec, sample_run_input())
+            .await
+            .expect("run");
+
+        let calls = h.engine.calls();
+        let reads = h.engine.runtime_reads();
+        let firsts: Vec<usize> = calls
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| c.as_str() == "First|before-request")
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(firsts.len(), 2);
+        assert_eq!(reads[firsts[0]].get("TOKEN"), None);
+        assert_eq!(
+            reads[firsts[1]].get("TOKEN"),
+            Some(&"abc123".to_string()),
+            "the second pass still sees the first pass's runtime variable"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_step_cap_counts_steps_across_all_rows() {
+        // 3 items x 400 rows is 1200 steps, over the cap of 1000.
+        let h = data_harness(
+            &csv_rows(400),
+            ProgrammableEngine::new(),
+            RecordingExecutor::new(),
+        );
+        let summary = h
+            .runner
+            .run(&h.exec, sample_run_input())
+            .await
+            .expect("run");
+
+        assert_eq!(summary.steps.len(), MAX_RUN_STEPS);
+        assert_eq!(
+            summary.stopped_reason,
+            StoppedReason::StepLimitReached {
+                limit: MAX_RUN_STEPS
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn a_bad_data_file_fails_before_runner_started_and_sends_nothing() {
+        // A header with no rows is an empty file, which the parser refuses.
+        let h = data_harness(
+            "user\n",
+            ProgrammableEngine::new(),
+            RecordingExecutor::new(),
+        );
+        let result = h.runner.run(&h.exec, sample_run_input()).await;
+
+        assert!(result.is_err());
+        assert!(h.publisher.execution_events().is_empty());
+        assert!(h.executor.sent_urls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn cancelling_in_the_second_pass_ends_the_run() {
+        let repo = InMemoryCollectionRepo::new(three_step_collection());
+        let executor = RecordingExecutor::new();
+        let engine = ProgrammableEngine::new();
+        let cancelled: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+
+        let exec = RequestExecutionService::new(
+            Box::new(NullEnvRepo),
+            Arc::new(SharedExecutor(Arc::clone(&executor))),
+            Box::new(SharedHistoryRepo(InMemoryHistoryRepo::new())),
+            Box::new(SharedCollectionRepo(Arc::clone(&repo))),
+            Box::new(NullCookieRepo),
+            Box::new(rocket_shared::events::NullEventPublisher),
+            Box::new(EmptySecretManagerRepo),
+            Arc::new(rocket_environment::NullSecretStore),
+            Arc::new(rocket_environment::NullVaultSecretFetcher),
+        )
+        .with_script_engine(Box::new(SharedEngine(Arc::clone(&engine))));
+
+        let runner = CollectionRunnerService::new(
+            Box::new(SharedCollectionRepo(Arc::clone(&repo))),
+            Box::new(CancelAfterSteps {
+                cancel_after: 4,
+                seen: Mutex::new(0),
+                cancelled: Arc::clone(&cancelled),
+            }),
+        )
+        .with_cancellations(Arc::clone(&cancelled))
+        .with_iteration_data(IterationDataService::new(Box::new(FakeDataReader(Some(
+            data_file(&csv_rows(3)),
+        )))));
+
+        let summary = runner.run(&exec, sample_run_input()).await.expect("run");
+
+        assert_eq!(
+            summary.steps.len(),
+            4,
+            "three from pass 0 and one from pass 1"
+        );
+        assert_eq!(summary.stopped_reason, StoppedReason::Cancelled);
+        assert_eq!(summary.steps[3].iteration, 1);
     }
 }

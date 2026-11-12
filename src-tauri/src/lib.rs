@@ -802,21 +802,27 @@ pub fn run() {
             // scripts, auth), so it must follow workspace switches the same way
             // collection_svc's sidebar reads do, not read whatever workspace was
             // active at process startup.
+            //
+            // Iteration data — reads the runner's data file through a
+            // workspace-following SharedPathCollectionRepo, like runner_svc, so a
+            // switch cannot make a run read another workspace's file. The service
+            // is not Clone, so the runner and the `load_iteration_data` command
+            // each get their own instance over the same kind of reader.
+            let new_iteration_data_svc = || {
+                rocket_app::IterationDataService::new(Box::new(
+                    rocket_infra::FsDataFileReader::new(Box::new(SharedPathCollectionRepo::new(
+                        Arc::clone(&active_workspace_path),
+                    ))),
+                ))
+            };
+            let iteration_data_svc = new_iteration_data_svc();
             let runner_svc = CollectionRunnerService::new(
                 Box::new(SharedPathCollectionRepo::new(Arc::clone(
                     &active_workspace_path,
                 ))),
                 Box::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
-            );
-
-            // Iteration data — reads the runner's data file through a
-            // workspace-following SharedPathCollectionRepo, like runner_svc, so a
-            // switch cannot make a run read another workspace's file.
-            let iteration_data_svc = rocket_app::IterationDataService::new(Box::new(
-                rocket_infra::FsDataFileReader::new(Box::new(SharedPathCollectionRepo::new(
-                    Arc::clone(&active_workspace_path),
-                ))),
-            ));
+            )
+            .with_iteration_data(new_iteration_data_svc());
 
             // Flow execution — both repos are workspace-following (SharedPathFlowRepo,
             // SharedPathCollectionRepo), matching runner_svc's own collection_repo

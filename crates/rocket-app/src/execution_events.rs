@@ -62,6 +62,8 @@ pub enum ExecutionEvent {
         collection: String,
         folder_path: Option<String>,
         total_steps: usize,
+        /// Number of passes over the run set: the data file's rows, or 1 without a file.
+        total_iterations: usize,
     },
     /// Emitted after every step of a run, in execution order.
     /// `status` is `"completed"`, `"skipped"`, or `"error"`.
@@ -69,6 +71,8 @@ pub enum ExecutionEvent {
         run_id: String,
         /// Position in the emitted step stream, starting at 0.
         index: usize,
+        /// Zero-based pass over the run set (0 without a data file).
+        iteration: usize,
         item_name: String,
         request_path: String,
         status: String,
@@ -226,8 +230,9 @@ mod tests {
                     collection: s("c"),
                     folder_path: Some(s("f")),
                     total_steps: 3,
+                    total_iterations: 3,
                 },
-                json!({"type":"runnerStarted","run_id":"r","collection":"c","folder_path":"f","total_steps":3}),
+                json!({"type":"runnerStarted","run_id":"r","collection":"c","folder_path":"f","total_steps":3,"total_iterations":3}),
                 "runner-started",
             ),
             (
@@ -236,14 +241,16 @@ mod tests {
                     collection: s("c"),
                     folder_path: None,
                     total_steps: 3,
+                    total_iterations: 1,
                 },
-                json!({"type":"runnerStarted","run_id":"r","collection":"c","folder_path":null,"total_steps":3}),
+                json!({"type":"runnerStarted","run_id":"r","collection":"c","folder_path":null,"total_steps":3,"total_iterations":1}),
                 "runner-started",
             ),
             (
                 ExecutionEvent::RunnerStepCompleted {
                     run_id: s("r"),
                     index: 0,
+                    iteration: 1,
                     item_name: s("L"),
                     request_path: s("a.yml"),
                     status: s("completed"),
@@ -254,13 +261,14 @@ mod tests {
                     script_error: Some(s("se")),
                     error: Some(s("e")),
                 },
-                json!({"type":"runnerStepCompleted","run_id":"r","index":0,"item_name":"L","request_path":"a.yml","status":"completed","status_code":200,"duration_ms":12,"test_pass_count":2,"test_fail_count":1,"script_error":"se","error":"e"}),
+                json!({"type":"runnerStepCompleted","run_id":"r","index":0,"iteration":1,"item_name":"L","request_path":"a.yml","status":"completed","status_code":200,"duration_ms":12,"test_pass_count":2,"test_fail_count":1,"script_error":"se","error":"e"}),
                 "runner-step-completed",
             ),
             (
                 ExecutionEvent::RunnerStepCompleted {
                     run_id: s("r"),
                     index: 0,
+                    iteration: 1,
                     item_name: s("L"),
                     request_path: s("a.yml"),
                     status: s("skipped"),
@@ -271,7 +279,7 @@ mod tests {
                     script_error: None,
                     error: None,
                 },
-                json!({"type":"runnerStepCompleted","run_id":"r","index":0,"item_name":"L","request_path":"a.yml","status":"skipped","status_code":null,"duration_ms":0,"test_pass_count":0,"test_fail_count":0,"script_error":null,"error":null}),
+                json!({"type":"runnerStepCompleted","run_id":"r","index":0,"iteration":1,"item_name":"L","request_path":"a.yml","status":"skipped","status_code":null,"duration_ms":0,"test_pass_count":0,"test_fail_count":0,"script_error":null,"error":null}),
                 "runner-step-completed",
             ),
             (
@@ -509,11 +517,12 @@ mod tests {
             collection: "my-api".into(),
             folder_path: Some("auth".into()),
             total_steps: 3,
+            total_iterations: 2,
         };
         let json = serde_json::to_string(&event).expect("serialize");
         assert_eq!(
             json,
-            r#"{"type":"runnerStarted","run_id":"01J","collection":"my-api","folder_path":"auth","total_steps":3}"#
+            r#"{"type":"runnerStarted","run_id":"01J","collection":"my-api","folder_path":"auth","total_steps":3,"total_iterations":2}"#
         );
     }
 
@@ -522,6 +531,7 @@ mod tests {
         let event = ExecutionEvent::RunnerStepCompleted {
             run_id: "01J".into(),
             index: 0,
+            iteration: 1,
             item_name: "Login".into(),
             request_path: "auth/login.yml".into(),
             status: "completed".into(),
@@ -540,6 +550,7 @@ mod tests {
         assert!(json.contains(r#""item_name":"Login""#));
         assert!(json.contains(r#""test_pass_count":2"#));
         assert!(json.contains(r#""status_code":200"#));
+        assert!(json.contains(r#""iteration":1"#));
     }
 
     #[test]
