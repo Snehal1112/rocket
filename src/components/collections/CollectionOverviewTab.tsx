@@ -458,17 +458,26 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
                       value={runnerDataFile}
                       placeholder='data/users.csv'
                       className='h-8 text-sm font-mono'
+                      aria-describedby={
+                        looksNotRelative(runnerDataFile)
+                          ? 'col-runner-data-file-hint col-runner-data-file-warning'
+                          : 'col-runner-data-file-hint'
+                      }
                       onChange={(e) => {
                         setRunnerDataFile(e.target.value);
                         setIsDirty(true);
                       }}
                     />
-                    <p className='text-xs text-muted-foreground'>
+                    <p id='col-runner-data-file-hint' className='text-xs text-muted-foreground'>
                       Relative to the collection folder, for example data/users.csv. Runs use this
                       file unless you pick another one in the Runner tab.
                     </p>
                     {looksNotRelative(runnerDataFile) && (
-                      <p className='text-xs text-amber-600 dark:text-amber-400'>
+                      <p
+                        id='col-runner-data-file-warning'
+                        role='status'
+                        className='text-xs text-amber-600 dark:text-amber-400'
+                      >
                         This does not look like a relative path. Saving still works, and a run
                         checks it when it needs the file.
                       </p>

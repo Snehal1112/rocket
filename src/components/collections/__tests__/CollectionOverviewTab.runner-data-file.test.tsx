@@ -131,10 +131,29 @@ describe('Runner data file field', () => {
   it('the_hint_explains_the_path_is_relative_to_the_collection', async () => {
     setup();
     await field();
-    expect(
-      screen.getByText(
-        'Relative to the collection folder, for example data/users.csv. Runs use this file unless you pick another one in the Runner tab.',
-      ),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/relative to the collection folder/i)).toBeInTheDocument();
+  });
+
+  it('the_input_is_described_by_the_hint', async () => {
+    setup();
+    const input = await field();
+    const text = describedText(input);
+    expect(text).toMatch(/relative to the collection folder/i);
+    expect(text).not.toMatch(/does not look like a relative path/i);
+  });
+
+  it('the_input_is_described_by_the_warning_when_the_path_looks_invalid', async () => {
+    setup();
+    const input = await field();
+    fireEvent.change(input, { target: { value: '../up/users.csv' } });
+    const text = describedText(input);
+    expect(text).toMatch(/relative to the collection folder/i);
+    expect(text).toMatch(/does not look like a relative path/i);
+    expect(screen.getByRole('status')).toHaveTextContent(/does not look like a relative path/i);
   });
 });
+
+function describedText(el: HTMLElement): string {
+  const ids = (el.getAttribute('aria-describedby') ?? '').split(/\s+/).filter(Boolean);
+  return ids.map((id) => document.getElementById(id)?.textContent ?? '').join(' ');
+}
