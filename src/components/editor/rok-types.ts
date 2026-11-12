@@ -567,7 +567,7 @@ type GrpcAdHocOptions = GrpcCommonOptions & {
 };
 interface RokGrpc {
   /**
-   * Run a saved gRPC request. The path is relative to the collection root and includes the extension, e.g. "orders/get-order.yml". Proto, server, auth and variables come from the collection.
+   * Run a saved gRPC request. The path is relative to the collection root. The extension is optional (.yml, .yaml, .json and .bru are accepted), e.g. "orders/get-order". Proto, server, auth and variables come from the collection.
    * Developer mode only. Safe mode rejects the call.
    * The exchange is non-interactive: all input messages are sent, then the stream is half-closed, then the replies are collected. Unary and server streaming take one input message. Client streaming and bidirectional take one or more (at most 1000).
    * Limits: 1000 response messages and 10 MiB in total (then truncated is true), 30 s default timeoutMs with a 5 min ceiling.

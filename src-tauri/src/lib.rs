@@ -887,7 +887,6 @@ pub fn run() {
             .with_audit_actor(AuditActor::User)
             .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
-
             // Tracks every live per-session MCP HTTP server so it can be
             // swept on app exit and on individual session end. Shared with
             // TauriSessionCleanup below, which ends one session's server.

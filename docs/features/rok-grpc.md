@@ -87,7 +87,11 @@ Constants live in `crates/rocket-grpc/src/limits.rs`. The exchange loop is in `c
 | Response messages | 1000 | The call is aborted, the messages so far are kept, status `RESOURCE_EXHAUSTED` (8) with the text "the response was cut at the size limit", `truncated` true. |
 | Total response bytes | 10 MiB (of message JSON text) | Same. |
 | Input messages | 1000 | Setup error (rejects). |
-| Time | `timeoutMs`, default 30 s, ceiling 5 min (a value above the ceiling is lowered, 0 or missing means the default) | Status `DEADLINE_EXCEEDED` (4), text "the call did not finish within N ms". Messages so far are kept. The stream is aborted. |
+| Time | `timeoutMs`, default 30 s, ceiling 5 min (a value above the ceiling is lowered, a missing value means the default, and the script layer rejects 0 and negative values) | Status `DEADLINE_EXCEEDED` (4), text "the call did not finish within N ms". Messages so far are kept. The stream is aborted. |
+
+The reflection step has its own time limit (the same `timeoutMs`) and runs before the call timer starts, so the total time can exceed `timeoutMs`.
+
+Each reply message is limited by the transport's decode limit, which is tonic's default of 4 MB (no larger limit is set). The 10 MiB total applies to the sum of the streamed messages, so a single large reply fails at the transport limit first.
 
 A gRPC call takes one nested-run slot while it runs. The slot count is shared with `rok.runRequest`: at most 16 nested runs are active per send (`MAX_ACTIVE_NESTED_RUNS`). Past it, the call rejects with `too many nested requests running (limit 16)`.
 
@@ -114,7 +118,7 @@ Everything else resolves with `status`:
 - Developer mode only, for both forms. In Safe mode the call rejects before anything is resolved.
 - Request guard. When the workspace policy "Block script redirects to internal hosts" is on, the guard runs on the exact URL the transport dials, once, before server reflection and before any connect. The URL is resolved only once, so a dynamic variable cannot give the guard one host and the transport another. `grpc://` and `grpcs://` are read like `http(s)://` by the same parser (`rocket_grpc::parse_target`), so shorthand IPv4 hosts such as `127.1`, `2130706433` and `0x7f.1` are blocked like any other loopback form. The guard checks host names, not resolved IPs (the same limit as `rok.sendRequest`, see R-68). The guard is skipped when the target host equals the host of the calling request. gRPC has no redirects, so there are no redirect hops to check.
 - Proto confinement. A script never names a proto file outside the collection. The path must pass the lexical rule `rocket_collection::validate_relative_path` (not empty, relative, `/` separators, no `\`, `:` or NUL, no empty, `.` or `..` part) and must not start with `~`. Then `ProtoLoader::resolve_within` canonicalises it (symlinks followed) and refuses a result outside the collection folder, a directory or a missing file. This applies to the saved request's `protoFilePath` as well as to `protoFile`, for every `rok.grpc` call. The gRPC pane is not confined (it still accepts an absolute path).
-- Known limit: `ProtoLoader::load` does not re-check confinement for the imports of an allowed proto. Exploiting it needs write access to the collection folder. A follow-up re-checks it (R-95).
+- Known limit: imports of an allowed proto are confined to the include directories by `FsProtoFileReader`. The gap is a race between `resolve_within` and `ProtoLoader::load`: a path component could be swapped for a symlink in between. Exploiting it needs write access to the collection folder.
 - Secrets. Variables resolve as in the gRPC pane, and secret values are not echoed in errors. The Console line holds the target (path, or URL and `service/method`) and the status name, never message content.
 
 ### Auth and headers
@@ -124,7 +128,9 @@ Everything else resolves with `status`:
 
 ### Variables
 
-`{{var}}` fills from the usual scopes plus the script's runtime variables. The request's own variables win over runtime variables. Unlike `rok.runRequest`, `rok.grpc` does not see environment writes made earlier in the same script (they are not carried to the call). A later item can change that (R-93).
+With `rok.grpc.run` on a saved request whose URL uses `{{var}}`, a script can set that runtime variable to another host, and the request's auth still goes with the call. This is the same as `rok.runRequest` and HTTP. It needs Developer mode, and the request guard still applies.
+
+`{{var}}` fills from the usual scopes plus the script's runtime variables. The request's own variables win over runtime variables, unlike HTTP sends where runtime variables are highest. Unlike `rok.runRequest`, `rok.grpc` does not see environment writes made earlier in the same script (they are not carried to the call). A later item can change that (R-93).
 
 ## Where it is unavailable
 

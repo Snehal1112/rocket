@@ -254,8 +254,7 @@ mod tests {
 
         let err = FsProtoLoader
             .resolve_within(&root, "link.proto")
-            .err()
-            .expect("error");
+            .expect_err("error");
 
         assert!(matches!(err, DomainError::InvalidInput(_)), "got: {err:?}");
     }
@@ -267,8 +266,7 @@ mod tests {
 
         let err = FsProtoLoader
             .resolve_within(dir.path(), "protos")
-            .err()
-            .expect("error");
+            .expect_err("error");
 
         assert!(matches!(err, DomainError::InvalidInput(_)), "got: {err:?}");
     }
