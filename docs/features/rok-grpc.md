@@ -150,4 +150,4 @@ The call needs the `GrpcService` on the execution service. The main execution se
 
 ## Follow-ups
 
-Roadmap rows R-88 to R-95 in `docs/roadmaps/roadmap.md`: interactive streaming, gRPC items in `rok.runRequest`, reflection control, Flow nodes, Bruno names, pending env writes, the agent tool-call service, and the confinement re-check inside `ProtoLoader::load`.
+Roadmap rows R-88 to R-96 in `docs/roadmaps/roadmap.md`: interactive streaming, gRPC items in `rok.runRequest`, reflection control, Flow nodes, Bruno names, pending env writes, the agent tool-call service, and the confinement re-check inside `ProtoLoader::load`.
