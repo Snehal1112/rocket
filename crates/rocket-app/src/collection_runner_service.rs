@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use crate::execution_events::ExecutionEvent;
 use rocket_collection::CollectionRepository;
 use rocket_scripting::{ExecutionMode, IterationInfo, NextRequest};
-use rocket_shared::error::DomainResult;
+use rocket_shared::error::{DomainError, DomainResult};
 use rocket_shared::events::EventPublisher;
 use serde::{Deserialize, Serialize};
 use ulid::Ulid;
@@ -267,6 +267,11 @@ impl CollectionRunnerService {
         // no event and no send. Without a file the run is one pass with no iteration.
         let loaded = match &self.iteration_data {
             Some(service) => service.load(&input.collection, input.data_file.as_deref())?,
+            None if input.data_file.is_some() => {
+                return Err(DomainError::InvalidInput(
+                    "iteration data is not available for this runner".into(),
+                ))
+            }
             None => None,
         };
         let total_passes = loaded.as_ref().map_or(1, |l| l.data.rows.len().max(1));
@@ -439,11 +444,12 @@ impl CollectionRunnerService {
             input.request_guard_policy.clone(),
             rocket_shared::RunSource::Runner,
         );
+        step_input.iteration = info;
+        // Test seam: records the iteration the send really carries.
         #[cfg(test)]
         if let Ok(mut seen) = self.seen_iterations.lock() {
-            seen.push(info.clone());
+            seen.push(step_input.iteration.clone());
         }
-        step_input.iteration = info;
 
         let mut state = match exec.begin_phases(&step_input, external_secrets) {
             Ok(state) => state,
@@ -2458,7 +2464,10 @@ mod tests {
         );
         let result = h.runner.run(&h.exec, sample_run_input()).await;
 
-        assert!(result.is_err());
+        assert!(
+            matches!(&result, Err(DomainError::InvalidInput(m)) if m.contains("rows.csv")),
+            "got {result:?}"
+        );
         assert!(h.publisher.execution_events().is_empty());
         assert!(h.executor.sent_urls().is_empty());
     }
@@ -2505,5 +2514,20 @@ mod tests {
         );
         assert_eq!(summary.stopped_reason, StoppedReason::Cancelled);
         assert_eq!(summary.steps[3].iteration, 1);
+    }
+
+    #[tokio::test]
+    async fn a_per_run_data_file_without_a_data_service_fails_closed() {
+        let h = harness(
+            three_step_collection(),
+            ProgrammableEngine::new(),
+            RecordingExecutor::new(),
+        );
+        let mut input = sample_run_input();
+        input.data_file = Some("rows.csv".into());
+        let result = h.runner.run(&h.exec, input).await;
+
+        assert!(matches!(result, Err(DomainError::InvalidInput(_))));
+        assert!(h.executor.sent_urls().is_empty());
     }
 }
