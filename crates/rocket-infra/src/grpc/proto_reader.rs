@@ -86,6 +86,26 @@ impl ProtoLoader for FsProtoLoader {
         dirs.extend(extra_include_dirs.iter().cloned());
         ProtoRegistry::compile(entry, Arc::new(FsProtoFileReader::new(dirs)))
     }
+
+    fn resolve_within(&self, root: &Path, relative: &str) -> DomainResult<PathBuf> {
+        let base = root.canonicalize().map_err(|e| {
+            DomainError::InvalidInput(format!("could not resolve '{}': {e}", root.display()))
+        })?;
+        let real = base.join(relative).canonicalize().map_err(|e| {
+            DomainError::InvalidInput(format!("could not resolve proto file '{relative}': {e}"))
+        })?;
+        if !real.starts_with(&base) {
+            return Err(DomainError::InvalidInput(format!(
+                "proto file '{relative}' is outside the collection folder"
+            )));
+        }
+        if !real.is_file() {
+            return Err(DomainError::InvalidInput(format!(
+                "proto file '{relative}' is not a file"
+            )));
+        }
+        Ok(real)
+    }
 }
 
 #[cfg(test)]
@@ -202,6 +222,64 @@ mod tests {
 
         assert!(registry.pool().get_message_by_name("real.pkg.M").is_some());
         assert!(registry.pool().get_message_by_name("other.pkg.M").is_none());
+    }
+
+    #[test]
+    fn resolve_within_returns_the_canonical_path_of_a_file_inside_the_root() {
+        let dir = TempDir::new().expect("tempdir");
+        fs::create_dir_all(dir.path().join("protos")).expect("mkdir");
+        fs::write(dir.path().join("protos/a.proto"), "syntax = \"proto3\";\n").expect("write");
+
+        let got = FsProtoLoader
+            .resolve_within(dir.path(), "protos/a.proto")
+            .expect("resolve");
+
+        let expected = dir
+            .path()
+            .join("protos/a.proto")
+            .canonicalize()
+            .expect("canon");
+        assert_eq!(got, expected);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolve_within_refuses_a_symlink_that_leaves_the_root() {
+        let dir = TempDir::new().expect("tempdir");
+        let root = dir.path().join("root");
+        fs::create_dir_all(&root).expect("mkdir");
+        fs::write(dir.path().join("outside.proto"), "syntax = \"proto3\";\n").expect("write");
+        std::os::unix::fs::symlink(dir.path().join("outside.proto"), root.join("link.proto"))
+            .expect("symlink");
+
+        let err = FsProtoLoader
+            .resolve_within(&root, "link.proto")
+            .err()
+            .expect("error");
+
+        assert!(matches!(err, DomainError::InvalidInput(_)), "got: {err:?}");
+    }
+
+    #[test]
+    fn resolve_within_refuses_a_directory() {
+        let dir = TempDir::new().expect("tempdir");
+        fs::create_dir_all(dir.path().join("protos")).expect("mkdir");
+
+        let err = FsProtoLoader
+            .resolve_within(dir.path(), "protos")
+            .err()
+            .expect("error");
+
+        assert!(matches!(err, DomainError::InvalidInput(_)), "got: {err:?}");
+    }
+
+    #[test]
+    fn resolve_within_refuses_a_missing_file() {
+        let dir = TempDir::new().expect("tempdir");
+
+        assert!(FsProtoLoader
+            .resolve_within(dir.path(), "nope.proto")
+            .is_err());
     }
 
     fn stamp_file(tmp: &TempDir) -> PathBuf {

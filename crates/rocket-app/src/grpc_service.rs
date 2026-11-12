@@ -785,6 +785,10 @@ message Rep { string message = 1; }
             lock(&self.loads).push((proto_file.to_path_buf(), extra.to_vec()));
             Ok(registry())
         }
+
+        fn resolve_within(&self, root: &Path, relative: &str) -> DomainResult<PathBuf> {
+            Ok(root.join(relative))
+        }
     }
 
     #[derive(Default)]

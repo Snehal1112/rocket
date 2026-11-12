@@ -30,6 +30,11 @@ pub trait ProtoLoader: Send + Sync {
         proto_file: &Path,
         extra_include_dirs: &[PathBuf],
     ) -> DomainResult<ProtoRegistry>;
+
+    /// Resolves `relative` under `root` to a canonical file path. Fails with `InvalidInput`
+    /// when the real file is not under the real root, or is not a regular file. The caller
+    /// checks the lexical form of `relative` first.
+    fn resolve_within(&self, root: &Path, relative: &str) -> DomainResult<PathBuf>;
 }
 
 /// One RPC method, as shown in the method picker.

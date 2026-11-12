@@ -142,23 +142,26 @@ fn parse_json(text: &str) -> DomainResult<IterationData> {
     Ok(IterationData { columns, rows })
 }
 
-/// Checks a saved default data file path: non-empty, relative, `/` separators, no `..`.
-pub fn validate_data_file_path(path: &str) -> DomainResult<()> {
-    if path.is_empty() {
-        return Err(invalid("The data file path is empty."));
+/// Checks the lexical rule of a relative path: non-empty, relative, `/` separators, no `..`.
+pub fn validate_relative_path(raw: &str) -> Result<(), String> {
+    if raw.is_empty() {
+        return Err("The data file path is empty.".to_string());
     }
-    if path.starts_with('/') || path.contains('\\') || path.contains(':') || path.contains('\0') {
-        return Err(invalid(
-            "The data file path must be relative and use / separators.",
-        ));
+    if raw.starts_with('/') || raw.contains('\\') || raw.contains(':') || raw.contains('\0') {
+        return Err("The data file path must be relative and use / separators.".to_string());
     }
-    if path
+    if raw
         .split('/')
         .any(|part| part.is_empty() || part == "." || part == "..")
     {
-        return Err(invalid("The data file path has an empty, . or .. part."));
+        return Err("The data file path has an empty, . or .. part.".to_string());
     }
     Ok(())
+}
+
+/// Checks a saved default data file path with the shared relative path rule.
+pub fn validate_data_file_path(path: &str) -> DomainResult<()> {
+    validate_relative_path(path).map_err(|message| invalid(&message))
 }
 
 /// Where a data file came from.
@@ -328,6 +331,16 @@ mod tests {
         ] {
             assert!(validate_data_file_path(p).is_err(), "{p}");
         }
+    }
+
+    #[test]
+    fn validate_relative_path_rejects_the_same_forms_as_the_data_file_rule() {
+        for p in [
+            "", "/a", "a\\b", "C:x", "a//b", "./a", "a/./b", "a/../b", "a/",
+        ] {
+            assert!(validate_relative_path(p).is_err(), "{p}");
+        }
+        assert!(validate_relative_path("protos/orders.proto").is_ok());
     }
 
     #[test]

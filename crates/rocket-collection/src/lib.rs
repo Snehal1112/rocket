@@ -48,8 +48,9 @@ pub use folder_settings::{
 pub use graphql_request::{GraphQlBody, GraphQlBodyVariant, GraphQlRequest};
 pub use grpc_request::{GrpcMessage, GrpcMetadataEntry, GrpcMethodType, GrpcRequest, GrpcScript};
 pub use iteration_data::{
-    format_for_path, parse_iteration_data, validate_data_file_path, DataFileReader, DataFileSource,
-    DataFileText, DataFormat, IterationData, IterationRow, MAX_DATA_FILE_BYTES, MAX_DATA_ROWS,
+    format_for_path, parse_iteration_data, validate_data_file_path, validate_relative_path,
+    DataFileReader, DataFileSource, DataFileText, DataFormat, IterationData, IterationRow,
+    MAX_DATA_FILE_BYTES, MAX_DATA_ROWS,
 };
 pub use names::CollectionName;
 pub use openapi_backup::{
