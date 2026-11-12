@@ -228,6 +228,15 @@ describe('RunnerPane', () => {
       expect(screen.getByRole('alert')).toBeInTheDocument();
     });
 
+    it('offers Run without data when the saved default cannot be read', async () => {
+      const { loadIterationData } = await import('@/lib/tauri-api');
+      vi.mocked(loadIterationData).mockRejectedValue('Row 3 has more cells than the header');
+      const tab = scopedTab('idle');
+      seed(tab);
+      render(<RunnerPane tab={tab} groupId='g1' />);
+      expect(await screen.findByRole('button', { name: /run without data/i })).toBeInTheDocument();
+    });
+
     it('shows an error when the file dialog fails', async () => {
       const user = userEvent.setup();
       mockOpen.mockRejectedValue(new Error('no dialog'));

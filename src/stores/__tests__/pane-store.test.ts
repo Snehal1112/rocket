@@ -901,6 +901,21 @@ describe('Runner tab actions', () => {
       expect(runnerTab().skipDataFile).toBe(true);
     });
 
+    it('skipDataFile_survives_rerunAll', async () => {
+      const { executeRunnerEntry } = await import('@/lib/runner-execute');
+      const { loadIterationData } = await import('@/lib/tauri-api');
+      vi.mocked(executeRunnerEntry).mockResolvedValue({ status: 'passed', result: undefined });
+      await setData(rowsData(3));
+      const tabId = await openTwoRequestRunnerTab();
+      usePaneStore.getState().setRunnerSkipDataFile(tabId, true);
+      vi.mocked(loadIterationData).mockClear();
+      await usePaneStore.getState().startRun(tabId);
+      await usePaneStore.getState().rerunAll(tabId);
+
+      expect(loadIterationData).not.toHaveBeenCalled();
+      expect(runnerTab().skipDataFile).toBe(true);
+    });
+
     it('picking_a_file_clears_skipDataFile_and_skipping_clears_the_path', () => {
       const store = usePaneStore.getState();
       return openTwoRequestRunnerTab().then((tabId) => {

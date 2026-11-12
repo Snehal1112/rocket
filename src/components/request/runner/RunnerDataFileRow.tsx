@@ -70,8 +70,9 @@ export function RunnerDataFileRow({ tab, collection }: { tab: RunnerTab; collect
   const canSkip =
     !skipDataFile &&
     !hasOverride &&
-    preview.kind === 'loaded' &&
-    preview.data.source === 'savedDefault';
+    ((preview.kind === 'loaded' && preview.data.source === 'savedDefault') ||
+      preview.kind === 'error' ||
+      Boolean(tab.dataFileError));
 
   let status: string;
   if (skipDataFile) {
