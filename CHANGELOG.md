@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.2.1](https://github.com/Snehal1112/rocket/compare/v2.2.0...v2.2.1) (2026-11-12)
+
+### Bug Fixes
+
+* **audit:** keep event kinds from newer versions ([ed087e5](https://github.com/Snehal1112/rocket/commit/ed087e556e969f98317690c508a9bfcc64ddfb50))
+* **infra:** keep list entries from newer versions ([ee64c99](https://github.com/Snehal1112/rocket/commit/ee64c99a274eb4546b812e3d3993051a927dd52c))
+
 ## [2.2.0](https://github.com/Snehal1112/rocket/compare/v2.1.6...v2.2.0) (2026-11-11)
 
 ### Features
