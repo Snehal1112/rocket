@@ -43,7 +43,7 @@ Notes: `docs/features/rok-api-parity-notes.md` (its status table is current: A, 
 | R-93 | `rok.grpc` sees pending env writes of the same script | done (merged to main, commits 81e0bcb1..edea7049) | `docs/features/rok-grpc.md` | `rok.grpc.run` fills `{{var}}` from stored scopes, the script's pending env, global and collection writes, then runtime variables, like `rok.runRequest`. |
 | R-94 | `rok.grpc` in the agent tool-call service | open | `docs/features/rok-grpc.md` | `mcp_exec_svc` in `src-tauri/src/lib.rs` has no `GrpcService`, so the call is unavailable there. |
 | R-95 | Re-check confinement inside `ProtoLoader::load` | open | `docs/features/rok-grpc.md` | `resolve_within` confines the proto path, but `load` does not re-check it, so a path component swapped for a symlink in between could lead out of the collection. Exploiting it needs write access to the collection folder. |
-| R-96 | Runnable gRPC test server for manual checks | done (branch feat/rok-grpc-test-server, commit 49b05990, not merged yet) | `docs/manual-tests/rok-grpc.md` | Bin `test_grpc_server` (`crates/rocket-infra/src/bin/test_grpc_server.rs`, feature `test-support`) serves the fixture Greeter on 127.0.0.1, with the `many` (1500 replies) and `hang` (one reply, stream stays open) names, so manual checks 9 and 10 run. |
+| R-96 | Runnable gRPC test server for manual checks | done (merged to main, commits 49b05990..72900371) | `docs/manual-tests/rok-grpc.md` | Bin `test_grpc_server` (`crates/rocket-infra/src/bin/test_grpc_server.rs`, feature `test-support`) serves the fixture Greeter on 127.0.0.1, with the `many` (1500 replies) and `hang` (one reply, stream stays open) names, so manual checks 9 and 10 run. |
 
 ## 2. Scripting and sandbox
 
