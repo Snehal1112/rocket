@@ -114,6 +114,8 @@ These are `pub` in `lib.rs` but are serialization-layer details — callers outs
 
 **Team network (`network/`).** The Team Network opens sockets and listens on a port, which is I/O and stays in this crate. `rocket-app` sees only the `rocket-network` ports. The seams that `rocket-app` end-to-end tests need (`RustlsPeerServer::local_test`, `tls_identity::test_support`) are behind `#[cfg(any(test, feature = "test-support"))]`.
 
+**gRPC test server (`grpc/test_server.rs`).** The `test_server` module is public only under `cfg(any(test, feature = "test-support"))`. The `test_grpc_server` bin (`src/bin/test_grpc_server.rs`, `required-features = ["test-support"]`) runs it for the manual checks: `cargo run -j4 -p rocket-infra --features test-support --bin test_grpc_server [--port N] [--reflection none|v1|v1alpha]`. See `docs/manual-tests/rok-grpc.md`.
+
 ## Testing
 
 All repository types have unit tests using `tempfile::TempDir` for ephemeral filesystem fixtures. `ReqwestExecutor` OAuth2 tests use `wiremock` to mock the token endpoint. Network tests that require live HTTP are marked `#[ignore]`.

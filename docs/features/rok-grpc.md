@@ -150,6 +150,10 @@ The call needs the `GrpcService` on the execution service. The main execution se
 | `rocket-infra` | `op_rok_grpc` and `rok.grpc` in `bootstrap.js`. `TonicGrpcExecutor` and `FsProtoLoader` (`resolve_within`) are the transport and the proto reader. |
 | `src-tauri` | Wiring only (`with_grpc_service`). No new command, so `app-commands.txt` is unchanged. |
 
+## Test server
+
+`cargo run -j4 -p rocket-infra --features test-support --bin test_grpc_server` serves the fixture Greeter on 127.0.0.1:50051 for the manual checks. See `docs/manual-tests/rok-grpc.md`.
+
 ## Follow-ups
 
 Roadmap rows R-88 to R-96 in `docs/roadmaps/roadmap.md`: interactive streaming, gRPC items in `rok.runRequest`, reflection control, Flow nodes, Bruno names, the agent tool-call service, and the confinement re-check inside `ProtoLoader::load`.
