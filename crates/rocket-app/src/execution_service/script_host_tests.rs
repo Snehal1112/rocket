@@ -2980,13 +2980,11 @@ async fn a_denied_nested_run_request_warns_once_in_its_caller() {
     assert!(out.vault_withheld);
 }
 
-#[test]
-fn run_request_e2e_the_nested_run_inherits_the_callers_iteration() {
-    let collection = main_and_login("", "", "");
-    let mut caller = send_input(&collection, "main.yml");
-    let mut nested = send_input(&collection, "auth/login.yml");
-    assert_eq!(nested.iteration, None);
-    let data = [("user".to_string(), "ann".to_string())]
+#[tokio::test]
+async fn run_request_e2e_the_nested_run_inherits_the_callers_iteration() {
+    let collection = main_and_login("await rok.runRequest('auth/login');", "", "");
+    let mut input = send_input(&collection, "main.yml");
+    let data = [("user".to_string(), "iteration-inherit-test".to_string())]
         .into_iter()
         .collect();
     let info = rocket_scripting::IterationInfo {
@@ -2994,7 +2992,17 @@ fn run_request_e2e_the_nested_run_inherits_the_callers_iteration() {
         total: 3,
         data,
     };
-    caller.iteration = Some(info.clone());
-    super::script_host::inherit_iteration(&mut nested, &caller);
-    assert_eq!(nested.iteration, Some(info));
+    input.iteration = Some(info.clone());
+    let (svc, executor) = run_service(collection);
+    let out = svc.execute(input).await.expect("execute");
+    assert!(out.script_error.is_none(), "{:?}", out.script_error);
+    assert_eq!(urls(&executor).len(), 2);
+    // The data value is unique to this test, so parallel tests do not mix in.
+    let seen = super::script_host::NESTED_ITERATIONS
+        .lock()
+        .expect("lock")
+        .iter()
+        .filter(|i| i.as_ref() == Some(&info))
+        .count();
+    assert_eq!(seen, 1);
 }

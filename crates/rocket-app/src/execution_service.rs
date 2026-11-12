@@ -3761,6 +3761,8 @@ impl RequestExecutionService {
         ExecuteRequestOutput,
         std::collections::HashMap<String, String>,
     )> {
+        #[cfg(test)]
+        script_host::record_nested_iteration(&input);
         let mut state = self.begin_phases(&input, external_secrets)?;
         state.unresolved_aliases = Arc::clone(unresolved);
         state.active_runs = Arc::clone(active_runs);

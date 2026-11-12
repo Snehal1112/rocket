@@ -72,6 +72,21 @@ pub(crate) struct ExecutionScriptHost<'a> {
     pub(crate) pending: std::sync::Mutex<rocket_scripting::PendingWrites>,
 }
 
+/// The iteration of every nested input a test run started, newest last.
+#[cfg(test)]
+pub(crate) static NESTED_ITERATIONS: std::sync::Mutex<
+    Vec<Option<rocket_scripting::IterationInfo>>,
+> = std::sync::Mutex::new(Vec::new());
+
+/// Test seam: keeps the iteration of the input a nested run really starts with.
+#[cfg(test)]
+pub(crate) fn record_nested_iteration(input: &ExecuteRequestInput) {
+    NESTED_ITERATIONS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push(input.iteration.clone());
+}
+
 /// A nested run belongs to the same data row as its caller.
 pub(crate) fn inherit_iteration(nested: &mut ExecuteRequestInput, caller: &ExecuteRequestInput) {
     nested.iteration = caller.iteration.clone();
