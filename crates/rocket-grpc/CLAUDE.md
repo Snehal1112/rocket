@@ -18,6 +18,8 @@ cargo test -j4 -p rocket-grpc <test_name>
 | `registry.rs` | `ProtoRegistry` (descriptor pool, services, methods), `ProtoFileReader`, `ProtoLoader`, the `GrpcServiceInfo` and `GrpcMethodInfo` view types. |
 | `codec.rs` | `json_to_message`, `message_to_json`, `empty_message_json`. |
 | `events.rs` | `GrpcEvent` (four session variants, channels `grpc-session-started`, `-headers`, `-message`, `-finished`; implements `PublishedEvent`) and `GrpcMetadataPair`. Frozen JSON literals in the tests pin the wire format. |
+| `limits.rs` | Limits of script-driven calls (`MAX_RESPONSE_MESSAGES` 1000, `MAX_RESPONSE_BYTES` 10 MiB, `MAX_INPUT_MESSAGES` 1000, `DEFAULT_CALL_TIMEOUT` 30 s, `MAX_CALL_TIMEOUT` 5 min) and `clamp_call_timeout`. |
+| `target.rs` | `parse_target(url) -> Target { uri, tls }`: the one URL parser. The transport and the `rok.grpc` request guard both read a URL through it, so the guard checks the host the transport dials. |
 | `call.rs` | `GrpcCall`, `GrpcExecutor` (`unary`, `open_stream` and `reflect`), `GrpcStatus`, `GrpcUnaryResponse`, `GrpcStreamEvent` and `GrpcStreamHandle`. |
 
 ## Rules
