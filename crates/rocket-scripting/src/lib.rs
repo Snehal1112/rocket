@@ -12,8 +12,9 @@ pub use assertion_evaluator::{assertion_outcomes, evaluate_assertions};
 pub use context::{ExecutionMode, IterationInfo, SandboxMode, ScriptContext, ScriptFileScope};
 pub use engine::ScriptEngine;
 pub use host::{
-    HostCookieOp, HostCookieResult, HostError, HostRequest, HostResponse, HostRunOutcome,
-    HostRunRequest, HostScopes, PendingWrites, ScriptHost,
+    HostCookieOp, HostCookieResult, HostError, HostGrpcRequest, HostGrpcResponse, HostGrpcStatus,
+    HostGrpcTarget, HostRequest, HostResponse, HostRunOutcome, HostRunRequest, HostScopes,
+    PendingWrites, ScriptHost,
 };
 pub use phase::ScriptPhase;
 pub use result::{

@@ -7,6 +7,7 @@
 pub mod call;
 pub mod codec;
 pub mod events;
+pub mod limits;
 pub mod registry;
 
 #[cfg(test)]
@@ -16,5 +17,9 @@ pub use call::{grpc_code_name, GrpcCall, GrpcExecutor, GrpcStatus, GrpcUnaryResp
 pub use call::{GrpcStreamEvent, GrpcStreamHandle};
 pub use codec::{empty_message_json, json_to_message, message_to_json};
 pub use events::{GrpcEvent, GrpcMetadataPair};
+pub use limits::{
+    clamp_call_timeout, DEFAULT_CALL_TIMEOUT, MAX_CALL_TIMEOUT, MAX_INPUT_MESSAGES,
+    MAX_RESPONSE_BYTES, MAX_RESPONSE_MESSAGES,
+};
 pub use prost_reflect::{DynamicMessage, MessageDescriptor, MethodDescriptor};
 pub use registry::{GrpcMethodInfo, GrpcServiceInfo, ProtoFileReader, ProtoLoader, ProtoRegistry};
