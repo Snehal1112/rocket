@@ -340,6 +340,7 @@ pub async fn op_rok_grpc(
     let mut request: HostGrpcRequest = serde_json::from_str(&request_json)
         .map_err(|e| ScriptHostError(format!("{API}: invalid options - {e}")))?;
     request.runtime_vars = current_runtime_vars(&state.borrow());
+    request.pending = pending_writes(&state.borrow());
     let label = match &request.target {
         HostGrpcTarget::Saved { path } => format!("{API} {path}"),
         HostGrpcTarget::AdHoc {

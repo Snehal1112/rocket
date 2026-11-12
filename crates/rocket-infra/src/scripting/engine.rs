@@ -1735,6 +1735,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn grpc_op_sends_the_scripts_pending_writes_to_the_host() {
+        let host = GrpcHost::ok();
+        let ctx = dev_ctx(
+            "rok.setEnvVar('U', 'alice'); rok.deleteEnvVar('E'); \
+             rok.setGlobalEnvVar('G', 'g'); rok.setCollectionVar('C', 7); \
+             await rok.grpc.run('svc/hello');",
+        );
+        let result = run_with(&host, ctx).await;
+        assert!(result.error.is_none(), "{:?}", result.error);
+        let seen = host.seen();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(
+            seen[0].pending,
+            PendingWrites {
+                env: vec![
+                    ("U".to_string(), Some("alice".to_string())),
+                    ("E".to_string(), None),
+                ],
+                global_env: vec![("G".to_string(), Some("g".to_string()))],
+                collection: vec![("C".to_string(), Some("7".to_string()))],
+            }
+        );
+    }
+
+    #[tokio::test]
     async fn grpc_op_forwards_the_request_to_the_host_and_returns_its_response() {
         let host = GrpcHost::ok();
         let mut ctx = dev_ctx(

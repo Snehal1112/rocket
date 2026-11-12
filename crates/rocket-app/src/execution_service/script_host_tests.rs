@@ -3221,6 +3221,17 @@ async fn grpc_host_call(
     active: usize,
     request: HostGrpcRequest,
 ) -> Result<HostGrpcResponse, HostError> {
+    grpc_host_call_inheriting(svc, req, active, request, Default::default()).await
+}
+
+/// Like `grpc_host_call`, with writes the host inherited from its caller.
+async fn grpc_host_call_inheriting(
+    svc: &RequestExecutionService,
+    req: &ExecuteRequestInput,
+    active: usize,
+    request: HostGrpcRequest,
+    inherited: rocket_scripting::PendingWrites,
+) -> Result<HostGrpcResponse, HostError> {
     let host = ExecutionScriptHost {
         svc,
         input: req,
@@ -3235,7 +3246,7 @@ async fn grpc_host_call(
         nested_vault_withheld: Default::default(),
         nested_ran: Default::default(),
         vault_forms: Vec::new(),
-        pending: Default::default(),
+        pending: Mutex::new(inherited),
     };
     let result = host.grpc(request).await;
     // A finished call frees its slot.
@@ -3253,6 +3264,7 @@ fn saved_call(path: &str) -> HostGrpcRequest {
         metadata: vec![],
         timeout_ms: None,
         runtime_vars: Default::default(),
+        pending: Default::default(),
     }
 }
 
@@ -3700,4 +3712,150 @@ async fn grpc_e2e_client_stream_sends_the_messages_array() {
         console(&out)
     );
     assert_eq!(fake.streamed.lock().expect("lock").len(), 3);
+}
+
+// ── rok.grpc sees the script's pending writes ────────────────────────────────
+
+/// A saved `greet` request whose message holds `{{token}}`.
+fn token_service(stored: Option<&str>) -> (RequestExecutionService, Arc<KeepingGrpc>) {
+    let mut grpc = greet_request();
+    grpc.messages[0].content = "{\"name\":\"{{token}}\"}".into();
+    let vars = stored
+        .map(|v| vec![Variable::new("token", v)])
+        .unwrap_or_default();
+    grpc_service_over(grpc_collection(grpc), dev_env(vars))
+}
+
+fn env_write(key: &str, value: Option<&str>) -> rocket_scripting::PendingWrites {
+    rocket_scripting::PendingWrites {
+        env: vec![(key.into(), value.map(str::to_string))],
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn grpc_sees_a_pending_env_write() {
+    let (svc, fake) = token_service(None);
+    let mut request = saved_call("greet");
+    request.pending = env_write("token", Some("fresh-value"));
+    grpc_host_call(&svc, &grpc_input(), 0, request)
+        .await
+        .expect("grpc");
+    let calls = fake.calls.lock().expect("lock");
+    assert!(calls[0].1.contains("fresh-value"), "{}", calls[0].1);
+}
+
+#[tokio::test]
+async fn grpc_pending_write_beats_the_stored_value() {
+    let (svc, fake) = token_service(Some("stored-value"));
+    let mut request = saved_call("greet");
+    request.pending = env_write("token", Some("fresh-value"));
+    grpc_host_call(&svc, &grpc_input(), 0, request)
+        .await
+        .expect("grpc");
+    let calls = fake.calls.lock().expect("lock");
+    assert!(calls[0].1.contains("fresh-value"), "{}", calls[0].1);
+    assert!(!calls[0].1.contains("stored-value"), "{}", calls[0].1);
+}
+
+#[tokio::test]
+async fn grpc_pending_delete_hides_the_stored_value() {
+    let (svc, fake) = token_service(Some("stored-value"));
+    let mut request = saved_call("greet");
+    request.pending = env_write("token", None);
+    let text = failure(grpc_host_call(&svc, &grpc_input(), 0, request).await);
+    assert!(text.contains("undefined variable"), "{text}");
+    assert!(!text.contains("stored-value"), "{text}");
+    assert!(fake.calls.lock().expect("lock").is_empty());
+}
+
+#[tokio::test]
+async fn grpc_runtime_var_beats_a_pending_write() {
+    let (svc, fake) = token_service(None);
+    let mut request = saved_call("greet");
+    request.pending = env_write("token", Some("fresh-value"));
+    request
+        .runtime_vars
+        .insert("token".into(), "runtime-value".into());
+    grpc_host_call(&svc, &grpc_input(), 0, request)
+        .await
+        .expect("grpc");
+    let calls = fake.calls.lock().expect("lock");
+    assert!(calls[0].1.contains("runtime-value"), "{}", calls[0].1);
+    assert!(!calls[0].1.contains("fresh-value"), "{}", calls[0].1);
+}
+
+#[tokio::test]
+async fn grpc_pending_write_to_an_unselected_scope_is_skipped() {
+    let (svc, fake) = token_service(None);
+    let mut req = grpc_input();
+    req.environment_name = None;
+    let mut request = saved_call("greet");
+    request.pending = env_write("token", Some("fresh-value"));
+    let text = failure(grpc_host_call(&svc, &req, 0, request).await);
+    assert!(text.contains("undefined variable"), "{text}");
+    assert!(fake.calls.lock().expect("lock").is_empty());
+}
+
+#[tokio::test]
+async fn grpc_inherited_pending_writes_are_overlaid_before_the_requests() {
+    let (svc, fake) = token_service(None);
+    let mut request = saved_call("greet");
+    request.pending = env_write("token", Some("own-value"));
+    grpc_host_call_inheriting(
+        &svc,
+        &grpc_input(),
+        0,
+        request,
+        env_write("token", Some("inherited-value")),
+    )
+    .await
+    .expect("grpc");
+    {
+        let calls = fake.calls.lock().expect("lock");
+        assert!(calls[0].1.contains("own-value"), "{}", calls[0].1);
+        assert!(!calls[0].1.contains("inherited-value"), "{}", calls[0].1);
+    }
+
+    // Alone, the inherited write is seen.
+    let (svc, fake) = token_service(None);
+    grpc_host_call_inheriting(
+        &svc,
+        &grpc_input(),
+        0,
+        saved_call("greet"),
+        env_write("token", Some("inherited-value")),
+    )
+    .await
+    .expect("grpc");
+    let calls = fake.calls.lock().expect("lock");
+    assert!(calls[0].1.contains("inherited-value"), "{}", calls[0].1);
+}
+
+#[tokio::test]
+async fn grpc_e2e_run_sees_a_set_env_var_from_the_same_script() {
+    let mut grpc = greet_request();
+    grpc.messages[0].content = "{\"name\":\"{{token}}\"}".into();
+    let mut collection = grpc_collection(grpc);
+    collection.settings.sandbox_mode = rocket_collection::settings::SandboxMode::Developer;
+    let repo = InMemoryCollectionRepo::new(collection);
+    let (svc, _http) = run_service_over(Arc::clone(&repo), dev());
+    let fake = Arc::new(KeepingGrpc::default());
+    let grpc = GrpcService::new(
+        Arc::new(SharedGrpc(Arc::clone(&fake))),
+        Arc::new(GreeterLoader),
+        repo,
+        Arc::new(Mutex::new(std::path::PathBuf::from("/ws"))),
+        Arc::new(NullEventPublisher),
+    );
+    let svc = svc
+        .with_grpc_service(Arc::new(grpc))
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
+    let mut req = grpc_input();
+    req.pre_request_script =
+        Some("rok.setEnvVar('token', 'from-script'); await rok.grpc.run('greet');".into());
+    let out = svc.execute(req).await.expect("execute");
+    assert!(out.script_error.is_none(), "{:?}", out.script_error);
+    let calls = fake.calls.lock().expect("lock");
+    assert!(calls[0].1.contains("from-script"), "{}", calls[0].1);
 }

@@ -1283,13 +1283,29 @@ impl RequestExecutionService {
         external_secrets: &std::collections::HashMap<String, String>,
         host_env: bool,
     ) -> std::collections::HashMap<String, String> {
-        let scopes = self.build_variable_scopes(
+        self.send_variable_map_pending(input, external_secrets, host_env, None)
+    }
+
+    /// Like `send_variable_map`, with a script's unsaved writes laid over the stored scopes in
+    /// memory first. `pending` is `(writes, vault_forms)`. A vault warning goes to the log only,
+    /// because the caller has no Console.
+    pub(crate) fn send_variable_map_pending(
+        &self,
+        input: &ExecuteRequestInput,
+        external_secrets: &std::collections::HashMap<String, String>,
+        host_env: bool,
+        pending: Option<(&rocket_scripting::PendingWrites, &[String])>,
+    ) -> std::collections::HashMap<String, String> {
+        let mut scopes = self.build_variable_scopes(
             input.global_env_name.as_deref(),
             input.collection.as_deref(),
             input.environment_name.as_deref(),
             input.request_path.as_deref(),
             external_secrets,
         );
+        if let Some((writes, vault_forms)) = pending {
+            overlay_pending_scopes(input, &mut scopes, vault_forms, &mut Vec::new(), writes);
+        }
         let mut vars = expanded_send(
             &scopes,
             &input.flow_vars,
@@ -4171,6 +4187,27 @@ fn apply_pending_writes(
     pending: &rocket_scripting::PendingWrites,
     warn: bool,
 ) {
+    let PhaseState {
+        var_ctx,
+        vault_forms,
+        console,
+        ..
+    } = state;
+    let mut scratch = Vec::new();
+    let console = if warn { console } else { &mut scratch };
+    overlay_pending_scopes(input, var_ctx, vault_forms, console, pending);
+}
+
+/// Lays pending writes over the scopes of `var_ctx`. A scope with nothing selected is skipped.
+/// A value that holds a RocketVault secret goes to runtime and adds a warning to `console`. A
+/// `None` value deletes the key from the scope. Nothing is saved.
+fn overlay_pending_scopes(
+    input: &ExecuteRequestInput,
+    var_ctx: &mut VariableContext,
+    vault_forms: &[String],
+    console: &mut Vec<ConsoleEntry>,
+    pending: &rocket_scripting::PendingWrites,
+) {
     let as_writes = |list: &[(String, Option<String>)]| -> Vec<rocket_scripting::EnvVarWrite> {
         list.iter()
             .map(|(key, value)| rocket_scripting::EnvVarWrite {
@@ -4182,14 +4219,6 @@ fn apply_pending_writes(
             })
             .collect()
     };
-    let PhaseState {
-        var_ctx,
-        vault_forms,
-        console,
-        ..
-    } = state;
-    let mut scratch = Vec::new();
-    let console = if warn { console } else { &mut scratch };
     if input.environment_name.is_some() {
         let kept = hold_back_vault_writes(
             &as_writes(&pending.env),

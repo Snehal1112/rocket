@@ -335,9 +335,26 @@ impl ScriptHost for ExecutionScriptHost<'_> {
                 .map(|(name, value)| GrpcMetadataEntry::new(name, value)),
         );
 
-        let mut variables = self
-            .svc
-            .send_variable_map(self.input, &self.external_secrets, true);
+        // The inherited writes come first, so the script's own writes win.
+        // A poisoned lock still holds the writes.
+        let mut pending = self
+            .pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        pending.env.extend(request.pending.env.iter().cloned());
+        pending
+            .global_env
+            .extend(request.pending.global_env.iter().cloned());
+        pending
+            .collection
+            .extend(request.pending.collection.iter().cloned());
+        let mut variables = self.svc.send_variable_map_pending(
+            self.input,
+            &self.external_secrets,
+            true,
+            Some((&pending, &self.vault_forms)),
+        );
         variables.extend(request.runtime_vars.clone());
         let execute = crate::grpc_service::GrpcExecuteInput {
             collection: self.input.collection.clone(),

@@ -154,6 +154,11 @@ pub struct HostGrpcRequest {
     pub timeout_ms: Option<u64>,
     #[serde(default)]
     pub runtime_vars: HashMap<String, String>,
+    /// The calling script's unsaved environment, global and collection writes. The call sees
+    /// them in memory only; the caller still saves them when its script ends. The engine fills
+    /// this, so it is never read from the script's options.
+    #[serde(skip, default)]
+    pub pending: PendingWrites,
 }
 
 /// The final status of a gRPC call.
@@ -339,6 +344,7 @@ mod tests {
             metadata: vec![],
             timeout_ms: None,
             runtime_vars: HashMap::new(),
+            pending: PendingWrites::default(),
         }
     }
 
