@@ -10,15 +10,19 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use rocket_collection::{GrpcMetadataEntry, GrpcRequest};
 use rocket_http::{HttpRequest, HttpResponse, RequestOptions};
 use rocket_scripting::{
-    to_entry, HostCookieOp, HostCookieResult, HostError, HostRequest, HostResponse, HostRunOutcome,
-    HostRunRequest, HostScopes, ScriptHost, UrlScope,
+    to_entry, HostCookieOp, HostCookieResult, HostError, HostGrpcRequest, HostGrpcResponse,
+    HostGrpcStatus, HostGrpcTarget, HostRequest, HostResponse, HostRunOutcome, HostRunRequest,
+    HostScopes, ScriptHost, UrlScope,
 };
+use rocket_shared::error::DomainError;
 use rocket_shared::types::{Body, BodyMode, Header, HttpMethod};
 
 use super::run_request::{
-    check_run_chain, find_run_target, normalize_run_path, runtime_changes, RunTarget,
+    check_run_chain, find_grpc_target, find_run_target, normalize_run_path, runtime_changes,
+    GrpcTarget, RunTarget,
 };
 use super::script_cookies::ScriptCookies;
 use super::{
@@ -301,6 +305,95 @@ impl ScriptHost for ExecutionScriptHost<'_> {
         })
     }
 
+    async fn grpc(&self, request: HostGrpcRequest) -> Result<HostGrpcResponse, HostError> {
+        let grpc_service = self
+            .svc
+            .grpc
+            .as_ref()
+            .ok_or_else(|| HostError::Failed("rok.grpc: gRPC is not available here".into()))?;
+        let failed = |message: String| HostError::Failed(format!("rok.grpc: {message}"));
+        let mut grpc_request = match &request.target {
+            HostGrpcTarget::Saved { path } => self.saved_grpc_request(path)?,
+            HostGrpcTarget::AdHoc {
+                url,
+                service,
+                method,
+                proto_file,
+                tls,
+            } => ad_hoc_grpc_request(url, service, method, proto_file, *tls),
+        };
+        // A script entry replaces a saved one of the same name.
+        for (name, _) in &request.metadata {
+            grpc_request
+                .metadata
+                .retain(|entry| !entry.key.trim().eq_ignore_ascii_case(name.trim()));
+        }
+        grpc_request.metadata.extend(
+            request
+                .metadata
+                .iter()
+                .map(|(name, value)| GrpcMetadataEntry::new(name, value)),
+        );
+
+        let mut variables = self
+            .svc
+            .send_variable_map(self.input, &self.external_secrets, true);
+        variables.extend(request.runtime_vars.clone());
+        let execute = crate::grpc_service::GrpcExecuteInput {
+            collection: self.input.collection.clone(),
+            request: grpc_request,
+            message: None,
+            variables,
+            // A script that picks the host never gets the collection token or headers.
+            skip_collection_defaults: matches!(request.target, HostGrpcTarget::AdHoc { .. }),
+            timeout: request.timeout_ms.map(Duration::from_millis),
+        };
+
+        // Past the limit the call fails, so a burst cannot pile up calls.
+        if self.active_runs.fetch_add(1, Ordering::SeqCst) >= MAX_ACTIVE_NESTED_RUNS {
+            self.active_runs.fetch_sub(1, Ordering::SeqCst);
+            return Err(failed(format!(
+                "too many nested requests running (limit {MAX_ACTIVE_NESTED_RUNS})"
+            )));
+        }
+        let _slot = ActiveRun(Arc::clone(&self.active_runs));
+        // The guard checks the exact URL the transport dials, before reflection or a connect.
+        let guard = |url: &str| {
+            let dialed = guard_url(url).map_err(DomainError::InvalidInput)?;
+            self.svc.check_request_guard(
+                &self.calling_url,
+                &dialed,
+                &self.input.request_guard_policy,
+            )
+        };
+        let output = grpc_service
+            .exchange_checked(
+                crate::grpc_service::GrpcExchangeInput {
+                    execute,
+                    messages: request.messages,
+                    // A script never names a proto file outside the collection.
+                    confine_proto: true,
+                },
+                &guard,
+            )
+            .await
+            .map_err(|e| failed(e.to_string()))?;
+        let pairs = |list: Vec<rocket_grpc::GrpcMetadataPair>| -> Vec<(String, String)> {
+            list.into_iter().map(|p| (p.name, p.value)).collect()
+        };
+        Ok(HostGrpcResponse {
+            status: HostGrpcStatus {
+                code: output.status.code,
+                name: output.status.code_name,
+                message: output.status.message,
+            },
+            messages: output.messages,
+            headers: pairs(output.headers),
+            trailers: pairs(output.trailers),
+            truncated: output.truncated,
+        })
+    }
+
     async fn cookies(&self, op: HostCookieOp) -> Result<HostCookieResult, HostError> {
         let cookies = ScriptCookies::new(self.svc.cookie_repo.as_ref(), self.svc.cookie_lock());
         let failed = |e: rocket_shared::error::DomainError| HostError::Failed(e.to_string());
@@ -342,7 +435,56 @@ impl ScriptHost for ExecutionScriptHost<'_> {
     }
 }
 
+/// The URL as the request guard reads it: the `http(s)` URI the transport really dials, from the
+/// same parser. An unsupported scheme is an error, so the guard never passes what it cannot read.
+fn guard_url(url: &str) -> Result<String, String> {
+    rocket_grpc::parse_target(url)
+        .map(|target| target.uri)
+        .map_err(|e| e.to_string())
+}
+
+/// The in-memory request of an ad hoc `rok.grpc` call. It has no auth and no metadata of its own.
+fn ad_hoc_grpc_request(
+    url: &str,
+    service: &str,
+    method: &str,
+    proto_file: &str,
+    tls: bool,
+) -> GrpcRequest {
+    let url = url.trim();
+    let url = if url.contains("://") {
+        url.to_string()
+    } else if tls {
+        format!("grpcs://{url}")
+    } else {
+        format!("grpc://{url}")
+    };
+    let mut request = GrpcRequest::new("rok.grpc", url);
+    request.method = Some(format!("{service}/{method}"));
+    request.proto_file_path = Some(proto_file.to_string());
+    request
+}
+
 impl ExecutionScriptHost<'_> {
+    /// The saved gRPC request at `path`, for `rok.grpc`.
+    fn saved_grpc_request(&self, path: &str) -> Result<GrpcRequest, HostError> {
+        let target = normalize_run_path(path);
+        let invalid = || HostError::Failed(format!("rok.grpc: invalid request path - {path}"));
+        let collection = self.input.collection.as_deref().ok_or_else(invalid)?;
+        let tree = self
+            .svc
+            .send_collection_repo()
+            .get(collection)
+            .map_err(|_| invalid())?;
+        match find_grpc_target(&tree, &target) {
+            GrpcTarget::Found(request) => Ok(*request),
+            GrpcTarget::WrongType => Err(HostError::Failed(format!(
+                "rok.grpc: {path} is not a gRPC request"
+            ))),
+            GrpcTarget::NotFound => Err(invalid()),
+        }
+    }
+
     /// Drops the inherited writes whose key the nested run changed, because the later write
     /// wins. The rest are laid over both scope maps, so the script keeps reading them.
     fn keep_inherited(

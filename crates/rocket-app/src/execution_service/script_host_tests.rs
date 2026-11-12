@@ -3006,3 +3006,533 @@ async fn run_request_e2e_the_nested_run_inherits_the_callers_iteration() {
         .count();
     assert_eq!(seen, 1);
 }
+
+// ── rok.grpc ─────────────────────────────────────────────────────────────────
+
+use rocket_collection::{GrpcMessage, GrpcMetadataEntry, GrpcRequest};
+use rocket_grpc::{
+    GrpcCall, GrpcExecutor, GrpcStatus, GrpcStreamHandle, GrpcUnaryResponse, ProtoFileReader,
+    ProtoLoader, ProtoRegistry,
+};
+use rocket_scripting::{HostError, HostGrpcRequest, HostGrpcResponse, HostGrpcTarget, ScriptHost};
+use rocket_shared::types::Auth;
+
+use super::script_host::{ExecutionScriptHost, MAX_ACTIVE_NESTED_RUNS};
+use crate::GrpcService;
+
+const GREETER_PROTO: &str = r#"syntax = "proto3";
+package demo.v1;
+service Greeter { rpc SayHello (Req) returns (Rep); }
+message Req { string name = 1; }
+message Rep { string message = 1; }
+"#;
+const SAY_HELLO: &str = "demo.v1.Greeter/SayHello";
+
+struct GreeterReader;
+
+impl ProtoFileReader for GreeterReader {
+    fn read(&self, name: &str) -> Option<String> {
+        (name == "greeter.proto").then(|| GREETER_PROTO.to_string())
+    }
+}
+
+struct GreeterLoader;
+
+impl ProtoLoader for GreeterLoader {
+    fn source_stamp(&self, _proto_file: &std::path::Path) -> Option<u128> {
+        Some(1)
+    }
+
+    fn load(
+        &self,
+        _proto_file: &std::path::Path,
+        _extra: &[std::path::PathBuf],
+    ) -> DomainResult<ProtoRegistry> {
+        ProtoRegistry::compile("greeter.proto", Arc::new(GreeterReader))
+    }
+
+    fn resolve_within(
+        &self,
+        root: &std::path::Path,
+        relative: &str,
+    ) -> DomainResult<std::path::PathBuf> {
+        Ok(root.join(relative))
+    }
+}
+
+/// Keeps every unary call and answers `{"message":"hi"}` with status OK.
+#[derive(Default)]
+struct KeepingGrpc {
+    calls: Mutex<Vec<(GrpcCall, String)>>,
+}
+
+#[async_trait]
+impl GrpcExecutor for KeepingGrpc {
+    async fn unary(
+        &self,
+        call: &GrpcCall,
+        _registry: &ProtoRegistry,
+        request_json: &str,
+    ) -> DomainResult<GrpcUnaryResponse> {
+        self.calls
+            .lock()
+            .expect("lock")
+            .push((call.clone(), request_json.to_string()));
+        Ok(GrpcUnaryResponse {
+            headers: vec![],
+            trailers: vec![],
+            message_json: Some("{\"message\":\"hi\"}".into()),
+            status: GrpcStatus::ok(),
+            duration_ms: 1,
+        })
+    }
+
+    async fn open_stream(
+        &self,
+        _call: &GrpcCall,
+        _registry: &ProtoRegistry,
+        _initial_json: Option<String>,
+    ) -> DomainResult<GrpcStreamHandle> {
+        Err(rocket_shared::error::DomainError::Internal(
+            "no streams here".into(),
+        ))
+    }
+}
+
+struct SharedGrpc(Arc<KeepingGrpc>);
+
+#[async_trait]
+impl GrpcExecutor for SharedGrpc {
+    async fn unary(
+        &self,
+        call: &GrpcCall,
+        registry: &ProtoRegistry,
+        request_json: &str,
+    ) -> DomainResult<GrpcUnaryResponse> {
+        self.0.unary(call, registry, request_json).await
+    }
+
+    async fn open_stream(
+        &self,
+        call: &GrpcCall,
+        registry: &ProtoRegistry,
+        initial_json: Option<String>,
+    ) -> DomainResult<GrpcStreamHandle> {
+        self.0.open_stream(call, registry, initial_json).await
+    }
+}
+
+fn greet_request() -> GrpcRequest {
+    let mut grpc = GrpcRequest::new("Greet", "localhost:50051");
+    grpc.file_name = Some("greet.yml".into());
+    grpc.method = Some(SAY_HELLO.into());
+    grpc.proto_file_path = Some("greeter.proto".into());
+    grpc.messages = vec![GrpcMessage {
+        title: String::new(),
+        selected: true,
+        content: "{\"name\":\"saved\"}".into(),
+    }];
+    grpc
+}
+
+fn grpc_collection(grpc: GrpcRequest) -> Collection {
+    let mut collection = Collection::new("api");
+    collection
+        .root
+        .items
+        .push(CollectionItem::Grpc(Box::new(grpc)));
+    let mut http = Request::new("Main", HttpMethod::Get, "https://api.test/main");
+    http.file_name = Some("main.yml".into());
+    collection.root.add_request(http);
+    collection
+}
+
+/// A service with a fake gRPC executor, plus that executor.
+fn grpc_service_over(
+    collection: Collection,
+    env: Arc<Mutex<Environment>>,
+) -> (RequestExecutionService, Arc<KeepingGrpc>) {
+    let repo = InMemoryCollectionRepo::new(collection);
+    let (svc, _http) = run_service_over(Arc::clone(&repo), env);
+    let fake = Arc::new(KeepingGrpc::default());
+    let grpc = GrpcService::new(
+        Arc::new(SharedGrpc(Arc::clone(&fake))),
+        Arc::new(GreeterLoader),
+        repo,
+        Arc::new(Mutex::new(std::path::PathBuf::from("/ws"))),
+        Arc::new(NullEventPublisher),
+    );
+    (svc.with_grpc_service(Arc::new(grpc)), fake)
+}
+
+fn grpc_input() -> ExecuteRequestInput {
+    let mut req = input("https://main.test/x");
+    req.collection = Some("api".into());
+    req.environment_name = Some("dev".into());
+    req
+}
+
+/// Runs `request` through a host built for `req`, with `active` nested runs counted.
+async fn grpc_host_call(
+    svc: &RequestExecutionService,
+    req: &ExecuteRequestInput,
+    active: usize,
+    request: HostGrpcRequest,
+) -> Result<HostGrpcResponse, HostError> {
+    let host = ExecutionScriptHost {
+        svc,
+        input: req,
+        external_secrets: Arc::new(Default::default()),
+        unresolved_aliases: Arc::new(Vec::new()),
+        active_runs: Arc::new(std::sync::atomic::AtomicUsize::new(active)),
+        options: Default::default(),
+        chain: Vec::new(),
+        calling_url: req.url.clone(),
+        nested_process_env_values: Default::default(),
+        nested_withheld: Default::default(),
+        nested_vault_withheld: Default::default(),
+        nested_ran: Default::default(),
+        vault_forms: Vec::new(),
+        pending: Default::default(),
+    };
+    let result = host.grpc(request).await;
+    // A finished call frees its slot.
+    assert_eq!(
+        host.active_runs.load(std::sync::atomic::Ordering::SeqCst),
+        active
+    );
+    result
+}
+
+fn saved_call(path: &str) -> HostGrpcRequest {
+    HostGrpcRequest {
+        target: HostGrpcTarget::Saved { path: path.into() },
+        messages: vec![],
+        metadata: vec![],
+        timeout_ms: None,
+        runtime_vars: Default::default(),
+    }
+}
+
+fn failure(result: Result<HostGrpcResponse, HostError>) -> String {
+    match result {
+        Err(HostError::Failed(text)) => text,
+        other => panic!("expected a failure, got {other:?}"),
+    }
+}
+
+fn dev() -> Arc<Mutex<Environment>> {
+    dev_env(vec![Variable::new("HOST", "env.test:443")])
+}
+
+#[tokio::test]
+async fn grpc_runs_a_saved_request_with_its_server_and_auth() {
+    let mut grpc = greet_request();
+    grpc.auth = Auth::Bearer {
+        token: "tok-1".into(),
+    };
+    let (svc, fake) = grpc_service_over(grpc_collection(grpc), dev());
+    let out = grpc_host_call(&svc, &grpc_input(), 0, saved_call("greet"))
+        .await
+        .expect("grpc");
+    assert_eq!(out.status.code, 0);
+    assert_eq!(out.status.name, "OK");
+    assert_eq!(out.messages, vec!["{\"message\":\"hi\"}".to_string()]);
+    let calls = fake.calls.lock().expect("lock");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].0.url, "localhost:50051");
+    assert_eq!(calls[0].0.full_method, SAY_HELLO);
+    assert!(calls[0]
+        .0
+        .metadata
+        .iter()
+        .any(|m| m.name == "authorization" && m.value == "Bearer tok-1"));
+    assert!(calls[0].1.contains("saved"), "{}", calls[0].1);
+}
+
+#[tokio::test]
+async fn grpc_script_messages_replace_the_saved_message() {
+    let (svc, fake) = grpc_service_over(grpc_collection(greet_request()), dev());
+    let mut request = saved_call("greet");
+    request.messages = vec!["{\"name\":\"script\"}".into()];
+    grpc_host_call(&svc, &grpc_input(), 0, request)
+        .await
+        .expect("grpc");
+    let calls = fake.calls.lock().expect("lock");
+    assert!(calls[0].1.contains("script"), "{}", calls[0].1);
+    assert!(!calls[0].1.contains("saved"), "{}", calls[0].1);
+}
+
+#[tokio::test]
+async fn grpc_script_metadata_overrides_a_saved_entry() {
+    let mut grpc = greet_request();
+    grpc.metadata = vec![
+        GrpcMetadataEntry::new("x-key", "old"),
+        GrpcMetadataEntry::new("x-other", "keep"),
+    ];
+    let (svc, fake) = grpc_service_over(grpc_collection(grpc), dev());
+    let mut request = saved_call("greet");
+    request.metadata = vec![("X-Key".into(), "new".into())];
+    grpc_host_call(&svc, &grpc_input(), 0, request)
+        .await
+        .expect("grpc");
+    let calls = fake.calls.lock().expect("lock");
+    let metadata = &calls[0].0.metadata;
+    let keys: Vec<_> = metadata
+        .iter()
+        .filter(|m| m.name.eq_ignore_ascii_case("x-key"))
+        .collect();
+    assert_eq!(keys.len(), 1, "{metadata:?}");
+    assert_eq!(keys[0].value, "new");
+    assert!(metadata
+        .iter()
+        .any(|m| m.name == "x-other" && m.value == "keep"));
+}
+
+#[tokio::test]
+async fn grpc_ad_hoc_builds_a_request_from_the_fields() {
+    let (svc, fake) = grpc_service_over(grpc_collection(greet_request()), dev());
+    let request = HostGrpcRequest {
+        target: HostGrpcTarget::AdHoc {
+            url: "adhoc.test:9000".into(),
+            service: "demo.v1.Greeter".into(),
+            method: "SayHello".into(),
+            proto_file: "greeter.proto".into(),
+            tls: true,
+        },
+        messages: vec!["{\"name\":\"x\"}".into()],
+        ..saved_call("")
+    };
+    let out = grpc_host_call(&svc, &grpc_input(), 0, request)
+        .await
+        .expect("grpc");
+    assert_eq!(out.status.name, "OK");
+    let calls = fake.calls.lock().expect("lock");
+    assert_eq!(calls[0].0.url, "grpcs://adhoc.test:9000");
+    assert_eq!(calls[0].0.full_method, SAY_HELLO);
+    assert!(calls[0].0.metadata.is_empty());
+}
+
+#[tokio::test]
+async fn grpc_fills_variables_from_scopes_and_runtime_vars() {
+    let mut grpc = greet_request();
+    grpc.url = "{{HOST}}".into();
+    grpc.messages[0].content = "{\"name\":\"{{who}}\"}".into();
+    let (svc, fake) = grpc_service_over(grpc_collection(grpc), dev());
+    let mut request = saved_call("greet");
+    request
+        .runtime_vars
+        .insert("who".into(), "ada-runtime".into());
+    grpc_host_call(&svc, &grpc_input(), 0, request)
+        .await
+        .expect("grpc");
+    let calls = fake.calls.lock().expect("lock");
+    assert_eq!(calls[0].0.url, "env.test:443");
+    assert!(calls[0].1.contains("ada-runtime"), "{}", calls[0].1);
+}
+
+#[tokio::test]
+async fn grpc_refuses_a_blocked_host_before_connecting() {
+    let mut grpc = greet_request();
+    // A bare host:port must be checked as a host, not skipped as an opaque URL.
+    grpc.url = "169.254.169.254:80".into();
+    let (svc, fake) = grpc_service_over(grpc_collection(grpc), dev());
+    let mut req = grpc_input();
+    req.request_guard_policy
+        .block_script_redirects_to_internal_hosts = true;
+    let text = failure(grpc_host_call(&svc, &req, 0, saved_call("greet")).await);
+    assert!(text.starts_with("rok.grpc:"), "{text}");
+    assert!(text.contains("blocked"), "{text}");
+    assert!(fake.calls.lock().expect("lock").is_empty());
+}
+
+#[tokio::test]
+async fn grpc_rejects_an_http_request_path() {
+    let (svc, fake) = grpc_service_over(grpc_collection(greet_request()), dev());
+    let text = failure(grpc_host_call(&svc, &grpc_input(), 0, saved_call("main")).await);
+    assert_eq!(text, "rok.grpc: main is not a gRPC request");
+    assert!(fake.calls.lock().expect("lock").is_empty());
+}
+
+#[tokio::test]
+async fn grpc_rejects_a_missing_path() {
+    let (svc, _fake) = grpc_service_over(grpc_collection(greet_request()), dev());
+    let text = failure(grpc_host_call(&svc, &grpc_input(), 0, saved_call("nope")).await);
+    assert_eq!(text, "rok.grpc: invalid request path - nope");
+}
+
+#[tokio::test]
+async fn grpc_ad_hoc_refuses_an_absolute_proto_path() {
+    let (svc, fake) = grpc_service_over(grpc_collection(greet_request()), dev());
+    for proto_file in ["/etc/greeter.proto", "~/greeter.proto"] {
+        let request = HostGrpcRequest {
+            target: HostGrpcTarget::AdHoc {
+                url: "adhoc.test:9000".into(),
+                service: "demo.v1.Greeter".into(),
+                method: "SayHello".into(),
+                proto_file: proto_file.into(),
+                tls: false,
+            },
+            ..saved_call("")
+        };
+        let text = failure(grpc_host_call(&svc, &grpc_input(), 0, request).await);
+        assert!(text.starts_with("rok.grpc:"), "{text}");
+    }
+    assert!(fake.calls.lock().expect("lock").is_empty());
+}
+
+#[tokio::test]
+async fn grpc_counts_against_the_nested_run_limit() {
+    let (svc, fake) = grpc_service_over(grpc_collection(greet_request()), dev());
+    let text = failure(
+        grpc_host_call(
+            &svc,
+            &grpc_input(),
+            MAX_ACTIVE_NESTED_RUNS,
+            saved_call("greet"),
+        )
+        .await,
+    );
+    assert_eq!(
+        text,
+        "rok.grpc: too many nested requests running (limit 16)"
+    );
+    assert!(fake.calls.lock().expect("lock").is_empty());
+}
+
+#[tokio::test]
+async fn grpc_without_a_service_reports_not_available() {
+    let (svc, _http) = run_service_over(
+        InMemoryCollectionRepo::new(grpc_collection(greet_request())),
+        dev(),
+    );
+    let text = failure(grpc_host_call(&svc, &grpc_input(), 0, saved_call("greet")).await);
+    assert_eq!(text, "rok.grpc: gRPC is not available here");
+}
+
+#[tokio::test]
+async fn grpc_error_text_never_contains_a_secret_value() {
+    let env = dev_env(vec![Variable::secret("API_KEY", SECRET)]);
+    let (svc, _fake) = grpc_service_over(grpc_collection(greet_request()), env);
+    let mut request = saved_call("greet");
+    // The field does not exist in the proto, so the call fails before connecting.
+    request.messages = vec!["{\"nofield\":\"{{API_KEY}}\"}".into()];
+    let text = failure(grpc_host_call(&svc, &grpc_input(), 0, request).await);
+    assert!(text.starts_with("rok.grpc:"), "{text}");
+    assert!(!text.contains(SECRET), "{text}");
+}
+
+fn guarded_input() -> ExecuteRequestInput {
+    let mut req = grpc_input();
+    req.request_guard_policy
+        .block_script_redirects_to_internal_hosts = true;
+    req
+}
+
+#[tokio::test]
+async fn grpc_guard_blocks_every_spelling_the_transport_resolves_to_a_blocked_host() {
+    for url in [
+        "grpc://127.1:50051",
+        "grpcs://0x7f.1:1",
+        "grpc://2130706433:1",
+        "grpc://0:1",
+        "grpcs://[::1]:1",
+        "localhost:50051",
+        "127.1:50051",
+        "http://127.1:1",
+        "GRPC://127.1:1",
+        "grpc://user@127.1:1/x",
+    ] {
+        let mut grpc = greet_request();
+        grpc.url = url.into();
+        let (svc, fake) = grpc_service_over(grpc_collection(grpc), dev());
+        let text = failure(grpc_host_call(&svc, &guarded_input(), 0, saved_call("greet")).await);
+        assert!(text.contains("blocked"), "{url}: {text}");
+        assert!(fake.calls.lock().expect("lock").is_empty(), "{url}");
+    }
+}
+
+#[tokio::test]
+async fn grpc_guard_blocks_an_ad_hoc_bare_loopback_spelling() {
+    let (svc, fake) = grpc_service_over(grpc_collection(greet_request()), dev());
+    for tls in [false, true] {
+        let request = HostGrpcRequest {
+            target: HostGrpcTarget::AdHoc {
+                url: "127.1:50051".into(),
+                service: "demo.v1.Greeter".into(),
+                method: "SayHello".into(),
+                proto_file: "greeter.proto".into(),
+                tls,
+            },
+            ..saved_call("")
+        };
+        let text = failure(grpc_host_call(&svc, &guarded_input(), 0, request).await);
+        assert!(text.contains("blocked"), "{text}");
+    }
+    assert!(fake.calls.lock().expect("lock").is_empty());
+}
+
+#[tokio::test]
+async fn grpc_guard_fails_closed_on_an_unknown_scheme_and_lets_a_public_host_through() {
+    let mut grpc = greet_request();
+    grpc.url = "ftp://public.test:21".into();
+    let (svc, fake) = grpc_service_over(grpc_collection(grpc), dev());
+    let text = failure(grpc_host_call(&svc, &guarded_input(), 0, saved_call("greet")).await);
+    assert!(text.starts_with("rok.grpc:"), "{text}");
+    assert!(fake.calls.lock().expect("lock").is_empty());
+
+    let mut grpc = greet_request();
+    grpc.url = "grpcs://public.test:443".into();
+    let (svc, fake) = grpc_service_over(grpc_collection(grpc), dev());
+    grpc_host_call(&svc, &guarded_input(), 0, saved_call("greet"))
+        .await
+        .expect("a public host passes");
+    assert_eq!(fake.calls.lock().expect("lock").len(), 1);
+}
+
+fn collection_with_defaults(grpc: GrpcRequest) -> Collection {
+    let mut collection = grpc_collection(grpc);
+    collection.settings.auth = Some(Auth::Bearer {
+        token: "collection-token".into(),
+    });
+    collection.settings.headers = vec![rocket_shared::types::Header::new("x-default", "dv")];
+    collection
+}
+
+#[tokio::test]
+async fn grpc_ad_hoc_inherits_no_collection_auth_or_headers_but_saved_does() {
+    let (svc, fake) = grpc_service_over(collection_with_defaults(greet_request()), dev());
+    let request = HostGrpcRequest {
+        target: HostGrpcTarget::AdHoc {
+            url: "adhoc.test:9000".into(),
+            service: "demo.v1.Greeter".into(),
+            method: "SayHello".into(),
+            proto_file: "greeter.proto".into(),
+            tls: false,
+        },
+        metadata: vec![("x-own".into(), "mine".into())],
+        ..saved_call("")
+    };
+    grpc_host_call(&svc, &grpc_input(), 0, request)
+        .await
+        .expect("ad hoc");
+    grpc_host_call(&svc, &grpc_input(), 0, saved_call("greet"))
+        .await
+        .expect("saved");
+    let calls = fake.calls.lock().expect("lock");
+    let ad_hoc: Vec<_> = calls[0]
+        .0
+        .metadata
+        .iter()
+        .map(|m| m.name.as_str())
+        .collect();
+    assert_eq!(ad_hoc, vec!["x-own"], "{ad_hoc:?}");
+    let saved: Vec<_> = calls[1]
+        .0
+        .metadata
+        .iter()
+        .map(|m| m.name.as_str())
+        .collect();
+    assert!(saved.contains(&"authorization"), "{saved:?}");
+    assert!(saved.contains(&"x-default"), "{saved:?}");
+}

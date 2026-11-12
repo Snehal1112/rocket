@@ -758,6 +758,8 @@ pub struct RequestExecutionService {
     /// The host process environment. The default has nothing in it, so an unwired service
     /// resolves no `process.env` value from the OS.
     host_env: Arc<dyn rocket_shared::host_env::HostEnv>,
+    /// The gRPC service behind `rok.grpc`. `None` leaves the call unavailable.
+    grpc: Option<Arc<crate::grpc_service::GrpcService>>,
 }
 
 impl RequestExecutionService {
@@ -791,6 +793,7 @@ impl RequestExecutionService {
             trust_store: Arc::new(rocket_collection::DenyAllTrustStore),
             cookie_lock: rocket_http::CookieJarLock::default(),
             host_env: Arc::new(rocket_shared::host_env::EmptyHostEnv),
+            grpc: None,
         }
     }
 
@@ -825,6 +828,7 @@ impl RequestExecutionService {
             trust_store: Arc::new(rocket_collection::DenyAllTrustStore),
             cookie_lock: rocket_http::CookieJarLock::default(),
             host_env: Arc::new(rocket_shared::host_env::EmptyHostEnv),
+            grpc: None,
         }
     }
 
@@ -892,6 +896,12 @@ impl RequestExecutionService {
             Some(repo) => repo,
             None => self.global_env_repo(),
         }
+    }
+
+    /// Sets the gRPC service that `rok.grpc` calls through.
+    pub fn with_grpc_service(mut self, grpc: Arc<crate::grpc_service::GrpcService>) -> Self {
+        self.grpc = Some(grpc);
+        self
     }
 
     /// Attach the host environment that `process.env` and `rok.getProcessEnv` read.

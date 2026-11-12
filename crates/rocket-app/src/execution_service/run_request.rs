@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use rocket_collection::{Collection, CollectionItem, Folder};
+use rocket_collection::{Collection, CollectionItem, Folder, GrpcRequest};
 
 use crate::runner_sequence::{flatten_run_set, RunItem};
 
@@ -67,6 +67,44 @@ pub(crate) fn find_run_target(collection: &Collection, path: &str) -> RunTarget 
     } else {
         RunTarget::NotFound
     }
+}
+
+/// What a `rok.grpc` saved path points at.
+#[derive(Debug)]
+pub(crate) enum GrpcTarget {
+    /// A saved gRPC request.
+    Found(Box<GrpcRequest>),
+    /// A request of another protocol sits at the path.
+    WrongType,
+    /// Nothing at that path.
+    NotFound,
+}
+
+/// Finds the gRPC request at `path`, which must already be normalized.
+pub(crate) fn find_grpc_target(collection: &Collection, path: &str) -> GrpcTarget {
+    if let Some(request) = find_grpc_in(&collection.root, "", path) {
+        return GrpcTarget::Found(Box::new(request));
+    }
+    match find_run_target(collection, path) {
+        RunTarget::NotFound => GrpcTarget::NotFound,
+        RunTarget::Http(_) | RunTarget::Skipped => GrpcTarget::WrongType,
+    }
+}
+
+/// The gRPC request whose file sits at `path`, searching `folder` and below.
+fn find_grpc_in(folder: &Folder, prefix: &str, path: &str) -> Option<GrpcRequest> {
+    folder.items.iter().find_map(|item| match item {
+        CollectionItem::Grpc(grpc) => grpc
+            .file_name
+            .as_deref()
+            .filter(|name| normalize_run_path(&format!("{prefix}{name}")) == path)
+            .map(|_| (**grpc).clone()),
+        CollectionItem::Folder(sub) => {
+            let dir = sub.dir_name.as_deref().unwrap_or(&sub.name);
+            find_grpc_in(sub, &format!("{prefix}{dir}/"), path)
+        }
+        _ => None,
+    })
 }
 
 /// True when a WebSocket or gRPC request file sits at `path`.
@@ -191,6 +229,36 @@ mod tests {
         assert!(matches!(
             find_run_target(&collection(), "login"),
             RunTarget::NotFound
+        ));
+    }
+
+    #[test]
+    fn find_grpc_target_finds_a_request_in_a_folder() {
+        let mut collection = collection();
+        let mut grpc = GrpcRequest::new("Greet", "localhost:50051");
+        grpc.file_name = Some("greet.yml".into());
+        let mut sub = Folder::new("svc");
+        sub.items.push(CollectionItem::Grpc(Box::new(grpc)));
+        collection.root.add_subfolder(sub);
+        match find_grpc_target(&collection, "svc/greet") {
+            GrpcTarget::Found(request) => assert_eq!(request.name, "Greet"),
+            other => panic!("expected a gRPC target, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn find_grpc_target_tells_a_wrong_type_from_a_miss() {
+        assert!(matches!(
+            find_grpc_target(&collection(), "main"),
+            GrpcTarget::WrongType
+        ));
+        assert!(matches!(
+            find_grpc_target(&collection(), "socket"),
+            GrpcTarget::WrongType
+        ));
+        assert!(matches!(
+            find_grpc_target(&collection(), "nope"),
+            GrpcTarget::NotFound
         ));
     }
 

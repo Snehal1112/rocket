@@ -41,6 +41,7 @@ impl GrpcExecuteDto {
                 .timeout_ms
                 .filter(|ms| *ms > 0)
                 .map(Duration::from_millis),
+            skip_collection_defaults: false,
         }
     }
 }

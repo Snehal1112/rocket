@@ -9,6 +9,7 @@ pub mod codec;
 pub mod events;
 pub mod limits;
 pub mod registry;
+pub mod target;
 
 #[cfg(test)]
 mod test_support;
@@ -23,3 +24,4 @@ pub use limits::{
 };
 pub use prost_reflect::{DynamicMessage, MessageDescriptor, MethodDescriptor};
 pub use registry::{GrpcMethodInfo, GrpcServiceInfo, ProtoFileReader, ProtoLoader, ProtoRegistry};
+pub use target::{parse_target, Target};

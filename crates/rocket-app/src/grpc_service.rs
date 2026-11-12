@@ -41,6 +41,9 @@ pub struct GrpcExecuteInput {
     pub variables: HashMap<String, String>,
     /// Deadline for the whole call.
     pub timeout: Option<Duration>,
+    /// Leave out the collection's auth and default headers, which a request normally inherits.
+    /// The collection still locates relative proto paths.
+    pub skip_collection_defaults: bool,
 }
 
 impl GrpcExecuteInput {
@@ -225,9 +228,14 @@ impl GrpcService {
         &self,
         input: &GrpcExecuteInput,
         confine: bool,
+        check: &(dyn Fn(&str) -> DomainResult<()> + Sync),
     ) -> DomainResult<(GrpcCall, ProtoRegistry, MethodDescriptor, GrpcMethodType)> {
         let call = self.prepare_call(input, true)?;
-        let registry = self.registry_for_confined(input, false, confine).await?;
+        // The check runs on the URL that will be dialed, before reflection or any connect.
+        check(&call.url)?;
+        let registry = self
+            .registry_for_confined(input, false, confine, Some(&call))
+            .await?;
         let method = registry.method(&call.full_method)?;
         let method_type = GrpcMethodType::from_streaming_flags(
             method.is_client_streaming(),
@@ -248,7 +256,8 @@ impl GrpcService {
         MessageDescriptor,
         Option<String>,
     )> {
-        let (call, registry, method, method_type) = self.resolve_target(input, false).await?;
+        let (call, registry, method, method_type) =
+            self.resolve_target(input, false, &|_| Ok(())).await?;
         if method_type == GrpcMethodType::Unary {
             return Err(DomainError::InvalidInput(format!(
                 "{} is a unary method, send it as a normal call",
@@ -357,10 +366,7 @@ impl GrpcService {
             }
             _ => String::new(),
         };
-        let url = resolve_text(&request.url, vars, "the URL")?;
-        if url.trim().is_empty() {
-            return Err(DomainError::InvalidInput("the gRPC URL is empty".into()));
-        }
+        let url = resolve_url(input)?;
 
         let mut metadata = Vec::new();
         for entry in request
@@ -385,6 +391,7 @@ impl GrpcService {
         let defaults = input
             .collection
             .as_deref()
+            .filter(|_| !input.skip_collection_defaults)
             .and_then(|c| self.collection_repo.get_settings(c).ok())
             .map(|s| s.headers)
             .unwrap_or_default();
@@ -432,6 +439,7 @@ impl GrpcService {
             Auth::None | Auth::Inherit => input
                 .collection
                 .as_deref()
+                .filter(|_| !input.skip_collection_defaults)
                 .and_then(|c| self.collection_repo.get_settings(c).ok())
                 .and_then(|s| s.auth)
                 .unwrap_or(Auth::None),
@@ -477,15 +485,19 @@ impl GrpcService {
         input: &GrpcExecuteInput,
         refresh: bool,
     ) -> DomainResult<ProtoRegistry> {
-        self.registry_for_confined(input, refresh, false).await
+        self.registry_for_confined(input, refresh, false, None)
+            .await
     }
 
     /// Like `registry_for`. With `confine` the proto path must stay inside the collection.
+    /// With `prepared`, reflection dials that call as is. Its URL is never resolved again,
+    /// so a caller that checked the URL knows the one that is dialed.
     async fn registry_for_confined(
         &self,
         input: &GrpcExecuteInput,
         refresh: bool,
         confine: bool,
+        prepared: Option<&GrpcCall>,
     ) -> DomainResult<ProtoRegistry> {
         let raw_path = input
             .request
@@ -495,7 +507,13 @@ impl GrpcService {
             .filter(|p| !p.is_empty());
         match raw_path {
             Some(raw) => self.registry_from_file(input, raw, refresh, confine).await,
-            None => self.registry_from_reflection(input, refresh).await,
+            None => {
+                let call = match prepared {
+                    Some(call) => call.clone(),
+                    None => self.prepare_call(input, false)?,
+                };
+                self.registry_from_reflection(&call, refresh).await
+            }
         }
     }
 
@@ -532,10 +550,9 @@ impl GrpcService {
 
     async fn registry_from_reflection(
         &self,
-        input: &GrpcExecuteInput,
+        call: &GrpcCall,
         refresh: bool,
     ) -> DomainResult<ProtoRegistry> {
-        let call = self.prepare_call(input, false)?;
         let key = {
             use std::hash::{Hash, Hasher};
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -550,7 +567,7 @@ impl GrpcService {
                 return Ok(hit.clone());
             }
         }
-        let registry = self.executor.reflect(&call).await?;
+        let registry = self.executor.reflect(call).await?;
         self.cache(key, registry.clone());
         Ok(registry)
     }
@@ -731,6 +748,15 @@ fn finish(
     });
 }
 
+/// The request URL with the variables of `input` filled in, which must not be empty.
+fn resolve_url(input: &GrpcExecuteInput) -> DomainResult<String> {
+    let url = resolve_text(&input.request.url, &input.variables, "the URL")?;
+    if url.trim().is_empty() {
+        return Err(DomainError::InvalidInput("the gRPC URL is empty".into()));
+    }
+    Ok(url)
+}
+
 /// Resolves `{{name}}` placeholders. A placeholder with no value is an error,
 /// because sending the literal text to a server is never what the user wants.
 fn resolve_text(text: &str, vars: &HashMap<String, String>, what: &str) -> DomainResult<String> {
@@ -864,6 +890,8 @@ message Rep { string message = 1; }
         streams: Mutex<Vec<(GrpcCall, Option<String>)>>,
         next_stream: Mutex<Option<GrpcStreamHandle>>,
         reflects: AtomicUsize,
+        /// The URL of every reflect call.
+        reflect_urls: Mutex<Vec<String>>,
         /// When set, `open_stream` waits for it, like a slow connect.
         open_gate: Mutex<Option<Arc<tokio::sync::Notify>>>,
         /// When set, every call fails like a connect error, with this text.
@@ -915,8 +943,9 @@ message Rep { string message = 1; }
                 .ok_or_else(|| DomainError::Internal("no stream prepared".into()))
         }
 
-        async fn reflect(&self, _call: &GrpcCall) -> DomainResult<ProtoRegistry> {
+        async fn reflect(&self, call: &GrpcCall) -> DomainResult<ProtoRegistry> {
             self.reflects.fetch_add(1, Ordering::SeqCst);
+            lock(&self.reflect_urls).push(call.url.clone());
             self.connect_failure()?;
             Ok(registry())
         }
@@ -1055,6 +1084,7 @@ message Rep { string message = 1; }
             message: None,
             variables: HashMap::new(),
             timeout: None,
+            skip_collection_defaults: false,
         }
     }
 
@@ -2158,6 +2188,68 @@ message Rep { string message = 1; }
             let text = format!("{:?}", out.status);
             assert!(!text.contains("hunter2") && !text.contains("pw@"), "{text}");
         }
+    }
+
+    #[tokio::test]
+    async fn exchange_checks_the_exact_url_it_dials_even_with_a_dynamic_variable() {
+        let h = harness(None);
+        for _ in 0..20 {
+            let mut r = request(SAY_HELLO);
+            r.url = "grpc://h{{$randomInt}}.example.test:50051".into();
+            let seen = Mutex::new(Vec::<String>::new());
+            let check = |url: &str| {
+                lock(&seen).push(url.to_string());
+                Ok(())
+            };
+            h.svc
+                .exchange_checked(exchange_input(r, &["{}"]), &check)
+                .await
+                .expect("exchange");
+            let checked = lock(&seen).clone();
+            assert_eq!(checked.len(), 1, "{checked:?}");
+            assert_eq!(checked[0], sent(&h).0.url);
+        }
+    }
+
+    #[tokio::test]
+    async fn exchange_reflects_on_the_checked_url_not_a_second_resolution() {
+        for _ in 0..20 {
+            let h = harness(None);
+            let mut r = request(SAY_HELLO);
+            r.proto_file_path = None;
+            r.url = "grpc://h{{$randomInt}}.example.test:50051".into();
+            let seen = Mutex::new(Vec::<String>::new());
+            let check = |url: &str| {
+                lock(&seen).push(url.to_string());
+                Ok(())
+            };
+            h.svc
+                .exchange_checked(exchange_input(r, &["{}"]), &check)
+                .await
+                .expect("exchange");
+            let checked = lock(&seen).clone();
+            let reflected = lock(&h.exec.reflect_urls).clone();
+            assert_eq!(checked.len(), 1, "{checked:?}");
+            assert_eq!(reflected, checked);
+            assert_eq!(sent(&h).0.url, checked[0]);
+        }
+    }
+
+    #[tokio::test]
+    async fn exchange_stops_before_reflection_and_connecting_when_the_check_refuses() {
+        let h = harness(None);
+        let mut r = request(SAY_HELLO);
+        r.proto_file_path = None;
+        let check = |_: &str| Err(DomainError::InvalidInput("blocked".into()));
+        let err = h
+            .svc
+            .exchange_checked(exchange_input(r, &["{}"]), &check)
+            .await
+            .expect_err("refused");
+        assert!(err.to_string().contains("blocked"), "{err}");
+        assert_eq!(h.exec.reflects.load(Ordering::SeqCst), 0);
+        assert!(lock(&h.exec.unary).is_empty());
+        assert!(lock(&h.exec.streams).is_empty());
     }
 
     #[tokio::test]

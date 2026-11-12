@@ -63,6 +63,18 @@ impl Collected {
 impl GrpcService {
     /// Runs one call of any shape to its end, or until a cap or the time limit stops it.
     pub async fn exchange(&self, input: GrpcExchangeInput) -> DomainResult<GrpcExchangeOutput> {
+        self.exchange_checked(input, &|_| Ok(())).await
+    }
+
+    /// Like `exchange`, but `check` sees the exact URL the transport dials, once, before
+    /// any reflection or connect. A refusal ends the call with that error. The URL is
+    /// resolved only once, so a dynamic variable cannot give the check one host and the
+    /// transport another.
+    pub async fn exchange_checked(
+        &self,
+        input: GrpcExchangeInput,
+        check: &(dyn Fn(&str) -> DomainResult<()> + Sync),
+    ) -> DomainResult<GrpcExchangeOutput> {
         let mut execute = input.execute.with_request_variables();
         execute.message = None;
         let limit = clamp_call_timeout(
@@ -72,13 +84,15 @@ impl GrpcService {
         );
         execute.timeout = Some(limit);
 
-        let (call, registry, method, method_type) =
-            match self.resolve_target(&execute, input.confine_proto).await {
-                Ok(target) => target,
-                // Reflection could not reach the server: a call outcome, not a setup problem.
-                Err(DomainError::Http(_)) => return Ok(unavailable(Collected::default())),
-                Err(e) => return Err(e),
-            };
+        let (call, registry, method, method_type) = match self
+            .resolve_target(&execute, input.confine_proto, check)
+            .await
+        {
+            Ok(target) => target,
+            // Reflection could not reach the server: a call outcome, not a setup problem.
+            Err(DomainError::Http(_)) => return Ok(unavailable(Collected::default())),
+            Err(e) => return Err(e),
+        };
         let messages = self.exchange_messages(&execute, &input.messages, method_type, &call)?;
         for (index, text) in messages.iter().enumerate() {
             if json_to_message(&method.input(), text).is_err() {
