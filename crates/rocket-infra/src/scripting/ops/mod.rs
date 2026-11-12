@@ -4,6 +4,7 @@ use deno_core::OpState;
 pub mod console;
 pub mod fs;
 pub mod host;
+pub mod iteration;
 pub mod modules;
 pub mod process;
 pub mod req;

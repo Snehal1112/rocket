@@ -54,7 +54,10 @@ Neither Bruno nor Postman stores a data file in the collection, as far as we kno
 
 - `rok.runner.iterationData.get(key)` returns the string or `undefined`.
 - `rok.runner.iterationData.has(key)` returns a boolean.
+- `rok.runner.iterationData.get()` with no key returns a plain copy of the row (the same as Bruno's `get()`).
 - `rok.runner.iterationData.toObject()` returns a plain copy of the row.
+- `rok.runner.iterationData.stringify()` returns the row as a JSON string (Bruno name).
+- Bruno's `unset(key)` is not provided: the row is read-only.
 - The object is read-only and rebuilt for each pass. A script cannot change a later row.
 - `iterationIndex` is zero-based. `totalIterations` is the row count.
 - These values are the same for every script phase of every request in the pass (pre-request, post-response, tests, and nested `rok.runRequest` calls). A nested `rok.runRequest` sees its caller's row.

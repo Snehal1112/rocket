@@ -2910,7 +2910,8 @@ impl RequestExecutionService {
             .with_execution_mode(mode)
             .with_sandbox_mode(state.sandbox_mode)
             .with_file_scope(state.file_scope.clone())
-            .with_collection_name(input.collection.clone());
+            .with_collection_name(input.collection.clone())
+            .with_iteration(input.iteration.clone());
             let had_error = state.script_error.is_some();
             let host = self.script_host(input, state);
             let result = self
@@ -3332,7 +3333,8 @@ impl RequestExecutionService {
             .with_execution_mode(mode)
             .with_sandbox_mode(state.sandbox_mode)
             .with_file_scope(state.file_scope.clone())
-            .with_collection_name(input.collection.clone());
+            .with_collection_name(input.collection.clone())
+            .with_iteration(input.iteration.clone());
             let host = self.script_host(input, state);
             let result = self
                 .run_script_phase(
@@ -3401,6 +3403,7 @@ impl RequestExecutionService {
             .with_sandbox_mode(state.sandbox_mode)
             .with_file_scope(state.file_scope.clone())
             .with_collection_name(input.collection.clone())
+            .with_iteration(input.iteration.clone())
             .with_assertion_results(rocket_scripting::assertion_outcomes(
                 &input.assertions,
                 response,
@@ -8794,6 +8797,45 @@ mod tests {
         assert!(contexts
             .iter()
             .all(|c| c.collection_name.as_deref() == Some("Payments")));
+    }
+
+    async fn contexts_for_all_phases(
+        iteration: Option<rocket_scripting::IterationInfo>,
+    ) -> Vec<ScriptContext> {
+        let capture = CapturingScriptEngine::new();
+        let svc = build_svc_with_script(
+            Box::new(SharedEnvRepo(RecordingEnvRepo::with_env(Environment::new(
+                "dev",
+            )))),
+            Box::new(StubCollectionRepo::empty()),
+            Box::new(SharedCapture(Arc::clone(&capture))),
+        );
+        let mut input = sample_input("https://example.com", Some("dev"));
+        input.pre_request_script = Some("// pre".into());
+        input.post_response_script = Some("// post".into());
+        input.tests_script = Some("// tests".into());
+        input.iteration = iteration;
+        svc.execute(input).await.expect("execute failed");
+        capture.contexts()
+    }
+
+    #[tokio::test]
+    async fn pre_request_post_response_and_tests_scripts_see_the_same_iteration() {
+        let info = rocket_scripting::IterationInfo {
+            index: 2,
+            total: 4,
+            data: std::collections::BTreeMap::from([("name".to_string(), "carol".to_string())]),
+        };
+        let contexts = contexts_for_all_phases(Some(info.clone())).await;
+        assert_eq!(contexts.len(), 3);
+        assert!(contexts.iter().all(|c| c.iteration.as_ref() == Some(&info)));
+    }
+
+    #[tokio::test]
+    async fn a_send_without_iteration_gives_the_default_to_every_phase() {
+        let contexts = contexts_for_all_phases(None).await;
+        assert_eq!(contexts.len(), 3);
+        assert!(contexts.iter().all(|c| c.iteration.is_none()));
     }
 
     fn developer_settings() -> CollectionSettings {

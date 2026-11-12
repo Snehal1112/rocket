@@ -3,7 +3,7 @@ use rocket_environment::VariableContext;
 use rocket_http::{HttpRequest, HttpResponse};
 use rocket_scripting::{
     AssertionOutcome, CollectionVarWrite, ConsoleEntry, ConsoleLevel, CookieEntry, EnvVarWrite,
-    NextRequest, RequestMutations, SandboxMode, ScriptPhase, TestResult, TestStatus,
+    IterationInfo, NextRequest, RequestMutations, SandboxMode, ScriptPhase, TestResult, TestStatus,
 };
 use rocket_shared::types::PathParam;
 use std::collections::{HashMap, HashSet};
@@ -43,6 +43,8 @@ pub struct ScriptInputState {
     pub cookie_url: String,
     /// Cookies matching `cookie_url` at the start of the phase.
     pub cookies: Vec<CookieEntry>,
+    /// Data-driven iteration, for `rok.runner.iterationIndex` and `iterationData`.
+    pub iteration: Option<IterationInfo>,
 }
 
 /// Accumulates all side-effects produced by ops during execution.

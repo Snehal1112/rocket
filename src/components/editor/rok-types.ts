@@ -707,10 +707,25 @@ declare const rok: {
     skipRequest(): void;
     /** Stop the whole run. Before the request it also skips sending it. Only meaningful during a Collection Runner run. */
     stopExecution(): void;
-    /** Zero-based index of the current iteration. Always 0 until data-driven runs exist. */
+    /** Zero-based index of the current iteration. It is 0 outside a data-driven run. */
     readonly iterationIndex: number;
-    /** Total number of iterations. Always 1 until data-driven runs exist. */
+    /** Total number of iterations (the data row count). It is 1 outside a data-driven run. */
     readonly totalIterations: number;
+    /**
+     * The current data row of a data-driven run. Every value is a string. It is read-only
+     * and empty outside a data-driven run. A nested rok.runRequest sees its caller's row.
+     */
+    readonly iterationData: {
+      /** Returns the value for a column, or undefined when the row has no such column. With no key it returns a copy of the whole row. */
+      get(key: string): string | undefined;
+      get(): Record<string, string>;
+      /** True when the row has the column, even if its value is an empty string. */
+      has(key: string): boolean;
+      /** Returns a plain copy of the row. Changing the copy does not change the row. */
+      toObject(): Record<string, string>;
+      /** Returns the row as a JSON string. */
+      stringify(): string;
+    };
   };
 };
 /** Collection directory. Developer mode only. */

@@ -121,6 +121,8 @@ pub struct ScriptContext {
     pub cookie_url: Option<String>,
     /// Cookies matching `cookie_url` when the phase starts, for `rok.cookies` reads.
     pub cookies: Vec<CookieEntry>,
+    /// The data-driven iteration this script runs in. `None` outside a data-driven run.
+    pub iteration: Option<IterationInfo>,
 }
 
 impl ScriptContext {
@@ -153,6 +155,7 @@ impl ScriptContext {
             assertion_results: Vec::new(),
             cookie_url: None,
             cookies: Vec::new(),
+            iteration: None,
         }
     }
 
@@ -186,6 +189,7 @@ impl ScriptContext {
             assertion_results: Vec::new(),
             cookie_url: None,
             cookies: Vec::new(),
+            iteration: None,
         }
     }
 
@@ -219,6 +223,7 @@ impl ScriptContext {
             assertion_results: Vec::new(),
             cookie_url: None,
             cookies: Vec::new(),
+            iteration: None,
         }
     }
 
@@ -240,6 +245,12 @@ impl ScriptContext {
     /// Sets the collection name returned by `rok.getCollectionName()`.
     pub fn with_collection_name(mut self, name: Option<String>) -> Self {
         self.collection_name = name;
+        self
+    }
+
+    /// Sets the iteration that `rok.runner.iterationIndex` and `iterationData` read.
+    pub fn with_iteration(mut self, iteration: Option<IterationInfo>) -> Self {
+        self.iteration = iteration;
         self
     }
 

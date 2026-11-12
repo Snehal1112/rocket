@@ -220,6 +220,26 @@
     return _cookieWrite(method, { op: 'upsert', url: _cookieScope(method), cookie });
   };
 
+  // The data row is parsed once per run. A Map keeps keys such as "__proto__" safe.
+  // Every read hands out a fresh copy, so a script cannot change the row.
+  let _iterRow = null;
+  const _iterEntries = () => {
+    if (_iterRow === null) _iterRow = new Map(Object.entries(JSON.parse(__ops.op_rok_iteration_data())));
+    return _iterRow;
+  };
+  const _iterCopy = () => {
+    const out = {};
+    for (const [k, v] of _iterEntries()) Object.defineProperty(out, k, { value: v, enumerable: true, writable: true, configurable: true });
+    return out;
+  };
+  const _iterationData = Object.freeze({
+    // With no key, `get` returns a copy of the whole row, as Bruno does.
+    get: (key) => (key === undefined ? _iterCopy() : _iterEntries().get(String(key))),
+    has: (key) => _iterEntries().has(String(key)),
+    toObject: () => _iterCopy(),
+    stringify: () => JSON.stringify(_iterCopy()),
+  });
+
   const _cookies = {
     get: (name) => { const c = _ck.find((x) => x.key === _cookieName('get', name)); return c ? c.value : undefined; },
     // The value is compared with strict equality, as strings.
@@ -347,8 +367,9 @@
       setNextRequest: (name)  => __ops.op_rok_set_next_request(name == null ? "" : String(name)),
       skipRequest:    ()      => __ops.op_rok_skip_request(),
       stopExecution:   ()      => __ops.op_rok_stop_execution(),
-      iterationIndex:  0,
-      totalIterations: 1,
+      get iterationIndex()  { return __ops.op_rok_iteration_index(); },
+      get totalIterations() { return __ops.op_rok_iteration_total(); },
+      get iterationData()   { return _iterationData; },
     },
   };
 

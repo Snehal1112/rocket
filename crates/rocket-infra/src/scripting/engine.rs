@@ -13,7 +13,9 @@ use tokio::sync::{mpsc, oneshot};
 use crate::scripting::budget::{check, BudgetClock, ScriptLimits, Verdict};
 use crate::scripting::host_bridge::{serve_host_call, HostCall, HostChannel};
 use crate::scripting::local_modules::build_roots;
-use crate::scripting::ops::{console, fs, host, modules, process, redact, req, res, rok};
+use crate::scripting::ops::{
+    console, fs, host, iteration, modules, process, redact, req, res, rok,
+};
 use crate::scripting::state::{ScriptInputState, ScriptOutputState};
 
 /// JS scripting engine backed by `deno_core` (V8).
@@ -293,6 +295,9 @@ extension!(
         req::op_req_get_body,
         req::op_req_get_timeout,
         req::op_req_get_execution_mode,
+        iteration::op_rok_iteration_index,
+        iteration::op_rok_iteration_total,
+        iteration::op_rok_iteration_data,
         req::op_req_get_execution_platform,
         req::op_req_get_name,
         req::op_req_get_tags,
@@ -523,6 +528,7 @@ async fn run_script_async(
             assertion_results: ctx.assertion_results,
             cookie_url: ctx.cookie_url.unwrap_or_default(),
             cookies: ctx.cookies,
+            iteration: ctx.iteration,
         });
         state.put(ScriptOutputState::default());
         state.put(HostChannel(calls));
@@ -593,6 +599,7 @@ mod tests {
             assertion_results: vec![],
             cookie_url: None,
             cookies: vec![],
+            iteration: None,
         }
     }
 
@@ -689,14 +696,93 @@ mod tests {
         assert!(!result.skip_request);
     }
 
+    fn iteration_ctx(
+        code: &str,
+        index: usize,
+        total: usize,
+        row: &[(&str, &str)],
+    ) -> ScriptContext {
+        let data = row
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        minimal_ctx(code).with_iteration(Some(rocket_scripting::IterationInfo {
+            index,
+            total,
+            data,
+        }))
+    }
+
+    async fn run_var(ctx: ScriptContext, name: &str) -> String {
+        let result = DenoScriptEngine::new().execute(ctx).await.expect("execute");
+        result
+            .runtime_vars
+            .get(name)
+            .expect("var present")
+            .as_str()
+            .expect("string var")
+            .to_string()
+    }
+
     #[tokio::test]
-    async fn rok_runner_iteration_values_default_to_a_single_iteration() {
-        let engine = DenoScriptEngine::new();
-        let ctx = minimal_ctx(
-            "rok.setVar('i', rok.runner.iterationIndex + ',' + rok.runner.totalIterations)",
-        );
-        let result = engine.execute(ctx).await.expect("execute");
-        assert_eq!(result.runtime_vars.get("i").expect("i present"), "0,1");
+    async fn iteration_values_default_to_a_single_empty_iteration() {
+        let code = "const d = rok.runner.iterationData; \
+            rok.setVar('i', [rok.runner.iterationIndex, rok.runner.totalIterations, \
+            String(d.get('a')), d.has('a'), JSON.stringify(d.toObject()), JSON.stringify(d.get()), d.stringify()].join('|'))";
+        let got = run_var(minimal_ctx(code), "i").await;
+        assert_eq!(got, "0|1|undefined|false|{}|{}|{}");
+    }
+
+    #[tokio::test]
+    async fn iteration_index_total_and_row_come_from_the_context() {
+        let code = "rok.setVar('i', rok.runner.iterationIndex + '/' + rok.runner.totalIterations \
+            + '/' + rok.runner.iterationData.get('name'))";
+        let ctx = iteration_ctx(code, 2, 5, &[("name", "carol")]);
+        assert_eq!(run_var(ctx, "i").await, "2/5/carol");
+    }
+
+    #[tokio::test]
+    async fn iteration_data_get_returns_strings_and_undefined_for_missing_keys() {
+        let code = "const d = rok.runner.iterationData; \
+            rok.setVar('i', typeof d.get('a') + ',' + typeof d.get('nope'))";
+        let ctx = iteration_ctx(code, 0, 1, &[("a", "x")]);
+        assert_eq!(run_var(ctx, "i").await, "string,undefined");
+    }
+
+    #[tokio::test]
+    async fn iteration_data_has_tells_empty_string_from_missing() {
+        let code = "const d = rok.runner.iterationData; \
+            rok.setVar('i', d.has('empty') + ',' + d.has('missing') + ',' + JSON.stringify(d.get('empty')))";
+        let ctx = iteration_ctx(code, 0, 1, &[("empty", "")]);
+        assert_eq!(run_var(ctx, "i").await, "true,false,\"\"");
+    }
+
+    #[tokio::test]
+    async fn iteration_data_to_object_returns_a_copy_that_cannot_change_the_row() {
+        let code = "const d = rok.runner.iterationData; \
+            const o = d.toObject(); o.a = 'changed'; o.extra = '1'; \
+            const all = d.get(); all.a = 'changed too'; \
+            rok.setVar('i', d.get('a') + ',' + d.has('extra') + ',' + d.toObject().a)";
+        let ctx = iteration_ctx(code, 0, 1, &[("a", "orig")]);
+        assert_eq!(run_var(ctx, "i").await, "orig,false,orig");
+    }
+
+    #[tokio::test]
+    async fn iteration_data_cannot_be_assigned() {
+        let code = "'use strict'; const d = rok.runner.iterationData; let threw = 0; \
+            for (const f of [() => { d.get = () => 'x'; }, () => { d.added = 1; }, \
+              () => { rok.runner.iterationData = {}; }]) { try { f(); } catch (_e) { threw++; } } \
+            rok.setVar('i', d.get('a') + ',' + (d.added === undefined) + ',' + (rok.runner.iterationData === d))";
+        let ctx = iteration_ctx(code, 0, 1, &[("a", "orig")]);
+        assert_eq!(run_var(ctx, "i").await, "orig,true,true");
+    }
+
+    #[tokio::test]
+    async fn a_numeric_looking_value_stays_a_string() {
+        let code = "const v = rok.runner.iterationData.get('n'); \
+            rok.setVar('i', typeof v + ':' + v + ':' + JSON.stringify(rok.runner.iterationData.toObject()))";
+        let ctx = iteration_ctx(code, 0, 1, &[("n", "007")]);
+        assert_eq!(run_var(ctx, "i").await, "string:007:{\"n\":\"007\"}");
     }
 
     #[tokio::test]
