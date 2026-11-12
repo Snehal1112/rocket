@@ -68,12 +68,13 @@
 ### Task 2: Collection settings field
 
 **Files:**
-- Modify: `src/lib/tauri-api.ts` (`CollectionSettings.runnerDataFile?: string`), `src/components/collections/CollectionOverviewTab.tsx` (field next to the script-flow control)
-- Test: the existing test file for `CollectionOverviewTab` (or `src/components/collections/__tests__/`)
+- Modify: `src/lib/tauri-api.ts` (`CollectionSettings.runnerDataFile?: string`), `src/lib/collection-settings-save.ts` (`buildSettingsForSave` must carry `runnerDataFile: current.runnerDataFile`, or every Overview-tab save deletes the saved default), `src/components/collections/CollectionOverviewTab.tsx` (field next to the script-flow control)
+- Test: the existing test file for `CollectionOverviewTab` (or `src/components/collections/__tests__/`), and the test of `collection-settings-save.ts` (`src/lib/__tests__/collection-settings-save.test.ts` if present, else create it)
 
 **Interfaces:**
 - Consumes (plan 01 task 2): `CollectionSettings.runner_data_file` over IPC as `runnerDataFile`.
 
+- [ ] **Step 1a: Write the failing test** `buildSettingsForSave_carries_runnerDataFile_from_current` (a current settings object with `runnerDataFile: 'data/users.csv'` still has it after `buildSettingsForSave`), and fix `buildSettingsForSave`. The backend `save_collection_settings` replaces all settings, so a field the helper does not carry is deleted from `opencollection.yml` on the first Overview save (found by the plan 01 task 2 review).
 - [ ] **Step 1: Write failing tests**: `shows_the_saved_runner_data_file`, `editing_the_field_saves_a_trimmed_relative_path`, `clearing_the_field_saves_no_path`, `the_field_never_blocks_saving_when_the_path_looks_invalid` (shows a hint for a leading `/` or a `..` segment, the save still goes through), `the_hint_explains_the_path_is_relative_to_the_collection`.
 - [ ] **Step 2: Implement** a shadcn `Input` labelled "Runner data file" with a short hint, wired to the existing settings save path the script-flow control uses.
 - [ ] **Step 3: Run** `bun run test CollectionOverviewTab`, `bun run tsc --noEmit`, `bun run check`. All pass.
