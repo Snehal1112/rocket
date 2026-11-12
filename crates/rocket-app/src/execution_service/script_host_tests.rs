@@ -3011,8 +3011,8 @@ async fn run_request_e2e_the_nested_run_inherits_the_callers_iteration() {
 
 use rocket_collection::{GrpcMessage, GrpcMetadataEntry, GrpcRequest};
 use rocket_grpc::{
-    GrpcCall, GrpcExecutor, GrpcStatus, GrpcStreamHandle, GrpcUnaryResponse, ProtoFileReader,
-    ProtoLoader, ProtoRegistry,
+    GrpcCall, GrpcExecutor, GrpcStatus, GrpcStreamEvent, GrpcStreamHandle, GrpcUnaryResponse,
+    ProtoFileReader, ProtoLoader, ProtoRegistry,
 };
 use rocket_scripting::{HostError, HostGrpcRequest, HostGrpcResponse, HostGrpcTarget, ScriptHost};
 use rocket_shared::types::Auth;
@@ -3022,7 +3022,11 @@ use crate::GrpcService;
 
 const GREETER_PROTO: &str = r#"syntax = "proto3";
 package demo.v1;
-service Greeter { rpc SayHello (Req) returns (Rep); }
+service Greeter {
+  rpc SayHello (Req) returns (Rep);
+  rpc List (Req) returns (stream Rep);
+  rpc Collect (stream Req) returns (Rep);
+}
 message Req { string name = 1; }
 message Rep { string message = 1; }
 "#;
@@ -3064,6 +3068,8 @@ impl ProtoLoader for GreeterLoader {
 #[derive(Default)]
 struct KeepingGrpc {
     calls: Mutex<Vec<(GrpcCall, String)>>,
+    /// The messages every stream call received from the script, in order.
+    streamed: Arc<Mutex<Vec<String>>>,
 }
 
 #[async_trait]
@@ -3091,11 +3097,47 @@ impl GrpcExecutor for KeepingGrpc {
         &self,
         _call: &GrpcCall,
         _registry: &ProtoRegistry,
-        _initial_json: Option<String>,
+        initial_json: Option<String>,
     ) -> DomainResult<GrpcStreamHandle> {
-        Err(rocket_shared::error::DomainError::Internal(
-            "no streams here".into(),
-        ))
+        let (events_tx, events) = tokio::sync::mpsc::channel(16);
+        let (outbound, mut inbound) = {
+            let (tx, rx) = tokio::sync::mpsc::channel::<String>(16);
+            (Some(tx), Some(rx))
+        };
+        // A server stream has one request and no sender, so its reply list is fixed.
+        let client_stream = initial_json.is_none();
+        let log = Arc::clone(&self.streamed);
+        if let Some(first) = initial_json {
+            log.lock().expect("lock").push(first);
+        }
+        let task = tokio::spawn(async move {
+            let mut count = 0;
+            if client_stream {
+                while let Some(message) = inbound.as_mut().expect("receiver").recv().await {
+                    log.lock().expect("lock").push(message);
+                    count += 1;
+                }
+            }
+            let replies = if client_stream {
+                vec![format!("{{\"message\":\"got {count}\"}}")]
+            } else {
+                vec!["{\"message\":\"a\"}".into(), "{\"message\":\"b\"}".into()]
+            };
+            for reply in replies {
+                let _ = events_tx.send(GrpcStreamEvent::Message(reply)).await;
+            }
+            let _ = events_tx
+                .send(GrpcStreamEvent::Finished {
+                    status: GrpcStatus::ok(),
+                    trailers: vec![],
+                })
+                .await;
+        });
+        Ok(GrpcStreamHandle {
+            outbound: client_stream.then_some(outbound).flatten(),
+            events,
+            abort: task.abort_handle(),
+        })
     }
 }
 
@@ -3535,4 +3577,127 @@ async fn grpc_ad_hoc_inherits_no_collection_auth_or_headers_but_saved_does() {
         .collect();
     assert!(saved.contains(&"authorization"), "{saved:?}");
     assert!(saved.contains(&"x-default"), "{saved:?}");
+}
+
+// ── rok.grpc end to end, with the real script engine ─────────────────────────
+
+/// Runs `script` as the pre-request script, with the gRPC request `greet` saved. The
+/// collection is in Developer mode when `developer` is set.
+async fn grpc_e2e(
+    script: &str,
+    developer: bool,
+) -> (ExecuteRequestOutput, Arc<KeepingGrpc>, Arc<KeepingExecutor>) {
+    let mut collection = grpc_collection(greet_request());
+    if developer {
+        collection.settings.sandbox_mode = rocket_collection::settings::SandboxMode::Developer;
+    }
+    let repo = InMemoryCollectionRepo::new(collection);
+    let (svc, http) = run_service_over(Arc::clone(&repo), dev());
+    let fake = Arc::new(KeepingGrpc::default());
+    let grpc = GrpcService::new(
+        Arc::new(SharedGrpc(Arc::clone(&fake))),
+        Arc::new(GreeterLoader),
+        repo,
+        Arc::new(Mutex::new(std::path::PathBuf::from("/ws"))),
+        Arc::new(NullEventPublisher),
+    );
+    let svc = svc
+        .with_grpc_service(Arc::new(grpc))
+        .with_trust_store(crate::test_doubles::InMemoryTrustStore::allow_all());
+    let mut req = grpc_input();
+    req.pre_request_script = Some(script.into());
+    let out = svc.execute(req).await.expect("execute");
+    (out, fake, http)
+}
+
+#[tokio::test]
+async fn grpc_e2e_run_returns_status_and_message_to_a_real_script() {
+    let (out, fake, _http) = grpc_e2e(
+        "const r = await rok.grpc.run('greet', { messages: [{ name: 'script' }] }); \
+         console.log('res', r.status.code, r.status.name, r.message.message, r.messages.length, \
+         r.truncated);",
+        true,
+    )
+    .await;
+    assert!(out.script_error.is_none(), "{:?}", out.script_error);
+    assert!(
+        console(&out).contains(&"res 0 OK hi 1 false".to_string()),
+        "{:?}",
+        console(&out)
+    );
+    let calls = fake.calls.lock().expect("lock");
+    assert_eq!(calls.len(), 1);
+    assert!(calls[0].1.contains("script"), "{}", calls[0].1);
+}
+
+#[tokio::test]
+async fn grpc_e2e_call_awaits_in_a_pre_request_script_and_sets_a_header_from_the_reply() {
+    let (out, fake, http) = grpc_e2e(
+        "const r = await rok.grpc.call({ url: 'grpc://api.test:50051', \
+         service: 'demo.v1.Greeter', method: 'SayHello', protoFile: 'greeter.proto', \
+         message: { name: 'adhoc' } }); req.setHeader('x-greeting', r.message.message);",
+        true,
+    )
+    .await;
+    assert!(out.script_error.is_none(), "{:?}", out.script_error);
+    assert_eq!(fake.calls.lock().expect("lock").len(), 1);
+    assert_eq!(sent_header(&http, 0, "x-greeting").as_deref(), Some("hi"));
+}
+
+#[tokio::test]
+async fn grpc_e2e_safe_mode_script_is_refused() {
+    let (out, fake, _http) = grpc_e2e(
+        "try { await rok.grpc.run('greet'); console.log('ran'); } \
+         catch (e) { console.log('refused', String(e.message || e)); }",
+        false,
+    )
+    .await;
+    let lines = console(&out);
+    assert!(
+        lines
+            .iter()
+            .any(|l| l.starts_with("refused") && l.contains("Developer mode")),
+        "{lines:?}"
+    );
+    assert!(!lines.contains(&"ran".to_string()), "{lines:?}");
+    assert!(fake.calls.lock().expect("lock").is_empty());
+}
+
+#[tokio::test]
+async fn grpc_e2e_server_stream_returns_all_messages() {
+    let (out, fake, _http) = grpc_e2e(
+        "const r = await rok.grpc.call({ url: 'grpc://api.test:50051', \
+         service: 'demo.v1.Greeter', method: 'List', protoFile: 'greeter.proto', \
+         message: { name: 'x' } }); \
+         console.log('n', r.messages.length, r.messages.map((m) => m.message).join(','), \
+         r.status.name);",
+        true,
+    )
+    .await;
+    assert!(out.script_error.is_none(), "{:?}", out.script_error);
+    assert!(
+        console(&out).contains(&"n 2 a,b OK".to_string()),
+        "{:?}",
+        console(&out)
+    );
+    assert_eq!(fake.streamed.lock().expect("lock").len(), 1);
+}
+
+#[tokio::test]
+async fn grpc_e2e_client_stream_sends_the_messages_array() {
+    let (out, fake, _http) = grpc_e2e(
+        "const r = await rok.grpc.call({ url: 'grpc://api.test:50051', \
+         service: 'demo.v1.Greeter', method: 'Collect', protoFile: 'greeter.proto', \
+         messages: [{ name: 'a' }, { name: 'b' }, { name: 'c' }] }); \
+         console.log('reply', r.message.message);",
+        true,
+    )
+    .await;
+    assert!(out.script_error.is_none(), "{:?}", out.script_error);
+    assert!(
+        console(&out).contains(&"reply got 3".to_string()),
+        "{:?}",
+        console(&out)
+    );
+    assert_eq!(fake.streamed.lock().expect("lock").len(), 3);
 }

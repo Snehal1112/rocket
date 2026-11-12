@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use rocket_app::{GrpcExecuteInput, GrpcService, RequestExecutionService};
@@ -71,7 +72,7 @@ async fn resolve_input(
 #[tauri::command]
 pub async fn grpc_unary_call(
     input: GrpcExecuteDto,
-    svc: State<'_, GrpcService>,
+    svc: State<'_, Arc<GrpcService>>,
     exec: State<'_, RequestExecutionService>,
 ) -> Result<GrpcUnaryResponse, DomainError> {
     let input = resolve_input(input, &exec).await?;
@@ -84,7 +85,7 @@ pub async fn grpc_unary_call(
 pub async fn grpc_start_session(
     input: GrpcExecuteDto,
     session_id: String,
-    svc: State<'_, GrpcService>,
+    svc: State<'_, Arc<GrpcService>>,
     exec: State<'_, RequestExecutionService>,
 ) -> Result<String, DomainError> {
     // The id is reserved before resolving, so a cancel during a slow vault fetch works.
@@ -96,7 +97,7 @@ pub async fn grpc_start_session(
 pub async fn grpc_send_message(
     session_id: String,
     message: String,
-    svc: State<'_, GrpcService>,
+    svc: State<'_, Arc<GrpcService>>,
 ) -> Result<(), DomainError> {
     svc.send_message(&session_id, &message).await
 }
@@ -104,7 +105,7 @@ pub async fn grpc_send_message(
 #[tauri::command]
 pub fn grpc_end_requests(
     session_id: String,
-    svc: State<'_, GrpcService>,
+    svc: State<'_, Arc<GrpcService>>,
 ) -> Result<(), DomainError> {
     svc.end_requests(&session_id)
 }
@@ -112,7 +113,7 @@ pub fn grpc_end_requests(
 #[tauri::command]
 pub fn grpc_cancel_session(
     session_id: String,
-    svc: State<'_, GrpcService>,
+    svc: State<'_, Arc<GrpcService>>,
 ) -> Result<(), DomainError> {
     svc.cancel(&session_id)
 }
@@ -123,7 +124,7 @@ pub fn grpc_cancel_session(
 pub async fn grpc_list_services(
     input: GrpcExecuteDto,
     refresh: bool,
-    svc: State<'_, GrpcService>,
+    svc: State<'_, Arc<GrpcService>>,
     exec: State<'_, RequestExecutionService>,
 ) -> Result<Vec<GrpcServiceInfo>, DomainError> {
     let input = resolve_input(input, &exec).await?;

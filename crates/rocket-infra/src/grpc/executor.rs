@@ -680,4 +680,101 @@ mod tests {
             other => panic!("expected Finished, got {other:?}"),
         }
     }
+
+    /// A script host that runs `rok.grpc` calls through the real transport. It applies no
+    /// request guard, so the local test server is reachable.
+    struct TransportHost {
+        server_url: String,
+        registry: ProtoRegistry,
+    }
+
+    #[async_trait]
+    impl rocket_scripting::ScriptHost for TransportHost {
+        async fn grpc(
+            &self,
+            request: rocket_scripting::HostGrpcRequest,
+        ) -> Result<rocket_scripting::HostGrpcResponse, rocket_scripting::HostError> {
+            let rocket_scripting::HostGrpcTarget::AdHoc {
+                service, method, ..
+            } = &request.target
+            else {
+                return Err(rocket_scripting::HostError::Failed("ad hoc only".into()));
+            };
+            let call = GrpcCall {
+                url: self.server_url.clone(),
+                full_method: format!("{service}/{method}"),
+                metadata: vec![],
+                timeout: None,
+                tls_ca_pem: None,
+            };
+            let message = request.messages.first().cloned().unwrap_or_default();
+            let response = TonicGrpcExecutor
+                .unary(&call, &self.registry, &message)
+                .await
+                .map_err(|e| rocket_scripting::HostError::Failed(e.to_string()))?;
+            Ok(rocket_scripting::HostGrpcResponse {
+                status: rocket_scripting::HostGrpcStatus {
+                    code: response.status.code,
+                    name: response.status.code_name,
+                    message: response.status.message,
+                },
+                messages: response.message_json.into_iter().collect(),
+                headers: vec![],
+                trailers: vec![],
+                truncated: false,
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn script_level_unary_call_over_the_real_transport() {
+        use rocket_scripting::{ScriptContext, ScriptEngine, ScriptPhase};
+        let server = start(None, Reflection::None).await;
+        let host = TransportHost {
+            server_url: server.url(),
+            registry: server.registry.clone(),
+        };
+        let ctx = ScriptContext {
+            code: "const r = await rok.grpc.call({ url: 'grpc://unused:1', \
+                   service: 'demo.greeter.v1.Greeter', method: 'SayHello', \
+                   protoFile: 'greeter.proto', message: { name: 'ada' } }); \
+                   rok.setVar('greeting', r.message.message); \
+                   rok.setVar('code', r.status.name);"
+                .into(),
+            phase: ScriptPhase::BeforeRequest,
+            variables: rocket_environment::VariableContext::default(),
+            request: rocket_http::HttpRequest::new(
+                rocket_shared::types::HttpMethod::Get,
+                "https://example.com",
+            ),
+            response: None,
+            env_name: None,
+            execution_mode: "standalone".into(),
+            execution_platform: "app".into(),
+            request_name: String::new(),
+            request_tags: vec![],
+            path_params: vec![],
+            sandbox_mode: rocket_scripting::SandboxMode::Developer,
+            file_scope: None,
+            collection_name: None,
+            assertion_results: vec![],
+            cookie_url: None,
+            cookies: vec![],
+            iteration: None,
+        };
+        let result = crate::scripting::DenoScriptEngine::new()
+            .execute_with_host(ctx, &host)
+            .await
+            .expect("execute");
+        assert!(result.error.is_none(), "{:?}", result.error);
+        let var = |key: &str| {
+            result
+                .runtime_vars
+                .get(key)
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        };
+        assert_eq!(var("greeting").as_deref(), Some("hello ada"));
+        assert_eq!(var("code").as_deref(), Some("OK"));
+    }
 }

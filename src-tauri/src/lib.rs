@@ -129,7 +129,7 @@ fn spawn_exit_signal_listener(app_handle: tauri::AppHandle) {
             if let Some(svc) = app_handle.try_state::<rocket_app::GraphQlSubscriptionService>() {
                 svc.end_all().await;
             }
-            if let Some(grpc_svc) = app_handle.try_state::<rocket_app::GrpcService>() {
+            if let Some(grpc_svc) = app_handle.try_state::<Arc<rocket_app::GrpcService>>() {
                 grpc_svc.end_all();
             }
             if let Some(mcp_registry) =
@@ -607,6 +607,19 @@ pub fn run() {
                 Arc::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
             );
 
+            // gRPC calls. The workspace path is shared with the collection repo, so relative
+            // proto paths follow a workspace switch. Shared with the execution service for `rok.grpc`.
+            let grpc_svc = Arc::new(rocket_app::GrpcService::new(
+                Arc::new(rocket_infra::TonicGrpcExecutor),
+                Arc::new(rocket_infra::FsProtoLoader),
+                Arc::new(SharedPathCollectionRepo::new(Arc::clone(
+                    &active_workspace_path,
+                ))),
+                Arc::clone(&active_workspace_path),
+                Arc::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
+            )
+            .with_host_env(Arc::new(rocket_infra::ProcessHostEnv)));
+
             let exec_svc = RequestExecutionService::new_with_audit(
                 Box::new(SharedPathEnvironmentRepo::with_secret_store(
                     Arc::clone(&active_workspace_path),
@@ -639,7 +652,8 @@ pub fn run() {
             .with_collection_env_repo_factory(Box::new(
                 SharedCollectionEnvironmentRepo::new(Arc::clone(&active_workspace_path)),
             ))
-            .with_dot_env_loader(Box::new(rocket_infra::FsDotEnvLoader));
+            .with_dot_env_loader(Box::new(rocket_infra::FsDotEnvLoader))
+            .with_grpc_service(Arc::clone(&grpc_svc));
 
             // OAuth2Service — stand-alone service for token acquisition flows.
             // Its repos follow the active workspace, like the exec service's.
@@ -873,18 +887,6 @@ pub fn run() {
             .with_audit_actor(AuditActor::User)
             .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
-            // gRPC calls. The workspace path is shared with the collection repo, so relative
-            // proto paths follow a workspace switch.
-            let grpc_svc = rocket_app::GrpcService::new(
-                Arc::new(rocket_infra::TonicGrpcExecutor),
-                Arc::new(rocket_infra::FsProtoLoader),
-                Arc::new(SharedPathCollectionRepo::new(Arc::clone(
-                    &active_workspace_path,
-                ))),
-                Arc::clone(&active_workspace_path),
-                Arc::new(tauri_event_bus::TauriEventBus::new(app_handle.clone())),
-            )
-            .with_host_env(Arc::new(rocket_infra::ProcessHostEnv));
 
             // Tracks every live per-session MCP HTTP server so it can be
             // swept on app exit and on individual session end. Shared with
@@ -1547,7 +1549,7 @@ pub(crate) fn shutdown_services(app_handle: &tauri::AppHandle) {
     if let Some(svc) = app_handle.try_state::<rocket_app::GraphQlSubscriptionService>() {
         tauri::async_runtime::block_on(svc.end_all());
     }
-    if let Some(grpc_svc) = app_handle.try_state::<rocket_app::GrpcService>() {
+    if let Some(grpc_svc) = app_handle.try_state::<Arc<rocket_app::GrpcService>>() {
         // Best-effort, like the ACP cleanup: the process is about to end.
         grpc_svc.end_all();
     }
