@@ -330,6 +330,7 @@ pub(crate) mod test_support {
             flow_vars: std::collections::HashMap::new(),
             skip_folder_scripts: false,
             run_source: rocket_shared::RunSource::Manual,
+            iteration: None,
             backend_process_env: false,
             extra_mask_values: Default::default(),
             process_env: Default::default(),

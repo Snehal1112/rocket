@@ -81,6 +81,7 @@ fn service(base: &std::path::Path) -> RequestExecutionService {
 fn input(pre_request_script: Option<&str>) -> ExecuteRequestInput {
     ExecuteRequestInput {
         run_source: rocket_shared::RunSource::Manual,
+        iteration: None,
         backend_process_env: false,
         extra_mask_values: Default::default(),
         process_env: Default::default(),

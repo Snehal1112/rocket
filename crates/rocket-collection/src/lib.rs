@@ -10,6 +10,7 @@ pub mod folder_settings;
 pub mod graphql_document;
 pub mod graphql_request;
 pub mod grpc_request;
+pub mod iteration_data;
 pub mod names;
 pub mod openapi_backup;
 pub mod openapi_baseline;
@@ -46,6 +47,10 @@ pub use folder_settings::{
 };
 pub use graphql_request::{GraphQlBody, GraphQlBodyVariant, GraphQlRequest};
 pub use grpc_request::{GrpcMessage, GrpcMetadataEntry, GrpcMethodType, GrpcRequest, GrpcScript};
+pub use iteration_data::{
+    format_for_path, parse_iteration_data, validate_data_file_path, DataFormat, IterationData,
+    IterationRow, MAX_DATA_FILE_BYTES, MAX_DATA_ROWS,
+};
 pub use names::CollectionName;
 pub use openapi_backup::{
     BackupEntry, OpenApiBackupRepository, OpenApiBackups, BACKUP_FILE_VERSION,

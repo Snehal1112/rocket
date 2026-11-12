@@ -9,7 +9,7 @@ pub mod result;
 pub mod script_cookie;
 
 pub use assertion_evaluator::{assertion_outcomes, evaluate_assertions};
-pub use context::{ExecutionMode, SandboxMode, ScriptContext, ScriptFileScope};
+pub use context::{ExecutionMode, IterationInfo, SandboxMode, ScriptContext, ScriptFileScope};
 pub use engine::ScriptEngine;
 pub use host::{
     HostCookieOp, HostCookieResult, HostError, HostRequest, HostResponse, HostRunOutcome,

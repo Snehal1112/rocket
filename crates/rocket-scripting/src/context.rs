@@ -42,6 +42,17 @@ pub enum SandboxMode {
     Developer,
 }
 
+/// The position of a send inside a data-driven runner iteration.
+///
+/// `data` is the current row: column name to text value.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IterationInfo {
+    pub index: usize,
+    pub total: usize,
+    pub data: std::collections::BTreeMap<String, String>,
+}
+
 /// Where a script may load local `.js` files from.
 ///
 /// Plain data only. `rocket-infra` does the file reading and the root checks.

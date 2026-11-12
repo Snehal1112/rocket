@@ -72,6 +72,11 @@ pub(crate) struct ExecutionScriptHost<'a> {
     pub(crate) pending: std::sync::Mutex<rocket_scripting::PendingWrites>,
 }
 
+/// A nested run belongs to the same data row as its caller.
+pub(crate) fn inherit_iteration(nested: &mut ExecuteRequestInput, caller: &ExecuteRequestInput) {
+    nested.iteration = caller.iteration.clone();
+}
+
 /// Turns an executor response into what a script sees.
 pub(crate) fn host_response(response: &HttpResponse) -> HostResponse {
     HostResponse {
@@ -182,7 +187,7 @@ impl ScriptHost for ExecutionScriptHost<'_> {
         if let Some(message) = &item.prepare_error {
             return Err(HostError::Failed(format!("rok.runRequest: {message}")));
         }
-        let nested = build_step_input(
+        let mut nested = build_step_input(
             &item,
             collection,
             self.input.environment_name.as_deref(),
@@ -192,6 +197,7 @@ impl ScriptHost for ExecutionScriptHost<'_> {
             // agent-driven run stays tagged as one.
             self.input.run_source,
         );
+        inherit_iteration(&mut nested, &self.input);
         // A nested request that uses an alias the vault could not resolve is refused.
         for unresolved in self.unresolved_aliases.iter() {
             if self

@@ -2979,3 +2979,22 @@ async fn a_denied_nested_run_request_warns_once_in_its_caller() {
     assert_eq!(lines, 1, "{:?}", console(&out));
     assert!(out.vault_withheld);
 }
+
+#[test]
+fn run_request_e2e_the_nested_run_inherits_the_callers_iteration() {
+    let collection = main_and_login("", "", "");
+    let mut caller = send_input(&collection, "main.yml");
+    let mut nested = send_input(&collection, "auth/login.yml");
+    assert_eq!(nested.iteration, None);
+    let data = [("user".to_string(), "ann".to_string())]
+        .into_iter()
+        .collect();
+    let info = rocket_scripting::IterationInfo {
+        index: 1,
+        total: 3,
+        data,
+    };
+    caller.iteration = Some(info.clone());
+    super::script_host::inherit_iteration(&mut nested, &caller);
+    assert_eq!(nested.iteration, Some(info));
+}

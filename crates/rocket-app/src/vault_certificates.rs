@@ -787,6 +787,7 @@ mod wiring_tests {
             flow_vars: HashMap::new(),
             skip_folder_scripts: false,
             run_source: rocket_shared::RunSource::Manual,
+            iteration: None,
             backend_process_env: false,
             extra_mask_values: Default::default(),
             process_env: Default::default(),

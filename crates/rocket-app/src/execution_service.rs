@@ -146,6 +146,9 @@ pub struct ExecuteRequestInput {
     /// paths. Every history entry this run produces carries this tag.
     #[serde(default)]
     pub run_source: rocket_shared::RunSource,
+    /// The data-driven iteration this send belongs to. A nested `rok.runRequest` inherits it.
+    #[serde(default)]
+    pub iteration: Option<rocket_scripting::IterationInfo>,
     /// When true, the send resolves `{{process.env.NAME}}` itself, behind the trust gate.
     /// Only inputs the backend builds set it (Flow, the runner, `rok.runRequest`, the
     /// assistant). The frontend resolves the host environment before it sends, so an input
@@ -4944,6 +4947,7 @@ mod tests {
             actions: vec![],
             request_guard_policy: rocket_workspace::RequestGuardPolicy::default(),
             run_source: rocket_shared::RunSource::Manual,
+            iteration: None,
             backend_process_env: false,
             extra_mask_values: Default::default(),
             process_env: Default::default(),
