@@ -6,8 +6,8 @@ mod executor;
 mod proto_reader;
 mod reflection;
 
-#[cfg(test)]
-mod test_server;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_server;
 
 pub use executor::TonicGrpcExecutor;
 pub use proto_reader::{FsProtoFileReader, FsProtoLoader};

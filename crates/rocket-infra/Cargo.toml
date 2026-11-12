@@ -4,8 +4,10 @@ version.workspace = true
 edition.workspace = true
 
 [features]
-# Exposes the fault hooks of the file transaction to the tests of other crates.
-test-support = []
+# Exposes the fault hooks of the file transaction to the tests of other crates. It also builds the
+# test gRPC server (`grpc::test_server`) and the `test_grpc_server` binary, which need the tonic
+# server side.
+test-support = ["tonic/server", "tonic/router", "tonic-reflection/server", "tokio-stream/net"]
 
 [dependencies]
 # WebSocket client. `native-tls` matches reqwest's TLS backend, so HTTP and WebSocket trust the
@@ -90,6 +92,14 @@ tokio-rustls = { version = "0.26", default-features = false, features = ["ring"]
 [[bin]]
 name = "test_acp_agent"
 path = "src/bin/test_acp_agent.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "test_grpc_server"
+path = "src/bin/test_grpc_server.rs"
+required-features = ["test-support"]
 test = false
 doc = false
 bench = false

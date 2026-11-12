@@ -573,6 +573,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_many_name_streams_1500_replies() {
+        let server = start(None, Reflection::None).await;
+        let mut handle = TonicGrpcExecutor
+            .open_stream(&call(&server, LIST), &server.registry, Some(name("many")))
+            .await
+            .expect("open");
+        let events = tokio::time::timeout(Duration::from_secs(10), collect(&mut handle))
+            .await
+            .expect("stream ends");
+        assert_eq!(messages(&events).len(), 1500);
+        assert!(matches!(
+            events.last(),
+            Some(GrpcStreamEvent::Finished { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn the_hang_name_sends_one_reply_and_stays_open_until_cancelled() {
+        let server = start(None, Reflection::None).await;
+        let mut handle = TonicGrpcExecutor
+            .open_stream(&call(&server, LIST), &server.registry, Some(name("hang")))
+            .await
+            .expect("open");
+        let mut seen = Vec::new();
+        let quiet = tokio::time::timeout(Duration::from_millis(800), async {
+            while let Some(event) = handle.events.recv().await {
+                let done = matches!(event, GrpcStreamEvent::Finished { .. });
+                seen.push(event);
+                if done {
+                    break;
+                }
+            }
+        })
+        .await;
+        assert!(quiet.is_err(), "the stream must stay open: {seen:?}");
+        assert_eq!(messages(&seen), vec!["hang-0"]);
+        assert!(!seen
+            .iter()
+            .any(|e| matches!(e, GrpcStreamEvent::Finished { .. })));
+        handle.abort.abort();
+    }
+
+    #[tokio::test]
     async fn a_server_stream_without_a_request_message_is_rejected() {
         let server = start(None, Reflection::None).await;
         let err = TonicGrpcExecutor

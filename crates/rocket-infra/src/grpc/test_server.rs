@@ -7,6 +7,8 @@
 //! - `slow`: replies after 2 seconds.
 //! - `trace`: replies with the value of the `x-trace` metadata.
 //! - `whoami`: replies with the value of the `authorization` metadata.
+//! - `many` (`ListGreetings`): streams 1500 replies.
+//! - `hang` (`ListGreetings`): sends one reply, then keeps the stream open until the client cancels.
 //! - anything else: `hello <name>`.
 
 use std::convert::Infallible;
@@ -28,42 +30,51 @@ use super::proto_reader::FsProtoLoader;
 
 const SERVICE: &str = "demo.greeter.v1.Greeter";
 
-pub(crate) fn fixture_dir() -> PathBuf {
+pub fn fixture_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-fixtures/grpc")
 }
 
-pub(crate) fn fixture_registry() -> ProtoRegistry {
+pub fn fixture_registry() -> ProtoRegistry {
     FsProtoLoader
         .load(&fixture_dir().join("greeter.proto"), &[])
         .expect("fixture proto compiles")
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Reflection {
+pub enum Reflection {
     None,
     V1,
     V1Alpha,
 }
 
-pub(crate) struct TestServer {
+pub struct TestServer {
     pub addr: SocketAddr,
     pub registry: ProtoRegistry,
     _shutdown: oneshot::Sender<()>,
 }
 
 impl TestServer {
-    pub(crate) fn url(&self) -> String {
+    pub fn url(&self) -> String {
         format!("127.0.0.1:{}", self.addr.port())
     }
 }
 
 /// Starts the server on a free port. `tls` is `(certificate pem, key pem)`.
-pub(crate) async fn start(tls: Option<(String, String)>, reflection: Reflection) -> TestServer {
-    let registry = fixture_registry();
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+pub async fn start(tls: Option<(String, String)>, reflection: Reflection) -> TestServer {
+    start_on(0, tls, reflection)
         .await
-        .expect("bind");
-    let addr = listener.local_addr().expect("addr");
+        .expect("bind a free port")
+}
+
+/// Like `start`, but binds the given port (0 picks a free one).
+pub async fn start_on(
+    port: u16,
+    tls: Option<(String, String)>,
+    reflection: Reflection,
+) -> std::io::Result<TestServer> {
+    let registry = fixture_registry();
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
+    let addr = listener.local_addr()?;
     let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
     let (shutdown, stop) = oneshot::channel::<()>();
 
@@ -103,11 +114,11 @@ pub(crate) async fn start(tls: Option<(String, String)>, reflection: Reflection)
             })
             .await;
     });
-    TestServer {
+    Ok(TestServer {
         addr,
         registry,
         _shutdown: shutdown,
-    }
+    })
 }
 
 #[derive(Clone)]
@@ -235,11 +246,21 @@ where
                             let registry = self.0.clone();
                             Box::pin(async move {
                                 let name = name_of(r.get_ref());
-                                let items: Vec<Result<DynamicMessage, Status>> = (0..3)
+                                let count = if name == "many" { 1500 } else { 3 };
+                                let items: Vec<Result<DynamicMessage, Status>> = (0..count)
                                     .map(|i| Ok(reply(&registry, &format!("{name}-{i}"), i)))
                                     .collect();
-                                let stream: ReplyStream =
-                                    Box::pin(futures_util::stream::iter(items));
+                                let first = futures_util::stream::iter(items);
+                                // `hang` keeps the stream open after its only reply.
+                                let stream: ReplyStream = if name == "hang" {
+                                    let one = reply(&registry, "hang-0", 0);
+                                    Box::pin(
+                                        futures_util::stream::iter(vec![Ok(one)])
+                                            .chain(futures_util::stream::pending()),
+                                    )
+                                } else {
+                                    Box::pin(first)
+                                };
                                 Ok(Response::new(stream))
                             })
                         }
