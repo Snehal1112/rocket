@@ -130,7 +130,9 @@ Everything else resolves with `status`:
 
 With `rok.grpc.run` on a saved request whose URL uses `{{var}}`, a script can set that runtime variable to another host, and the request's auth still goes with the call. This is the same as `rok.runRequest` and HTTP. It needs Developer mode, and the request guard still applies.
 
-`{{var}}` fills from the usual scopes plus the script's runtime variables. The request's own variables win over runtime variables, unlike HTTP sends where runtime variables are highest. Unlike `rok.runRequest`, `rok.grpc` does not see environment writes made earlier in the same script (they are not carried to the call). A later item can change that (R-93).
+`{{var}}` fills in this order, lowest to highest: the stored scopes, the calling script's pending writes, then the script's runtime variables. The request's own variables still win over runtime variables, unlike HTTP sends where runtime variables are highest.
+
+Like `rok.runRequest`, `rok.grpc` sees the environment, global and collection writes the calling script made earlier and has not saved yet (R-93). A deleted key hides the stored value. A scope with nothing selected is skipped. The overlay lives in memory for the call only; the calling script saves its writes at the end as before. A RocketVault secret value in a pending write is held back to runtime. The gRPC call does not show the Console warning for that; the calling script warns when it saves.
 
 ## Where it is unavailable
 
@@ -150,4 +152,4 @@ The call needs the `GrpcService` on the execution service. The main execution se
 
 ## Follow-ups
 
-Roadmap rows R-88 to R-96 in `docs/roadmaps/roadmap.md`: interactive streaming, gRPC items in `rok.runRequest`, reflection control, Flow nodes, Bruno names, pending env writes, the agent tool-call service, and the confinement re-check inside `ProtoLoader::load`.
+Roadmap rows R-88 to R-96 in `docs/roadmaps/roadmap.md`: interactive streaming, gRPC items in `rok.runRequest`, reflection control, Flow nodes, Bruno names, the agent tool-call service, and the confinement re-check inside `ProtoLoader::load`.
