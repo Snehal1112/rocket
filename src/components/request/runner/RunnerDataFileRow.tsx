@@ -1,5 +1,5 @@
 import { open } from '@tauri-apps/plugin-dialog';
-import { FileSpreadsheet, FolderOpen, TriangleAlert, X } from 'lucide-react';
+import { FileSpreadsheet, FileX, FolderOpen, TriangleAlert, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { type IterationData, loadIterationData } from '@/lib/tauri-api';
@@ -24,13 +24,19 @@ function rowsLabel(count: number): string {
 // default saved in the collection settings. One pass runs per row.
 export function RunnerDataFileRow({ tab, collection }: { tab: RunnerTab; collection: string }) {
   const setRunnerDataFile = usePaneStore((s) => s.setRunnerDataFile);
+  const setRunnerSkipDataFile = usePaneStore((s) => s.setRunnerSkipDataFile);
   const [preview, setPreview] = useState<Preview>({ kind: 'loading' });
   const [pickError, setPickError] = useState<string>();
   const dataFilePath = tab.dataFilePath;
+  const skipDataFile = tab.skipDataFile === true;
   const isRunning = tab.runState === 'running';
 
   useEffect(() => {
     let cancelled = false;
+    if (skipDataFile) {
+      setPreview({ kind: 'none' });
+      return;
+    }
     setPreview({ kind: 'loading' });
     loadIterationData(collection, dataFilePath)
       .then((data) => {
@@ -42,7 +48,7 @@ export function RunnerDataFileRow({ tab, collection }: { tab: RunnerTab; collect
     return () => {
       cancelled = true;
     };
-  }, [collection, dataFilePath]);
+  }, [collection, dataFilePath, skipDataFile]);
 
   const pick = async () => {
     setPickError(undefined);
@@ -61,9 +67,16 @@ export function RunnerDataFileRow({ tab, collection }: { tab: RunnerTab; collect
   const error =
     pickError ?? tab.dataFileError ?? (preview.kind === 'error' ? preview.message : undefined);
   const hasOverride = Boolean(dataFilePath);
+  const canSkip =
+    !skipDataFile &&
+    !hasOverride &&
+    preview.kind === 'loaded' &&
+    preview.data.source === 'savedDefault';
 
   let status: string;
-  if (preview.kind === 'loaded') {
+  if (skipDataFile) {
+    status = 'Saved default skipped, the run goes once.';
+  } else if (preview.kind === 'loaded') {
     const { data } = preview;
     const lead =
       data.source === 'savedDefault' ? `Using saved default: ${data.fileName}` : data.fileName;
@@ -97,14 +110,27 @@ export function RunnerDataFileRow({ tab, collection }: { tab: RunnerTab; collect
         </span>
       )}
       <div className='ml-auto flex shrink-0 items-center gap-1'>
-        {hasOverride && (
+        {canSkip && (
+          <Button
+            size='sm'
+            variant='ghost'
+            disabled={isRunning}
+            onClick={() => setRunnerSkipDataFile(tab.id, true)}
+          >
+            <FileX className='h-3.5 w-3.5 mr-1.5' /> Run without data
+          </Button>
+        )}
+        {(hasOverride || skipDataFile) && (
           <Button
             size='sm'
             variant='ghost'
             disabled={isRunning}
             aria-label='Use saved default'
             title='Use saved default'
-            onClick={() => setRunnerDataFile(tab.id, undefined)}
+            onClick={() => {
+              if (skipDataFile) setRunnerSkipDataFile(tab.id, false);
+              else setRunnerDataFile(tab.id, undefined);
+            }}
           >
             <X className='h-3.5 w-3.5' />
           </Button>

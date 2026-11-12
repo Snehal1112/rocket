@@ -36,7 +36,7 @@ Rules of the saved default:
 
 The per-run file is chosen in the Runner tab (or `data_file` in `RunCollectionInput`). It can be any file on disk. It wins over the saved default. Its extension is checked after the file is read.
 
-A saved default that is invalid shows an error in the Runner tab and blocks the run. The X button ("Use saved default") of the Data file row drops a per-run choice. With a saved default set there is no "run without a data file" choice in the Runner tab; clear the setting instead.
+A saved default that is invalid shows an error in the Runner tab and blocks the run. The X button ("Use saved default") of the Data file row drops a per-run choice. With a saved default in use, the row also shows "Run without data". It makes the tab run once with no data file until the user picks a file or presses the X button again ("Use saved default"). The choice lives on the tab only (`skipDataFile`), is not saved, and does not change the collection settings. It is not offered while the saved default is unreadable.
 
 ## Script API
 

@@ -884,6 +884,36 @@ describe('Runner tab actions', () => {
       expect(tab.runState).toBe('idle');
     });
 
+    it('skipDataFile_runs_once_without_loading_the_data_file', async () => {
+      const { executeRunnerEntry } = await import('@/lib/runner-execute');
+      const { loadIterationData } = await import('@/lib/tauri-api');
+      vi.mocked(executeRunnerEntry).mockResolvedValue({ status: 'passed', result: undefined });
+      await setData(rowsData(3));
+
+      const tabId = await openTwoRequestRunnerTab();
+      usePaneStore.getState().setRunnerSkipDataFile(tabId, true);
+      vi.mocked(loadIterationData).mockClear();
+      await usePaneStore.getState().startRun(tabId);
+
+      expect(loadIterationData).not.toHaveBeenCalled();
+      expect(executeRunnerEntry).toHaveBeenCalledTimes(2);
+      expect(runnerTab().iterationData).toBeUndefined();
+      expect(runnerTab().skipDataFile).toBe(true);
+    });
+
+    it('picking_a_file_clears_skipDataFile_and_skipping_clears_the_path', () => {
+      const store = usePaneStore.getState();
+      return openTwoRequestRunnerTab().then((tabId) => {
+        store.setRunnerDataFile(tabId, '/tmp/a.csv');
+        store.setRunnerSkipDataFile(tabId, true);
+        expect(runnerTab().dataFilePath).toBeUndefined();
+        expect(runnerTab().skipDataFile).toBe(true);
+        store.setRunnerDataFile(tabId, '/tmp/b.csv');
+        expect(runnerTab().skipDataFile).toBeUndefined();
+        expect(runnerTab().dataFilePath).toBe('/tmp/b.csv');
+      });
+    });
+
     it('a_closed_pass_keeps_its_identity_while_later_passes_run', async () => {
       const { executeRunnerEntry } = await import('@/lib/runner-execute');
       await setData(rowsData(3));

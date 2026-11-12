@@ -193,6 +193,31 @@ describe('RunnerPane', () => {
       expect(loadIterationData).toHaveBeenCalledWith('demo', '/tmp/rows.csv');
     });
 
+    it('offers Run without data only for a saved default and can undo it', async () => {
+      const user = userEvent.setup();
+      const { loadIterationData } = await import('@/lib/tauri-api');
+      vi.mocked(loadIterationData).mockResolvedValue({
+        columns: ['id'],
+        rows: [{ id: '1' }],
+        source: 'savedDefault',
+        fileName: 'users.csv',
+      });
+      const tab = scopedTab('idle');
+      seed(tab);
+      const { rerender } = render(<RunnerPane tab={tab} groupId='g1' />);
+      await user.click(await screen.findByRole('button', { name: /run without data/i }));
+      const root = usePaneStore.getState().root;
+      const stored = root.type === 'leaf' ? root.tabs[0] : undefined;
+      expect(stored && 'skipDataFile' in stored ? stored.skipDataFile : false).toBe(true);
+      rerender(<RunnerPane tab={{ ...tab, skipDataFile: true }} groupId='g1' />);
+      expect(await screen.findByText(/saved default skipped/i)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /run without data/i })).toBeNull();
+      await user.click(screen.getByRole('button', { name: 'Use saved default' }));
+      const after = usePaneStore.getState().root;
+      const undone = after.type === 'leaf' ? after.tabs[0] : undefined;
+      expect(undone && 'skipDataFile' in undone ? undone.skipDataFile : true).toBeUndefined();
+    });
+
     it('shows a warning when the saved default is invalid', async () => {
       const { loadIterationData } = await import('@/lib/tauri-api');
       vi.mocked(loadIterationData).mockRejectedValue('Row 3 has more cells than the header');

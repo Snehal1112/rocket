@@ -412,6 +412,7 @@ export interface PaneState {
   toggleRunnerEntry: (tabId: string, requestPath: string) => void;
   /** Sets or clears the per-run data file. Ignored while a run is going. */
   setRunnerDataFile: (tabId: string, path: string | undefined) => void;
+  setRunnerSkipDataFile: (tabId: string, skip: boolean) => void;
   startRun: (tabId: string) => Promise<void>;
   stopRun: (tabId: string) => void;
   rerunAll: (tabId: string) => Promise<void>;
@@ -1021,7 +1022,27 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     set({
       root: updateTabInTree(get().root, tabId, (tab) => {
         if (!isRunnerTab(tab) || tab.runState === 'running') return tab;
-        return { ...tab, dataFilePath: path, dataFileError: undefined };
+        // Picking a file ends the skip choice.
+        return {
+          ...tab,
+          dataFilePath: path,
+          skipDataFile: path ? undefined : tab.skipDataFile,
+          dataFileError: undefined,
+        };
+      }),
+    });
+  },
+
+  setRunnerSkipDataFile(tabId, skip) {
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) => {
+        if (!isRunnerTab(tab) || tab.runState === 'running') return tab;
+        return {
+          ...tab,
+          skipDataFile: skip || undefined,
+          dataFilePath: skip ? undefined : tab.dataFilePath,
+          dataFileError: undefined,
+        };
       }),
     });
   },
@@ -1032,6 +1053,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     const collectionName = found.tab.collectionName;
     const entries = found.tab.requests;
     const dataFilePath = found.tab.dataFilePath;
+    const skipDataFile = found.tab.skipDataFile === true;
 
     // Assigning a fresh id here, and making every subsequent write in this
     // run conditional on it still matching, is what makes it safe to press
@@ -1050,7 +1072,7 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     // and no iteration on any send.
     let data: IterationData | null = null;
     try {
-      data = (await loadIterationData(collectionName, dataFilePath)) ?? null;
+      if (!skipDataFile) data = (await loadIterationData(collectionName, dataFilePath)) ?? null;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       set({

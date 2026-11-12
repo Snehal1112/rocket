@@ -157,6 +157,8 @@ export interface RunnerTab extends BaseTab {
   runId?: number;
   /** The per-run data file the user picked. It wins over the saved default. */
   dataFilePath?: string;
+  /** Run once with no data file, even when the collection has a saved default. */
+  skipDataFile?: boolean;
   /** Loaded on every Run and Re-run, so edits to the file are picked up. Kept for display. */
   iterationData?: import('@/lib/tauri-api').IterationData;
   /** The zero-based pass that is running. */
