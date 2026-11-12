@@ -7,11 +7,12 @@ use std::time::Instant;
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
+use rocket_collection::validate_relative_path;
 use rocket_collection::GrpcMethodType;
 use rocket_collection::{CollectionRepository, GrpcRequest};
 use rocket_environment::resolve;
 use rocket_grpc::GrpcMetadataPair;
-use rocket_grpc::{json_to_message, GrpcStreamEvent, MessageDescriptor};
+use rocket_grpc::{json_to_message, GrpcStreamEvent, MessageDescriptor, MethodDescriptor};
 use rocket_grpc::{GrpcCall, GrpcExecutor, GrpcUnaryResponse, ProtoLoader, ProtoRegistry};
 use rocket_grpc::{GrpcEvent, GrpcServiceInfo};
 use rocket_shared::error::{DomainError, DomainResult};
@@ -20,6 +21,10 @@ use rocket_shared::host_env::{EmptyHostEnv, HostEnv};
 use rocket_shared::types::Auth;
 use tokio::sync::mpsc;
 use tokio::task::AbortHandle;
+
+mod exchange;
+
+pub use exchange::{GrpcExchangeInput, GrpcExchangeOutput};
 
 /// Descriptor caches stop growing at this many entries and start over.
 const MAX_CACHED_REGISTRIES: usize = 32;
@@ -214,6 +219,23 @@ impl GrpcService {
         Ok(session_id)
     }
 
+    /// The transport call, the descriptors, the method and its call shape. With `confine`
+    /// the proto path must stay inside the collection.
+    async fn resolve_target(
+        &self,
+        input: &GrpcExecuteInput,
+        confine: bool,
+    ) -> DomainResult<(GrpcCall, ProtoRegistry, MethodDescriptor, GrpcMethodType)> {
+        let call = self.prepare_call(input, true)?;
+        let registry = self.registry_for_confined(input, false, confine).await?;
+        let method = registry.method(&call.full_method)?;
+        let method_type = GrpcMethodType::from_streaming_flags(
+            method.is_client_streaming(),
+            method.is_server_streaming(),
+        );
+        Ok((call, registry, method, method_type))
+    }
+
     /// Everything a streaming call needs before it connects: the transport call,
     /// the descriptors, the call shape and the first message of a server stream.
     async fn prepare_session(
@@ -226,13 +248,7 @@ impl GrpcService {
         MessageDescriptor,
         Option<String>,
     )> {
-        let call = self.prepare_call(input, true)?;
-        let registry = self.registry_for(input, false).await?;
-        let method = registry.method(&call.full_method)?;
-        let method_type = GrpcMethodType::from_streaming_flags(
-            method.is_client_streaming(),
-            method.is_server_streaming(),
-        );
+        let (call, registry, method, method_type) = self.resolve_target(input, false).await?;
         if method_type == GrpcMethodType::Unary {
             return Err(DomainError::InvalidInput(format!(
                 "{} is a unary method, send it as a normal call",
@@ -461,6 +477,16 @@ impl GrpcService {
         input: &GrpcExecuteInput,
         refresh: bool,
     ) -> DomainResult<ProtoRegistry> {
+        self.registry_for_confined(input, refresh, false).await
+    }
+
+    /// Like `registry_for`. With `confine` the proto path must stay inside the collection.
+    async fn registry_for_confined(
+        &self,
+        input: &GrpcExecuteInput,
+        refresh: bool,
+        confine: bool,
+    ) -> DomainResult<ProtoRegistry> {
         let raw_path = input
             .request
             .proto_file_path
@@ -468,7 +494,7 @@ impl GrpcService {
             .map(str::trim)
             .filter(|p| !p.is_empty());
         match raw_path {
-            Some(raw) => self.registry_from_file(input, raw, refresh).await,
+            Some(raw) => self.registry_from_file(input, raw, refresh, confine).await,
             None => self.registry_from_reflection(input, refresh).await,
         }
     }
@@ -478,10 +504,15 @@ impl GrpcService {
         input: &GrpcExecuteInput,
         raw: &str,
         refresh: bool,
+        confine: bool,
     ) -> DomainResult<ProtoRegistry> {
         let resolved = resolve_text(raw, &input.variables, "the proto file path")?;
-        let (path, include_dirs) =
-            self.resolve_proto_path(input.collection.as_deref(), &resolved)?;
+        let (path, include_dirs) = if confine {
+            self.resolve_confined_proto_path(input.collection.as_deref(), &resolved)
+                .await?
+        } else {
+            self.resolve_proto_path(input.collection.as_deref(), &resolved)?
+        };
         let modified = self.proto_loader.source_stamp(&path);
         let key = modified.map(|nanos| format!("proto:{}:{nanos}", path.display()));
         if let (Some(key), false) = (&key, refresh) {
@@ -530,6 +561,37 @@ impl GrpcService {
             cache.clear();
         }
         cache.insert(key, registry);
+    }
+
+    /// The strict form for scripts: the path must be relative, lexically clean and, once
+    /// symlinks are followed, still inside the collection. No `~/` and no absolute path.
+    async fn resolve_confined_proto_path(
+        &self,
+        collection: Option<&str>,
+        raw: &str,
+    ) -> DomainResult<(PathBuf, Vec<PathBuf>)> {
+        if raw.starts_with('~') || validate_relative_path(raw).is_err() {
+            return Err(DomainError::InvalidInput(
+                "the proto path must be relative to the collection, use / separators and have no '..' part"
+                    .into(),
+            ));
+        }
+        let collection_dir = collection
+            .map(|name| {
+                lock_path(&self.workspace_path)
+                    .join("collections")
+                    .join(name)
+            })
+            .ok_or_else(|| {
+                DomainError::InvalidInput("a relative proto path needs a collection".into())
+            })?;
+        let loader = Arc::clone(&self.proto_loader);
+        let root = collection_dir.clone();
+        let relative = raw.to_string();
+        let path = tokio::task::spawn_blocking(move || loader.resolve_within(&root, &relative))
+            .await
+            .map_err(|e| DomainError::Internal(format!("proto lookup stopped: {e}")))??;
+        Ok((path, vec![collection_dir]))
     }
 
     /// A relative path is inside the collection and may not climb out of it. An
@@ -765,6 +827,8 @@ message Rep { string message = 1; }
         loads: Mutex<Vec<(PathBuf, Vec<PathBuf>)>>,
         /// Stamps by path. A path without an entry has the stamp `Some(1)`.
         stamps: Mutex<HashMap<PathBuf, Option<u128>>>,
+        /// When set, `resolve_within` refuses with this text.
+        refusal: Mutex<Option<String>>,
     }
 
     impl FakeLoader {
@@ -787,6 +851,9 @@ message Rep { string message = 1; }
         }
 
         fn resolve_within(&self, root: &Path, relative: &str) -> DomainResult<PathBuf> {
+            if let Some(text) = lock(&self.refusal).clone() {
+                return Err(DomainError::InvalidInput(text));
+            }
             Ok(root.join(relative))
         }
     }
@@ -799,6 +866,17 @@ message Rep { string message = 1; }
         reflects: AtomicUsize,
         /// When set, `open_stream` waits for it, like a slow connect.
         open_gate: Mutex<Option<Arc<tokio::sync::Notify>>>,
+        /// When set, every call fails like a connect error, with this text.
+        connect_error: Mutex<Option<String>>,
+    }
+
+    impl FakeExecutor {
+        fn connect_failure(&self) -> DomainResult<()> {
+            match lock(&self.connect_error).clone() {
+                Some(text) => Err(DomainError::Http(text)),
+                None => Ok(()),
+            }
+        }
     }
 
     #[async_trait]
@@ -810,6 +888,7 @@ message Rep { string message = 1; }
             request_json: &str,
         ) -> DomainResult<GrpcUnaryResponse> {
             lock(&self.unary).push((call.clone(), request_json.to_string()));
+            self.connect_failure()?;
             Ok(GrpcUnaryResponse {
                 headers: vec![],
                 trailers: vec![],
@@ -826,6 +905,7 @@ message Rep { string message = 1; }
             initial_json: Option<String>,
         ) -> DomainResult<GrpcStreamHandle> {
             lock(&self.streams).push((call.clone(), initial_json));
+            self.connect_failure()?;
             let gate = lock(&self.open_gate).clone();
             if let Some(gate) = gate {
                 gate.notified().await;
@@ -837,6 +917,7 @@ message Rep { string message = 1; }
 
         async fn reflect(&self, _call: &GrpcCall) -> DomainResult<ProtoRegistry> {
             self.reflects.fetch_add(1, Ordering::SeqCst);
+            self.connect_failure()?;
             Ok(registry())
         }
     }
@@ -1719,5 +1800,418 @@ message Rep { string message = 1; }
         }
 
         assert_eq!(lock(&h.loader.loads).len(), 2, "no stamp, no cache key");
+    }
+
+    // ---- exchange ----------------------------------------------------------
+
+    fn exchange_input(r: GrpcRequest, messages: &[&str]) -> GrpcExchangeInput {
+        GrpcExchangeInput {
+            execute: input(r),
+            messages: messages.iter().map(|m| m.to_string()).collect(),
+            confine_proto: true,
+        }
+    }
+
+    fn reply(text: &str) -> GrpcStreamEvent {
+        GrpcStreamEvent::Message(format!(r#"{{"message": "{text}"}}"#))
+    }
+
+    fn finished(code: i32, message: &str) -> GrpcStreamEvent {
+        GrpcStreamEvent::Finished {
+            status: GrpcStatus::new(code, message),
+            trailers: vec![],
+        }
+    }
+
+    /// Hands out a stream that plays `script` and then stays open (silent) or ends.
+    /// Returns the call task, which ends when the call is aborted.
+    fn scripted_stream(
+        h: &Harness,
+        script: Vec<GrpcStreamEvent>,
+        stay_open: bool,
+    ) -> tokio::task::JoinHandle<()> {
+        let fx = prepare_stream(h, false);
+        let tx = fx.events_tx.clone();
+        tokio::spawn(async move {
+            for event in script {
+                if tx.send(event).await.is_err() {
+                    return;
+                }
+            }
+            if stay_open {
+                std::future::pending::<()>().await;
+            }
+        });
+        fx.task
+    }
+
+    async fn assert_aborted(task: &tokio::task::JoinHandle<()>) {
+        for _ in 0..100 {
+            if task.is_finished() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        panic!("the call was not aborted");
+    }
+
+    /// Hands out a stream that answers every inbound message with one reply (bidirectional),
+    /// or with one reply for the whole input (client stream), and finishes with OK once
+    /// the sender is dropped.
+    fn echo_stream(h: &Harness, bidi: bool) -> Arc<Mutex<Vec<String>>> {
+        let fx = prepare_stream(h, true);
+        let tx = fx.events_tx.clone();
+        let mut rx = fx.outbound_rx.expect("receiver");
+        let received = Arc::new(Mutex::new(Vec::new()));
+        let log = received.clone();
+        tokio::spawn(async move {
+            let mut count = 0;
+            while let Some(message) = rx.recv().await {
+                lock(&log).push(message);
+                count += 1;
+                if bidi {
+                    let _ = tx.send(reply(&format!("r{count}"))).await;
+                }
+            }
+            if !bidi {
+                let _ = tx.send(reply(&format!("got {count}"))).await;
+            }
+            let _ = tx.send(finished(0, "")).await;
+        });
+        received
+    }
+
+    #[tokio::test]
+    async fn exchange_runs_a_unary_call_and_returns_the_reply() {
+        let h = harness(None);
+        let out = h
+            .svc
+            .exchange(exchange_input(request(SAY_HELLO), &[r#"{"name": "a"}"#]))
+            .await
+            .expect("exchange");
+        assert!(out.status.is_ok());
+        assert_eq!(out.messages, vec!["{}".to_string()]);
+        assert!(!out.truncated);
+        assert_eq!(sent(&h).1, r#"{"name": "a"}"#);
+    }
+
+    #[tokio::test]
+    async fn exchange_uses_the_saved_message_when_no_messages_are_given() {
+        let h = harness(None);
+        let mut r = request(SAY_HELLO);
+        r.messages = vec![GrpcMessage {
+            title: "m".into(),
+            selected: true,
+            content: r#"{"name": "saved"}"#.into(),
+        }];
+        h.svc
+            .exchange(exchange_input(r, &[]))
+            .await
+            .expect("exchange");
+        assert_eq!(sent(&h).1, r#"{"name": "saved"}"#);
+    }
+
+    #[tokio::test]
+    async fn exchange_rejects_two_messages_for_a_unary_method() {
+        let h = harness(None);
+        let err = h
+            .svc
+            .exchange(exchange_input(request(SAY_HELLO), &["{}", "{}"]))
+            .await
+            .expect_err("two messages");
+        assert!(matches!(err, DomainError::InvalidInput(_)), "{err:?}");
+        assert!(lock(&h.exec.unary).is_empty());
+    }
+
+    #[tokio::test]
+    async fn exchange_collects_every_message_of_a_server_stream() {
+        let h = harness(None);
+        scripted_stream(
+            &h,
+            vec![
+                GrpcStreamEvent::Headers(vec![GrpcMetadataPair::new("h", "1")]),
+                reply("a"),
+                reply("b"),
+                finished(0, ""),
+            ],
+            false,
+        );
+        let out = h
+            .svc
+            .exchange(exchange_input(
+                request("demo.v1.Greeter/List"),
+                &[r#"{"name": "x"}"#],
+            ))
+            .await
+            .expect("exchange");
+        assert_eq!(out.messages.len(), 2);
+        assert_eq!(out.headers, vec![GrpcMetadataPair::new("h", "1")]);
+        assert!(out.status.is_ok());
+        assert_eq!(
+            lock(&h.exec.streams)[0].1.as_deref(),
+            Some(r#"{"name": "x"}"#)
+        );
+    }
+
+    #[tokio::test]
+    async fn exchange_sends_all_messages_of_a_client_stream_then_half_closes() {
+        let h = harness(None);
+        let received = echo_stream(&h, false);
+        let out = h
+            .svc
+            .exchange(exchange_input(
+                request("demo.v1.Greeter/Collect"),
+                &[r#"{"name": "a"}"#, r#"{"name": "b"}"#, r#"{"name": "c"}"#],
+            ))
+            .await
+            .expect("exchange");
+        assert_eq!(lock(&received).len(), 3);
+        assert_eq!(out.messages, vec![r#"{"message": "got 3"}"#.to_string()]);
+        assert!(out.status.is_ok());
+        assert_eq!(lock(&h.exec.streams)[0].1, None);
+    }
+
+    #[tokio::test]
+    async fn exchange_keeps_replies_of_a_bidirectional_call_in_order() {
+        let h = harness(None);
+        let _received = echo_stream(&h, true);
+        let inputs: Vec<String> = (0..40).map(|i| format!(r#"{{"name": "n{i}"}}"#)).collect();
+        let refs: Vec<&str> = inputs.iter().map(String::as_str).collect();
+        let out = h
+            .svc
+            .exchange(exchange_input(request("demo.v1.Greeter/Chat"), &refs))
+            .await
+            .expect("exchange");
+        let expected: Vec<String> = (1..=40)
+            .map(|i| format!(r#"{{"message": "r{i}"}}"#))
+            .collect();
+        assert_eq!(out.messages, expected);
+    }
+
+    #[tokio::test]
+    async fn exchange_returns_the_error_status_of_a_stream_with_no_messages() {
+        let h = harness(None);
+        scripted_stream(&h, vec![finished(5, "no such user")], false);
+        let out = h
+            .svc
+            .exchange(exchange_input(request("demo.v1.Greeter/List"), &["{}"]))
+            .await
+            .expect("exchange");
+        assert!(out.messages.is_empty());
+        assert_eq!(out.status.code, 5);
+        assert_eq!(out.status.message, "no such user");
+    }
+
+    #[tokio::test]
+    async fn exchange_stops_at_the_message_cap_and_marks_truncated() {
+        let h = harness(None);
+        let mut script: Vec<GrpcStreamEvent> = (0..=rocket_grpc::MAX_RESPONSE_MESSAGES)
+            .map(|_| reply("x"))
+            .collect();
+        script.push(finished(0, ""));
+        let task = scripted_stream(&h, script, false);
+        let out = h
+            .svc
+            .exchange(exchange_input(request("demo.v1.Greeter/List"), &["{}"]))
+            .await
+            .expect("exchange");
+        assert_aborted(&task).await;
+        assert!(out.truncated);
+        assert_eq!(out.messages.len(), rocket_grpc::MAX_RESPONSE_MESSAGES);
+        assert_eq!(out.status.code, 8);
+    }
+
+    #[tokio::test]
+    async fn exchange_stops_at_the_byte_cap_and_marks_truncated() {
+        let h = harness(None);
+        let big = GrpcStreamEvent::Message("x".repeat(1024 * 1024));
+        let mut script: Vec<GrpcStreamEvent> = (0..12).map(|_| big.clone()).collect();
+        script.push(finished(0, ""));
+        let task = scripted_stream(&h, script, false);
+        let out = h
+            .svc
+            .exchange(exchange_input(request("demo.v1.Greeter/List"), &["{}"]))
+            .await
+            .expect("exchange");
+        assert_aborted(&task).await;
+        assert!(out.truncated);
+        assert_eq!(out.status.code, 8);
+        let total: usize = out.messages.iter().map(String::len).sum();
+        assert!(total <= rocket_grpc::MAX_RESPONSE_BYTES);
+        assert!(out.messages.len() < 12);
+    }
+
+    #[tokio::test]
+    async fn exchange_returns_what_arrived_when_the_time_limit_hits() {
+        let h = harness(None);
+        let task = scripted_stream(&h, vec![reply("a")], true);
+        let mut i = exchange_input(request("demo.v1.Greeter/List"), &["{}"]);
+        i.execute.timeout = Some(Duration::from_millis(100));
+        let out = h.svc.exchange(i).await.expect("exchange");
+        assert_aborted(&task).await;
+        assert_eq!(out.status.code, 4);
+        assert_eq!(out.messages.len(), 1);
+        assert!(!out.truncated);
+    }
+
+    #[tokio::test]
+    async fn exchange_names_the_index_of_a_message_that_does_not_fit_the_proto() {
+        let h = harness(None);
+        let _received = echo_stream(&h, true);
+        let err = h
+            .svc
+            .exchange(exchange_input(
+                request("demo.v1.Greeter/Chat"),
+                &[
+                    r#"{"name": "ok"}"#,
+                    r#"{"secretfield": "hunter2"}"#,
+                    r#"{"name": "ok"}"#,
+                ],
+            ))
+            .await
+            .expect_err("bad message");
+        let text = err.to_string();
+        assert!(matches!(err, DomainError::InvalidInput(_)), "{err:?}");
+        assert!(text.contains("message 1"), "{text}");
+        assert!(!text.contains("hunter2"), "{text}");
+        assert!(lock(&h.exec.streams).is_empty(), "nothing was opened");
+        assert!(lock(&h.exec.unary).is_empty());
+    }
+
+    #[tokio::test]
+    async fn exchange_refuses_an_absolute_proto_path_when_confined() {
+        let h = harness(None);
+        let mut r = request(SAY_HELLO);
+        r.proto_file_path = Some("/etc/greeter.proto".into());
+        let err = h
+            .svc
+            .exchange(exchange_input(r, &["{}"]))
+            .await
+            .expect_err("refused");
+        assert!(matches!(err, DomainError::InvalidInput(_)), "{err:?}");
+        assert!(lock(&h.loader.loads).is_empty());
+
+        let mut r = request(SAY_HELLO);
+        r.proto_file_path = Some("~/greeter.proto".into());
+        h.svc
+            .exchange(exchange_input(r, &["{}"]))
+            .await
+            .expect_err("a home path is refused too");
+        assert!(lock(&h.loader.loads).is_empty());
+    }
+
+    #[tokio::test]
+    async fn exchange_refuses_a_dotdot_proto_path_when_confined() {
+        let h = harness(None);
+        let mut r = request(SAY_HELLO);
+        r.proto_file_path = Some("../greeter.proto".into());
+        let err = h
+            .svc
+            .exchange(exchange_input(r, &["{}"]))
+            .await
+            .expect_err("refused");
+        assert!(matches!(err, DomainError::InvalidInput(_)), "{err:?}");
+        assert!(lock(&h.loader.loads).is_empty());
+    }
+
+    #[tokio::test]
+    async fn exchange_allows_an_absolute_proto_path_when_not_confined() {
+        let h = harness(None);
+        let mut r = request(SAY_HELLO);
+        r.proto_file_path = Some("/abs/greeter.proto".into());
+        let mut i = exchange_input(r, &["{}"]);
+        i.confine_proto = false;
+        h.svc.exchange(i).await.expect("exchange");
+        assert_eq!(
+            lock(&h.loader.loads)[0].0,
+            PathBuf::from("/abs/greeter.proto")
+        );
+    }
+
+    #[tokio::test]
+    async fn exchange_resolves_a_confined_path_through_the_loader() {
+        let h = harness(None);
+        h.svc
+            .exchange(exchange_input(request(SAY_HELLO), &["{}"]))
+            .await
+            .expect("exchange");
+        assert_eq!(
+            lock(&h.loader.loads)[0].0,
+            h.dir.path().join("collections/api/protos/greeter.proto")
+        );
+    }
+
+    #[tokio::test]
+    async fn exchange_resolves_a_connect_failure_as_unavailable() {
+        for method in [SAY_HELLO, "demo.v1.Greeter/List", "demo.v1.Greeter/Chat"] {
+            let h = harness(None);
+            *lock(&h.exec.connect_error) =
+                Some("could not connect to https://user:pw@host: refused".into());
+            let out = h
+                .svc
+                .exchange(exchange_input(request(method), &[r#"{"name": "hunter2"}"#]))
+                .await
+                .expect("a connect failure is an outcome");
+            assert_eq!(out.status.code, 14, "{method}");
+            assert!(out.messages.is_empty());
+            assert!(!out.truncated);
+            let text = format!("{:?}", out.status);
+            assert!(!text.contains("hunter2") && !text.contains("pw@"), "{text}");
+        }
+    }
+
+    #[tokio::test]
+    async fn exchange_resolves_a_reflection_connect_failure_as_unavailable() {
+        let h = harness(None);
+        *lock(&h.exec.connect_error) = Some("could not connect".into());
+        let mut r = request(SAY_HELLO);
+        r.proto_file_path = None;
+        let out = h
+            .svc
+            .exchange(exchange_input(r, &["{}"]))
+            .await
+            .expect("outcome");
+        assert_eq!(out.status.code, 14);
+    }
+
+    #[tokio::test]
+    async fn exchange_rejects_more_than_the_input_message_limit() {
+        let h = harness(None);
+        let many: Vec<&str> = vec!["{}"; rocket_grpc::MAX_INPUT_MESSAGES + 1];
+        let err = h
+            .svc
+            .exchange(exchange_input(request("demo.v1.Greeter/Chat"), &many))
+            .await
+            .expect_err("too many");
+        assert!(matches!(err, DomainError::InvalidInput(_)), "{err:?}");
+        assert!(lock(&h.exec.streams).is_empty());
+    }
+
+    #[tokio::test]
+    async fn exchange_rejects_two_messages_for_a_server_streaming_method() {
+        let h = harness(None);
+        let err = h
+            .svc
+            .exchange(exchange_input(
+                request("demo.v1.Greeter/List"),
+                &["{}", "{}"],
+            ))
+            .await
+            .expect_err("two messages");
+        assert!(matches!(err, DomainError::InvalidInput(_)), "{err:?}");
+        assert!(lock(&h.exec.streams).is_empty());
+    }
+
+    #[tokio::test]
+    async fn exchange_passes_on_a_refusal_from_the_proto_loader() {
+        let h = harness(None);
+        *lock(&h.loader.refusal) = Some("outside the collection".into());
+        let err = h
+            .svc
+            .exchange(exchange_input(request(SAY_HELLO), &["{}"]))
+            .await
+            .expect_err("refused");
+        assert!(err.to_string().contains("outside the collection"), "{err}");
+        assert!(lock(&h.exec.unary).is_empty());
     }
 }

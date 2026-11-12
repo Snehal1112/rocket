@@ -133,7 +133,7 @@ pub use graphql_subscription::{
     resolve_graphql_subscription, to_websocket_url, GraphQlSubscribeInput,
     GraphQlSubscriptionService, GraphQlSubscriptionStart,
 };
-pub use grpc_service::{GrpcExecuteInput, GrpcService};
+pub use grpc_service::{GrpcExchangeInput, GrpcExchangeOutput, GrpcExecuteInput, GrpcService};
 pub use history_service::HistoryService;
 pub use iteration_data_service::{iteration_info, IterationDataService, LoadedIterationData};
 pub use load_test_service::LoadTestService;
