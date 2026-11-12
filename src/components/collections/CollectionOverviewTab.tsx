@@ -10,6 +10,8 @@ import { AuthEditor } from '@/components/request/AuthEditor';
 import { HeadersEditor } from '@/components/request/HeadersEditor';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Select,
@@ -55,6 +57,13 @@ import type {
 import { CollectionVariablesEditor } from './CollectionVariablesEditor';
 import { MethodBreakdown } from './MethodBreakdown';
 import { RequestList } from './RequestList';
+
+/** True for a leading slash, a `..` segment, a backslash or a colon. A hint only. */
+function looksNotRelative(path: string): boolean {
+  const p = path.trim();
+  if (!p) return false;
+  return p.startsWith('/') || p.includes('\\') || p.includes(':') || p.split('/').includes('..');
+}
 
 interface CollectionOverviewTabProps {
   tab: CollectionTab;
@@ -153,6 +162,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   const [auth, setAuth] = useState<AuthState>({ authType: 'none' });
   const [headers, setHeaders] = useState<KeyValueEntry[]>([]);
   const [variables, setVariables] = useState<CollectionVariable[]>([]);
+  const [runnerDataFile, setRunnerDataFile] = useState('');
 
   const scopedContext = useMemo(() => {
     const envVars: Record<string, string> = {};
@@ -262,6 +272,7 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
         setHeaders(toKeyValueEntries(s.headers));
         setVariables(s.variables ?? []);
         setDocs(s.docs ?? '');
+        setRunnerDataFile(s.runnerDataFile ?? '');
         setIsDirty(false);
         setIsLoaded(true);
       })
@@ -286,17 +297,17 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
   // via the toolbar's SandboxPopover, would be silently wiped by this save.
   const saveSettings = useCallback(async () => {
     const current = await getCollectionSettings(collectionName);
-    await saveCollectionSettings(
-      collectionName,
-      buildSettingsForSave(current, {
-        auth: toPersistedAuth(auth),
-        headers: toPersistedHeaders(headers),
-        docs: docs || undefined,
-        variables,
-      }),
-    );
+    const payload = buildSettingsForSave(current, {
+      auth: toPersistedAuth(auth),
+      headers: toPersistedHeaders(headers),
+      docs: docs || undefined,
+      variables,
+    });
+    // An empty field saves no path at all, never an empty string.
+    payload.runnerDataFile = runnerDataFile.trim() || undefined;
+    await saveCollectionSettings(collectionName, payload);
     setIsDirty(false);
-  }, [collectionName, auth, headers, docs, variables]);
+  }, [collectionName, auth, headers, docs, variables, runnerDataFile]);
 
   const { state: saveState, trigger: triggerSave } = useSaveButton(
     saveSettings,
@@ -431,6 +442,54 @@ export function CollectionOverviewTab({ tab }: CollectionOverviewTabProps) {
                         </Button>
                       </div>
                     )}
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className='pb-2 pt-4 px-4'>
+                    <span className='text-base font-semibold tracking-tight'>Runner</span>
+                  </CardHeader>
+                  <CardContent className='px-4 pb-4 space-y-2'>
+                    <Label htmlFor='col-runner-data-file' className='text-sm'>
+                      Runner data file
+                    </Label>
+                    <Input
+                      id='col-runner-data-file'
+                      value={runnerDataFile}
+                      placeholder='data/users.csv'
+                      className='h-8 text-sm font-mono'
+                      onChange={(e) => {
+                        setRunnerDataFile(e.target.value);
+                        setIsDirty(true);
+                      }}
+                    />
+                    <p className='text-xs text-muted-foreground'>
+                      Relative to the collection folder, for example data/users.csv. Runs use this
+                      file unless you pick another one in the Runner tab.
+                    </p>
+                    {looksNotRelative(runnerDataFile) && (
+                      <p className='text-xs text-amber-600 dark:text-amber-400'>
+                        This does not look like a relative path. Saving still works, and a run
+                        checks it when it needs the file.
+                      </p>
+                    )}
+                    <div className='flex justify-end'>
+                      <Button
+                        size='sm'
+                        onClick={() => void triggerSave()}
+                        disabled={!isDirty || saveState !== 'idle'}
+                        className={cn('gap-1.5', saveState === 'success' && 'text-green-600')}
+                      >
+                        {saveState === 'saving' ? (
+                          <Loader2 className='h-3.5 w-3.5 animate-spin' />
+                        ) : saveState === 'success' ? (
+                          <Check className='h-3.5 w-3.5' />
+                        ) : (
+                          <Save className='h-3.5 w-3.5' />
+                        )}
+                        {saveState === 'success' ? 'Saved' : 'Save'}
+                      </Button>
+                    </div>
                   </CardContent>
                 </Card>
 

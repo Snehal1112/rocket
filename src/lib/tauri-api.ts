@@ -95,6 +95,11 @@ export interface CollectionSettings {
   /** Persisted at extensions.bruno.scripts.flow in opencollection.yml. */
   scriptFlow?: ScriptFlow;
   /**
+   * Saved default data file for Runner iterations, relative to the collection folder.
+   * Persisted at extensions.rocketapi.runner.dataFile in opencollection.yml.
+   */
+  runnerDataFile?: string;
+  /**
    * Lets the AI Assistant send this collection's requests. Off by default.
    * Persisted at extensions.rocketapi.agentAutonomyEnabled in opencollection.yml.
    */

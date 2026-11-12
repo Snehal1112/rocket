@@ -42,6 +42,15 @@ describe('buildSettingsForSave', () => {
     expect(payload.scriptFlow).toBe('sequential');
   });
 
+  it('buildSettingsForSave_carries_runnerDataFile_from_current', () => {
+    const payload = buildSettingsForSave(
+      { ...current, runnerDataFile: 'data/users.csv' },
+      { headers: [], variables: [] },
+    );
+
+    expect(payload.runnerDataFile).toBe('data/users.csv');
+  });
+
   it('leaves the script flow out when the backend did not send one', () => {
     const withoutFlow: CollectionSettings = {
       headers: [],
