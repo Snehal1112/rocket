@@ -8,7 +8,8 @@ use std::time::Duration;
 use deno_core::{op2, OpState};
 use rocket_scripting::{
     CollectionVarWrite, ConsoleLevel, EnvVarWrite, HostCookieOp, HostCookieResult, HostError,
-    HostRequest, HostRunOutcome, HostRunRequest, PendingWrites,
+    HostGrpcRequest, HostGrpcTarget, HostRequest, HostRunOutcome, HostRunRequest, PendingWrites,
+    SandboxMode,
 };
 use tokio::sync::oneshot;
 
@@ -316,6 +317,57 @@ pub async fn op_rok_run_request(
                 .borrow_mut::<ScriptOutputState>()
                 .add_console(ConsoleLevel::Log, line);
             Ok(serde_json::json!({ "response": run.response, "changed": changed }).to_string())
+        }
+    }
+}
+
+/// rok.grpc.run and rok.grpc.call — one gRPC call through the host. Takes a
+/// `HostGrpcRequest` as JSON (the engine fills `runtimeVars`) and returns a
+/// `HostGrpcResponse` as JSON. Developer mode only. The Console line holds the
+/// target and the status name, never message content.
+#[op2]
+#[string]
+pub async fn op_rok_grpc(
+    state: Rc<RefCell<OpState>>,
+    #[string] request_json: String,
+) -> Result<String, ScriptHostError> {
+    const API: &str = "rok.grpc";
+    if state.borrow().borrow::<ScriptInputState>().sandbox_mode == SandboxMode::Safe {
+        return Err(ScriptHostError(format!(
+            "{API}: gRPC calls need Developer mode"
+        )));
+    }
+    let mut request: HostGrpcRequest = serde_json::from_str(&request_json)
+        .map_err(|e| ScriptHostError(format!("{API}: invalid options - {e}")))?;
+    request.runtime_vars = current_runtime_vars(&state.borrow());
+    let label = match &request.target {
+        HostGrpcTarget::Saved { path } => format!("{API} {path}"),
+        HostGrpcTarget::AdHoc {
+            url,
+            service,
+            method,
+            ..
+        } => format!("{API} {url} {service}/{method}"),
+    };
+    let (reply, answer) = oneshot::channel();
+    send_host_call(&state, HostCall::Grpc { request, reply }, API)?;
+    let outcome = answer.await.unwrap_or(Err(HostError::Unavailable));
+    let mut state = state.borrow_mut();
+    match outcome {
+        Ok(response) => {
+            let line = redact(&state, format!("{label} -> {}", response.status.name));
+            state
+                .borrow_mut::<ScriptOutputState>()
+                .add_console(ConsoleLevel::Log, line);
+            serde_json::to_string(&response).map_err(|e| ScriptHostError(format!("{API}: {e}")))
+        }
+        Err(error) => {
+            let error = host_error(&state, API, error);
+            let line = redact(&state, format!("{label} failed: {}", error.0));
+            state
+                .borrow_mut::<ScriptOutputState>()
+                .add_console(ConsoleLevel::Error, line);
+            Err(error)
         }
     }
 }

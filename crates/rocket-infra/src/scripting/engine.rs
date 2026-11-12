@@ -283,6 +283,7 @@ extension!(
         host::op_rok_sleep,
         host::op_rok_run_request,
         host::op_rok_cookies,
+        host::op_rok_grpc,
         rok::op_rok_cookie_snapshot,
         // req read ops
         req::op_req_get_url,
@@ -1643,6 +1644,407 @@ mod tests {
             result.runtime_vars.get("m").expect("m present"),
             "rok.runRequest: path must be a non-empty string"
         );
+        assert!(host.seen().is_empty());
+    }
+
+    // ── grpc ─────────────────────────────────────────────────────────────────
+
+    use rocket_scripting::{HostGrpcRequest, HostGrpcResponse, HostGrpcStatus, HostGrpcTarget};
+
+    /// Host that answers `rok.grpc` with a fixed outcome and records the calls.
+    struct GrpcHost {
+        seen: StdMutex<Vec<HostGrpcRequest>>,
+        answer: Result<HostGrpcResponse, HostError>,
+    }
+
+    impl GrpcHost {
+        fn answering(answer: Result<HostGrpcResponse, HostError>) -> Self {
+            Self {
+                seen: StdMutex::new(Vec::new()),
+                answer,
+            }
+        }
+
+        fn ok() -> Self {
+            Self::answering(Ok(grpc_reply()))
+        }
+
+        fn seen(&self) -> Vec<HostGrpcRequest> {
+            self.seen.lock().expect("lock").clone()
+        }
+    }
+
+    #[async_trait]
+    impl ScriptHost for GrpcHost {
+        async fn grpc(&self, request: HostGrpcRequest) -> Result<HostGrpcResponse, HostError> {
+            self.seen.lock().expect("lock").push(request);
+            self.answer.clone()
+        }
+    }
+
+    fn grpc_reply() -> HostGrpcResponse {
+        HostGrpcResponse {
+            status: HostGrpcStatus {
+                code: 0,
+                name: "OK".into(),
+                message: String::new(),
+            },
+            messages: vec![
+                "{\"greeting\":\"hi\"}".into(),
+                "{\"greeting\":\"yo\"}".into(),
+            ],
+            headers: vec![("Content-Type".into(), "application/grpc".into())],
+            trailers: vec![("X-Trail".into(), "1".into())],
+            truncated: false,
+        }
+    }
+
+    fn dev_ctx(code: &str) -> ScriptContext {
+        let mut ctx = minimal_ctx(code);
+        ctx.sandbox_mode = SandboxMode::Developer;
+        ctx
+    }
+
+    async fn run_with(host: &dyn ScriptHost, ctx: ScriptContext) -> ScriptResult {
+        DenoScriptEngine::new()
+            .execute_with_host(ctx, host)
+            .await
+            .expect("execute")
+    }
+
+    fn var_text(result: &ScriptResult, key: &str) -> String {
+        result
+            .runtime_vars
+            .get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or_else(|| panic!("{key} missing in {:?}", result.runtime_vars))
+            .to_string()
+    }
+
+    #[tokio::test]
+    async fn grpc_op_refuses_in_safe_mode_with_a_developer_mode_message() {
+        let host = GrpcHost::ok();
+        let ctx = minimal_ctx(
+            "try { await rok.grpc.run('a/b'); } catch (e) { rok.setVar('e', e.message); }",
+        );
+        let result = run_with(&host, ctx).await;
+        let message = var_text(&result, "e");
+        assert!(message.contains("Developer mode"), "{message}");
+        assert!(message.starts_with("rok.grpc.run:"), "{message}");
+        assert!(host.seen().is_empty());
+    }
+
+    #[tokio::test]
+    async fn grpc_op_forwards_the_request_to_the_host_and_returns_its_response() {
+        let host = GrpcHost::ok();
+        let mut ctx = dev_ctx(
+            "const r = await rok.grpc.run('svc/hello', { message: { a: 1 } }); \
+             rok.setVar('n', r.messages.length); rok.setVar('g', r.message.greeting);",
+        );
+        ctx.variables.runtime = map(&[("tok", "abc")]);
+        let result = run_with(&host, ctx).await;
+        assert!(result.error.is_none(), "{:?}", result.error);
+        assert_eq!(var_text(&result, "g"), "hi");
+        let seen = host.seen();
+        assert_eq!(seen.len(), 1);
+        assert_eq!(
+            seen[0].runtime_vars.get("tok").map(String::as_str),
+            Some("abc")
+        );
+    }
+
+    #[tokio::test]
+    async fn grpc_op_without_a_host_reports_unavailable() {
+        let code = "try { await rok.grpc.run('x'); } catch (e) { rok.setVar('e', e.message); }";
+        let without = DenoScriptEngine::new()
+            .execute(dev_ctx(code))
+            .await
+            .expect("execute");
+        let bare = run_with(&BareHost, dev_ctx(code)).await;
+        for result in [without, bare] {
+            let message = var_text(&result, "e");
+            assert!(
+                message.contains("rok.grpc is not available here"),
+                "{message}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn grpc_op_writes_a_console_line_without_message_content() {
+        let host = GrpcHost::ok();
+        let ctx = dev_ctx("await rok.grpc.run('svc/hello', { message: { secretish: 'zzz' } });");
+        let result = run_with(&host, ctx).await;
+        let lines: Vec<&str> = result
+            .console_entries
+            .iter()
+            .map(|c| c.message.as_str())
+            .collect();
+        assert!(lines.contains(&"rok.grpc svc/hello -> OK"), "{lines:?}");
+        assert!(lines
+            .iter()
+            .all(|l| !l.contains("zzz") && !l.contains("greeting")));
+    }
+
+    #[tokio::test]
+    async fn run_sends_a_saved_target_with_messages_and_metadata() {
+        let host = GrpcHost::ok();
+        let ctx = dev_ctx(
+            "await rok.grpc.run('svc/hello', { messages: [{ a: 1 }, { b: 2 }], \
+             metadata: { 'X-Id': '7' }, timeoutMs: 2500 });",
+        );
+        run_with(&host, ctx).await;
+        let seen = host.seen();
+        assert_eq!(
+            seen[0].target,
+            HostGrpcTarget::Saved {
+                path: "svc/hello".into()
+            }
+        );
+        assert_eq!(seen[0].messages, vec!["{\"a\":1}", "{\"b\":2}"]);
+        assert_eq!(
+            seen[0].metadata,
+            vec![("x-id".to_string(), "7".to_string())]
+        );
+        assert_eq!(seen[0].timeout_ms, Some(2500));
+    }
+
+    #[tokio::test]
+    async fn call_sends_an_ad_hoc_target() {
+        let host = GrpcHost::ok();
+        let ctx = dev_ctx(
+            "await rok.grpc.call({ url: 'localhost:50051', service: 'a.Greeter', \
+             method: 'SayHello', protoFile: 'protos/g.proto', tls: true, message: {} });",
+        );
+        let result = run_with(&host, ctx).await;
+        assert!(result.error.is_none(), "{:?}", result.error);
+        let seen = host.seen();
+        assert_eq!(
+            seen[0].target,
+            HostGrpcTarget::AdHoc {
+                url: "localhost:50051".into(),
+                service: "a.Greeter".into(),
+                method: "SayHello".into(),
+                proto_file: "protos/g.proto".into(),
+                tls: true,
+            }
+        );
+        assert_eq!(seen[0].timeout_ms, None);
+    }
+
+    #[tokio::test]
+    async fn message_shortcut_becomes_a_one_item_messages_array() {
+        let host = GrpcHost::ok();
+        run_with(
+            &host,
+            dev_ctx("await rok.grpc.run('p', { message: { n: [1] } });"),
+        )
+        .await;
+        assert_eq!(host.seen()[0].messages, vec!["{\"n\":[1]}"]);
+        let none = GrpcHost::ok();
+        run_with(&none, dev_ctx("await rok.grpc.run('p');")).await;
+        assert!(none.seen()[0].messages.is_empty());
+    }
+
+    /// Runs `code` in Developer mode and returns the message it caught, plus the host.
+    async fn caught(code: &str) -> (String, GrpcHost) {
+        let (message, _, host) = caught_typed(code).await;
+        (message, host)
+    }
+
+    /// Like `caught`, and also says whether the error was a `TypeError`.
+    async fn caught_typed(code: &str) -> (String, bool, GrpcHost) {
+        let host = GrpcHost::ok();
+        let ctx = dev_ctx(&format!(
+            "try {{ {code} }} catch (e) {{ rok.setVar('e', e.message); \
+             rok.setVar('t', e instanceof TypeError); }}"
+        ));
+        let result = run_with(&host, ctx).await;
+        let is_type = result.runtime_vars.get("t").and_then(|v| v.as_bool()) == Some(true);
+        (var_text(&result, "e"), is_type, host)
+    }
+
+    #[tokio::test]
+    async fn message_and_messages_together_reject() {
+        let (message, was_type_error, host) =
+            caught_typed("await rok.grpc.run('p', { message: {}, messages: [{}] });").await;
+        assert!(message.starts_with("rok.grpc.run:"), "{message}");
+        assert!(host.seen().is_empty());
+        assert!(was_type_error);
+    }
+
+    #[tokio::test]
+    async fn metadata_keys_are_lowercased() {
+        let host = GrpcHost::ok();
+        run_with(
+            &host,
+            dev_ctx(
+                "await rok.grpc.run('p', { metadata: { 'Authorization': 'Bearer x', 'X-A': 'b' } });",
+            ),
+        )
+        .await;
+        let keys: Vec<String> = host.seen()[0]
+            .metadata
+            .iter()
+            .map(|(k, _)| k.clone())
+            .collect();
+        assert_eq!(keys, vec!["authorization", "x-a"]);
+        let (message, was_type_error, host) =
+            caught_typed("await rok.grpc.run('p', { metadata: { a: 1 } });").await;
+        assert!(was_type_error);
+        assert!(message.starts_with("rok.grpc.run:"), "{message}");
+        assert!(host.seen().is_empty());
+    }
+
+    #[tokio::test]
+    async fn timeout_ms_zero_or_nan_rejects() {
+        for bad in ["0", "NaN", "-5", "Infinity", "'9'"] {
+            let (message, host) =
+                caught(&format!("await rok.grpc.run('p', {{ timeoutMs: {bad} }});")).await;
+            assert!(message.contains("timeoutMs"), "{bad}: {message}");
+            assert!(host.seen().is_empty(), "{bad}");
+        }
+    }
+
+    #[tokio::test]
+    async fn result_headers_are_plain_objects() {
+        let host = GrpcHost::ok();
+        let ctx = dev_ctx(
+            "const r = await rok.grpc.run('p'); \
+             rok.setVar('h', r.headers['content-type']); rok.setVar('t', r.trailers['x-trail']); \
+             rok.setVar('proto', Object.getPrototypeOf(r.headers) === Object.prototype); \
+             rok.setVar('s', [r.status.code, r.status.name, r.status.message, r.truncated].join('|')); \
+             rok.setVar('m', r.messages[1].greeting);",
+        );
+        let result = run_with(&host, ctx).await;
+        assert_eq!(var_text(&result, "h"), "application/grpc");
+        assert_eq!(var_text(&result, "t"), "1");
+        assert_eq!(result.runtime_vars.get("proto").expect("proto"), true);
+        assert_eq!(var_text(&result, "s"), "0|OK||false");
+        assert_eq!(var_text(&result, "m"), "yo");
+    }
+
+    #[tokio::test]
+    async fn no_message_gives_undefined_message() {
+        let mut reply = grpc_reply();
+        reply.messages.clear();
+        let host = GrpcHost::answering(Ok(reply));
+        let result = run_with(
+            &host,
+            dev_ctx(
+                "const r = await rok.grpc.run('p'); rok.setVar('m', String(r.message) + r.messages.length);",
+            ),
+        )
+        .await;
+        assert_eq!(var_text(&result, "m"), "undefined0");
+    }
+
+    #[tokio::test]
+    async fn callback_form_receives_error_and_result() {
+        let host = GrpcHost::ok();
+        let ctx = dev_ctx(
+            "await new Promise((resolve) => rok.grpc.run('p', {}, (err, res) => { \
+               rok.setVar('ok', String(err) + '|' + res.status.name); resolve(); })); \
+             await new Promise((resolve) => rok.grpc.call({ url: '' }, (err, res) => { \
+               rok.setVar('bad', err.message + '|' + String(res)); resolve(); }));",
+        );
+        let result = run_with(&host, ctx).await;
+        assert_eq!(var_text(&result, "ok"), "null|OK");
+        let bad = var_text(&result, "bad");
+        assert!(
+            bad.starts_with("rok.grpc.call:") && bad.ends_with("|null"),
+            "{bad}"
+        );
+    }
+
+    #[tokio::test]
+    async fn non_object_message_element_rejects() {
+        for code in [
+            "await rok.grpc.run('p', { messages: [1] });",
+            "await rok.grpc.run('p', { messages: {} });",
+            "await rok.grpc.run('p', { messages: [null] });",
+            "await rok.grpc.run('p', { message: 'x' });",
+        ] {
+            let (message, was_type_error, host) = caught_typed(code).await;
+            assert!(was_type_error, "{code}");
+            assert!(message.starts_with("rok.grpc.run:"), "{code}: {message}");
+            assert!(host.seen().is_empty(), "{code}");
+        }
+    }
+
+    #[tokio::test]
+    async fn non_ok_status_resolves_and_host_failure_rejects_with_prefix() {
+        let mut reply = grpc_reply();
+        reply.status = HostGrpcStatus {
+            code: 5,
+            name: "NOT_FOUND".into(),
+            message: "nope".into(),
+        };
+        let host = GrpcHost::answering(Ok(reply));
+        let result = run_with(
+            &host,
+            dev_ctx("const r = await rok.grpc.run('p'); rok.setVar('n', r.status.name);"),
+        )
+        .await;
+        assert_eq!(var_text(&result, "n"), "NOT_FOUND");
+        let failing = GrpcHost::answering(Err(HostError::Failed("rok.grpc: boom".into())));
+        let result = run_with(
+            &failing,
+            dev_ctx(
+                "try { await rok.grpc.call({ url: 'u', service: 's', method: 'm', protoFile: 'f' }); } \
+                 catch (e) { rok.setVar('e', e.message); }",
+            ),
+        )
+        .await;
+        assert_eq!(var_text(&result, "e"), "rok.grpc.call: boom");
+    }
+
+    #[tokio::test]
+    async fn a_non_json_host_message_rejects_without_quoting_it() {
+        let mut reply = grpc_reply();
+        reply.messages = vec!["{\"ok\":1}".into(), "SECRET-not-json".into()];
+        let host = GrpcHost::answering(Ok(reply));
+        let result = run_with(
+            &host,
+            dev_ctx(
+                "try { await rok.grpc.run('p'); } catch (e) { rok.setVar('e', e.message); \
+                 rok.setVar('syn', e instanceof SyntaxError); }",
+            ),
+        )
+        .await;
+        let message = var_text(&result, "e");
+        assert_eq!(
+            message,
+            "rok.grpc.run: response message 1 is not valid JSON"
+        );
+        assert!(!message.contains("SECRET"));
+        assert_eq!(result.runtime_vars.get("syn").expect("syn"), false);
+    }
+
+    #[tokio::test]
+    async fn an_unawaited_grpc_call_does_not_hang_the_run() {
+        let host = GrpcHost::ok();
+        let ctx = dev_ctx("rok.grpc.run('p'); rok.setVar('done', 1);");
+        let result = tokio::time::timeout(Duration::from_secs(10), run_with(&host, ctx))
+            .await
+            .expect("run must not hang");
+        assert_eq!(result.runtime_vars.get("done").expect("done"), 1);
+    }
+
+    #[tokio::test]
+    async fn bad_ad_hoc_fields_reject_before_the_host() {
+        for opts in [
+            "{ url: 'u', service: 's', method: 'm' }",
+            "{ url: 'u', service: '', method: 'm', protoFile: 'f' }",
+            "{ url: 'u', service: 's', method: 'm', protoFile: 'f', tls: 'yes' }",
+            "undefined",
+        ] {
+            let (message, host) = caught(&format!("await rok.grpc.call({opts});")).await;
+            assert!(message.starts_with("rok.grpc.call:"), "{opts}: {message}");
+            assert!(host.seen().is_empty(), "{opts}");
+        }
+        let (message, host) = caught("await rok.grpc.run('  ');").await;
+        assert!(message.starts_with("rok.grpc.run:"), "{message}");
         assert!(host.seen().is_empty());
     }
 

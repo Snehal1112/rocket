@@ -62,6 +62,120 @@
     return { status: r.status, statusText: r.status_text, headers, data, responseTime: r.response_time_ms };
   }
 
+  // The result of rok.grpc, as the script sees it. Header names are lowercase.
+  function _grpcResult(r) {
+    const pairs = (list) => {
+      const out = {};
+      for (const [k, v] of list) out[String(k).toLowerCase()] = v;
+      return out;
+    };
+    const messages = r.messages.map((text, i) => {
+      try { return JSON.parse(text); } catch (_e) { throw Object.assign(new Error('bad'), { grpcIndex: i }); }
+    });
+    return {
+      status: { code: r.status.code, name: r.status.name, message: r.status.message },
+      message: messages.length > 0 ? messages[0] : undefined,
+      messages,
+      headers: pairs(r.headers),
+      trailers: pairs(r.trailers),
+      truncated: r.truncated,
+    };
+  }
+
+  function _grpcIsObject(v) {
+    return v !== null && typeof v === 'object' && !Array.isArray(v);
+  }
+
+  // Validates the arguments, calls the op and maps the answer. Every failure
+  // carries the api prefix. Nothing reaches the host when validation fails.
+  async function _grpc(api, target, options) {
+    const opts = options === undefined || options === null ? {} : options;
+    if (!_grpcIsObject(opts)) throw new TypeError(`${api}: options must be an object`);
+    if (opts.message !== undefined && opts.messages !== undefined) {
+      throw new TypeError(`${api}: give message or messages, not both`);
+    }
+    let list = [];
+    if (opts.messages !== undefined) {
+      if (!Array.isArray(opts.messages)) throw new TypeError(`${api}: messages must be an array`);
+      list = opts.messages;
+    } else if (opts.message !== undefined) {
+      list = [opts.message];
+    }
+    const messages = list.map((m, i) => {
+      if (!_grpcIsObject(m)) throw new TypeError(`${api}: message ${i} must be an object`);
+      return JSON.stringify(m);
+    });
+    const metadata = [];
+    if (opts.metadata !== undefined && opts.metadata !== null) {
+      if (!_grpcIsObject(opts.metadata)) throw new TypeError(`${api}: metadata must be an object`);
+      for (const [k, v] of Object.entries(opts.metadata)) {
+        if (typeof v !== 'string') throw new TypeError(`${api}: metadata value for ${k} must be a string`);
+        metadata.push([k.toLowerCase(), v]);
+      }
+    }
+    let timeoutMs = null;
+    if (opts.timeoutMs !== undefined && opts.timeoutMs !== null) {
+      if (typeof opts.timeoutMs !== 'number' || !Number.isFinite(opts.timeoutMs) || opts.timeoutMs <= 0) {
+        throw new TypeError(`${api}: timeoutMs must be a finite number greater than 0`);
+      }
+      timeoutMs = Math.max(1, Math.floor(opts.timeoutMs));
+    }
+    let out;
+    try {
+      out = JSON.parse(await __ops.op_rok_grpc(JSON.stringify({ target, messages, metadata, timeoutMs })));
+    } catch (e) {
+      const text = String((e && e.message) || e);
+      const bare = text.startsWith('rok.grpc: ') ? text.slice('rok.grpc: '.length) : text;
+      throw new Error(`${api}: ${bare}`);
+    }
+    try {
+      return _grpcResult(out);
+    } catch (e) {
+      // The parse error text can quote the message, so only the index is reported.
+      throw new Error(`${api}: response message ${e && e.grpcIndex !== undefined ? e.grpcIndex : '?'} is not valid JSON`);
+    }
+  }
+
+  function _grpcNonEmpty(api, name, value) {
+    if (typeof value !== 'string' || value.trim() === '') {
+      throw new TypeError(`${api}: ${name} must be a non-empty string`);
+    }
+  }
+
+  // Runs `work` and gives the answer as a Promise, or to a Node-style callback.
+  function _grpcCallback(work, callback) {
+    const done = (async () => work())();
+    if (typeof callback !== 'function') return done;
+    return done.then((res) => callback(null, res), (err) => callback(err, null));
+  }
+
+  const _grpcApi = {
+    run: (path, options, callback) => {
+      if (typeof options === 'function') { callback = options; options = undefined; }
+      return _grpcCallback(() => {
+        _grpcNonEmpty('rok.grpc.run', 'path', path);
+        return _grpc('rok.grpc.run', { kind: 'saved', path }, options);
+      }, callback);
+    },
+    call: (options, callback) => _grpcCallback(() => {
+      const api = 'rok.grpc.call';
+      if (!_grpcIsObject(options)) throw new TypeError(`${api}: options must be an object`);
+      for (const name of ['url', 'service', 'method', 'protoFile']) _grpcNonEmpty(api, name, options[name]);
+      if (options.tls !== undefined && typeof options.tls !== 'boolean') {
+        throw new TypeError(`${api}: tls must be a boolean`);
+      }
+      const target = {
+        kind: 'adHoc',
+        url: options.url,
+        service: options.service,
+        method: options.method,
+        protoFile: options.protoFile,
+        tls: options.tls === true,
+      };
+      return _grpc(api, target, options);
+    }, callback),
+  };
+
   function _sendOptions(options) {
     if (!options || typeof options !== 'object') {
       throw new TypeError('rok.sendRequest: options must be an object');
@@ -362,6 +476,7 @@
       if (out.response === null) return { status: 'skipped' };
       return _hostResponse(out.response);
     },
+    grpc: _grpcApi,
     cookies: _cookies,
     runner: {
       setNextRequest: (name)  => __ops.op_rok_set_next_request(name == null ? "" : String(name)),

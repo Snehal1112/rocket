@@ -5,8 +5,8 @@
 //! `run_script_bounded` in `engine.rs` serves it on the caller's task.
 
 use rocket_scripting::{
-    HostCookieOp, HostCookieResult, HostError, HostRequest, HostResponse, HostRunOutcome,
-    HostRunRequest, ScriptHost,
+    HostCookieOp, HostCookieResult, HostError, HostGrpcRequest, HostGrpcResponse, HostRequest,
+    HostResponse, HostRunOutcome, HostRunRequest, ScriptHost,
 };
 use tokio::sync::{mpsc, oneshot};
 
@@ -21,6 +21,11 @@ pub enum HostCall {
     Run {
         request: HostRunRequest,
         reply: oneshot::Sender<Result<HostRunOutcome, HostError>>,
+    },
+    /// `rok.grpc`.
+    Grpc {
+        request: HostGrpcRequest,
+        reply: oneshot::Sender<Result<HostGrpcResponse, HostError>>,
     },
     /// `rok.cookies` and `rok.cookies.jar()`.
     Cookies {
@@ -40,6 +45,9 @@ pub async fn serve_host_call(host: &dyn ScriptHost, call: HostCall) {
         }
         HostCall::Run { request, reply } => {
             let _ = reply.send(host.run_request(request).await);
+        }
+        HostCall::Grpc { request, reply } => {
+            let _ = reply.send(host.grpc(request).await);
         }
         HostCall::Cookies { op, reply } => {
             let _ = reply.send(host.cookies(op).await);
