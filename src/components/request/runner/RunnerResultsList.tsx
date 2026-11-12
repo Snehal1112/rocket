@@ -10,6 +10,7 @@ import { useState } from 'react';
 import { TestsPanel } from '@/components/response/TestsPanel';
 import { EmptyState } from '@/components/ui/empty-state';
 import { METHOD_TEXT_COLOR, statusTextColor } from '@/lib/colors';
+import { getRunnerPasses } from '@/lib/runner-summary';
 import { cn } from '@/lib/utils';
 import type { RunnerRequestEntry, RunnerTab } from '@/types/pane-types';
 import { runnerScopeLabel } from './runner-scope';
@@ -97,6 +98,25 @@ export function RunnerResultsList({ tab }: { tab: RunnerTab }) {
         title='Nothing was run'
         reason={`${runnerScopeLabel(tab)} has no requests.`}
       />
+    );
+  }
+
+  const passes = getRunnerPasses(tab);
+  if (passes) {
+    const total = tab.iterationData?.rows.length ?? passes.length;
+    return (
+      <div className='flex-1 overflow-auto'>
+        {passes.map((pass) => (
+          <section key={pass.iteration} aria-label={`Pass ${pass.iteration + 1} of ${total}`}>
+            <h3 className='sticky top-0 z-10 border-b bg-muted px-3 py-1.5 text-xs font-medium text-muted-foreground'>
+              Pass {pass.iteration + 1} of {total}
+            </h3>
+            {pass.requests.map((entry) => (
+              <ResultRow key={entry.requestPath} entry={entry} />
+            ))}
+          </section>
+        ))}
+      </div>
     );
   }
 

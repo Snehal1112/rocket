@@ -155,6 +155,16 @@ export interface RunnerTab extends BaseTab {
   // safe: the old loop's next write sees a mismatched id and becomes a
   // no-op instead of racing the new run and overwriting its results.
   runId?: number;
+  /** The per-run data file the user picked. It wins over the saved default. */
+  dataFilePath?: string;
+  /** Loaded when Run is pressed and kept for Re-run. */
+  iterationData?: import('@/lib/tauri-api').IterationData;
+  /** The zero-based pass that is running. */
+  iterationIndex?: number;
+  /** Finished passes, zero-based, oldest first. The running pass lives in `requests`. */
+  completedPasses?: { iteration: number; requests: RunnerRequestEntry[] }[];
+  /** Why the data file could not be loaded. Nothing was sent. */
+  dataFileError?: string;
 }
 
 export function isRunnerTab(tab: Tab): tab is RunnerTab {

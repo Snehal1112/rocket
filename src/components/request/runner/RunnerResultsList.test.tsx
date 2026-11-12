@@ -95,4 +95,29 @@ describe('RunnerResultsList', () => {
     fireEvent.click(screen.getByText('A'));
     expect(screen.getByText('status is 200')).toBeInTheDocument();
   });
+
+  it('groups results under Pass headings when the run has a data file', () => {
+    const base = tab([entry({ status: 'passed' })]);
+    render(
+      <RunnerResultsList
+        tab={{
+          ...base,
+          iterationData: { columns: ['id'], rows: [{}, {}, {}], source: 'perRun', fileName: 'r.csv' },
+          completedPasses: [
+            { iteration: 0, requests: [entry({ status: 'passed' })] },
+            { iteration: 1, requests: [entry({ status: 'failed' })] },
+            { iteration: 2, requests: [entry({ status: 'skipped' })] },
+          ],
+        }}
+      />,
+    );
+    expect(screen.getByText('Pass 1 of 3')).toBeInTheDocument();
+    expect(screen.getByText('Pass 2 of 3')).toBeInTheDocument();
+    expect(screen.getByText('Pass 3 of 3')).toBeInTheDocument();
+  });
+
+  it('shows a plain list without Pass headings when there is no data file', () => {
+    render(<RunnerResultsList tab={tab([entry({ status: 'passed' })])} />);
+    expect(screen.queryByText(/^Pass \d/)).not.toBeInTheDocument();
+  });
 });

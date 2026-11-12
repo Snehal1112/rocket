@@ -7,8 +7,13 @@ import { RunnerPane } from './RunnerPane';
 
 vi.mock('@/lib/tauri-api', async () => {
   const actual = await vi.importActual<typeof import('@/lib/tauri-api')>('@/lib/tauri-api');
-  return { ...actual, listCollections: vi.fn(), getCollection: vi.fn() };
+  return { ...actual, listCollections: vi.fn(), getCollection: vi.fn(), loadIterationData: vi.fn() };
 });
+
+const mockOpen = vi.fn();
+vi.mock('@tauri-apps/plugin-dialog', () => ({
+  open: (...args: unknown[]) => mockOpen(...args),
+}));
 
 beforeAll(() => {
   HTMLElement.prototype.hasPointerCapture = vi.fn(() => false);
@@ -42,9 +47,11 @@ function scopedTab(runState: RunnerTab['runState'] = 'idle'): RunnerTab {
 }
 
 describe('RunnerPane', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     usePaneStore.getState().reset();
     vi.clearAllMocks();
+    const { loadIterationData } = await import('@/lib/tauri-api');
+    vi.mocked(loadIterationData).mockResolvedValue(null);
   });
 
   it('shows a collection picker when collectionName is null', async () => {
@@ -137,5 +144,85 @@ describe('RunnerPane', () => {
     }));
     render(<RunnerPane tab={tab} groupId='g1' />);
     expect(screen.getByText('Nothing was run')).toBeInTheDocument(); // RunnerResultsList empty state
+  });
+
+  describe('data file row', () => {
+    function seed(tab: RunnerTab) {
+      usePaneStore.setState((s) => ({
+        root: { ...s.root, type: 'leaf', tabs: [tab], activeTabId: tab.id } as typeof s.root,
+      }));
+    }
+
+    it('shows a Data file row with a picker button', async () => {
+      const tab = scopedTab('idle');
+      seed(tab);
+      render(<RunnerPane tab={tab} groupId='g1' />);
+      expect(screen.getByText('Data file')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Choose data file' })).toBeInTheDocument();
+      expect(await screen.findByText(/goes once/i)).toBeInTheDocument();
+    });
+
+    it('shows the saved default as the file in use', async () => {
+      const { loadIterationData } = await import('@/lib/tauri-api');
+      vi.mocked(loadIterationData).mockResolvedValue({
+        columns: ['id'],
+        rows: [{ id: '1' }],
+        source: 'savedDefault',
+        fileName: 'users.csv',
+      });
+      const tab = scopedTab('idle');
+      seed(tab);
+      render(<RunnerPane tab={tab} groupId='g1' />);
+      expect(await screen.findByText(/using saved default/i)).toBeInTheDocument();
+      expect(screen.getByText(/users\.csv/)).toBeInTheDocument();
+    });
+
+    it('shows the row count and column names after a successful load', async () => {
+      const { loadIterationData } = await import('@/lib/tauri-api');
+      vi.mocked(loadIterationData).mockResolvedValue({
+        columns: ['id', 'email'],
+        rows: [{ id: '1', email: 'a' }, { id: '2', email: 'b' }, { id: '3', email: 'c' }],
+        source: 'perRun',
+        fileName: 'rows.csv',
+      });
+      const tab = { ...scopedTab('idle'), dataFilePath: '/tmp/rows.csv' };
+      seed(tab);
+      render(<RunnerPane tab={tab} groupId='g1' />);
+      expect(await screen.findByText(/3 rows/)).toBeInTheDocument();
+      expect(screen.getByText(/id, email/)).toBeInTheDocument();
+      expect(loadIterationData).toHaveBeenCalledWith('demo', '/tmp/rows.csv');
+    });
+
+    it('shows a warning when the saved default is invalid', async () => {
+      const { loadIterationData } = await import('@/lib/tauri-api');
+      vi.mocked(loadIterationData).mockRejectedValue('Row 3 has more cells than the header');
+      const tab = scopedTab('idle');
+      seed(tab);
+      render(<RunnerPane tab={tab} groupId='g1' />);
+      expect(await screen.findByText(/Row 3 has more cells than the header/)).toBeInTheDocument();
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+    });
+
+    it('stores the picked file on the tab', async () => {
+      const user = userEvent.setup();
+      mockOpen.mockResolvedValue('/tmp/picked.json');
+      const tab = scopedTab('idle');
+      seed(tab);
+      render(<RunnerPane tab={tab} groupId='g1' />);
+      await user.click(screen.getByRole('button', { name: 'Choose data file' }));
+      await waitFor(() => {
+        const stored = usePaneStore.getState().root;
+        const tabs = stored.type === 'leaf' ? stored.tabs : [];
+        expect(tabs[0] && 'dataFilePath' in tabs[0] ? tabs[0].dataFilePath : '').toBe(
+          '/tmp/picked.json',
+        );
+      });
+      expect(mockOpen).toHaveBeenCalledWith(
+        expect.objectContaining({
+          multiple: false,
+          filters: [{ name: 'Data files', extensions: ['csv', 'json'] }],
+        }),
+      );
+    });
   });
 });

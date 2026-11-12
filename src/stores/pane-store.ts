@@ -43,6 +43,9 @@ import {
   getCollection,
   getFlow,
   getRequest,
+  type IterationData,
+  type IterationInfo,
+  loadIterationData,
   type RequestExample,
   readScriptFile,
   renameRequest,
@@ -407,6 +410,8 @@ export interface PaneState {
   // Runner tab.
   openRunnerTab: (collectionName: string | null, folderPath?: string) => Promise<void>;
   toggleRunnerEntry: (tabId: string, requestPath: string) => void;
+  /** Sets or clears the per-run data file. Ignored while a run is going. */
+  setRunnerDataFile: (tabId: string, path: string | undefined) => void;
   startRun: (tabId: string) => Promise<void>;
   stopRun: (tabId: string) => void;
   rerunAll: (tabId: string) => Promise<void>;
@@ -461,6 +466,11 @@ export interface PaneState {
 // different tabs, get distinct ids, so a stale loop can never coincide with
 // a fresh one by chance.
 let runIdCounter = 0;
+
+// Puts a runner entry back to pending, without a result or error.
+function resetRunnerEntry(entry: RunnerRequestEntry): RunnerRequestEntry {
+  return { ...entry, status: 'pending', result: undefined, error: undefined };
+}
 
 export const usePaneStore = create<PaneState>((set, get) => ({
   ...buildInitialState(),
@@ -967,11 +977,21 @@ export const usePaneStore = create<PaneState>((set, get) => ({
     });
   },
 
+  setRunnerDataFile(tabId, path) {
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) => {
+        if (!isRunnerTab(tab) || tab.runState === 'running') return tab;
+        return { ...tab, dataFilePath: path, dataFileError: undefined };
+      }),
+    });
+  },
+
   async startRun(tabId) {
     const found = findTabInTree(get().root, tabId);
     if (!found || !isRunnerTab(found.tab) || !found.tab.collectionName) return;
     const collectionName = found.tab.collectionName;
     const entries = found.tab.requests;
+    const dataFilePath = found.tab.dataFilePath;
 
     // Assigning a fresh id here, and making every subsequent write in this
     // run conditional on it still matching, is what makes it safe to press
@@ -986,52 +1006,115 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       ),
     });
 
+    // A data file makes one pass per row. Without one there is a single pass
+    // and no iteration on any send.
+    let data: IterationData | null = null;
+    try {
+      data = (await loadIterationData(collectionName, dataFilePath)) ?? null;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      set({
+        root: updateTabInTree(get().root, tabId, (tab) => {
+          if (!isRunnerTab(tab) || tab.runId !== myRunId) return tab;
+          return { ...tab, runState: 'idle', dataFileError: message };
+        }),
+      });
+      return;
+    }
+    const totalPasses = data ? data.rows.length : 1;
+
+    set({
+      root: updateTabInTree(get().root, tabId, (tab) => {
+        if (!isRunnerTab(tab) || tab.runId !== myRunId) return tab;
+        return {
+          ...tab,
+          dataFileError: undefined,
+          iterationData: data ?? undefined,
+          iterationIndex: data ? 0 : undefined,
+          completedPasses: data ? [] : undefined,
+        };
+      }),
+    });
+
     const environmentName = useEnvStore.getState().activeEnvId ?? undefined;
 
-    for (const entry of entries) {
-      const live = findTabInTree(get().root, tabId);
-      if (
-        !live ||
-        !isRunnerTab(live.tab) ||
-        live.tab.runId !== myRunId ||
-        live.tab.runState !== 'running'
-      )
-        break;
-      if (!entry.included) continue;
+    // Passes that were closed into completedPasses.
+    let finishedPasses = 0;
+    let aborted = false;
 
+    for (let pass = 0; pass < totalPasses && !aborted; pass++) {
+      const iteration: IterationInfo | undefined = data
+        ? { index: pass, total: totalPasses, data: data.rows[pass] }
+        : undefined;
+
+      for (const entry of entries) {
+        const live = findTabInTree(get().root, tabId);
+        if (
+          !live ||
+          !isRunnerTab(live.tab) ||
+          live.tab.runId !== myRunId ||
+          live.tab.runState !== 'running'
+        ) {
+          aborted = true;
+          break;
+        }
+        if (!entry.included) continue;
+
+        set({
+          root: updateTabInTree(get().root, tabId, (tab) => {
+            if (!isRunnerTab(tab) || tab.runId !== myRunId) return tab;
+            return {
+              ...tab,
+              requests: tab.requests.map((e) =>
+                e.requestPath === entry.requestPath ? { ...e, status: 'running' } : e,
+              ),
+            };
+          }),
+        });
+
+        const outcome = await executeRunnerEntry(
+          collectionName,
+          entry.requestPath,
+          entry.request,
+          environmentName,
+          entry.graphql,
+          iteration,
+        );
+
+        set({
+          root: updateTabInTree(get().root, tabId, (tab) => {
+            if (!isRunnerTab(tab) || tab.runId !== myRunId) return tab;
+            return {
+              ...tab,
+              requests: tab.requests.map((e) =>
+                e.requestPath === entry.requestPath
+                  ? { ...e, status: outcome.status, result: outcome.result, error: outcome.error }
+                  : e,
+              ),
+            };
+          }),
+        });
+      }
+      if (aborted || !data) continue;
+
+      // Close the pass. The next pass starts again from pending.
+      const hasNext = pass + 1 < totalPasses;
       set({
         root: updateTabInTree(get().root, tabId, (tab) => {
           if (!isRunnerTab(tab) || tab.runId !== myRunId) return tab;
           return {
             ...tab,
-            requests: tab.requests.map((e) =>
-              e.requestPath === entry.requestPath ? { ...e, status: 'running' } : e,
-            ),
+            completedPasses: [
+              ...(tab.completedPasses ?? []),
+              { iteration: pass, requests: tab.requests },
+            ],
+            ...(hasNext
+              ? { iterationIndex: pass + 1, requests: tab.requests.map(resetRunnerEntry) }
+              : {}),
           };
         }),
       });
-
-      const outcome = await executeRunnerEntry(
-        collectionName,
-        entry.requestPath,
-        entry.request,
-        environmentName,
-        entry.graphql,
-      );
-
-      set({
-        root: updateTabInTree(get().root, tabId, (tab) => {
-          if (!isRunnerTab(tab) || tab.runId !== myRunId) return tab;
-          return {
-            ...tab,
-            requests: tab.requests.map((e) =>
-              e.requestPath === entry.requestPath
-                ? { ...e, status: outcome.status, result: outcome.result, error: outcome.error }
-                : e,
-            ),
-          };
-        }),
-      });
+      finishedPasses += 1;
     }
 
     set({
@@ -1040,7 +1123,22 @@ export const usePaneStore = create<PaneState>((set, get) => ({
         const requests = tab.requests.map((e) =>
           e.status === 'pending' ? { ...e, status: 'skipped' as const } : e,
         );
-        return { ...tab, runState: tab.runState === 'stopped' ? 'stopped' : 'done', requests };
+        const runState = tab.runState === 'stopped' ? 'stopped' : 'done';
+        if (!data || finishedPasses >= totalPasses) return { ...tab, runState, requests };
+        // Stop ended the run early: the open pass and every later pass are skipped.
+        const skippedPasses = [{ iteration: finishedPasses, requests }];
+        for (let later = finishedPasses + 1; later < totalPasses; later++) {
+          skippedPasses.push({
+            iteration: later,
+            requests: requests.map((e) => ({ ...resetRunnerEntry(e), status: 'skipped' as const })),
+          });
+        }
+        return {
+          ...tab,
+          runState,
+          requests,
+          completedPasses: [...(tab.completedPasses ?? []), ...skippedPasses],
+        };
       }),
     });
   },
@@ -1060,12 +1158,10 @@ export const usePaneStore = create<PaneState>((set, get) => ({
         return {
           ...tab,
           runState: 'idle',
-          requests: tab.requests.map((e) => ({
-            ...e,
-            status: 'pending' as const,
-            result: undefined,
-            error: undefined,
-          })),
+          requests: tab.requests.map(resetRunnerEntry),
+          completedPasses: undefined,
+          iterationIndex: undefined,
+          dataFileError: undefined,
         };
       }),
     });

@@ -596,6 +596,21 @@ export interface PathParam {
   description?: string;
 }
 
+/** The data row a send runs for. Scripts read it through `rok.runner.iterationData`. */
+export interface IterationInfo {
+  index: number;
+  total: number;
+  data: Record<string, string>;
+}
+
+/** A loaded CSV or JSON data file. */
+export interface IterationData {
+  columns: string[];
+  rows: Record<string, string>[];
+  source: 'perRun' | 'savedDefault';
+  fileName: string;
+}
+
 export interface ExecuteRequestInput {
   method: HttpMethod;
   url: string;
@@ -626,6 +641,8 @@ export interface ExecuteRequestInput {
   runSource?: RunSource;
   /** The host environment scope of the send, used for an inherited OAuth2 auth. */
   processEnv: ProcessEnvScopeInput;
+  /** The data row of a run that loops over a data file. Absent for a single pass. */
+  iteration?: IterationInfo;
 }
 
 export interface FileChangedEvent {
@@ -1232,6 +1249,10 @@ export type ExportFormat = 'html' | 'csv' | 'json' | 'pdf';
 // ============================================================
 // Request execution
 // ============================================================
+
+/** Loads the per-run data file, or the saved default when no path is given. Null when there is none. */
+export const loadIterationData = (collection: string, perRunPath?: string) =>
+  invoke<IterationData | null>('load_iteration_data', { collection, perRunPath });
 
 export const executeRequest = (input: ExecuteRequestInput) =>
   invoke<ExecuteRequestResponse>('execute_request', { input });

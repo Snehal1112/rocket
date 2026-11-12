@@ -77,6 +77,24 @@ describe('executeRunnerEntry', () => {
     );
   });
 
+  it('sends the iteration row with the request', async () => {
+    vi.mocked(executeRequest).mockResolvedValue({
+      status: 200,
+      statusText: 'OK',
+      headers: [],
+      body: '',
+      durationMs: 10,
+      ttfbMs: 5,
+      sizeBytes: 0,
+      testResults: [],
+      consoleEntries: [],
+      scriptError: null,
+    });
+    const iteration = { index: 1, total: 3, data: { id: '2' } };
+    await executeRunnerEntry('demo', 'ping.yml', baseRequest(), undefined, undefined, iteration);
+    expect(executeRequest).toHaveBeenCalledWith(expect.objectContaining({ iteration }));
+  });
+
   it('reports failed for a non-2xx response', async () => {
     vi.mocked(executeRequest).mockResolvedValue({
       status: 500,

@@ -12,6 +12,7 @@ import {
   executeGraphQlRequest,
   executeRequest,
   type GraphQlRequest,
+  type IterationInfo,
   type Request,
 } from '@/lib/tauri-api';
 
@@ -30,6 +31,7 @@ export async function executeRunnerEntry(
   request: Request,
   environmentName: string | undefined,
   graphql?: GraphQlRequest,
+  iteration?: IterationInfo,
 ): Promise<RunnerExecutionOutcome> {
   try {
     const requestState = graphql ? mapGraphQlToState(graphql) : mapApiRequestToState(request, true);
@@ -60,6 +62,7 @@ export async function executeRunnerEntry(
       requestGuardPolicy,
       runSource: 'runner',
       processEnv: { kind: 'collection', name: collection },
+      iteration,
     };
 
     const result = graphql

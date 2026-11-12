@@ -11,6 +11,7 @@ import { getRunnerFolderOptions, type RunnerFolderOption } from '@/lib/runner-fl
 import { type CollectionSummary, getCollection, listCollections } from '@/lib/tauri-api';
 import { usePaneStore } from '@/stores/pane-store';
 import type { RunnerTab } from '@/types/pane-types';
+import { RunnerDataFileRow } from './RunnerDataFileRow';
 import { RunnerRequestList } from './RunnerRequestList';
 import { RunnerResultsList } from './RunnerResultsList';
 import { RunnerSummaryHeader } from './RunnerSummaryHeader';
@@ -108,6 +109,7 @@ export function RunnerPane({ tab, groupId }: { tab: RunnerTab; groupId: string }
   return (
     <div className='flex flex-col h-full'>
       <RunnerSummaryHeader tab={tab} />
+      <RunnerDataFileRow tab={tab} collection={tab.collectionName} />
       {tab.runState === 'idle' ? <RunnerRequestList tab={tab} /> : <RunnerResultsList tab={tab} />}
     </div>
   );

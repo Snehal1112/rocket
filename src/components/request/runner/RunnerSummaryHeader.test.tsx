@@ -93,4 +93,16 @@ describe('RunnerSummaryHeader', () => {
     render(<RunnerSummaryHeader tab={tab([entry({ status: 'passed' })], 'done')} />);
     expect(screen.getByRole('button', { name: /re-run/i })).toBeInTheDocument();
   });
+
+  it('shows the pass counter while a data-file run is going', () => {
+    const t = {
+      ...tab([entry({ status: 'running' })], 'running'),
+      iterationData: { columns: ['id'], rows: [{}, {}, {}], source: 'perRun' as const, fileName: 'r.csv' },
+      iterationIndex: 1,
+      completedPasses: [{ iteration: 0, requests: [entry({ status: 'passed' })] }],
+    };
+    seedStore(t);
+    render(<RunnerSummaryHeader tab={t} />);
+    expect(screen.getByText('Pass 2 of 3')).toBeInTheDocument();
+  });
 });

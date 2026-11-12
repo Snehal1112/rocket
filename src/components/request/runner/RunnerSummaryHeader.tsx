@@ -11,6 +11,7 @@ export function RunnerSummaryHeader({ tab }: { tab: RunnerTab }) {
 
   const summary = getRunnerSummary(tab);
   const isRunning = tab.runState === 'running';
+  const totalPasses = tab.iterationData?.rows.length;
   const isFinished = tab.runState === 'done' || tab.runState === 'stopped';
 
   return (
@@ -20,6 +21,13 @@ export function RunnerSummaryHeader({ tab }: { tab: RunnerTab }) {
           ? 'No requests'
           : `${summary.passed + summary.failed + summary.skipped} / ${summary.included} complete`}
       </span>
+      {totalPasses !== undefined && (
+        <span className='text-muted-foreground'>
+          {isRunning
+            ? `Pass ${(tab.iterationIndex ?? 0) + 1} of ${totalPasses}`
+            : `${totalPasses} ${totalPasses === 1 ? 'pass' : 'passes'}`}
+        </span>
+      )}
       {summary.passed > 0 && (
         <span className='text-green-600 dark:text-green-400'>{summary.passed} passed</span>
       )}
