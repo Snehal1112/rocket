@@ -203,6 +203,16 @@ describe('RunnerPane', () => {
       expect(screen.getByRole('alert')).toBeInTheDocument();
     });
 
+    it('shows an error when the file dialog fails', async () => {
+      const user = userEvent.setup();
+      mockOpen.mockRejectedValue(new Error('no dialog'));
+      const tab = scopedTab('idle');
+      seed(tab);
+      render(<RunnerPane tab={tab} groupId='g1' />);
+      await user.click(screen.getByRole('button', { name: 'Choose data file' }));
+      expect(await screen.findByText(/Could not open the file dialog: no dialog/)).toBeInTheDocument();
+    });
+
     it('stores the picked file on the tab', async () => {
       const user = userEvent.setup();
       mockOpen.mockResolvedValue('/tmp/picked.json');

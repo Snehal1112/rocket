@@ -884,6 +884,42 @@ describe('Runner tab actions', () => {
       expect(tab.runState).toBe('idle');
     });
 
+    it('a_closed_pass_keeps_its_identity_while_later_passes_run', async () => {
+      const { executeRunnerEntry } = await import('@/lib/runner-execute');
+      await setData(rowsData(3));
+      const seen: unknown[] = [];
+      vi.mocked(executeRunnerEntry).mockImplementation(async () => {
+        seen.push(runnerTab().completedPasses?.[0]);
+        return { status: 'passed', result: undefined };
+      });
+
+      const tabId = await openTwoRequestRunnerTab();
+      await usePaneStore.getState().startRun(tabId);
+
+      const first = seen.filter((p) => p !== undefined);
+      expect(first.length).toBeGreaterThan(1);
+      expect(new Set(first).size).toBe(1);
+      expect(runnerTab().completedPasses?.[0]).toBe(first[0]);
+    });
+
+    it('a_load_error_clears_the_previous_run_data', async () => {
+      const { loadIterationData } = await import('@/lib/tauri-api');
+      const { executeRunnerEntry } = await import('@/lib/runner-execute');
+      vi.mocked(executeRunnerEntry).mockResolvedValue({ status: 'passed', result: undefined });
+      await setData(rowsData(2));
+      const tabId = await openTwoRequestRunnerTab();
+      await usePaneStore.getState().startRun(tabId);
+      expect(runnerTab().iterationData).toBeDefined();
+
+      vi.mocked(loadIterationData).mockRejectedValue('bad file');
+      await usePaneStore.getState().rerunAll(tabId);
+
+      const tab = runnerTab();
+      expect(tab.iterationData).toBeUndefined();
+      expect(tab.completedPasses).toBeUndefined();
+      expect(tab.dataFileError).toBe('bad file');
+    });
+
     it('rerunAll_starts_again_from_pass_one', async () => {
       const { executeRunnerEntry } = await import('@/lib/runner-execute');
       vi.mocked(executeRunnerEntry).mockResolvedValue({ status: 'passed', result: undefined });

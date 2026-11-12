@@ -1,5 +1,5 @@
 import { open } from '@tauri-apps/plugin-dialog';
-import { FileSpreadsheet, TriangleAlert, X } from 'lucide-react';
+import { FileSpreadsheet, FolderOpen, TriangleAlert, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { type IterationData, loadIterationData } from '@/lib/tauri-api';
@@ -25,6 +25,7 @@ function rowsLabel(count: number): string {
 export function RunnerDataFileRow({ tab, collection }: { tab: RunnerTab; collection: string }) {
   const setRunnerDataFile = usePaneStore((s) => s.setRunnerDataFile);
   const [preview, setPreview] = useState<Preview>({ kind: 'loading' });
+  const [pickError, setPickError] = useState<string>();
   const dataFilePath = tab.dataFilePath;
   const isRunning = tab.runState === 'running';
 
@@ -44,6 +45,7 @@ export function RunnerDataFileRow({ tab, collection }: { tab: RunnerTab; collect
   }, [collection, dataFilePath]);
 
   const pick = async () => {
+    setPickError(undefined);
     try {
       const selected = await open({
         multiple: false,
@@ -52,11 +54,12 @@ export function RunnerDataFileRow({ tab, collection }: { tab: RunnerTab; collect
       });
       if (typeof selected === 'string') setRunnerDataFile(tab.id, selected);
     } catch (err) {
-      console.error('[RunnerDataFileRow] failed to open the file dialog', err);
+      setPickError(`Could not open the file dialog: ${errorMessage(err)}`);
     }
   };
 
-  const error = tab.dataFileError ?? (preview.kind === 'error' ? preview.message : undefined);
+  const error =
+    pickError ?? tab.dataFileError ?? (preview.kind === 'error' ? preview.message : undefined);
   const hasOverride = Boolean(dataFilePath);
 
   let status: string;
@@ -83,7 +86,9 @@ export function RunnerDataFileRow({ tab, collection }: { tab: RunnerTab; collect
         >
           <TriangleAlert className='h-3.5 w-3.5 shrink-0' />
           <span className='truncate'>
-            {hasOverride ? error : `The saved default data file cannot be read: ${error}`}
+            {hasOverride || pickError
+              ? error
+              : `The saved default data file cannot be read: ${error}`}
           </span>
         </span>
       ) : (
@@ -104,14 +109,8 @@ export function RunnerDataFileRow({ tab, collection }: { tab: RunnerTab; collect
             <X className='h-3.5 w-3.5' />
           </Button>
         )}
-        <Button
-          size='sm'
-          variant='outline'
-          disabled={isRunning}
-          aria-label='Choose data file'
-          onClick={() => void pick()}
-        >
-          Choose file
+        <Button size='sm' variant='outline' disabled={isRunning} onClick={() => void pick()}>
+          <FolderOpen className='h-3.5 w-3.5 mr-1.5' /> Choose data file
         </Button>
       </div>
     </div>

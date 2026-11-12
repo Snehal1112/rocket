@@ -467,6 +467,11 @@ export interface PaneState {
 // a fresh one by chance.
 let runIdCounter = 0;
 
+// A closed pass shows entries that did not run (excluded ones) as skipped.
+function skipPendingRunnerEntry(entry: RunnerRequestEntry): RunnerRequestEntry {
+  return entry.status === 'pending' ? { ...entry, status: 'skipped' } : entry;
+}
+
 // Puts a runner entry back to pending, without a result or error.
 function resetRunnerEntry(entry: RunnerRequestEntry): RunnerRequestEntry {
   return { ...entry, status: 'pending', result: undefined, error: undefined };
@@ -1016,7 +1021,15 @@ export const usePaneStore = create<PaneState>((set, get) => ({
       set({
         root: updateTabInTree(get().root, tabId, (tab) => {
           if (!isRunnerTab(tab) || tab.runId !== myRunId) return tab;
-          return { ...tab, runState: 'idle', dataFileError: message };
+          return {
+            ...tab,
+            // Stop pressed during the load stays stopped.
+            runState: tab.runState === 'stopped' ? 'stopped' : 'idle',
+            dataFileError: message,
+            iterationData: undefined,
+            iterationIndex: undefined,
+            completedPasses: undefined,
+          };
         }),
       });
       return;
@@ -1106,7 +1119,8 @@ export const usePaneStore = create<PaneState>((set, get) => ({
             ...tab,
             completedPasses: [
               ...(tab.completedPasses ?? []),
-              { iteration: pass, requests: tab.requests },
+              // A closed pass is never recreated, so views can skip it.
+              { iteration: pass, requests: tab.requests.map(skipPendingRunnerEntry) },
             ],
             ...(hasNext
               ? { iterationIndex: pass + 1, requests: tab.requests.map(resetRunnerEntry) }
