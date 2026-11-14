@@ -626,8 +626,9 @@ Each item in `items[]` maps to a separate `.yml` file on disk.
 Priority order (highest → lowest):
 
 ```
-7. Runtime Variables      set by scripts at send time; stored in memory only
-6. Request Variables      runtime.variables[] in the request .yml
+8. Runtime Variables      set by scripts at send time; stored in memory only
+7. Request Variables      runtime.variables[] in the request .yml
+6. Data Columns           current row of a runner data file (Rocket extension, passes only)
 5. Folder Variables       request.variables[] in folder.yml (walk full parent chain; innermost wins)
 4. Environment Variables  active env in collection/environments/
 3. Collection Variables   request.variables[] in opencollection.yml
@@ -641,6 +642,7 @@ Priority order (highest → lowest):
 - For `Variable.value`, resolution uses `value ?? initialValue` — the `initialValue` field is the Git-committed shared value; `value` is the local override. (This is a RocketAPI convention layered on top of the spec's `VariableValue` type.)
 - Global environments are **regular `Environment` yml files** stored at the workspace level — they are NOT a special type.
 - Runtime variables exist in memory only — never serialised to disk.
+- Data columns (6) are a Rocket extension and are not in the OpenCollection schema. They exist only for a send inside a data-driven pass (`ExecuteRequestInput.iteration`), fill `{{column}}` placeholders only, and are never stored. A request or runtime variable of the same name wins. A column whose name starts with `process.env.` is never a variable. A column value is used literally (a `{{x}}` in it is not expanded). `rok.getVar` and `rok.interpolate` do not see columns. See `docs/features/runner-iteration-data.md`.
 
 ### 6.1 Headers, auth and scripts follow the same chain
 

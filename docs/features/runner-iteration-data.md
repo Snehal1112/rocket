@@ -1,12 +1,13 @@
 # Runner iteration data
 
-Run a collection or folder once per row of a CSV or JSON data file. Scripts read the current row. Roadmap item R-04. Spec: `docs/superpowers/specs/2026-11-12-runner-iteration-data-design.md`. Manual checks: `docs/manual-tests/runner-iteration-data.md` (open, nobody has run the app yet).
+Run a collection or folder once per row of a CSV or JSON data file. Scripts read the current row, and `{{column}}` placeholders fill from it. Roadmap items R-04 and R-84. Spec: `docs/superpowers/specs/2026-11-12-runner-iteration-data-design.md`. Manual checks: `docs/manual-tests/runner-iteration-data.md` (open, nobody has run the app yet).
 
 ## What the user gets
 
 - In the Runner tab, a "Data file" row. Choose a CSV or JSON file, or use the default saved in the collection settings.
 - The whole run set runs once per row. Results are grouped by pass (one section per row).
 - Scripts read the row with `rok.runner.iterationData`.
+- A `{{column}}` placeholder in a URL, header or body fills from the row (see "Columns as variables").
 - In the collection Overview tab, a "Runner" card with a "Runner data file" field for the saved default.
 
 ## Data files
@@ -56,6 +57,21 @@ Without a data file the values are `0`, `1` and an empty row.
 
 The row reaches the pre-request, post-response and tests scripts of a send. A nested `rok.runRequest` inherits the caller's row. Typings are in `src/components/editor/rok-types.ts`; the runtime is in `crates/rocket-infra/src/scripting/bootstrap.js`.
 
+## Columns as variables
+
+During a pass, every send fills `{{column}}` from the current row. This covers the Runner tab, `run_collection`, a nested `rok.runRequest` and `rok.grpc.run`. A send without a pass is unchanged.
+
+- Order: the row beats folder, environment and collection variables. A request variable and a runtime variable beat the row.
+- A column named `process.env.X` is never a variable. `rok.runner.iterationData.get` still returns it.
+- A column value is used literally. A `{{x}}` inside it is not expanded.
+- A column missing in the row leaves the placeholder unresolved. An empty cell fills with the empty string.
+- Scripts cannot read a column through `rok.getVar` or `rok.interpolate`. Use `rok.runner.iterationData`.
+- Text a script writes into the request (`req.setUrl('.../{{id}}')`) is not filled from the row.
+- Masking: a column named like a secret variable has its value masked in History and the Console. Other columns are not masked, so name a sensitive column like a secret variable.
+- A column named like a RocketVault key (`alias.secretName`) replaces it, as an environment variable does.
+
+Code: the `data` layer in `crates/rocket-environment/src/context.rs`, and `iteration_columns` in `crates/rocket-app/src/execution_service.rs`.
+
 ## Runner tab and backend runner
 
 The Runner tab does not call the backend runner. It loops in the frontend (`startRun` in `src/stores/pane-store.ts`) and sends each request with `ExecuteRequestInput.iteration`. The backend runner (`run_collection`, `CollectionRunnerService`) has the same row loop and more rules.
@@ -85,7 +101,7 @@ Bruno and Postman do not store a data file inside the collection. The saved defa
 
 ## Known limits and follow-ups
 
-- No `{{column}}` variables from the row yet. Scripts read the row. See R-84.
+- No column highlighting or completion in the editors. See R-97.
 - No row filters, no delay between rows, no data files in load tests or Flow. See R-85.
 - The Runner tab lacks the backend runner's extras (table above). See R-86.
 - `iterationData.unset(key)` is missing (see above).
