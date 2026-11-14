@@ -34,7 +34,7 @@ Flow: row (`input.iteration.data`) -> filtered column map -> new `data` layer of
 
 ### 1. A `data` layer in `rocket-environment`
 
-`VariableContext` gets `pub data: HashMap<String, String>`. `layers()` returns eight layers, lowest first: global_env, collection, external_secrets, env, folder, **data**, request, runtime. `flatten`, `flatten_with_process_env` and nested expansion read `layers()`, so they pick the layer up. Precedence is the user's decision: the row beats folder, environment and collection variables; a request variable and a runtime variable beat the row.
+`VariableContext` gets `pub data: HashMap<String, String>`. `layers()` returns eight layers, lowest first: global_env, collection, external_secrets, env, folder, **data**, request, runtime. `flatten` and `flatten_with_process_env` read `layers()`. Nested expansion (`is_expandable` in `nested.rs`) keeps its own list, which does not include `data`: row values are used literally. Precedence is the user's decision: the row beats folder, environment and collection variables; a request variable and a runtime variable beat the row.
 
 ### 2. A column filter in `rocket-app`
 
@@ -42,7 +42,7 @@ Flow: row (`input.iteration.data`) -> filtered column map -> new `data` layer of
 
 ### 3. Fill the layer on every send
 
-Where `build_variable_scopes` is followed by `expanded_send` for a send (`resolve_request_parts`, the second expansion after pre-request scripts, and `send_variable_map_pending`), set `scopes.data = iteration_columns(info)` when `input.iteration` is `Some`. The builder finds every such call with `rg "expanded_send\("` and treats a send path that skips the layer as a defect. The script scope state `var_ctx` (`:~2787`) must carry the layer too, because the second expansion (`second_pass_values`, `:489`) reads it. The layer is for placeholder expansion only: no `rok.*` getter returns a column, and the builder checks each getter against the layer list to keep it that way.
+Where `build_variable_scopes` is followed by `expanded_send` for a send (`resolve_request_parts`, the second expansion after pre-request scripts, and `send_variable_map_pending`), set `scopes.data = iteration_columns(info)` when `input.iteration` is `Some`. The builder finds every such call with `rg "expanded_send\("` and treats a send path that skips the layer as a defect. The layer is for placeholder expansion only. `rok.interpolate` resolves against `variables.flatten()` (`crates/rocket-infra/src/scripting/ops/rok.rs:207`), so the row must stay out of the variables handed to the script engine (`ScriptInputState`, built from `var_ctx` at `:~2787`). The second expansion (`second_pass_values`, `:489`) still needs the row: the builder passes the columns to it separately from the script state, for example as an extra map. No `rok.*` function (`getVar`, `interpolate`, the scope getters) returns a column.
 
 Example: row `{id: "7"}`, collection variable `id=1`, URL `https://x/{{id}}` -> `https://x/7`. With a request variable `id=9` the URL is `https://x/9`.
 
@@ -59,9 +59,11 @@ Add the layer to `docs/superpowers/specs/opencollection-spec-reference.md` secti
 | Column named `process.env.X` | Not offered as a variable. `rok.runner.iterationData.get` still returns it. |
 | Same name in request and row | The request variable wins. |
 | Same name as a runtime variable | The runtime variable wins. |
-| Nested value (`{{a}}` in an env value that mentions a column) | The column fills it, because expansion reads the merged layers. |
+| Env value that mentions a column (`{{a}}`) | The column fills it, because expansion reads the merged layers. The column value itself is not expanded. |
 | Send without a pass (`iteration` is `None`) | No change. |
-| Column value contains `{{x}}` | Expanded like any variable value (same nested rule). |
+| Column value contains `{{x}}` | Used literally, like a runtime value. `is_expandable` (`crates/rocket-environment/src/nested.rs:145-160`) does not list `data`, and a test pins it. |
+| Column name equals a secret variable name (`secret_keys`) | The row value is added to the masked values, so history and the Console mask it. |
+| Column name equals a RocketVault key (`alias.secretName`) | The column replaces it in top-level resolution, as an environment variable already does. This is intended. |
 | Column name with spaces or odd characters | Kept as written. It matches only a placeholder spelled the same. |
 
 ## Testing
@@ -78,6 +80,9 @@ Add the layer to `docs/superpowers/specs/opencollection-spec-reference.md` secti
 - `process_env_columns_are_not_variables`
 - `second_expansion_after_scripts_keeps_the_row`
 - `rok_get_var_does_not_return_a_column`
+- `rok_interpolate_does_not_return_a_column`
+- `column_value_with_placeholder_is_not_expanded`
+- `column_named_like_a_secret_variable_is_masked`
 - `send_without_iteration_is_unchanged`
 - `nested_run_request_fills_from_the_inherited_row`
 - `grpc_run_fills_from_the_row` (script host test)
@@ -106,7 +111,8 @@ Commands: `bun run tsc --noEmit` is not needed, there is no frontend change.
 - Columns named `process.env.*` never become variables.
 - A send without a pass behaves as before.
 - A nested `rok.runRequest` and `rok.grpc.run` fill from the same row.
-- Scripts cannot read a column through `rok.getVar`.
+- Scripts cannot read a column through `rok.getVar` or `rok.interpolate`.
+- A column value is not expanded, and a column named like a secret variable is masked.
 - Docs and the roadmap row are updated.
 
 ## Out of scope
@@ -123,4 +129,6 @@ Column highlighting in editors, secret columns, filters and delays (R-85), runne
 - Can scripts read a column as a variable? Options: no, only `{{col}}`; also `rok.getVar`; as runtime vars. Chosen: only `{{col}}`. Decided by: user
 - Which sends fill from the row? Options: every send in the pass; runner sends only; Runner tab only. Chosen: every send in the pass. Decided by: user
 - How are reserved `process.env.*` column names handled? Options: skip them; reject the file; allow. Chosen: skip them. Decided by: user
-- Are column values secret? Options: no, plain data; mask them. Chosen: plain data, not masked, because a data file is user content in the clear. Decided by: call
+- Are column values expanded when they contain `{{x}}`? Options: literal like runtime values; expanded like env values. Chosen: literal. Decided by: user
+- A column shares its name with a secret variable: what happens to the value? Options: mask it; skip the column; leave it unmasked. Chosen: mask it. Decided by: user
+- Other column values are plain data and not masked. Decided by: call
