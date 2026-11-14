@@ -147,7 +147,14 @@ impl<'a> Expander<'a> {
         if self.extra.contains_key(name) || ctx.runtime.contains_key(name) {
             return false;
         }
-        if [&ctx.request, &ctx.folder, &ctx.env]
+        if ctx.request.contains_key(name) {
+            return true;
+        }
+        // A row column is used as written, even when it shadows a folder or env value.
+        if ctx.data.contains_key(name) {
+            return false;
+        }
+        if [&ctx.folder, &ctx.env]
             .iter()
             .any(|layer| layer.contains_key(name))
         {

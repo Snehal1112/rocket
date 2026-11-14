@@ -3007,6 +3007,30 @@ async fn run_request_e2e_the_nested_run_inherits_the_callers_iteration() {
     assert_eq!(seen, 1);
 }
 
+#[tokio::test]
+async fn nested_run_request_fills_from_the_inherited_row() {
+    let collection = main_and_login_with(
+        "await rok.runRequest('auth/login');",
+        "",
+        "",
+        &[],
+        &[("X-Id", "{{id}}")],
+    );
+    let mut input = send_input(&collection, "main.yml");
+    input.iteration = Some(rocket_scripting::IterationInfo {
+        index: 0,
+        total: 1,
+        data: [("id".to_string(), "7".to_string())].into_iter().collect(),
+    });
+    let (svc, executor) = run_service(collection);
+    let out = svc.execute(input).await.expect("execute");
+    assert!(out.script_error.is_none(), "{:?}", out.script_error);
+    let filled = (0..2)
+        .filter_map(|i| sent_header(&executor, i, "X-Id"))
+        .collect::<Vec<_>>();
+    assert_eq!(filled, vec!["7".to_string()]);
+}
+
 // ── rok.grpc ─────────────────────────────────────────────────────────────────
 
 use rocket_collection::{GrpcMessage, GrpcMetadataEntry, GrpcRequest};
@@ -3383,6 +3407,26 @@ async fn grpc_fills_variables_from_scopes_and_runtime_vars() {
     let calls = fake.calls.lock().expect("lock");
     assert_eq!(calls[0].0.url, "env.test:443");
     assert!(calls[0].1.contains("ada-runtime"), "{}", calls[0].1);
+}
+
+#[tokio::test]
+async fn grpc_run_fills_from_the_row() {
+    let mut grpc = greet_request();
+    grpc.messages[0].content = "{\"name\":\"{{id}}\"}".into();
+    let (svc, fake) = grpc_service_over(grpc_collection(grpc), dev());
+    let mut req = grpc_input();
+    req.iteration = Some(rocket_scripting::IterationInfo {
+        index: 0,
+        total: 1,
+        data: [("id".to_string(), "row-seven".to_string())]
+            .into_iter()
+            .collect(),
+    });
+    grpc_host_call(&svc, &req, 0, saved_call("greet"))
+        .await
+        .expect("grpc");
+    let calls = fake.calls.lock().expect("lock");
+    assert!(calls[0].1.contains("row-seven"), "{}", calls[0].1);
 }
 
 #[tokio::test]
