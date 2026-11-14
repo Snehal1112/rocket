@@ -34,6 +34,10 @@ pub struct VariableContext {
     pub runtime: HashMap<String, String>,
     pub request: HashMap<String, String>,
     pub folder: HashMap<String, String>,
+    /// Columns of the current data-driven row. A Rocket extension: it sits above folder and
+    /// environment variables and below request and runtime variables. Placeholder expansion
+    /// only; values are used literally and no `rok.*` function returns them.
+    pub data: HashMap<String, String>,
     pub env: HashMap<String, String>,
     pub collection: HashMap<String, String>,
     /// Values fetched from RocketVault, keyed by "{alias}.{secretName}" per
@@ -104,13 +108,14 @@ impl VariableContext {
     /// The scope maps in precedence order, lowest first. This is the only place the order is written.
     /// Later layers overwrite earlier ones on key collision. `process_env` is not a layer here:
     /// `flatten_with_process_env` adds it below all of these.
-    fn layers(&self) -> [&HashMap<String, String>; 7] {
+    fn layers(&self) -> [&HashMap<String, String>; 8] {
         [
             &self.global_env,
             &self.collection,
             &self.external_secrets,
             &self.env,
             &self.folder,
+            &self.data,
             &self.request,
             &self.runtime,
         ]
@@ -124,7 +129,7 @@ impl VariableContext {
     }
 
     /// Merge all scopes except process_env.
-    /// Insertion order: global_env → collection → external_secrets → env → folder → request → runtime.
+    /// Insertion order: global_env → collection → external_secrets → env → folder → data → request → runtime.
     /// Later layers overwrite earlier on key collision.
     pub fn flatten(&self) -> HashMap<String, String> {
         let mut out = HashMap::new();
@@ -172,6 +177,38 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(ctx.flatten().get("k").unwrap(), "folder");
+    }
+
+    #[test]
+    fn data_beats_folder_env_and_collection() {
+        let ctx = VariableContext {
+            collection: m(&[("k", "col")]),
+            env: m(&[("k", "env")]),
+            folder: m(&[("k", "folder")]),
+            data: m(&[("k", "row")]),
+            ..Default::default()
+        };
+        assert_eq!(ctx.flatten().get("k").map(String::as_str), Some("row"));
+    }
+
+    #[test]
+    fn request_beats_data() {
+        let ctx = VariableContext {
+            request: m(&[("k", "req")]),
+            data: m(&[("k", "row")]),
+            ..Default::default()
+        };
+        assert_eq!(ctx.flatten().get("k").map(String::as_str), Some("req"));
+    }
+
+    #[test]
+    fn runtime_beats_data() {
+        let ctx = VariableContext {
+            runtime: m(&[("k", "run")]),
+            data: m(&[("k", "row")]),
+            ..Default::default()
+        };
+        assert_eq!(ctx.flatten().get("k").map(String::as_str), Some("run"));
     }
 
     #[test]
@@ -247,6 +284,7 @@ mod tests {
             runtime: m(&[("k", "runtime")]),
             request: m(&[("k", "request")]),
             folder: m(&[("k", "folder")]),
+            data: m(&[("k", "row")]),
             env: m(&[("k", "env")]),
             collection: m(&[("k", "collection")]),
             external_secrets: m(&[("k", "vault")]),
@@ -385,6 +423,7 @@ mod tests {
             "external_secrets",
             "env",
             "folder",
+            "data",
             "request",
             "runtime",
         ];
@@ -398,6 +437,7 @@ mod tests {
                     "external_secrets" => ctx.external_secrets = layer,
                     "env" => ctx.env = layer,
                     "folder" => ctx.folder = layer,
+                    "data" => ctx.data = layer,
                     "request" => ctx.request = layer,
                     _ => ctx.runtime = layer,
                 }
