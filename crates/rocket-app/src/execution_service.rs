@@ -479,6 +479,42 @@ pub(crate) fn expanded_send(
     }
 }
 
+/// The columns of a data row that may fill placeholders. A `process.env.*` column is dropped, so
+/// a row never replaces a host environment value. Other names are kept as written.
+pub(crate) fn iteration_columns(
+    info: &rocket_scripting::IterationInfo,
+) -> std::collections::HashMap<String, String> {
+    info.data
+        .iter()
+        .filter(|(name, _)| !name.starts_with("process.env."))
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect()
+}
+
+/// The redaction forms of every column that shares its name with a secret variable.
+fn secret_column_forms(
+    ctx: &VariableContext,
+    columns: &std::collections::HashMap<String, String>,
+) -> Vec<String> {
+    columns
+        .iter()
+        .filter(|(name, _)| ctx.secret_keys.contains(*name))
+        .flat_map(|(_, value)| crate::redaction::redaction_forms(value))
+        .collect()
+}
+
+/// A copy of `ctx` with the row columns in its `data` layer. The row fills placeholders only, so
+/// the context handed to scripts never holds it.
+fn with_row_columns(
+    ctx: &VariableContext,
+    columns: &std::collections::HashMap<String, String>,
+) -> VariableContext {
+    VariableContext {
+        data: columns.clone(),
+        ..ctx.clone()
+    }
+}
+
 /// The variables of the second pass: the first pass values when no stored value changed, else
 /// the scopes expanded again.
 ///
@@ -496,7 +532,8 @@ pub(crate) fn second_pass_values_recording(
     state: &PhaseState,
     secret_fills: &mut std::collections::HashSet<String>,
 ) -> std::collections::HashMap<String, String> {
-    let now_raw = state.var_ctx.flatten();
+    let ctx = with_row_columns(&state.var_ctx, &state.row_columns);
+    let now_raw = ctx.flatten();
     if now_raw == state.templates.first_raw {
         return state.templates.first_values.clone();
     }
@@ -506,7 +543,7 @@ pub(crate) fn second_pass_values_recording(
         .map(|(name, raw)| (name.clone(), raw.clone()))
         .collect();
     rocket_environment::expand_nested_recording(
-        &state.var_ctx,
+        &ctx,
         &changed,
         &mut state.templates.nested_dynamic.clone(),
         secret_fills,
@@ -650,6 +687,9 @@ pub(crate) struct PhaseState {
     /// Names a pre-request script added in text it wrote (URL, header, body). Script text is
     /// filled only for these and the names the first resolution could not resolve.
     pub script_names: std::collections::HashSet<String>,
+    /// The columns of this pass's data row. They fill placeholders (the `data` layer) and are
+    /// never part of `var_ctx`, so no script function can read them.
+    pub row_columns: std::collections::HashMap<String, String>,
 }
 
 impl PhaseState {
@@ -1303,6 +1343,9 @@ impl RequestExecutionService {
             input.request_path.as_deref(),
             external_secrets,
         );
+        if let Some(info) = &input.iteration {
+            scopes.data = iteration_columns(info);
+        }
         if let Some((writes, vault_forms)) = pending {
             overlay_pending_scopes(input, &mut scopes, vault_forms, &mut Vec::new(), writes);
         }
@@ -1778,21 +1821,26 @@ impl RequestExecutionService {
         } else {
             ProcessEnv::default()
         };
-        let scopes = self.build_variable_scopes(
+        let mut scopes = self.build_variable_scopes(
             input.global_env_name.as_deref(),
             input.collection.as_deref(),
             input.environment_name.as_deref(),
             input.request_path.as_deref(),
             external_secrets,
         );
+        if let Some(info) = &input.iteration {
+            scopes.data = iteration_columns(info);
+        }
         // Client certificates use the map without the host environment.
         // The stored values have their nested names filled. Host environment values are the
         // lowest layer and are never filled, so they go in under the filled map.
         let mut nested_dynamic = std::collections::HashMap::new();
         let ExpandedSend {
             values: plain_vars,
-            secret_forms,
+            mut secret_forms,
         } = expanded_send(&scopes, &input.flow_vars, &mut nested_dynamic);
+        // A row column named like a secret variable is masked too.
+        secret_forms.extend(secret_column_forms(&scopes, &scopes.data));
         let mut vars = plain_vars.clone();
         for (k, v) in &process_env.vars {
             vars.entry(format!("process.env.{k}"))
@@ -2807,7 +2855,12 @@ impl RequestExecutionService {
         ));
         // The second pass compares against these values to find what the scripts changed.
         templates.nested_dynamic = nested_dynamic;
-        templates.first_raw = var_ctx.flatten();
+        let row_columns = input
+            .iteration
+            .as_ref()
+            .map(iteration_columns)
+            .unwrap_or_default();
+        templates.first_raw = with_row_columns(&var_ctx, &row_columns).flatten();
         // The first pass built the same map from the same scopes, so it is not built twice.
         templates.first_values = first_values;
         // A secret value that had names filled in is masked in its filled form too, and so is a
@@ -2901,6 +2954,7 @@ impl RequestExecutionService {
             pending: rocket_scripting::PendingWrites::default(),
             pending_stored: PendingStored::default(),
             script_names: std::collections::HashSet::new(),
+            row_columns,
         })
     }
 
@@ -15068,5 +15122,227 @@ mod tests {
         let text = err.to_string();
         assert!(!text.contains("abc123secret"), "{text}");
         assert!(text.contains("Token endpoint returned 400"), "{text}");
+    }
+
+    // ── Data row columns fill placeholders (the `data` layer) ────────────────
+
+    fn row_info(pairs: &[(&str, &str)]) -> rocket_scripting::IterationInfo {
+        rocket_scripting::IterationInfo {
+            index: 0,
+            total: 1,
+            data: pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        }
+    }
+
+    fn row_env(vars: &[(&str, &str, bool)]) -> MockEnvRepo {
+        let mut env = Environment::new("dev");
+        for (key, value, secret) in vars {
+            let mut variable = Variable::new(*key, *value);
+            variable.secret = *secret;
+            env.set_variable(variable);
+        }
+        MockEnvRepo::with_env(env)
+    }
+
+    /// Sends `url` inside a pass over `row` and returns the URL the executor got.
+    async fn row_send(
+        env: MockEnvRepo,
+        repo: StubCollectionRepo,
+        engine: Box<dyn ScriptEngine>,
+        url: &str,
+        row: &[(&str, &str)],
+        with_script: bool,
+    ) -> String {
+        let (svc, executor, _) = runtime_svc_with_repo(env, repo, engine);
+        let mut input = sample_input(url, Some("dev"));
+        input.collection = Some("my-api".into());
+        input.request_path = Some("items/get.yml".into());
+        input.iteration = Some(row_info(row));
+        if with_script {
+            input.pre_request_script = Some("// pre".into());
+        }
+        svc.execute(input).await.expect("execute");
+        executor_request(&executor).url
+    }
+
+    fn no_script_engine() -> Box<dyn ScriptEngine> {
+        Box::new(MockBeforeRequestEngine::returning(ScriptResult::default()))
+    }
+
+    fn unrelated_runtime_engine() -> Box<dyn ScriptEngine> {
+        Box::new(MockBeforeRequestEngine::returning(runtime_result(&[(
+            "unrelated",
+            "z",
+        )])))
+    }
+
+    #[tokio::test]
+    async fn row_column_fills_a_url_placeholder() {
+        let url = row_send(
+            MockEnvRepo::empty(),
+            StubCollectionRepo::empty(),
+            no_script_engine(),
+            "https://x.test/{{id}}",
+            &[("id", "7")],
+            false,
+        )
+        .await;
+        assert_eq!(url, "https://x.test/7");
+    }
+
+    #[tokio::test]
+    async fn row_column_overrides_an_environment_variable() {
+        let url = row_send(
+            row_env(&[("id", "1", false)]),
+            StubCollectionRepo::empty(),
+            no_script_engine(),
+            "https://x.test/{{id}}",
+            &[("id", "7")],
+            false,
+        )
+        .await;
+        assert_eq!(url, "https://x.test/7");
+    }
+
+    #[tokio::test]
+    async fn request_variable_beats_a_row_column() {
+        let url = row_send(
+            MockEnvRepo::empty(),
+            StubCollectionRepo::empty().with_request_vars(vec![cv("id", "9")]),
+            no_script_engine(),
+            "https://x.test/{{id}}",
+            &[("id", "7")],
+            false,
+        )
+        .await;
+        assert_eq!(url, "https://x.test/9");
+    }
+
+    #[test]
+    fn process_env_columns_are_not_variables() {
+        let columns = iteration_columns(&row_info(&[
+            ("process.env.ROCKET_TEST_COL", "x"),
+            ("id", "7"),
+        ]));
+        assert!(!columns.contains_key("process.env.ROCKET_TEST_COL"));
+        assert_eq!(columns.get("id").map(String::as_str), Some("7"));
+    }
+
+    #[tokio::test]
+    async fn second_expansion_after_scripts_keeps_the_row() {
+        let url = row_send(
+            row_env(&[("id", "1", false)]),
+            StubCollectionRepo::empty(),
+            unrelated_runtime_engine(),
+            "https://x.test/{{id}}",
+            &[("id", "7")],
+            true,
+        )
+        .await;
+        assert_eq!(url, "https://x.test/7");
+    }
+
+    #[tokio::test]
+    async fn second_pass_keeps_request_variable_over_row() {
+        let url = row_send(
+            MockEnvRepo::empty(),
+            StubCollectionRepo::empty().with_request_vars(vec![cv("id", "9")]),
+            unrelated_runtime_engine(),
+            "https://x.test/{{id}}",
+            &[("id", "7")],
+            true,
+        )
+        .await;
+        assert!(url.ends_with("/9"), "{url}");
+    }
+
+    #[tokio::test]
+    async fn column_overriding_an_env_variable_is_not_expanded() {
+        let url = row_send(
+            row_env(&[("id", "1", false), ("other", "x", false)]),
+            StubCollectionRepo::empty(),
+            no_script_engine(),
+            "https://x.test/{{id}}",
+            &[("id", "{{other}}")],
+            false,
+        )
+        .await;
+        assert!(url.ends_with("{{other}}"), "{url}");
+    }
+
+    #[tokio::test]
+    async fn column_value_with_placeholder_is_not_expanded() {
+        let url = row_send(
+            row_env(&[("other", "x", false)]),
+            StubCollectionRepo::empty(),
+            no_script_engine(),
+            "https://x.test/{{id}}",
+            &[("id", "{{other}}")],
+            false,
+        )
+        .await;
+        assert!(url.ends_with("{{other}}"), "{url}");
+    }
+
+    /// The scripts of a send in a pass over `id = 7` get a context without the column.
+    async fn script_contexts_with_row() -> Vec<ScriptContext> {
+        let capture = CapturingScriptEngine::new();
+        let (svc, _, _) = runtime_svc_with_repo(
+            MockEnvRepo::empty(),
+            StubCollectionRepo::empty(),
+            Box::new(SharedCapture(Arc::clone(&capture))),
+        );
+        let mut input = sample_input("https://x.test/{{id}}", None);
+        input.post_response_script = Some("// post".into());
+        input.iteration = Some(row_info(&[("id", "7")]));
+        svc.execute(input).await.expect("execute");
+        capture.contexts()
+    }
+
+    // `rok.getVar` reads the scope maps of this context.
+    #[tokio::test]
+    async fn rok_get_var_does_not_return_a_column() {
+        let contexts = script_contexts_with_row().await;
+        assert_eq!(contexts.len(), 1);
+        assert!(contexts[0].variables.data.is_empty());
+        assert!(contexts[0].variables.runtime.is_empty());
+    }
+
+    // `rok.interpolate` resolves against `variables.flatten()`.
+    #[tokio::test]
+    async fn rok_interpolate_does_not_return_a_column() {
+        let contexts = script_contexts_with_row().await;
+        assert_eq!(contexts.len(), 1);
+        assert!(!contexts[0].variables.flatten().contains_key("id"));
+    }
+
+    #[tokio::test]
+    async fn column_named_like_a_secret_variable_is_masked() {
+        let (svc, _, saved) = runtime_svc_with_repo(
+            row_env(&[("apiKey", "env-value", true)]),
+            StubCollectionRepo::empty(),
+            no_script_engine(),
+        );
+        let mut input = sample_input("https://x.test/?k={{apiKey}}", Some("dev"));
+        input.iteration = Some(row_info(&[("apiKey", "s3cret-value")]));
+        let output = svc.execute(input).await.expect("execute");
+        assert!(output.run_secret_values.contains("s3cret-value"));
+        let history_url = saved.lock().expect("lock")[0].url.clone();
+        assert!(!history_url.contains("s3cret-value"), "{history_url}");
+    }
+
+    #[tokio::test]
+    async fn send_without_iteration_is_unchanged() {
+        let (svc, executor, _) = runtime_svc_with_repo(
+            MockEnvRepo::empty(),
+            StubCollectionRepo::empty(),
+            no_script_engine(),
+        );
+        let input = sample_input("https://x.test/{{id}}", None);
+        svc.execute(input).await.expect("execute");
+        assert_eq!(executor_request(&executor).url, "https://x.test/{{id}}");
     }
 }
