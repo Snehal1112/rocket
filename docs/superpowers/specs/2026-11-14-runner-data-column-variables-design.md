@@ -42,7 +42,7 @@ Flow: row (`input.iteration.data`) -> filtered column map -> new `data` layer of
 
 ### 3. Fill the layer on every send
 
-Where `build_variable_scopes` is followed by `expanded_send` for a send (`resolve_request_parts`, the second expansion after pre-request scripts, and `send_variable_map_pending`), set `scopes.data = iteration_columns(info)` when `input.iteration` is `Some`. The builder finds every such call with `rg "expanded_send\("` and treats a send path that skips the layer as a defect. The layer is for placeholder expansion only. `rok.interpolate` resolves against `variables.flatten()` (`crates/rocket-infra/src/scripting/ops/rok.rs:207`), so the row must stay out of the variables handed to the script engine (`ScriptInputState`, built from `var_ctx` at `:~2787`). The second expansion (`second_pass_values`, `:489`) still needs the row: the builder passes the columns to it separately from the script state, for example as an extra map. No `rok.*` function (`getVar`, `interpolate`, the scope getters) returns a column.
+Where `build_variable_scopes` is followed by `expanded_send` for a send (`resolve_request_parts`, the second expansion after pre-request scripts, and `send_variable_map_pending`), set `scopes.data = iteration_columns(info)` when `input.iteration` is `Some`. The builder finds every such call with `rg "expanded_send\("` and treats a send path that skips the layer as a defect. The layer is for placeholder expansion only. `rok.interpolate` resolves against `variables.flatten()` (`crates/rocket-infra/src/scripting/ops/rok.rs:207`), so the row must stay out of the variables handed to the script engine (`ScriptInputState`, built from `var_ctx` at `:~2787`). The second expansion (`second_pass_values`, `:489`) still needs the row. It compares `state.var_ctx.flatten()` with `templates.first_raw` (`:499-507`), so `first_raw` must be built from the same row-free layers, or the columns are added back before the compare. Otherwise every name the row shadowed counts as changed and the env or folder value replaces the column after a pre-request script runs. No `rok.*` function (`getVar`, `interpolate`, the scope getters) returns a column.
 
 Example: row `{id: "7"}`, collection variable `id=1`, URL `https://x/{{id}}` -> `https://x/7`. With a request variable `id=9` the URL is `https://x/9`.
 
@@ -61,7 +61,7 @@ Add the layer to `docs/superpowers/specs/opencollection-spec-reference.md` secti
 | Same name as a runtime variable | The runtime variable wins. |
 | Env value that mentions a column (`{{a}}`) | The column fills it, because expansion reads the merged layers. The column value itself is not expanded. |
 | Send without a pass (`iteration` is `None`) | No change. |
-| Column value contains `{{x}}` | Used literally, like a runtime value. `is_expandable` (`crates/rocket-environment/src/nested.rs:145-160`) does not list `data`, and a test pins it. |
+| Column value contains `{{x}}` | Used literally, like a runtime value. `is_expandable` (`crates/rocket-environment/src/nested.rs:145-160`) gets `if ctx.data.contains_key(name) { return false; }` after the `request` check and before folder and env, because it returns true for a name in folder or env even when the row won the merge. Tests pin both a row-only name and a row name that shadows an env variable. |
 | Column name equals a secret variable name (`secret_keys`) | The row value is added to the masked values, so history and the Console mask it. |
 | Column name equals a RocketVault key (`alias.secretName`) | The column replaces it in top-level resolution, as an environment variable already does. This is intended. |
 | Column name with spaces or odd characters | Kept as written. It matches only a placeholder spelled the same. |
@@ -78,7 +78,8 @@ Add the layer to `docs/superpowers/specs/opencollection-spec-reference.md` secti
 - `row_column_overrides_an_environment_variable`
 - `request_variable_beats_a_row_column`
 - `process_env_columns_are_not_variables`
-- `second_expansion_after_scripts_keeps_the_row`
+- `second_expansion_after_scripts_keeps_the_row` (env `id=1`, row `id=7`, a pre-request script sets an unrelated variable, the sent URL ends in `/7`)
+- `column_overriding_an_env_variable_is_not_expanded` (row `id={{other}}`, env `id=1`)
 - `rok_get_var_does_not_return_a_column`
 - `rok_interpolate_does_not_return_a_column`
 - `column_value_with_placeholder_is_not_expanded`
@@ -131,4 +132,4 @@ Column highlighting in editors, secret columns, filters and delays (R-85), runne
 - How are reserved `process.env.*` column names handled? Options: skip them; reject the file; allow. Chosen: skip them. Decided by: user
 - Are column values expanded when they contain `{{x}}`? Options: literal like runtime values; expanded like env values. Chosen: literal. Decided by: user
 - A column shares its name with a secret variable: what happens to the value? Options: mask it; skip the column; leave it unmasked. Chosen: mask it. Decided by: user
-- Other column values are plain data and not masked. Decided by: call
+- Are other column values masked in History, Console and logged URLs? Options: only secret-named columns; every column; a per-file secret flag. Chosen: only secret-named columns, documented in the feature doc so a user knows to name a sensitive column like a secret variable. Decided by: user

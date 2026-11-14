@@ -67,7 +67,8 @@ Add `request_beats_data` (request `req`, data `row`, expects `req`) and `runtime
   - `row_column_overrides_an_environment_variable`: env variable `id=1` with the same input, sent URL still `.../7`.
   - `request_variable_beats_a_row_column`: request variable `id=9`, sent URL `.../9`.
   - `process_env_columns_are_not_variables`: row key `process.env.ROCKET_TEST_COL` = `x`; unit test of `iteration_columns` asserts the key is absent and `id` is present.
-  - `second_expansion_after_scripts_keeps_the_row`: pre-request script sets a runtime variable, then the sent URL is still `.../7`.
+  - `second_expansion_after_scripts_keeps_the_row`: env variable `id=1`, row `id=7`, a pre-request script sets an unrelated runtime variable, then the sent URL is still `.../7`.
+  - `column_overriding_an_env_variable_is_not_expanded`: row `id={{other}}`, env `id=1`, `other=x`; the sent URL ends in `{{other}}`.
   - `rok_get_var_does_not_return_a_column`: a post-response script logs `rok.getVar('id')`; the Console line shows `undefined`.
   - `rok_interpolate_does_not_return_a_column`: the script logs `rok.interpolate('{{id}}')`; the line keeps `{{id}}`.
   - `column_value_with_placeholder_is_not_expanded`: row `id` = `{{other}}` with `other` defined in the environment; the sent URL ends in `{{other}}`.
@@ -75,7 +76,7 @@ Add `request_beats_data` (request `req`, data `row`, expects `req`) and `runtime
   - `send_without_iteration_is_unchanged`: no iteration, URL keeps `{{id}}` unresolved.
   - `nested_run_request_fills_from_the_inherited_row`: a nested send (see the `inherit_iteration` tests in `script_host_tests.rs`) sends `.../7`.
 - [ ] **Step 3: Run** `cargo test -j4 -p rocket-app execution_service row_column` and expect failure `cannot find function 'iteration_columns'` or assertion `.../{{id}}` vs `.../7`.
-- [ ] **Step 4: Implement** `iteration_columns`, and set `scopes.data` from `input.iteration` right after each `build_variable_scopes` result that feeds `expanded_send`. Keep the row out of the variables handed to the script engine (`rok.interpolate` reads `variables.flatten()` at `crates/rocket-infra/src/scripting/ops/rok.rs:207`): pass the columns to `second_pass_values` as a separate map. Do not add `data` to `is_expandable` in `crates/rocket-environment/src/nested.rs`. Add every column whose name is in `secret_keys` to the masked values.
+- [ ] **Step 4: Implement** `iteration_columns`, and set `scopes.data` from `input.iteration` right after each `build_variable_scopes` result that feeds `expanded_send`. Keep the row out of the variables handed to the script engine (`rok.interpolate` reads `variables.flatten()` at `crates/rocket-infra/src/scripting/ops/rok.rs:207`): pass the columns to `second_pass_values` as a separate map. In `is_expandable` (`crates/rocket-environment/src/nested.rs:145-160`) add `if ctx.data.contains_key(name) { return false; }` after the `request` check and before folder and env. Build `first_raw` for the second expansion (`:499-507`) from the same row-free layers, or add the columns back before the compare. Add every column whose name is in `secret_keys` to the masked values.
 - [ ] **Step 5: Add** `grpc_run_fills_from_the_row` in `script_host_tests.rs`, built like the existing `grpc_fills_variables_from_scopes_and_runtime_vars`: a saved gRPC request with `{{id}}` in its URL or message, row `id=7`, and assert the fake executor saw `7`. Implement in `send_variable_map_pending`.
 - [ ] **Step 6: Run** `cargo test -j4 -p rocket-app execution_service` and `cargo test -j4 -p rocket-app script_host`; expect all pass. Run `cargo check -j4` for `src-tauri`.
 
