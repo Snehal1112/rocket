@@ -62,7 +62,7 @@ Add the layer to `docs/superpowers/specs/opencollection-spec-reference.md` secti
 | Same name as a runtime variable | The runtime variable wins. |
 | Env value that mentions a column (`{{a}}`) | The column fills it, because expansion reads the merged layers. The column value itself is not expanded. |
 | Send without a pass (`iteration` is `None`) | No change. |
-| Text a script writes into the request (`req.setUrl('.../{{id}}')`) | Filled from the row too: `script_vars` (`execution_service.rs:~3174`) is built from the same copy of `var_ctx` that has `data` set. |
+| Text a script writes into the request (`req.setUrl('.../{{id}}')`) | Follows the existing rule: only names the first pass could not resolve and names the script added are filled (`execution_service.rs:~3174`). A column name is not added to that filter, so such text is not filled from the row. |
 | Request type that the frontend resolves fully (no collection, or not http/graphql) | Not part of a pass today, so nothing changes. A frontend test pins that the Runner tab leaves non-`process.env` placeholders for the backend. |
 | Column value contains `{{x}}` | Used literally, like a runtime value. `is_expandable` (`crates/rocket-environment/src/nested.rs:145-160`) gets `if ctx.data.contains_key(name) { return false; }` after the `request` check and before folder and env, because it returns true for a name in folder or env even when the row won the merge. Tests pin both a row-only name and a row name that shadows an env variable. |
 | Column name equals a secret variable name (`secret_keys`) | The row value is added to the masked values, so history and the Console mask it. |
@@ -83,7 +83,6 @@ Add the layer to `docs/superpowers/specs/opencollection-spec-reference.md` secti
 - `process_env_columns_are_not_variables`
 - `second_expansion_after_scripts_keeps_the_row` (env `id=1`, row `id=7`, a pre-request script sets an unrelated variable, the sent URL ends in `/7`)
 - `second_pass_keeps_request_variable_over_row` (request variable `id=9`, row `id=7`, a pre-request script sets an unrelated variable, the sent URL ends in `/9`)
-- `script_written_placeholder_is_filled_from_the_row`
 - `column_overriding_an_env_variable_is_not_expanded` (row `id={{other}}`, env `id=1`)
 - `rok_get_var_does_not_return_a_column`
 - `rok_interpolate_does_not_return_a_column`

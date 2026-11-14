@@ -70,7 +70,6 @@ Add `request_beats_data` (request `req`, data `row`, expects `req`) and `runtime
   - `process_env_columns_are_not_variables`: row key `process.env.ROCKET_TEST_COL` = `x`; unit test of `iteration_columns` asserts the key is absent and `id` is present.
   - `second_expansion_after_scripts_keeps_the_row`: env variable `id=1`, row `id=7`, a pre-request script sets an unrelated runtime variable, then the sent URL is still `.../7`.
   - `second_pass_keeps_request_variable_over_row`: request variable `id=9`, row `id=7`, a pre-request script sets an unrelated variable; the sent URL ends in `/9`.
-  - `script_written_placeholder_is_filled_from_the_row`: a pre-request script calls `req.setUrl('https://x.test/{{id}}')`, row `id=7`; the sent URL ends in `/7`. Build `script_vars` (`execution_service.rs:~3174`) from the copy of `var_ctx` that has `data` set.
   - `column_overriding_an_env_variable_is_not_expanded`: row `id={{other}}`, env `id=1`, `other=x`; the sent URL ends in `{{other}}`.
   - `rok_get_var_does_not_return_a_column`: a post-response script logs `rok.getVar('id')`; the Console line shows `undefined`.
   - `rok_interpolate_does_not_return_a_column`: the script logs `rok.interpolate('{{id}}')`; the line keeps `{{id}}`.
