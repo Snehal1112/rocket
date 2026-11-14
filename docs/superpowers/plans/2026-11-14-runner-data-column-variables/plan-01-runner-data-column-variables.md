@@ -14,6 +14,7 @@
 - `crates/rocket-environment/src/context.rs`: `data` field, `layers()` of eight, tests.
 - `crates/rocket-app/src/execution_service.rs`: `iteration_columns`, the calls, tests.
 - `crates/rocket-app/src/execution_service/script_host.rs`: the `rok.grpc.run` map, test.
+- `src/lib/runner-execute.test.ts` (new): one pin test.
 - Docs: `docs/superpowers/specs/opencollection-spec-reference.md` (section 6), `docs/features/runner-iteration-data.md`, `docs/manual-tests/runner-iteration-data.md`, `crates/rocket-environment/CLAUDE.md`, `docs/roadmaps/roadmap.md`.
 
 ## Review Focus
@@ -69,6 +70,7 @@ Add `request_beats_data` (request `req`, data `row`, expects `req`) and `runtime
   - `process_env_columns_are_not_variables`: row key `process.env.ROCKET_TEST_COL` = `x`; unit test of `iteration_columns` asserts the key is absent and `id` is present.
   - `second_expansion_after_scripts_keeps_the_row`: env variable `id=1`, row `id=7`, a pre-request script sets an unrelated runtime variable, then the sent URL is still `.../7`.
   - `second_pass_keeps_request_variable_over_row`: request variable `id=9`, row `id=7`, a pre-request script sets an unrelated variable; the sent URL ends in `/9`.
+  - `script_written_placeholder_is_filled_from_the_row`: a pre-request script calls `req.setUrl('https://x.test/{{id}}')`, row `id=7`; the sent URL ends in `/7`. Build `script_vars` (`execution_service.rs:~3174`) from the copy of `var_ctx` that has `data` set.
   - `column_overriding_an_env_variable_is_not_expanded`: row `id={{other}}`, env `id=1`, `other=x`; the sent URL ends in `{{other}}`.
   - `rok_get_var_does_not_return_a_column`: a post-response script logs `rok.getVar('id')`; the Console line shows `undefined`.
   - `rok_interpolate_does_not_return_a_column`: the script logs `rok.interpolate('{{id}}')`; the line keeps `{{id}}`.
@@ -79,7 +81,8 @@ Add `request_beats_data` (request `req`, data `row`, expects `req`) and `runtime
 - [ ] **Step 3: Run** `cargo test -j4 -p rocket-app execution_service row_column` and expect failure `cannot find function 'iteration_columns'` or assertion `.../{{id}}` vs `.../7`.
 - [ ] **Step 4: Implement** `iteration_columns`, and set `scopes.data` from `input.iteration` right after each `build_variable_scopes` result that feeds `expanded_send`. Keep the row out of the variables handed to the script engine (`rok.interpolate` reads `variables.flatten()` at `crates/rocket-infra/src/scripting/ops/rok.rs:207`): store the columns on `PhaseState` (`row_columns`) and never pass them as `extra` (it beats every layer, `nested.rs:104,147`). In `second_pass_values_recording` expand from a copy of `var_ctx` with `data` set to `row_columns`, and build `first_raw` (`:2810`) from the same copy. In `is_expandable` (`crates/rocket-environment/src/nested.rs:145-160`) add `if ctx.data.contains_key(name) { return false; }` after the `request` check and before folder and env. Add every column whose name is in `secret_keys` to the masked values.
 - [ ] **Step 5: Add** `grpc_run_fills_from_the_row` in `script_host_tests.rs`, built like the existing `grpc_fills_variables_from_scopes_and_runtime_vars`: a saved gRPC request with `{{id}}` in its URL or message, row `id=7`, and assert the fake executor saw `7`. Implement in `send_variable_map_pending`.
-- [ ] **Step 6: Run** `cargo test -j4 -p rocket-app execution_service` and `cargo test -j4 -p rocket-app script_host`; expect all pass. Run `cargo check -j4` for `src-tauri`.
+- [ ] **Step 6: Frontend pin.** Create `src/lib/runner-execute.test.ts` with `runner_tab_leaves_collection_placeholders_for_the_backend`: mock `@/lib/tauri-api` as `src/components/request/runner/RunnerPane.test.tsx` does, set env `id=1`, run `executeRunnerEntry` for a collection http request with URL `https://x.test/{{id}}`, and assert the `ExecuteRequestInput.url` it sends still contains `{{id}}`. Run `bun run test runner-execute`, `bun run tsc --noEmit`, `bun run check`; no production frontend change is expected.
+- [ ] **Step 7: Run** `cargo test -j4 -p rocket-app execution_service` and `cargo test -j4 -p rocket-app script_host`; expect all pass. Run `cargo check -j4` for `src-tauri`.
 
 ### Task 3: Docs and roadmap
 
