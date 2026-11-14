@@ -18,7 +18,7 @@ const NESTED_FILL_COST: usize = 64;
 /// have their `{{placeholders}}` filled.
 ///
 /// A name is filled only when its winning layer is request, folder, env, collection or global.
-/// A name won by runtime, external secrets or `extra` keeps its value.
+/// A name won by runtime, the data row, external secrets or `extra` keeps its value.
 /// Lookups use the same merged map, except vault names and `process.env.` names, which stay as
 /// written. A nested name is expanded too, at most `MAX_NESTED_DEPTH` levels below the top value.
 /// Past that, or on a name already on the current path (a cycle), the placeholder stays.

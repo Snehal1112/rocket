@@ -66,7 +66,7 @@ During a pass, every send fills `{{column}}` from the current row. This covers t
 - A column value is used literally. A `{{x}}` inside it is not expanded.
 - A column missing in the row leaves the placeholder unresolved. An empty cell fills with the empty string.
 - Scripts cannot read a column through `rok.getVar` or `rok.interpolate`. Use `rok.runner.iterationData`.
-- Text a script writes into the request (`req.setUrl('.../{{id}}')`) is not filled from the row.
+- Text a script writes into the request (`req.setUrl('.../{{id}}')`) is not filled from the row. A name the row shadows is filled from the next layer down instead, so with environment `id=1` and row `id=7` that text sends `1`, while `{{id}}` written in the request sends `7`.
 - Masking: a column named like a secret variable has its value masked in History and the Console. Other columns are not masked, so name a sensitive column like a secret variable.
 - A column named like a RocketVault key (`alias.secretName`) replaces it, as an environment variable does.
 
