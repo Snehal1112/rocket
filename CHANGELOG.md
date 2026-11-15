@@ -1,5 +1,35 @@
 # Changelog
 
+## [2.3.0](https://github.com/Snehal1112/rocket/compare/v2.2.1...v2.3.0) (2026-11-15)
+
+### Features
+
+* **app:** fill column placeholders from the data row ([640b054](https://github.com/Snehal1112/rocket/commit/640b05409c13e8e31e1e4057d34cde2a73aa5d26))
+* **app:** run script gRPC calls through ExecutionScriptHost ([1227c6b](https://github.com/Snehal1112/rocket/commit/1227c6bb7f7bee7624852b1c130f8a7044adb552))
+* **app:** wire gRPC service into script execution ([c2895b8](https://github.com/Snehal1112/rocket/commit/c2895b8f14156aef8121feebf2db1c353aeb2d4c))
+* **editor:** add rok.grpc typings ([20ff549](https://github.com/Snehal1112/rocket/commit/20ff5490995795707521567498381fcd42aade71))
+* **environment:** add data layer to VariableContext ([77e0c30](https://github.com/Snehal1112/rocket/commit/77e0c30ea6c0b9f2f964e92079f03232b9872665))
+* **grpc:** add confined proto path resolution ([087e1ca](https://github.com/Snehal1112/rocket/commit/087e1caa6671c77777fb84af02648e0c0751b010))
+* **grpc:** add GrpcService::exchange for script calls ([74ad223](https://github.com/Snehal1112/rocket/commit/74ad22303461fdc9ead8250332784cd15ca113ed))
+* **grpc:** add runnable test_grpc_server for manual checks ([49b0599](https://github.com/Snehal1112/rocket/commit/49b059902fa6c364f34d1a78928498de651cf644))
+* **grpc:** let rok.grpc.run see pending env writes ([81e0bcb](https://github.com/Snehal1112/rocket/commit/81e0bcb12b8df1e461f0e5386359226d4cc8de9b))
+* **runner:** load iteration data from a saved or chosen file ([48f7b13](https://github.com/Snehal1112/rocket/commit/48f7b1361be6d656b2739004c4f8ac4529898e9c))
+* **runner:** parse iteration data and add iteration field ([e822ba7](https://github.com/Snehal1112/rocket/commit/e822ba739c6b38b89477ddec0bdb16375aea6465))
+* **runner:** run once without the saved data file ([f6596cb](https://github.com/Snehal1112/rocket/commit/f6596cbd3f1df135a22f1ab86f62de8af75c72b5))
+* **runner:** run the Runner tab once per data row ([b42dfd9](https://github.com/Snehal1112/rocket/commit/b42dfd9622b21d6056178c8b35272742bc9b7f6c))
+* **runner:** run the set once per data row ([a69a46d](https://github.com/Snehal1112/rocket/commit/a69a46d1d6918d4a06ce0da914e51553e53cdf17))
+* **runner:** set a saved data file in collection settings ([3dcf21b](https://github.com/Snehal1112/rocket/commit/3dcf21b2e259055bd208ae48a3ed9d5afd1b1986))
+* **scripting:** add gRPC host types and call limits ([318df38](https://github.com/Snehal1112/rocket/commit/318df3805907f6fbc3854a8ba8dcbebf4ca9a4c3))
+* **scripting:** add rok.grpc.run and rok.grpc.call ([d3ee349](https://github.com/Snehal1112/rocket/commit/d3ee3496524fa78a859273e0cfabee1a81a8a122))
+* **scripting:** expose the iteration row to scripts ([5fc7d0b](https://github.com/Snehal1112/rocket/commit/5fc7d0ba426e6ddc6e406642ac15a39838da90d4))
+
+### Bug Fixes
+
+* **runner:** allow skipping an unreadable saved default ([025ea7d](https://github.com/Snehal1112/rocket/commit/025ea7d295af6bfdb6ecdbd92b45da3c28191637))
+* **runner:** bound data file reads and run memory ([a965106](https://github.com/Snehal1112/rocket/commit/a9651067ea6958d310350238633f2db6d155df1a))
+* **runner:** describe the data file field to screen readers ([ae9787e](https://github.com/Snehal1112/rocket/commit/ae9787ef09b4eafceba54ddf8d142a413546cde1))
+* **runner:** keep large data runs responsive ([5e7cb69](https://github.com/Snehal1112/rocket/commit/5e7cb69da167e9815e407517d430a7a9c610f9da))
+
 ## [2.2.1](https://github.com/Snehal1112/rocket/compare/v2.2.0...v2.2.1) (2026-11-12)
 
 ### Bug Fixes
